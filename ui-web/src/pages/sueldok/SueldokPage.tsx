@@ -368,17 +368,17 @@ export default function SueldokPage() {
       const motivoRaw = l.motivo || localMatch?.motivo
       const motivoNorm = motivoRaw === "Despido Injustificado" ? "despido_sin_causa" : (motivoRaw === "Renuncia Voluntaria" ? "renuncia" : motivoRaw)
 
+      const netMonto = Number(localMatch?.total_liquidacion_neta ?? l.montoNeto ?? 0)
+      const hasPendingNet = netMonto > 0
       const isCompensado = Boolean(
         localMatch?.receivable_payment_numero ||
         localMatch?.receivable_payment_id ||
-        (localMatch && Number(localMatch.total_liquidacion_neta || 0) <= 0 && localMatch.estado === "pagado")
+        (localMatch && !hasPendingNet && localMatch.estado === "pagado")
       )
       const isPagado = Boolean(
-        localMatch?.estado === "pagado" ||
-        localMatch?.payment_order_id ||
-        l.estado === "paid" ||
-        l.payoutConfirmed ||
-        isCompensado
+        (!hasPendingNet && (localMatch?.estado === "pagado" || isCompensado)) ||
+        (hasPendingNet && localMatch?.payment_order_id && localMatch?.estado === "pagado") ||
+        (!hasPendingNet && (l.estado === "paid" || l.payoutConfirmed))
       )
 
       return {
@@ -421,10 +421,12 @@ export default function SueldokPage() {
     const localOnly = (settlements || [])
       .filter((s: any) => !processedLocalIds.has(s.id))
       .map((s: any) => {
+        const netMonto = Number(s.total_liquidacion_neta || 0)
+        const hasPendingNet = netMonto > 0
         const isCompensado = Boolean(
           s.receivable_payment_numero ||
           s.receivable_payment_id ||
-          (Number(s.total_liquidacion_neta || 0) <= 0 && s.estado === "pagado")
+          (!hasPendingNet && s.estado === "pagado")
         )
         return {
           id: s.id,
@@ -442,8 +444,8 @@ export default function SueldokPage() {
           preaviso_monto: s.preaviso || 0,
           indemnizacion_legal_monto: s.indemnizacion_legal || 0,
           descuentos_salariales_monto: (Number(s.descuento_extra_club || 0) + Number(s.descuento_anticipos || 0)) || s.descuentos_varios || 0,
-          total_liquidacion_neta: s.total_liquidacion_neta || 0,
-          total_neto: s.total_liquidacion_neta || 0,
+          total_liquidacion_neta: netMonto,
+          total_neto: netMonto,
           payment_order_id: s.payment_order_id,
           payment_order_num: s.payment_order_numero,
           payment_order: s.payment_order_numero ? {
@@ -452,7 +454,7 @@ export default function SueldokPage() {
           } : null,
           receivable_payment_id: s.receivable_payment_id,
           receivable_payment_numero: s.receivable_payment_numero,
-          estado_pago: s.estado === "pagado" ? "pagado" : "pendiente",
+          estado_pago: (!hasPendingNet && (s.estado === "pagado" || isCompensado)) || (hasPendingNet && s.payment_order_id && s.estado === "pagado") ? "pagado" : "pendiente",
           is_compensado: isCompensado,
           origen: "intelimarket",
         }
@@ -2190,7 +2192,7 @@ export default function SueldokPage() {
                                 <span>Recibo PDF</span>
                               </button>
                             </div>
-                          ) : (s.receivable_payment_numero || s.estado_pago === "pagado" || s.is_compensado) ? (
+                          ) : (s.receivable_payment_numero || s.is_compensado) && Number(s.total_neto || 0) <= 0 ? (
                             <div className="flex flex-col items-center gap-1">
                               <span className="font-mono font-bold text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-lg border border-emerald-500/20">
                                 {s.receivable_payment_numero || "RC-FINIQUITO"}
@@ -2209,14 +2211,30 @@ export default function SueldokPage() {
                               </button>
                             </div>
                           ) : Number(s.total_neto || 0) > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenFiniquitoOPModal(s)}
-                              className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1 mx-auto"
-                            >
-                              <Plus className="w-3 h-3" />
-                              <span>Emitir OP</span>
-                            </button>
+                            <div className="flex flex-col items-center gap-1.5">
+                              {s.receivable_payment_numero && (
+                                <span className="font-mono font-bold text-[9px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/20" title="Compensación comercial aplicada">
+                                  RC: {s.receivable_payment_numero}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleOpenFiniquitoOPModal(s)}
+                                className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1 mx-auto"
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>{s.receivable_payment_numero ? "Pagar Saldo" : "Emitir OP"}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
+                                className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-semibold border border-slate-300 dark:border-slate-600 flex items-center gap-1 cursor-pointer transition-all"
+                                title="Descargar Recibo Oficial de Finiquito en PDF"
+                              >
+                                <FileText className="w-3 h-3 text-indigo-500" />
+                                <span>Recibo PDF</span>
+                              </button>
+                            </div>
                           ) : (
                             <button
                               type="button"
