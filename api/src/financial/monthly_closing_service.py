@@ -153,7 +153,7 @@ class MonthlyClosingService:
         # operativo mensual y se registra como provisión acumulada en cuenta diferida de pasivo hacia Diciembre.
         aguinaldo_diferido_acumulado = aguinaldo_provisional
         total_costo_laboral = masa_salarial_bruta + ips_patronal + gastos_directos_personal
-        neto_percibido_empleados = 89307330  # Descontando anticipos (5.8M) y compras Extra Club en súper (40.2M)
+        neto_percibido_empleados = 89320863  # Descontando anticipos (5.8M) y compras Extra Club en súper (40.2M) (ajustado con Fredy Nuñez 10 días = ₲ 1.014.666)
 
         return {
             "salario_base": salario_base,
