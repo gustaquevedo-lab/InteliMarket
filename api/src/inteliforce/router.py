@@ -142,9 +142,8 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
     if not warehouse:
         raise HTTPException(status_code=400, detail=f"El vendedor {rep.nombre} no tiene depósito asignado")
 
-    # Igual que la preventa legacy: PRECIO1 + IVA (la lista guarda el precio SIN IVA y la app vieja
-    # ignora clientes.LISTA; medido en fac_ventas: 97% de las líneas). Precio, IVA y descuento los decide
-    # el servidor; lo que manda el celular es referencia.
+    # Igual que la preventa legacy: lista "Precio 1" (ya con IVA, entera) e ignora clientes.LISTA
+    # (medido en fac_ventas: 97% de las líneas). Precio, IVA y descuento los decide el servidor.
     # shortcut: sin escalas PRECIO2/3 (0,3% de líneas) ni actividades de proveedor (~19% con descuento), ver informe 01 §P1.7.
     ids = [i.product_id for i in data.items]
     products = {p.id: p for p in (await db.execute(select(Product).where(
@@ -164,7 +163,7 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
         iva = Decimal(str(product.iva_tasa if product.iva_tasa is not None else 10))
         items.append(SaleItemInput(
             product_id=item.product_id, cantidad=item.cantidad,
-            precio_unitario=(Decimal(str(precio1[item.product_id])) * (1 + iva / 100)).quantize(Decimal("1"), rounding=ROUND_CEILING),
+            precio_unitario=Decimal(str(precio1[item.product_id])).quantize(Decimal("1"), rounding=ROUND_CEILING),
             descuento_pct=0, iva_tasa=iva,
         ))
 

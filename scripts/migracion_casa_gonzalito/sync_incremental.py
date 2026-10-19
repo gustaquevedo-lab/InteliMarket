@@ -36,7 +36,7 @@ import sys
 import time
 import uuid
 from datetime import datetime, date, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import pymysql
 import pymysql.cursors
@@ -412,8 +412,9 @@ def sync_precios(pg, my):
     since = last_ts or datetime(2000, 1, 1)
     with my.cursor() as cur:
         cur.execute(
-            "SELECT CODIGO, PRECIO1, PRECIO2, PRECIO3, PRECIO4, PRECIO5, PRECIO6, PRECIO7, "
-            "FECMOD FROM precios_ventas WHERE FECMOD > %s ORDER BY FECMOD", (since,))
+            "SELECT pv.CODIGO, pv.PRECIO1, pv.PRECIO2, pv.PRECIO3, pv.PRECIO4, pv.PRECIO5, pv.PRECIO6, pv.PRECIO7, "
+            "i.IMPUESTO, pv.FECMOD FROM precios_ventas pv JOIN productos p ON p.CODIGO = pv.CODIGO "
+            "LEFT JOIN impuesto i ON i.IDIMPUESTO = p.IDIMPUESTO WHERE pv.FECMOD > %s ORDER BY pv.FECMOD", (since,))
         legacy_rows = cur.fetchall()
     if not legacy_rows:
         log("  precios: sin cambios")
@@ -422,13 +423,16 @@ def sync_precios(pg, my):
     max_ts = since
     rows = []
     for row in legacy_rows:
-        cod, *precios, fecmod = row
+        cod, *precios, iva, fecmod = row
         cod = txt_keep(cod, 50)
         if not cod or cod not in productos_validos:
             continue
         pid = uuid.uuid5(NS, f"prod:{cod}")
         for (slug, _n), precio in zip(PRICE_LEVELS, precios):
-            precio = money(precio)
+            # El legacy guarda el precio SIN IVA y lo factura redondeando al más cercano;
+            # InteliMarket guarda el precio final con IVA, entero (el que se cobra).
+            precio = int((Decimal(str(precio or 0)) * (100 + Decimal(str(iva or 0))) / 100)
+                         .quantize(Decimal("1"), rounding=ROUND_HALF_UP))
             if precio and precio > 0:
                 rows.append((uuid.uuid5(NS, f"pp:{cod}:{slug}"), plist_id(slug), pid, precio,
                              "PYG", True))
