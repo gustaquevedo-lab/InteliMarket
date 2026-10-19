@@ -1,6 +1,6 @@
 """Currency schemas"""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime, date
 from uuid import UUID
@@ -17,8 +17,7 @@ class CurrencyResponse(BaseModel):
     es_moneda_local: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ExchangeRateResponse(BaseModel):
@@ -31,8 +30,7 @@ class ExchangeRateResponse(BaseModel):
     fecha: date
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BcpRateResponse(BaseModel):

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal
@@ -38,8 +38,7 @@ class WithholdingConfigResponse(BaseModel):
     regimen: Optional[str] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class WithholdingDocumentCreate(BaseModel):
     company_id: str
@@ -71,8 +70,7 @@ class WithholdingDocumentResponse(BaseModel):
     notas: Optional[str] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class WithholdingDashboard(BaseModel):
     total_retenciones_pendientes: int
@@ -104,8 +102,7 @@ class AccountPlanResponse(BaseModel):
     acepta_asientos: bool
     activo: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Accounting Period ────────────────────────────────────────────────────────
@@ -130,8 +127,7 @@ class AccountingPeriodResponse(BaseModel):
     motivo_reapertura: Optional[str] = None
     observaciones: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PeriodReopenBody(BaseModel):
@@ -165,8 +161,7 @@ class AccountingEntryResponse(BaseModel):
     reversa_de_asiento: Optional[str] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EntryReversalBody(BaseModel):
@@ -264,8 +259,7 @@ class CollectionActionResponse(BaseModel):
     created_by: Optional[UUID] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Customer Scoring ─────────────────────────────────────────────────────────
@@ -286,8 +280,7 @@ class CustomerScoreResponse(BaseModel):
     veces_mora: int
     ultima_actualizacion: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── EBITDA ───────────────────────────────────────────────────────────────────

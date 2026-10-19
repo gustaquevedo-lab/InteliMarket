@@ -1,6 +1,6 @@
 """Purchase schemas — suppliers, orders, receipts, requisitions, contracts, forecasting, suggestions, budgets"""
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import Optional, List
 from datetime import datetime, date
 from uuid import UUID
@@ -152,8 +152,7 @@ class SupplierResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Purchase Order ────────────────────────────────────────────────────────────
@@ -250,8 +249,7 @@ class POResponse(BaseModel):
     updated_at: datetime
     supplier: Optional[SupplierResponse] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class POWithItems(POResponse):
@@ -279,8 +277,7 @@ class POItemResponse(BaseModel):
     codigo_barra: Optional[str] = None
     unidad_medida: Optional[str] = "UN"
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class POHistoryResponse(BaseModel):
@@ -293,8 +290,7 @@ class POHistoryResponse(BaseModel):
     observaciones: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Purchase Receipt ──────────────────────────────────────────────────────────
@@ -385,8 +381,7 @@ class ReceiptResponse(BaseModel):
     created_at: datetime
     supplier: Optional[SupplierResponse] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReceiptWithItems(ReceiptResponse):
@@ -408,8 +403,7 @@ class ReceiptItemResponse(BaseModel):
     motivo_rechazo: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Purchase Requisition ──────────────────────────────────────────────────────
@@ -471,8 +465,7 @@ class RequisitionResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RequisitionWithItems(RequisitionResponse):
@@ -492,8 +485,7 @@ class RequisitionItemResponse(BaseModel):
     observaciones: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Supplier Contract ─────────────────────────────────────────────────────────
@@ -550,8 +542,7 @@ class ContractItemResponse(BaseModel):
     descuento_pct: Optional[Decimal] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ContractResponse(BaseModel):
@@ -575,8 +566,7 @@ class ContractResponse(BaseModel):
     updated_at: datetime
     items: list[ContractItemResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Supplier Evaluation ───────────────────────────────────────────────────────
@@ -616,8 +606,7 @@ class EvaluationResponse(BaseModel):
     user_id: Optional[UUID] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SupplierPerformanceResponse(BaseModel):
@@ -646,8 +635,7 @@ class PriceHistoryResponse(BaseModel):
     purchase_order_id: Optional[UUID] = None
     notas: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Forecasting ───────────────────────────────────────────────────────────────
@@ -719,8 +707,7 @@ class ForecastRuleResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ForecastProjectionResponse(BaseModel):
@@ -732,8 +719,7 @@ class ForecastProjectionResponse(BaseModel):
     demanda_real: Optional[Decimal] = None
     confianza: Optional[Decimal] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Purchase Suggestions ──────────────────────────────────────────────────────
@@ -761,8 +747,7 @@ class PurchaseSuggestionResponse(BaseModel):
     purchase_order_id: Optional[UUID] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Purchase Budgets ──────────────────────────────────────────────────────────
@@ -807,8 +792,7 @@ class BudgetResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BudgetConsumptionResponse(BaseModel):
@@ -891,8 +875,7 @@ class RfqItemResponse(BaseModel):
     cantidad_solicitada: Decimal
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RfqResponseItemInput(BaseModel):
@@ -916,8 +899,7 @@ class RfqResponseItemResponse(BaseModel):
     plazo_entrega_dias: Optional[int] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RfqResponseResponse(BaseModel):
@@ -933,8 +915,7 @@ class RfqResponseResponse(BaseModel):
     total_cotizado: Optional[Decimal] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RfqResponse(BaseModel):
@@ -951,8 +932,7 @@ class RfqResponse(BaseModel):
     purchase_order_id: Optional[UUID] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RfqWithDetail(RfqResponse):
@@ -1126,8 +1106,7 @@ class LostDemandResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── INBOX IMAP Y FACTURAS SIFEN ───────────────────────────────────────────────
@@ -1167,8 +1146,7 @@ class PurchaseInboxConfigResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SyncInboxResponse(BaseModel):
@@ -1292,8 +1270,7 @@ class SupplierNcRequestResponse(BaseModel):
     updated_at: datetime
     resolved_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ResolveSupplierNcRequest(BaseModel):
@@ -1517,8 +1494,7 @@ class ConsignmentSettlementItemResponse(BaseModel):
     margen_ganancia: Decimal
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConsignmentSettlementResponse(BaseModel):
@@ -1546,8 +1522,7 @@ class ConsignmentSettlementResponse(BaseModel):
     updated_at: datetime
     items: list[ConsignmentSettlementItemResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 

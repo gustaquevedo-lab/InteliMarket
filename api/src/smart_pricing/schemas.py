@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Any
 from datetime import datetime
 import uuid
@@ -18,8 +18,7 @@ class PriceListAssignmentResponse(BaseModel):
     ref_id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TieredPriceCreate(BaseModel):
@@ -51,8 +50,7 @@ class TieredPriceResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PromotionCreate(BaseModel):
@@ -97,8 +95,7 @@ class PromotionResponse(BaseModel):
     rewards: list["PromotionRewardResponse"] = []
     assignments: list["PromotionAssignmentResponse"] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PromotionRewardResponse(BaseModel):
@@ -111,8 +108,7 @@ class PromotionRewardResponse(BaseModel):
     precio_fijo: Optional[float]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PromotionAssignmentResponse(BaseModel):
@@ -122,8 +118,7 @@ class PromotionAssignmentResponse(BaseModel):
     ref_id: Optional[str]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PriceSuggestionCreate(BaseModel):
@@ -154,8 +149,7 @@ class PriceSuggestionResponse(BaseModel):
     reviewed_at: Optional[datetime]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PriceChangeRequestCreate(BaseModel):
@@ -189,8 +183,7 @@ class PriceChangeRequestResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PriceChangeHistoryResponse(BaseModel):
@@ -205,8 +198,7 @@ class PriceChangeHistoryResponse(BaseModel):
     reason: Optional[str]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DynamicPriceRequest(BaseModel):

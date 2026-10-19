@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import datetime
 import uuid
@@ -20,8 +20,7 @@ class RfmScoreOut(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BehavioralSegmentCreate(BaseModel):
@@ -60,8 +59,7 @@ class BehavioralSegmentOut(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CustomerSegmentAssignmentOut(BaseModel):
@@ -71,8 +69,7 @@ class CustomerSegmentAssignmentOut(BaseModel):
     assigned_by: str
     assigned_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoyaltyProgramOut(BaseModel):
@@ -93,8 +90,7 @@ class LoyaltyProgramOut(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoyaltyProgramUpdate(BaseModel):
@@ -135,8 +131,7 @@ class LoyaltyTransactionOut(BaseModel):
     created_by: Optional[uuid.UUID]
     created_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoyaltySummary(BaseModel):
@@ -194,8 +189,7 @@ class PersonalizedOfferOut(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CouponCodeGenerate(BaseModel):
@@ -228,8 +222,7 @@ class CouponCodeOut(BaseModel):
     used_at: Optional[datetime]
     created_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CouponValidateRequest(BaseModel):
