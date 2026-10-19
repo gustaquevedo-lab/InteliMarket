@@ -413,8 +413,9 @@ def sync_precios(pg, my):
     with my.cursor() as cur:
         cur.execute(
             "SELECT pv.CODIGO, pv.PRECIO1, pv.PRECIO2, pv.PRECIO3, pv.PRECIO4, pv.PRECIO5, pv.PRECIO6, pv.PRECIO7, "
-            "i.IMPUESTO, pv.FECMOD FROM precios_ventas pv JOIN productos p ON p.CODIGO = pv.CODIGO "
-            "LEFT JOIN impuesto i ON i.IDIMPUESTO = p.IDIMPUESTO WHERE pv.FECMOD > %s ORDER BY pv.FECMOD", (since,))
+            # La tasa real es productos.IMPUESTO (coincide con lo facturado); IDIMPUESTO=0 en 5.208 productos.
+            "p.IMPUESTO, pv.FECMOD FROM precios_ventas pv JOIN productos p ON p.CODIGO = pv.CODIGO "
+            "WHERE pv.FECMOD > %s ORDER BY pv.FECMOD", (since,))
         legacy_rows = cur.fetchall()
     if not legacy_rows:
         log("  precios: sin cambios")
@@ -424,6 +425,7 @@ def sync_precios(pg, my):
     rows = []
     for row in legacy_rows:
         cod, *precios, iva, fecmod = row
+        iva = iva if iva in (0, 5, 10) else 10  # mismo criterio que etl.py
         cod = txt_keep(cod, 50)
         if not cod or cod not in productos_validos:
             continue
@@ -431,7 +433,7 @@ def sync_precios(pg, my):
         for (slug, _n), precio in zip(PRICE_LEVELS, precios):
             # El legacy guarda el precio SIN IVA y lo factura redondeando al más cercano;
             # InteliMarket guarda el precio final con IVA, entero (el que se cobra).
-            precio = int((Decimal(str(precio or 0)) * (100 + Decimal(str(iva or 0))) / 100)
+            precio = int((Decimal(str(precio or 0)) * (100 + iva) / 100)
                          .quantize(Decimal("1"), rounding=ROUND_HALF_UP))
             if precio and precio > 0:
                 rows.append((uuid.uuid5(NS, f"pp:{cod}:{slug}"), plist_id(slug), pid, precio,

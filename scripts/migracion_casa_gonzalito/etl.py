@@ -271,9 +271,10 @@ def load_productos(pg, my, cat_map, imp_map):
     def gen():
         with mysql_stream() as sc:
             cur = sc.cursor()
-            cur.execute("SELECT CODIGO, COD_BARRA, NOMBRE, ID_CATEGORIA, IDIMPUESTO, "
+            # productos.IMPUESTO es la tasa real (coincide con lo facturado); IDIMPUESTO vale 0 en miles de productos.
+            cur.execute("SELECT CODIGO, COD_BARRA, NOMBRE, ID_CATEGORIA, IMPUESTO, "
                         "SERVICIO, INACTIVO, FECHA, PRECIOPROMEDIO FROM productos")
-            for (codigo, cod_barra, nombre, id_cat, idimp, servicio,
+            for (codigo, cod_barra, nombre, id_cat, impuesto, servicio,
                  inactivo, fecha, preciop) in cur:
                 cod = txt_keep(codigo, 50)
                 if not cod:
@@ -281,7 +282,7 @@ def load_productos(pg, my, cat_map, imp_map):
                 codigos.add(cod)
                 costos[cod] = money(preciop)
                 cat_id = cat_map.get(str(id_cat)) if id_cat else None
-                tasa = Decimal(str(imp_map.get(idimp, 10)))
+                tasa = Decimal(impuesto if impuesto in (0, 5, 10) else 10)
                 yield (uuid.uuid5(NS, f"prod:{cod}"), COMPANY_ID, cat_id, cod,
                        txt_keep(cod_barra, 50), (txt(nombre) or cod)[:200],
                        "servicio" if servicio == 1 else "producto", "UN", tasa,
