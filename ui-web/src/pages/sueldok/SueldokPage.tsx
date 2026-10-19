@@ -588,10 +588,12 @@ export default function SueldokPage() {
 
     return employees.map((emp: any): PayrollItem => {
       const baseSalary = emp.salario || 0
-      const SMLV = 2798309
-      // En Extra Supermercado el IPS obrero y patronal se calcula con la base del Salario Mínimo Legal
-      const ipsWorker = emp.ipsWorker !== undefined ? emp.ipsWorker : (emp.hasIps === false ? 0 : Math.round(SMLV * 0.09))
-      const ipsEmployer = emp.ipsEmployer !== undefined ? emp.ipsEmployer : (emp.hasIps === false ? 0 : Math.round(SMLV * 0.165))
+      const smlvRef = data?.references?.smlv || 3044000
+      const workerRate = data?.references?.ipsWorkerRate || 0.09
+      const employerRate = data?.references?.ipsEmployerRate || 0.165
+      // En Extra Supermercado el IPS obrero y patronal se calcula sobre la referencia del Salario Mínimo Legal del sistema
+      const ipsWorker = emp.ipsWorker !== undefined ? emp.ipsWorker : (emp.hasIps === false ? 0 : Math.round(smlvRef * workerRate))
+      const ipsEmployer = emp.ipsEmployer !== undefined ? emp.ipsEmployer : (emp.hasIps === false ? 0 : Math.round(smlvRef * employerRate))
 
       // Anticipos aprobados de este funcionario
       const empAdvances = advances
@@ -3615,6 +3617,7 @@ export default function SueldokPage() {
           availablePayrolls={data?.availablePayrolls || []}
           company={selectedCompany}
           sueldokOverviewUrl={SUELDOK_OVERVIEW_URL}
+          systemReferences={data?.references}
         />
       )}
     </div>

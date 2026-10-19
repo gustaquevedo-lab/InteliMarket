@@ -1,12 +1,21 @@
 import React, { useState, useEffect, useRef } from "react"
 import {
-  FileText, Download, Printer, X, Calendar, Loader2, ShieldCheck, Check
+  FileText, Download, Printer, X, Calendar, Loader2, ShieldCheck
 } from "lucide-react"
 import html2canvas from "html2canvas"
 import jsPDF from "jspdf"
 import { formatPYG } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
 import type { PayrollItem } from "./SueldokPage"
+
+export interface SystemReferences {
+  smlv?: number
+  ipsWorkerRate?: number
+  ipsEmployerRate?: number
+  familyBonusRate?: number
+  dailySalary?: number
+  hourlyValue?: number
+}
 
 interface Props {
   isOpen: boolean
@@ -20,14 +29,8 @@ interface Props {
     apiKey: string
   }
   sueldokOverviewUrl: string
+  systemReferences?: SystemReferences
 }
-
-// Salario Mínimo Legal Vigente en Paraguay (SMLV)
-const SMLV_PARAGUAY = 2798309
-const IPS_OBRERO_PORCENTAJE = 0.09
-const IPS_PATRONAL_PORCENTAJE = 0.165
-export const IPS_OBRERO_SMLV = Math.round(SMLV_PARAGUAY * IPS_OBRERO_PORCENTAJE) // 251.848 Gs.
-export const IPS_PATRONAL_SMLV = Math.round(SMLV_PARAGUAY * IPS_PATRONAL_PORCENTAJE) // 461.721 Gs.
 
 // Nombres de meses en español
 const MESES = [
@@ -127,6 +130,7 @@ export function LiquidacionSalarioModal({
   availablePayrolls,
   company,
   sueldokOverviewUrl,
+  systemReferences,
 }: Props) {
   const toast = useToast()
   const printRef = useRef<HTMLDivElement>(null)
@@ -134,13 +138,15 @@ export function LiquidacionSalarioModal({
   const [selectedPeriod, setSelectedPeriod] = useState(periodoActivo || "2026-09")
   const [loadingPeriod, setLoadingPeriod] = useState(false)
   const [activeItem, setActiveItem] = useState<PayrollItem | null>(employee)
+  const [currentRefs, setCurrentRefs] = useState<SystemReferences | undefined>(systemReferences)
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
 
-  // Sincronizar cuando cambia el empleado o el período base
+  // Sincronizar cuando cambia el empleado, las referencias o el período base
   useEffect(() => {
     setActiveItem(employee)
     setSelectedPeriod(periodoActivo || "2026-09")
-  }, [employee, periodoActivo])
+    if (systemReferences) setCurrentRefs(systemReferences)
+  }, [employee, periodoActivo, systemReferences])
 
   // Carga reactiva de datos si se selecciona un período diferente
   useEffect(() => {
@@ -157,6 +163,9 @@ export function LiquidacionSalarioModal({
       .then((res) => res.json())
       .then((json) => {
         if (!isMounted) return
+        if (json?.references) {
+          setCurrentRefs(json.references)
+        }
         const items = json?.approvedPayroll?.items || []
         const cleanCi = String(employee.ci || "").replace(/\D/g, "")
         const match = items.find((it: any) => {
@@ -174,8 +183,8 @@ export function LiquidacionSalarioModal({
             baseSalary: match.baseSalary,
             bonus: match.bonus || 0,
             totalGross: match.totalGross,
-            ipsWorker: match.ipsWorker !== undefined ? match.ipsWorker : IPS_OBRERO_SMLV,
-            ipsEmployer: match.ipsEmployer !== undefined ? match.ipsEmployer : IPS_PATRONAL_SMLV,
+            ipsWorker: match.ipsWorker !== undefined ? match.ipsWorker : 0,
+            ipsEmployer: match.ipsEmployer !== undefined ? match.ipsEmployer : 0,
             advances: match.advances || 0,
             deductions: match.deductions || 0,
             loanDeductions: match.loanDeductionsDetails || match.typedDeductions || match.loanDeductions || [],
@@ -189,10 +198,18 @@ export function LiquidacionSalarioModal({
             rawItem: match.rawItem || match,
           })
         } else {
-          // Si no está liquidado en este período, proyectar con valores base y regla SMLV
+          // Si no está liquidado en este período, proyectar con valores del sistema
           const baseSal = employee.baseSalary || 0
-          const workerIps = employee.ipsWorker !== undefined ? employee.ipsWorker : IPS_OBRERO_SMLV
-          const employerIps = employee.ipsEmployer !== undefined ? employee.ipsEmployer : IPS_PATRONAL_SMLV
+          const smlv = json?.references?.smlv || currentRefs?.smlv || 3044000
+          const workerRate = json?.references?.ipsWorkerRate || currentRefs?.ipsWorkerRate || 0.09
+          const employerRate = json?.references?.ipsEmployerRate || currentRefs?.ipsEmployerRate || 0.165
+          const workerIps = employee.ipsWorker !== undefined && employee.ipsWorker > 0
+            ? employee.ipsWorker
+            : Math.round(smlv * workerRate)
+          const employerIps = employee.ipsEmployer !== undefined && employee.ipsEmployer > 0
+            ? employee.ipsEmployer
+            : Math.round(smlv * employerRate)
+
           setActiveItem({
             ...employee,
             baseSalary: baseSal,
@@ -219,9 +236,19 @@ export function LiquidacionSalarioModal({
     return () => {
       isMounted = false
     }
-  }, [selectedPeriod, isOpen, employee, periodoActivo, sueldokOverviewUrl, company.apiKey])
+  }, [selectedPeriod, isOpen, employee, periodoActivo, sueldokOverviewUrl, company.apiKey, currentRefs?.smlv, currentRefs?.ipsWorkerRate, currentRefs?.ipsEmployerRate])
 
   if (!isOpen || !activeItem) return null
+
+  // ── RESOLUCIÓN DINÁMICA DE REFERENCIAS PREVISIONALES DEL SISTEMA ──
+  // Si el item ya tiene ipsWorker calculado por el sistema (ej. 273.960 Gs.), la base real es ipsWorker / 0.09 = 3.044.000
+  const workerRate = currentRefs?.ipsWorkerRate || 0.09
+  const employerRate = currentRefs?.ipsEmployerRate || 0.165
+  const smlvDelSistema = currentRefs?.smlv || (
+    activeItem.ipsWorker && activeItem.ipsWorker > 0
+      ? Math.round(activeItem.ipsWorker / workerRate)
+      : 3044000
+  )
 
   // ── DESGLOSE DE HABERES ──
   const haberes: Array<{ concepto: string; tipo: string; referencia: string; monto: number }> = [
@@ -260,18 +287,17 @@ export function LiquidacionSalarioModal({
   // ── DESGLOSE DETALLADO DE DESCUENTOS Y OPERACIONES ──
   const descuentos: Array<{ concepto: string; tipo: string; referencia: string; monto: number }> = []
 
-  // 1. Aporte Previsional IPS Obrero (9% sobre Salario Mínimo Legal Vigente)
-  // En Extra Supermercado rige la regla SMLV = 2.798.309 -> 9% = 251.848 Gs.
+  // 1. Aporte Previsional IPS Obrero (9% sobre Salario Mínimo Legal del Sistema)
   const ipsMontoCalculado =
     activeItem.ipsWorker !== undefined && activeItem.ipsWorker > 0
       ? activeItem.ipsWorker
-      : IPS_OBRERO_SMLV
+      : Math.round(smlvDelSistema * workerRate)
 
   if (ipsMontoCalculado > 0) {
     descuentos.push({
-      concepto: "Aporte Jubilatorio Obrero I.P.S. (9%)",
+      concepto: `Aporte Jubilatorio Obrero I.P.S. (${Math.round(workerRate * 100)}%)`,
       tipo: "Retención Legal",
-      referencia: `Base SMLV ₲ ${formatPYG(SMLV_PARAGUAY)} (Ley 213/93)`,
+      referencia: `Base SMLV ₲ ${formatPYG(smlvDelSistema)} (Ley 213/93)`,
       monto: ipsMontoCalculado,
     })
   }
@@ -288,7 +314,6 @@ export function LiquidacionSalarioModal({
 
   // 3. Anticipos de Salario Quincenal
   if (Number(activeItem.advances || 0) > 0) {
-    // Si los anticipos no están duplicados con los préstamos
     descuentos.push({
       concepto: "Anticipo de Salario Quincenal",
       tipo: "Anticipo",
@@ -298,7 +323,6 @@ export function LiquidacionSalarioModal({
   }
 
   // 4. Desglose Exhaustivo de Préstamos y Convenios Comerciales de Terceros
-  // Inspeccionamos loanDeductions, typedDeductions y loanDeductionsDetails
   const loanList =
     (Array.isArray(activeItem.loanDeductions) && activeItem.loanDeductions.length > 0)
       ? activeItem.loanDeductions
@@ -367,11 +391,11 @@ export function LiquidacionSalarioModal({
   const totalDescuentos = descuentos.reduce((sum, d) => sum + d.monto, 0)
   const netoACobrar = Math.max(0, totalHaberes - totalDescuentos)
 
-  // Aporte Patronal IPS (Informativo, 16.5% sobre SMLV)
+  // Aporte Patronal IPS (Informativo, 16.5% sobre el SMLV del sistema)
   const ipsPatronalMonto =
     activeItem.ipsEmployer !== undefined && activeItem.ipsEmployer > 0
       ? activeItem.ipsEmployer
-      : IPS_PATRONAL_SMLV
+      : Math.round(smlvDelSistema * employerRate)
 
   // Descarga limpia en PDF A4 de alta definición
   const handleDownloadPdf = async () => {
@@ -552,7 +576,6 @@ export function LiquidacionSalarioModal({
                     alt="Extra Supermercado"
                     className="max-h-full max-w-full object-contain"
                     onError={(e) => {
-                      // Fallback si la imagen no carga
                       (e.target as HTMLElement).style.display = "none"
                     }}
                   />
@@ -616,7 +639,7 @@ export function LiquidacionSalarioModal({
               </div>
               <div>
                 <span className="text-[9px] uppercase font-bold text-slate-500 block">Base IPS Obrero Declarada</span>
-                <span className="font-bold font-mono text-indigo-700 block">SMLV ₲ {formatPYG(SMLV_PARAGUAY)}</span>
+                <span className="font-bold font-mono text-indigo-700 block">SMLV ₲ {formatPYG(smlvDelSistema)}</span>
               </div>
               <div>
                 <span className="text-[9px] uppercase font-bold text-slate-500 block">Fecha de Emisión</span>
@@ -697,7 +720,7 @@ export function LiquidacionSalarioModal({
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-indigo-600 shrink-0" />
                 <span>
-                  <strong>Aporte Patronal I.P.S. (16,5%):</strong> Contribución a cargo exclusivo de la patronal sobre SMLV (₲ {formatPYG(ipsPatronalMonto)}), no deducible del salario.
+                  <strong>Aporte Patronal I.P.S. ({(employerRate * 100).toFixed(1)}%):</strong> Contribución a cargo exclusivo de la patronal sobre base SMLV (₲ {formatPYG(ipsPatronalMonto)}), no deducible del salario.
                 </span>
               </div>
               <span className="font-mono font-bold text-slate-800 bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shrink-0">
