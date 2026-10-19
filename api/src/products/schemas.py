@@ -1,6 +1,6 @@
 """Product schemas"""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
 from uuid import UUID
@@ -23,8 +23,7 @@ class CategoryResponse(BaseModel):
     activo: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProductCreate(BaseModel):
@@ -138,5 +137,4 @@ class ProductResponse(BaseModel):
     # Precio de venta promedio histórico ponderado real (en caja)
     precio_promedio_real: Optional[Decimal] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

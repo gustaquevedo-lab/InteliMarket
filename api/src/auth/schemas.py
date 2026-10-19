@@ -1,6 +1,6 @@
 """Auth request/response schemas"""
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import Optional
 from datetime import datetime
 from uuid import UUID
@@ -66,8 +66,7 @@ class UserResponse(BaseModel):
     tenant_slug: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChangePasswordRequest(BaseModel):

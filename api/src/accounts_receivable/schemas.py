@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime, date
 from uuid import UUID
@@ -27,8 +27,7 @@ class AccountsReceivableResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AgingBucket(BaseModel):
@@ -215,8 +214,7 @@ class ReceivablePaymentResponse(BaseModel):
     monto_cheque: Optional[Decimal] = None
     allocations: list[dict] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReceiptVerificationResponse(BaseModel):

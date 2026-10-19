@@ -1,6 +1,6 @@
 """Payment schemas"""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime, date
 from uuid import UUID
@@ -21,8 +21,7 @@ class PaymentMethodResponse(BaseModel):
     activo: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PaymentAllocationInput(BaseModel):
@@ -58,8 +57,7 @@ class PaymentResponse(BaseModel):
     observaciones: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WalletResponse(BaseModel):
@@ -69,8 +67,7 @@ class WalletResponse(BaseModel):
     moneda: str
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AccountResponse(BaseModel):
@@ -83,8 +80,7 @@ class AccountResponse(BaseModel):
     activo: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FinancingResponse(BaseModel):
@@ -101,8 +97,7 @@ class FinancingResponse(BaseModel):
     estado: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class InstallmentResponse(BaseModel):
@@ -115,5 +110,4 @@ class InstallmentResponse(BaseModel):
     estado: str
     fecha_pago: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
