@@ -1088,6 +1088,8 @@ export default function FinancialPage() {
       const nNum = String(n.numero || "").trim().toLowerCase()
       const nTimb = String(n.timbrado || "").trim()
       const key = `${nNum}_${nTimb}`
+      const saldoNC = Math.max(0, Number(n.saldo_disponible !== undefined && n.saldo_disponible !== null ? n.saldo_disponible : (n.numero_factura_origen ? 0 : n.monto || 0)))
+      if (saldoNC <= 0) return false
       if (assignedNcIds.has(nId) || (nNum && assignedNcNums.has(nNum))) {
         return false
       }
@@ -1170,7 +1172,11 @@ export default function FinancialPage() {
       }
       if (ncNumStr) seenNcKeys.add(ncDedupKey)
 
-      const saldoNC = Number(nc.saldo_disponible) > 0 ? Number(nc.saldo_disponible) : Number(nc.monto || 0)
+      const saldoNC = Math.max(0, Number(nc.saldo_disponible !== undefined && nc.saldo_disponible !== null ? nc.saldo_disponible : (nc.numero_factura_origen ? 0 : nc.monto || 0)))
+      if (saldoNC <= 0) {
+        return
+      }
+
       docs.push({
         id: nc.id,
         docType: "nota_credito",
@@ -1180,7 +1186,7 @@ export default function FinancialPage() {
         fechaVencimiento: null,
         montoOriginal: -Number(nc.monto || saldoNC),
         saldoEfectivo: -saldoNC,
-        estado: Number(nc.saldo_disponible) > 0 ? "Saldo Disponible (Libre)" : "Crédito Registrado (Libre)",
+        estado: "Saldo Disponible (Libre)",
         isSelected: selectedOpCreditNoteIds.has(nc.id),
         raw: nc,
       })
@@ -1378,7 +1384,7 @@ export default function FinancialPage() {
     return currentSelectedSupplier.creditNotes
       .filter(n => selectedOpCreditNoteIds.has(n.id))
       .reduce((sum, n) => {
-        const saldoNC = Number(n.saldo_disponible) > 0 ? Number(n.saldo_disponible) : Number(n.monto || 0)
+        const saldoNC = Math.max(0, Number(n.saldo_disponible !== undefined && n.saldo_disponible !== null ? n.saldo_disponible : (n.numero_factura_origen ? 0 : n.monto || 0)))
         return sum + saldoNC
       }, 0)
   }, [currentSelectedSupplier, selectedOpCreditNoteIds])
@@ -1498,7 +1504,7 @@ export default function FinancialPage() {
         if (nKey && seenAppliedNc.has(nKey)) continue
         if (nKey) seenAppliedNc.add(nKey)
 
-        const saldoNC = Number(n.saldo_disponible) > 0 ? Number(n.saldo_disponible) : Number(n.monto || 0)
+        const saldoNC = Math.max(0, Number(n.saldo_disponible !== undefined && n.saldo_disponible !== null ? n.saldo_disponible : (n.numero_factura_origen ? 0 : n.monto || 0)))
         if (saldoNC <= 0) continue
         const montoAplicar = Math.min(saldoNC, restanteACubrir)
         ncDisbursements.push({

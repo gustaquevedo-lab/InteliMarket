@@ -3356,6 +3356,42 @@ async def create_supplier_credit_note(db: AsyncSession, company_id: str, data: S
         cancelado=False,
     )
     db.add(note)
+    await db.flush()
+
+    # Si se especificó factura de origen, auto-aplicar de inmediato para mantener
+    # la consistencia entre el monto original inmutable de la factura y su saldo neto pagable
+    if note.numero_factura_origen:
+        inv_q = select(SupplierInvoice).where(
+            SupplierInvoice.company_id == cid,
+            SupplierInvoice.supplier_id == sid,
+            SupplierInvoice.numero_factura == note.numero_factura_origen,
+            SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial", "retenida_discrepancia"])
+        )
+        inv_res = await db.execute(inv_q)
+        target_inv = inv_res.scalar_one_or_none()
+        if target_inv and (target_inv.saldo_pendiente or Decimal("0")) > Decimal("0"):
+            monto_auto_aplicar = min(note.monto, target_inv.saldo_pendiente)
+            note.saldo_disponible = max(Decimal("0"), note.monto - monto_auto_aplicar)
+            target_inv.saldo_pendiente = max(Decimal("0"), target_inv.saldo_pendiente - monto_auto_aplicar)
+            target_inv.monto_retenido_nc = max(Decimal("0"), (target_inv.monto_retenido_nc or Decimal("0")) - monto_auto_aplicar)
+            if target_inv.saldo_pendiente <= Decimal("0"):
+                target_inv.estado = "pagada"
+                target_inv.bloqueada_para_pago = False
+                target_inv.requiere_nc = False
+            else:
+                target_inv.estado = "parcial"
+                if target_inv.monto_retenido_nc <= Decimal("0"):
+                    target_inv.bloqueada_para_pago = False
+                    target_inv.requiere_nc = False
+
+            db.add(SupplierCreditNoteApplication(
+                company_id=cid,
+                credit_note_id=note.id,
+                invoice_id=target_inv.id,
+                monto_aplicado=monto_auto_aplicar,
+                observaciones=f"Compensación automática por vinculación directa a factura {target_inv.numero_factura}",
+            ))
+
     await db.commit()
     await db.refresh(note)
 

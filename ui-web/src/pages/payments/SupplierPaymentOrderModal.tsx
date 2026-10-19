@@ -22,6 +22,7 @@ interface InvoiceToPay {
   supplier_id: string
   supplier_nombre?: string
   tipo_comprobante?: string
+  notas_credito?: any[]
 }
 
 interface LegalInvoiceFormItem {
@@ -231,16 +232,31 @@ export default function SupplierPaymentOrderModal({
           setPettyCashFunds(fundsRes.value)
         }
         if (cnRes.status === "fulfilled" && Array.isArray(cnRes.value)) {
-          const validNCs = cnRes.value.filter((n: any) => (n.saldo_disponible ?? n.monto) > 0)
+          const validNCs = cnRes.value.filter((n: any) => {
+            const saldoDisp = Math.max(0, Number(n.saldo_disponible !== undefined && n.saldo_disponible !== null ? n.saldo_disponible : (n.numero_factura_origen ? 0 : n.monto || 0)))
+            return saldoDisp > 0
+          })
           setCreditNotes(validNCs)
-          // Preseleccionar NCs: si existingOrder ya tenía, seleccionar esas; sino todas las disponibles
+          // Preseleccionar NCs: si existingOrder ya tenía, seleccionar esas; sino solo las libres que no pertenezcan a las facturas iniciales
           const existingNcIds = (existingOrder?.disbursements || [])
             .map((d: any) => d.credit_note_id)
             .filter(Boolean)
           if (existingNcIds.length > 0) {
             setSelectedCreditNoteIds(existingNcIds)
           } else {
-            setSelectedCreditNoteIds(validNCs.map((n: any) => n.id))
+            const assignedNums = new Set<string>()
+            initialInvoices.forEach(inv => {
+              if (inv.notas_credito && Array.isArray(inv.notas_credito)) {
+                inv.notas_credito.forEach((nc: any) => {
+                  if (nc.numero) assignedNums.add(String(nc.numero).trim().toLowerCase())
+                })
+              }
+            })
+            const freeValid = validNCs.filter((n: any) => {
+              const numStr = String(n.numero || "").trim().toLowerCase()
+              return !assignedNums.has(numStr) && !n.numero_factura_origen
+            })
+            setSelectedCreditNoteIds(freeValid.map((n: any) => n.id))
           }
         }
         if (vaultRes.status === "fulfilled" && vaultRes.value) {
@@ -512,7 +528,7 @@ export default function SupplierPaymentOrderModal({
     let remNeto = finalNeto
 
     for (const nc of ncsToApply) {
-      const saldoDisp = Number(nc.saldo_disponible ?? nc.monto ?? 0)
+      const saldoDisp = Math.max(0, Number(nc.saldo_disponible !== undefined && nc.saldo_disponible !== null ? nc.saldo_disponible : (nc.numero_factura_origen ? 0 : nc.monto || 0)))
       if (saldoDisp <= 0) continue
       const montoAAplicar = remNeto > 0 ? Math.min(saldoDisp, remNeto) : saldoDisp
       ncRows.push({
@@ -902,8 +918,9 @@ export default function SupplierPaymentOrderModal({
                     <tr>
                       <th className="p-3">Factura N°</th>
                       <th className="p-3">Timbrado / Vto</th>
-                      <th className="p-3 text-right">Saldo Original</th>
-                      <th className="p-3 text-right w-36">Monto Amortizado</th>
+                      <th className="p-3 text-right">Monto Factura</th>
+                      <th className="p-3 text-right">Saldo Pagable</th>
+                      <th className="p-3 text-right w-36">Monto a Pagar</th>
                       <th className="p-3 text-right w-28">Retención</th>
                       <th className="p-3 text-right">Saldo Restante</th>
                       <th className="p-3 text-center w-12">Acción</th>
@@ -914,6 +931,8 @@ export default function SupplierPaymentOrderModal({
                       const numAplicado = Number(monto_aplicado || 0)
                       const numRetencion = Number(monto_retencion || 0)
                       const saldo = Number(inv.saldo_pendiente || 0)
+                      const totalFac = Number(inv.total || saldo)
+                      const deduccionNC = Math.max(0, totalFac - saldo)
                       const restante = Math.max(0, saldo - numAplicado)
                       const isExceeded = numAplicado > saldo
                       const isRetencionExceeded = numRetencion > numAplicado
@@ -936,8 +955,16 @@ export default function SupplierPaymentOrderModal({
                             <p>{inv.timbrado || "S/T"}</p>
                             <p className="text-[10px] text-slate-400">Vto: {formatDate(inv.fecha_vencimiento)}</p>
                           </td>
-                          <td className="p-3 text-right font-mono text-slate-700 dark:text-slate-300">
-                            {formatPYG(inv.saldo_pendiente)}
+                          <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
+                            <span className="block">{formatPYG(totalFac)}</span>
+                            {deduccionNC > 0 && (
+                              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 block" title="Deducción de NCs vinculadas">
+                                -{formatPYG(deduccionNC)} (NC)
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                            {formatPYG(saldo)}
                           </td>
                           <td className="p-2 text-right">
                             <CurrencyInput
