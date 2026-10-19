@@ -25,7 +25,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 import uuid
 
-router = APIRouter(prefix="/api/v1/integrated-finance", tags=["integrated-finance"])
+router = APIRouter(prefix="/api/v1/integrated-finance", tags=["integrated-finance"], dependencies=[Depends(require_auth)])
 
 _LEDGER_ROLES = {"Finanzas", "Gerente"}
 

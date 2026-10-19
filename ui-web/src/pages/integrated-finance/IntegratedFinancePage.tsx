@@ -5,12 +5,11 @@ import {
   RefreshCcw, FileText, Ban, Layers, Building, Eye, ChevronRight, Scale, Lock,
   Unlock, HelpCircle, Check, ArrowUpRight, ArrowDownRight, Printer, Sparkles, Filter
 } from "lucide-react"
-import { api } from "../../api"
+import { api, downloadAuthenticated } from "../../api"
 import { formatPYG } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
-const API_BASE = import.meta.env.VITE_API_URL || "/api"
 
 type MainTab = "dashboard" | "asientos" | "retenciones" | "activosfijos" | "plancuentas"
 
@@ -104,9 +103,12 @@ export default function IntegratedFinancePage() {
     fetchPeriodDetails()
   }, [selectedPeriod])
 
-  const handleDownloadPdf = (endpoint: string) => {
-    const url = `${API_BASE}${endpoint}${endpoint.includes("?") ? "&" : "?"}company_id=${COMPANY_ID}`
-    window.open(url, "_blank")
+  const handleDownloadPdf = async (endpoint: string) => {
+    try {
+      await downloadAuthenticated(endpoint, { company_id: COMPANY_ID }, `${endpoint.split("/").slice(-3, -1).join("-")}.pdf`)
+    } catch (err: any) {
+      toast.error("Error al descargar PDF", err.message)
+    }
   }
 
   const handleClosePeriod = async (periodId: string) => {
