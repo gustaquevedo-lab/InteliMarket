@@ -3303,6 +3303,16 @@ async def get_sueldok_approved_advances(db: AsyncSession, company_id: str, searc
     )
     used_advances_map = {row.sueldok_sync_id: row for row in used_res.fetchall()}
 
+    # Obtener los IDs de anticipos/préstamos ya deducidos formalmente en nómina aprobada de SueldOK
+    approved_payroll = data.get("approvedPayroll") or {}
+    payroll_items = approved_payroll.get("items") or []
+    payroll_deducted_ids = set()
+    for item in payroll_items:
+        for ld in (item.get("loanDeductions") or []):
+            lid = ld.get("loanId") or ld.get("id")
+            if lid:
+                payroll_deducted_ids.add(str(lid))
+
     advances = []
     seen_ids = set()
 
@@ -3336,7 +3346,9 @@ async def get_sueldok_approved_advances(db: AsyncSession, company_id: str, searc
                 q not in motivo.lower() and q not in tipo_label.lower()):
                 continue
 
-        ya_usado = eid in used_advances_map
+        en_gasto = eid in used_advances_map
+        en_nomina = eid in payroll_deducted_ids
+        ya_usado = en_gasto or en_nomina
         expense_info = used_advances_map.get(eid)
 
         advances.append({
@@ -3354,6 +3366,8 @@ async def get_sueldok_approved_advances(db: AsyncSession, company_id: str, searc
             "fecha": fecha,
             "estado": "approved",
             "ya_desembolsado": ya_usado,
+            "descontado_en_nomina": en_nomina,
+            "desembolsado_en_gasto": en_gasto,
             "expense_id": str(expense_info.id) if expense_info else None,
             "expense_estado": expense_info.estado if expense_info else None,
         })
@@ -3384,7 +3398,9 @@ async def get_sueldok_approved_advances(db: AsyncSession, company_id: str, searc
                 q not in motivo.lower() and q not in cargo.lower()):
                 continue
 
-        ya_usado = adv_id in used_advances_map
+        en_gasto = adv_id in used_advances_map
+        en_nomina = adv_id in payroll_deducted_ids
+        ya_usado = en_gasto or en_nomina
         expense_info = used_advances_map.get(adv_id)
 
         advances.append({
@@ -3402,6 +3418,8 @@ async def get_sueldok_approved_advances(db: AsyncSession, company_id: str, searc
             "fecha": fecha,
             "estado": estado,
             "ya_desembolsado": ya_usado,
+            "descontado_en_nomina": en_nomina,
+            "desembolsado_en_gasto": en_gasto,
             "expense_id": str(expense_info.id) if expense_info else None,
             "expense_estado": expense_info.estado if expense_info else None,
         })

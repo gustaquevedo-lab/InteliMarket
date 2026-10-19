@@ -92,7 +92,17 @@ const COLORES_AVATAR = [
   "#f97316",
 ]
 
-type TabType = "dashboard" | "payroll" | "expediente" | "settlements" | "advances" | "deductions" | "asistencia" | "funcionarios"
+type TabType =
+  | "payroll"
+  | "settlements"
+  | "novedades"
+  | "personal"
+  | "dashboard"
+  | "expediente"
+  | "advances"
+  | "deductions"
+  | "asistencia"
+  | "funcionarios"
 
 export interface PayrollItem {
   id: string
@@ -154,7 +164,9 @@ function AvatarCircle({ initials, idx, size = 40 }: { initials: string; idx: num
 export default function SueldokPage() {
   const navigate = useNavigate()
   const [selectedCompany, setSelectedCompany] = useState(EMPRESAS_DISPONIBLES[0])
-  const [tab, setTab] = useState<TabType>("dashboard")
+  const [tab, setTab] = useState<TabType>("payroll")
+  const [subtabNovedades, setSubtabNovedades] = useState<"anticipos" | "descuentos">("anticipos")
+  const [subtabPersonal, setSubtabPersonal] = useState<"funcionarios" | "asistencia">("funcionarios")
   const [search, setSearch] = useState("")
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -1298,24 +1310,25 @@ export default function SueldokPage() {
         </div>
       </div>
 
-      {/* ── BARRA DE TABS DE NAVEGACIÓN Y ACCIONES RÁPIDAS (IDÉNTICO A REPORTS) ── */}
+      {/* ── BARRA DE TABS DE NAVEGACIÓN CONSOLIDADA (4 VISTAS OPERATIVAS + ANALÍTICA) ── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-2">
         <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
           {[
-            { id: "dashboard", label: "Dashboard Estratégico", icon: Activity },
-            { id: "payroll", label: `Nómina & Liquidación (${payrollItems.length})`, icon: Receipt },
-            { id: "expediente", label: "Expediente Multi-Fase", icon: ShieldCheck },
-            { id: "settlements", label: `Finiquitos Laborales (${allSettlements.length})`, icon: Briefcase },
-            { id: "advances", label: `Anticipos (${advances.length})`, icon: PiggyBank },
-            { id: "deductions", label: `Descuentos & Faltantes (${deductions.length})`, icon: Scissors },
-            { id: "asistencia", label: `Marcaciones Dahua (${todayAttendance.length})`, icon: Clock },
-            { id: "funcionarios", label: `Funcionarios (${employees.length})`, icon: Users },
+            { id: "payroll" as TabType, label: `Nómina & Haberes (${payrollItems.length})`, icon: Receipt },
+            { id: "settlements" as TabType, label: `Finiquitos Laborales (${allSettlements.length})`, icon: Briefcase },
+            { id: "novedades" as TabType, label: `Novedades & Descuentos (${advances.length + deductions.length})`, icon: PiggyBank },
+            { id: "personal" as TabType, label: `Personal & Asistencia (${employees.length})`, icon: Users },
+            { id: "dashboard" as TabType, label: "Analítica Estratégica", icon: Activity },
           ].map(({ id, label, icon: Icon }) => {
-            const active = tab === id
+            const active =
+              tab === id ||
+              (id === "payroll" && tab === "expediente") ||
+              (id === "novedades" && (tab === "advances" || tab === "deductions")) ||
+              (id === "personal" && (tab === "asistencia" || tab === "funcionarios"))
             return (
               <button
                 key={id}
-                onClick={() => setTab(id as TabType)}
+                onClick={() => setTab(id)}
                 className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer whitespace-nowrap ${
                   active
                     ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/25"
@@ -1327,43 +1340,6 @@ export default function SueldokPage() {
               </button>
             )
           })}
-        </div>
-
-        {/* Botones Operativos Rápidos */}
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => {
-              if (employees.length > 0) {
-                handleSeleccionarFuncionarioFiniquito(employees[0].id)
-              }
-              setModalFiniquitoOpen(true)
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-300 hover:bg-orange-100 text-xs font-black transition cursor-pointer shadow-xs"
-          >
-            <Briefcase className="w-3.5 h-3.5" />
-            <span>Finiquito</span>
-          </button>
-          <button
-            onClick={() => setModalAnticipoOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-violet-50 dark:bg-violet-950/40 border border-violet-200 dark:border-violet-800 text-violet-700 dark:text-violet-300 hover:bg-violet-100 text-xs font-black transition cursor-pointer shadow-xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Anticipo</span>
-          </button>
-          <button
-            onClick={() => setModalDescuentoOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-100 text-xs font-black transition cursor-pointer shadow-xs"
-          >
-            <Scissors className="w-3.5 h-3.5" />
-            <span>Descuento</span>
-          </button>
-          <button
-            onClick={() => setModalNominaOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black transition shadow-md shadow-emerald-500/20 cursor-pointer"
-          >
-            <Calculator className="w-3.5 h-3.5" />
-            <span>Generar Nómina</span>
-          </button>
         </div>
       </div>
 
@@ -1816,7 +1792,10 @@ export default function SueldokPage() {
                   </h3>
                 </div>
                 <button
-                  onClick={() => setTab("asistencia")}
+                  onClick={() => {
+                    setTab("personal")
+                    setSubtabPersonal("asistencia")
+                  }}
                   className="text-xs font-bold text-indigo-500 hover:underline cursor-pointer"
                 >
                   Ver todas →
@@ -2002,6 +1981,34 @@ export default function SueldokPage() {
                 <DollarSign className="w-3.5 h-3.5" />
                 <span>Emitir Orden de Pago (OP)</span>
               </button>
+            </div>
+          </div>
+
+          {/* Resumen Ejecutivo de la Planilla Activa */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Total Haberes Brutos</span>
+              <p className="text-base sm:text-lg font-black font-mono text-slate-900 dark:text-white mt-0.5 whitespace-nowrap">
+                {formatPYG(payrollItems.reduce((acc, p) => acc + (p.totalGross || 0), 0))}
+              </p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-500 dark:text-blue-400">Aporte IPS Obrero (9%)</span>
+              <p className="text-base sm:text-lg font-black font-mono text-blue-600 dark:text-blue-400 mt-0.5 whitespace-nowrap">
+                {formatPYG(payrollItems.reduce((acc, p) => acc + (p.ipsWorker || 0), 0))}
+              </p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500 dark:text-amber-400">Anticipos & Deducciones</span>
+              <p className="text-base sm:text-lg font-black font-mono text-amber-600 dark:text-amber-400 mt-0.5 whitespace-nowrap">
+                {formatPYG(payrollItems.reduce((acc, p) => acc + ((p.advances || 0) + (p.deductions || 0)), 0))}
+              </p>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Total Neto a Liquidar</span>
+              <p className="text-base sm:text-lg font-black font-mono text-emerald-600 dark:text-emerald-400 mt-0.5 whitespace-nowrap">
+                {formatPYG(totalPayrollNet)}
+              </p>
             </div>
           </div>
 
@@ -2303,306 +2310,376 @@ export default function SueldokPage() {
         </div>
       )}
 
-      {/* 3. ANTICIPOS DE SUELDO */}
-      {tab === "advances" && (
+      {/* 3. NOVEDADES & DESCUENTOS (CONSOLIDADO ANTICIPOS + DESCUENTOS DE CAJA) */}
+      {(tab === "novedades" || tab === "advances" || tab === "deductions") && (
         <div className="flex flex-col gap-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 p-5 rounded-3xl bg-violet-950/20 border border-violet-500/30 backdrop-blur-md">
-            <div>
-              <h3 className="text-base font-black text-violet-950 dark:text-violet-100 flex items-center gap-2">
-                <PiggyBank className="w-5 h-5 text-violet-500" /> Solicitudes & Anticipos de Sueldo
-              </h3>
-              <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
-                Política vigente: hasta el 40% del salario base registrado. Los anticipos aprobados se descuentan
-                automáticamente de la liquidación mensual.
-              </p>
-            </div>
+          {/* Subtabs Selector Pill */}
+          <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-800/60 w-fit border border-slate-200 dark:border-slate-700/60 shadow-xs">
             <button
-              onClick={() => setModalAnticipoOpen(true)}
-              className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-violet-600/30"
+              onClick={() => {
+                setTab("novedades")
+                setSubtabNovedades("anticipos")
+              }}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-black rounded-xl transition cursor-pointer ${
+                (subtabNovedades === "anticipos" && tab !== "deductions") || tab === "advances"
+                  ? "bg-white dark:bg-slate-900 text-violet-600 dark:text-violet-400 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+              }`}
             >
-              <Plus className="w-4 h-4" />
-              <span>Solicitar Anticipo</span>
+              <PiggyBank className="w-4 h-4" />
+              <span>Anticipos & Préstamos ({advances.length})</span>
+            </button>
+            <button
+              onClick={() => {
+                setTab("novedades")
+                setSubtabNovedades("descuentos")
+              }}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-black rounded-xl transition cursor-pointer ${
+                subtabNovedades === "descuentos" || tab === "deductions"
+                  ? "bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+              }`}
+            >
+              <Scissors className="w-4 h-4" />
+              <span>Descuentos & Faltantes POS ({deductions.length})</span>
             </button>
           </div>
 
-          <section className="rounded-3xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[760px]">
-                <thead>
-                  <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80 text-left bg-slate-50/40 dark:bg-slate-800/20">
-                    <th className="px-6 py-3.5">Funcionario</th>
-                    <th className="px-4 py-3.5">Fecha</th>
-                    <th className="px-4 py-3.5">Motivo / Concepto</th>
-                    <th className="px-4 py-3.5 text-right">Monto</th>
-                    <th className="px-4 py-3.5 text-center">Estado</th>
-                    <th className="px-6 py-3.5 text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                  {advances.map((adv, idx) => (
-                    <tr key={adv.id || idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="px-6 py-3.5">
-                        <div className="font-black text-slate-900 dark:text-white">{adv.nombre}</div>
-                        <div className="text-[11px] text-slate-400">
-                          CI: {adv.ci || "—"} · {adv.cargo} ({adv.depto})
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5 text-xs text-slate-500 font-medium">{formatDate(adv.fecha)}</td>
-                      <td className="px-4 py-3.5 text-xs text-slate-700 dark:text-slate-300 font-medium">
-                        {adv.motivo}
-                      </td>
-                      <td className="px-4 py-3.5 text-right font-mono font-black text-slate-900 dark:text-white">
-                        {formatPYG(adv.monto)}
-                      </td>
-                      <td className="px-4 py-3.5 text-center">
-                        {adv.isDeductedInPayroll ? (
-                          <span
-                            title="Este anticipo/préstamo ya fue descontado en la nómina aprobada del período"
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider border bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
-                          >
-                            <Check className="w-3 h-3" />
-                            <span>Descontado en Nómina</span>
-                          </span>
-                        ) : (
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider border ${
-                              adv.estado === "approved"
-                                ? "bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/30"
-                                : "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/30"
-                            }`}
-                          >
-                            {adv.estado === "approved" ? "Pendiente Desembolso" : "Pendiente Aprobación"}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-3.5 text-right">
-                        {adv.isDeductedInPayroll ? (
-                          <span className="text-[11px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg">
-                            Liquidado en Haberes
-                          </span>
-                        ) : adv.estado === "approved" ? (
-                          <button
-                            type="button"
-                            onClick={() => navigate(`/gastos?action=desembolsar_sueldok&sueldok_id=${adv.id}`)}
-                            className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm ml-auto cursor-pointer"
-                            title="Desembolsar y registrar en Gastos Operativos (Fondo Fijo, Bóveda o Banco)"
-                          >
-                            <DollarSign className="w-3.5 h-3.5" />
-                            <span>Desembolsar en Gastos</span>
-                          </button>
-                        ) : (
-                          <span className="text-[11px] text-slate-400 italic">En revisión</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {((subtabNovedades === "anticipos" && tab !== "deductions") || tab === "advances") && (
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-wrap items-center justify-between gap-4 p-5 rounded-3xl bg-violet-950/20 border border-violet-500/30 backdrop-blur-md">
+                <div>
+                  <h3 className="text-base font-black text-violet-950 dark:text-violet-100 flex items-center gap-2">
+                    <PiggyBank className="w-5 h-5 text-violet-500" /> Solicitudes & Anticipos de Sueldo
+                  </h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                    Política vigente: hasta el 40% del salario base registrado. Los anticipos aprobados se descuentan
+                    automáticamente de la liquidación mensual.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setModalAnticipoOpen(true)}
+                  className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-violet-600/30"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Solicitar Anticipo</span>
+                </button>
+              </div>
+
+              <section className="rounded-3xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[760px]">
+                    <thead>
+                      <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80 text-left bg-slate-50/40 dark:bg-slate-800/20">
+                        <th className="px-6 py-3.5">Funcionario</th>
+                        <th className="px-4 py-3.5">Fecha</th>
+                        <th className="px-4 py-3.5">Motivo / Concepto</th>
+                        <th className="px-4 py-3.5 text-right">Monto</th>
+                        <th className="px-4 py-3.5 text-center">Estado</th>
+                        <th className="px-6 py-3.5 text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                      {advances.map((adv, idx) => (
+                        <tr key={adv.id || idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="px-6 py-3.5">
+                            <div className="font-black text-slate-900 dark:text-white">{adv.nombre}</div>
+                            <div className="text-[11px] text-slate-400">
+                              CI: {adv.ci || "—"} · {adv.cargo} ({adv.depto})
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5 text-xs text-slate-500 font-medium">{formatDate(adv.fecha)}</td>
+                          <td className="px-4 py-3.5 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                            {adv.motivo}
+                          </td>
+                          <td className="px-4 py-3.5 text-right font-mono font-black text-slate-900 dark:text-white">
+                            {formatPYG(adv.monto)}
+                          </td>
+                          <td className="px-4 py-3.5 text-center">
+                            {adv.isDeductedInPayroll ? (
+                              <span
+                                title="Este anticipo/préstamo ya fue descontado en la nómina aprobada del período"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider border bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>Descontado en Nómina</span>
+                              </span>
+                            ) : (
+                              <span
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider border ${
+                                  adv.estado === "approved"
+                                    ? "bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-500/30"
+                                    : "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-500/30"
+                                }`}
+                              >
+                                {adv.estado === "approved" ? "Pendiente Desembolso" : "Pendiente Aprobación"}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-3.5 text-right">
+                            {adv.isDeductedInPayroll ? (
+                              <span className="text-[11px] font-bold text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2.5 py-1 rounded-lg">
+                                Liquidado en Haberes
+                              </span>
+                            ) : adv.estado === "approved" ? (
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/gastos?action=desembolsar_sueldok&sueldok_id=${adv.id}`)}
+                                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm ml-auto cursor-pointer"
+                                title="Desembolsar y registrar en Gastos Operativos (Fondo Fijo, Bóveda o Banco)"
+                              >
+                                <DollarSign className="w-3.5 h-3.5" />
+                                <span>Desembolsar en Gastos</span>
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">En revisión</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             </div>
-          </section>
-        </div>
-      )}
+          )}
 
-      {/* 4. DESCUENTOS & FALTANTES DE CAJA */}
-      {tab === "deductions" && (
-        <div className="flex flex-col gap-6">
-          <div className="flex flex-wrap items-center justify-between gap-4 p-5 rounded-3xl bg-amber-950/20 border border-amber-500/30 backdrop-blur-md">
-            <div>
-              <h3 className="text-base font-black text-amber-950 dark:text-amber-100 flex items-center gap-2">
-                <Scissors className="w-5 h-5 text-amber-500" /> Descuentos Salariales & Faltantes de Arqueo
-              </h3>
-              <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
-                Trazabilidad directa con las cajas de Extra Supermercado: los faltantes de arqueo ciego confirmados
-                por supervisión se registran como deducciones aplicables a la nómina.
-              </p>
-            </div>
-            <button
-              onClick={() => setModalDescuentoOpen(true)}
-              className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-amber-600/30"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Registrar Descuento</span>
-            </button>
-          </div>
+          {(subtabNovedades === "descuentos" || tab === "deductions") && (
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-wrap items-center justify-between gap-4 p-5 rounded-3xl bg-amber-950/20 border border-amber-500/30 backdrop-blur-md">
+                <div>
+                  <h3 className="text-base font-black text-amber-950 dark:text-amber-100 flex items-center gap-2">
+                    <Scissors className="w-5 h-5 text-amber-500" /> Descuentos Salariales & Faltantes de Arqueo
+                  </h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                    Trazabilidad directa con las cajas de Extra Supermercado: los faltantes de arqueo ciego confirmados
+                    por supervisión se registran como deducciones aplicables a la nómina.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setModalDescuentoOpen(true)}
+                  className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-amber-600/30"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Registrar Descuento</span>
+                </button>
+              </div>
 
-          <section className="rounded-3xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[760px]">
-                <thead>
-                  <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80 text-left bg-slate-50/40 dark:bg-slate-800/20">
-                    <th className="px-6 py-3.5">Funcionario / Cajero</th>
-                    <th className="px-4 py-3.5">Fecha</th>
-                    <th className="px-4 py-3.5">Concepto / Causa</th>
-                    <th className="px-4 py-3.5">Periodo Nómina</th>
-                    <th className="px-4 py-3.5 text-right">Monto Deducción</th>
-                    <th className="px-6 py-3.5 text-right">Estado</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-                  {deductions.map((ded, idx) => (
-                    <tr key={ded.id || idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
-                      <td className="px-6 py-3.5">
-                        <div className="font-black text-slate-900 dark:text-white">{ded.nombre}</div>
-                        <div className="text-[11px] text-slate-400">
-                          CI: {ded.ci || "—"} · {ded.cargo} ({ded.depto})
-                        </div>
-                      </td>
-                      <td className="px-4 py-3.5 text-xs text-slate-500 font-medium">{formatDate(ded.fecha)}</td>
-                      <td className="px-4 py-3.5 text-xs text-slate-700 dark:text-slate-300 font-medium">
-                        <div className="font-bold">{ded.descripcion}</div>
-                        {ded.comentarios && <div className="text-[11px] text-slate-400">{ded.comentarios}</div>}
-                      </td>
-                      <td className="px-4 py-3.5 text-xs font-mono font-bold text-slate-500">
-                        {ded.periodo || periodoNomina}
-                      </td>
-                      <td className="px-4 py-3.5 text-right font-mono font-black text-amber-600 dark:text-amber-400">
-                        -{formatPYG(ded.monto)}
-                      </td>
-                      <td className="px-6 py-3.5 text-right">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30">
-                          Deducible
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </div>
-      )}
-
-      {/* 5. MARCACIONES EN VIVO (DAHUA) */}
-      {tab === "asistencia" && (
-        <div className="flex flex-col gap-6">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-black text-slate-900 dark:text-white">
-              Marcaciones Biométrica Facial Dahua ({todayAttendance.length})
-            </h3>
-            <span className="text-xs text-slate-400">Captura en tiempo real · Servidor Extra Supermercado</span>
-          </div>
-
-          {todayAttendance.length === 0 ? (
-            <div className="p-12 text-center text-xs text-slate-400 font-bold rounded-3xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80">
-              No hay marcaciones faciales registradas hoy.
-            </div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {todayAttendance.map((att: any, idx: number) => {
-                const cfg = estadoConfig[att.status] || estadoConfig.Late
-                const Icon = cfg.icon
-                return (
-                  <div
-                    key={att.id || idx}
-                    className="flex items-center justify-between p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm hover:shadow-md transition-all"
-                  >
-                    <div className="flex items-center gap-3">
-                      {att.checkInPhotoUrl ? (
-                        <button
-                          onClick={() =>
-                            setSelectedPunchPhoto({
-                              photoUrl: att.checkInPhotoUrl,
-                              nombre: att.nombre,
-                              hora: att.horaEntrada,
-                              status: att.status,
-                              cargo: att.cargo,
-                            })
-                          }
-                          className="relative group cursor-pointer shrink-0"
-                        >
-                          <img
-                            src={att.checkInPhotoUrl}
-                            alt={att.nombre}
-                            className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-700"
-                          />
-                          <span className="absolute inset-0 bg-black/40 rounded-xl opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
-                            <Camera className="w-4 h-4" />
-                          </span>
-                        </button>
-                      ) : (
-                        <AvatarCircle initials={att.nombre?.slice(0, 2) || "OK"} idx={idx} size={48} />
-                      )}
-
-                      <div className="min-w-0">
-                        <div className="font-black text-sm text-slate-900 dark:text-white truncate">{att.nombre}</div>
-                        <div className="text-[11px] text-slate-400 truncate">{att.cargo}</div>
-                        <div className="font-mono text-xs font-bold text-slate-600 dark:text-slate-300 mt-1">
-                          Entrada: {att.horaEntrada || "—"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <span
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-black uppercase tracking-wider ${cfg.bg}`}
-                    >
-                      <Icon className="w-3 h-3" />
-                      <span>{cfg.label}</span>
-                    </span>
-                  </div>
-                )
-              })}
+              <section className="rounded-3xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-[760px]">
+                    <thead>
+                      <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80 text-left bg-slate-50/40 dark:bg-slate-800/20">
+                        <th className="px-6 py-3.5">Funcionario / Cajero</th>
+                        <th className="px-4 py-3.5">Fecha</th>
+                        <th className="px-4 py-3.5">Concepto / Causa</th>
+                        <th className="px-4 py-3.5">Periodo Nómina</th>
+                        <th className="px-4 py-3.5 text-right">Monto Deducción</th>
+                        <th className="px-6 py-3.5 text-right">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                      {deductions.map((ded, idx) => (
+                        <tr key={ded.id || idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                          <td className="px-6 py-3.5">
+                            <div className="font-black text-slate-900 dark:text-white">{ded.nombre}</div>
+                            <div className="text-[11px] text-slate-400">
+                              CI: {ded.ci || "—"} · {ded.cargo} ({ded.depto})
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5 text-xs text-slate-500 font-medium">{formatDate(ded.fecha)}</td>
+                          <td className="px-4 py-3.5 text-xs text-slate-700 dark:text-slate-300 font-medium">
+                            <div className="font-bold">{ded.descripcion}</div>
+                            {ded.comentarios && <div className="text-[11px] text-slate-400">{ded.comentarios}</div>}
+                          </td>
+                          <td className="px-4 py-3.5 text-xs font-mono font-bold text-slate-500">
+                            {ded.periodo || periodoNomina}
+                          </td>
+                          <td className="px-4 py-3.5 text-right font-mono font-black text-amber-600 dark:text-amber-400">
+                            -{formatPYG(ded.monto)}
+                          </td>
+                          <td className="px-6 py-3.5 text-right">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/30">
+                              Deducible
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             </div>
           )}
         </div>
       )}
 
-      {/* 6. PADRÓN DE FUNCIONARIOS */}
-      {tab === "funcionarios" && (
+      {/* 4. PERSONAL & ASISTENCIA (CONSOLIDADO PLANTILLA + MARCACIONES DAHUA) */}
+      {(tab === "personal" || tab === "funcionarios" || tab === "asistencia") && (
         <div className="flex flex-col gap-6">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Buscar funcionario por nombre, CI, cargo o departamento…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800/80 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs backdrop-blur-md"
-              />
-            </div>
-            <span className="text-xs font-bold text-slate-400">
-              {filteredEmployees.length} de {employees.length} colaboradores
-            </span>
+          {/* Subtabs Selector Pill */}
+          <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-slate-100 dark:bg-slate-800/60 w-fit border border-slate-200 dark:border-slate-700/60 shadow-xs">
+            <button
+              onClick={() => {
+                setTab("personal")
+                setSubtabPersonal("funcionarios")
+              }}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-black rounded-xl transition cursor-pointer ${
+                (subtabPersonal === "funcionarios" && tab !== "asistencia") || tab === "funcionarios"
+                  ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              <span>Plantilla de Funcionarios ({employees.length})</span>
+            </button>
+            <button
+              onClick={() => {
+                setTab("personal")
+                setSubtabPersonal("asistencia")
+              }}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-black rounded-xl transition cursor-pointer ${
+                subtabPersonal === "asistencia" || tab === "asistencia"
+                  ? "bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-sm"
+                  : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              <span>Marcaciones Biométricas Dahua ({todayAttendance.length})</span>
+            </button>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredEmployees.map((emp: any, idx: number) => (
-              <div
-                key={emp.id || idx}
-                className="p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-4"
-              >
-                <div className="flex items-start gap-3.5">
-                  <AvatarCircle initials={emp.foto || "OK"} idx={idx} size={48} />
-                  <div className="min-w-0 flex-1">
-                    <div className="font-black text-sm text-slate-900 dark:text-white truncate">{emp.nombre}</div>
-                    <div className="text-[11px] text-slate-400">CI: {emp.ci || "—"}</div>
-                    <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">{emp.cargo}</div>
-                  </div>
-                  {emp.biometricId && (
-                    <span
-                      title={`Enrolado en el Reloj Dahua con ID #${emp.biometricId}`}
-                      className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-indigo-500/15 text-indigo-400 border border-indigo-500/30"
-                    >
-                      Dahua #{emp.biometricId}
-                    </span>
-                  )}
+          {((subtabPersonal === "funcionarios" && tab !== "asistencia") || tab === "funcionarios") && (
+            <div className="flex flex-col gap-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar funcionario por nombre, CI, cargo o departamento…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-white/80 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800/80 text-xs font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs backdrop-blur-md"
+                  />
                 </div>
+                <span className="text-xs font-bold text-slate-400">
+                  {filteredEmployees.length} de {employees.length} colaboradores
+                </span>
+              </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Departamento</div>
-                    <div className="font-bold text-slate-800 dark:text-slate-200 mt-0.5 truncate">{emp.depto}</div>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Salario Base</div>
-                    <div className="font-black font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
-                      {formatPYG(emp.salario)}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredEmployees.map((emp: any, idx: number) => (
+                  <div
+                    key={emp.id || idx}
+                    className="p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm hover:shadow-md transition-all flex flex-col justify-between gap-4"
+                  >
+                    <div className="flex items-start gap-3.5">
+                      <AvatarCircle initials={emp.foto || "OK"} idx={idx} size={48} />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-black text-sm text-slate-900 dark:text-white truncate">{emp.nombre}</div>
+                        <div className="text-[11px] text-slate-400">CI: {emp.ci || "—"}</div>
+                        <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">{emp.cargo}</div>
+                      </div>
+                      {emp.biometricId && (
+                        <span
+                          title={`Enrolado en el Reloj Dahua con ID #${emp.biometricId}`}
+                          className="px-2 py-0.5 rounded-lg text-[10px] font-black bg-indigo-500/15 text-indigo-400 border border-indigo-500/30"
+                        >
+                          Dahua #{emp.biometricId}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase">Departamento</div>
+                        <div className="font-bold text-slate-800 dark:text-slate-200 mt-0.5 truncate">{emp.depto}</div>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase">Salario Base</div>
+                        <div className="font-black font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
+                          {formatPYG(emp.salario)}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
+
+          {(subtabPersonal === "asistencia" || tab === "asistencia") && (
+            <div className="flex flex-col gap-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  Marcaciones Biométrica Facial Dahua ({todayAttendance.length})
+                </h3>
+                <span className="text-xs text-slate-400">Captura en tiempo real · Servidor Extra Supermercado</span>
+              </div>
+
+              {todayAttendance.length === 0 ? (
+                <div className="p-12 text-center text-xs text-slate-400 font-bold rounded-3xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80">
+                  No hay marcaciones faciales registradas hoy.
+                </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {todayAttendance.map((att: any, idx: number) => {
+                    const cfg = estadoConfig[att.status] || estadoConfig.Late
+                    const Icon = cfg.icon
+                    return (
+                      <div
+                        key={att.id || idx}
+                        className="flex items-center justify-between p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm hover:shadow-md transition-all"
+                      >
+                        <div className="flex items-center gap-3">
+                          {att.checkInPhotoUrl ? (
+                            <button
+                              onClick={() =>
+                                setSelectedPunchPhoto({
+                                  photoUrl: att.checkInPhotoUrl,
+                                  nombre: att.nombre,
+                                  hora: att.horaEntrada,
+                                  status: att.status,
+                                  cargo: att.cargo,
+                                })
+                              }
+                              className="relative group cursor-pointer shrink-0"
+                            >
+                              <img
+                                src={att.checkInPhotoUrl}
+                                alt={att.nombre}
+                                className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-700"
+                              />
+                              <span className="absolute inset-0 bg-black/40 rounded-xl opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity">
+                                <Camera className="w-4 h-4" />
+                              </span>
+                            </button>
+                          ) : (
+                            <AvatarCircle initials={att.nombre?.slice(0, 2) || "OK"} idx={idx} size={48} />
+                          )}
+
+                          <div className="min-w-0">
+                            <div className="font-black text-sm text-slate-900 dark:text-white truncate">{att.nombre}</div>
+                            <div className="text-[11px] text-slate-400 truncate">{att.cargo}</div>
+                            <div className="font-mono text-xs font-bold text-slate-600 dark:text-slate-300 mt-1">
+                              Entrada: {att.horaEntrada || "—"}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-black uppercase tracking-wider ${cfg.bg}`}
+                        >
+                          <Icon className="w-3 h-3" />
+                          <span>{cfg.label}</span>
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

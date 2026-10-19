@@ -279,6 +279,7 @@ export default function ExpensesPage() {
 
   // Anticipos formalmente cargados y aprobados en SueldOK
   const [sueldokAdvances, setSueldokAdvances] = useState<any[]>([])
+  const [sueldokFilterMode, setSueldokFilterMode] = useState<"pendientes" | "todos">("pendientes")
   const [advanceSearchQuery, setAdvanceSearchQuery] = useState("")
   const [advanceDropdownOpen, setAdvanceDropdownOpen] = useState(false)
   const [loadingAdvances, setLoadingAdvances] = useState(false)
@@ -354,10 +355,14 @@ export default function ExpensesPage() {
 
   // Filtrado ágil de anticipos aprobados en SueldOK
   const filteredSueldokAdvances = useMemo(() => {
+    let list = sueldokAdvances
+    if (sueldokFilterMode === "pendientes") {
+      list = list.filter((a: any) => !a.ya_desembolsado)
+    }
     const q = (advanceSearchQuery || "").trim().toLowerCase()
-    if (!q) return sueldokAdvances
+    if (!q) return list
     const qClean = q.replace(/[^a-z0-9]/g, "")
-    return sueldokAdvances.filter((a: any) => {
+    return list.filter((a: any) => {
       const nombre = (a.nombre || "").toLowerCase()
       const ci = (a.ci || "").toLowerCase()
       const ciClean = ci.replace(/[^0-9]/g, "")
@@ -368,7 +373,7 @@ export default function ExpensesPage() {
       if (motivo.includes(q) || cargo.includes(q)) return true
       return false
     })
-  }, [sueldokAdvances, advanceSearchQuery])
+  }, [sueldokAdvances, advanceSearchQuery, sueldokFilterMode])
 
   // Filtrado ágil de colaboradores para anticipo de sueldo
   const filteredStaffCandidates = useMemo(() => {
@@ -7147,33 +7152,62 @@ export default function ExpensesPage() {
               </button>
             </div>
 
-            {/* Buscador interno */}
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3">
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Buscar por colaborador, cédula o motivo..."
-                  value={advanceSearchQuery}
-                  onChange={(e) => setAdvanceSearchQuery(e.target.value)}
-                  className="input-field pl-9 text-xs w-full"
-                />
+            {/* Buscador interno y selector de filtro */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div className="inline-flex items-center p-1 bg-slate-200/80 dark:bg-slate-900 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setSueldokFilterMode("pendientes")}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                      sueldokFilterMode === "pendientes"
+                        ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                    }`}
+                  >
+                    Solo Pendientes ({sueldokAdvances.filter((a: any) => !a.ya_desembolsado).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSueldokFilterMode("todos")}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                      sueldokFilterMode === "todos"
+                        ? "bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-xs"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                    }`}
+                  >
+                    Todos ({sueldokAdvances.length})
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1 sm:w-72">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por colaborador, cédula o motivo..."
+                      value={advanceSearchQuery}
+                      onChange={(e) => setAdvanceSearchQuery(e.target.value)}
+                      className="input-field pl-9 text-xs w-full"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoadingAdvances(true)
+                      api.expenses.sueldokAdvances()
+                        .then(list => setSueldokAdvances(list))
+                        .finally(() => setLoadingAdvances(false))
+                    }}
+                    disabled={loadingAdvances}
+                    className="px-3 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                    title="Refrescar lista desde SueldOK"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingAdvances ? "animate-spin text-blue-500" : ""}`} />
+                    <span>Actualizar</span>
+                  </button>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setLoadingAdvances(true)
-                  api.expenses.sueldokAdvances()
-                    .then(list => setSueldokAdvances(list))
-                    .finally(() => setLoadingAdvances(false))
-                }}
-                disabled={loadingAdvances}
-                className="px-3 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-xs font-bold transition flex items-center gap-1.5"
-                title="Refrescar lista desde SueldOK"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${loadingAdvances ? "animate-spin text-blue-500" : ""}`} />
-                <span>Actualizar</span>
-              </button>
             </div>
 
             {/* Lista de Registros */}
@@ -7182,10 +7216,14 @@ export default function ExpensesPage() {
                 <div className="py-16 text-center text-slate-400 space-y-2">
                   <CheckCircle2 className="w-10 h-10 mx-auto text-emerald-500/60" />
                   <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
-                    No hay anticipos ni préstamos pendientes de desembolso
+                    {sueldokFilterMode === "pendientes"
+                      ? "No hay anticipos ni préstamos pendientes de desembolso"
+                      : "No se encontraron registros que coincidan con la búsqueda"}
                   </p>
                   <p className="text-xs text-slate-400">
-                    Todos los compromisos aprobados en SueldOK ya fueron procesados o no coinciden con la búsqueda.
+                    {sueldokFilterMode === "pendientes"
+                      ? "Todos los anticipos aprobados ya fueron desembolsados o descontados en nómina."
+                      : "Podés cambiar los filtros o actualizar la lista desde SueldOK."}
                   </p>
                 </div>
               ) : (
@@ -7225,17 +7263,22 @@ export default function ExpensesPage() {
                           {adv.motivo && <span className="italic">"{adv.motivo}"</span>}
                         </div>
 
-                        {adv.ya_desembolsado && (
+                        {adv.descontado_en_nomina ? (
+                          <div className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-300/40">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Descontado en Nómina Aprobada (SueldOK)
+                          </div>
+                        ) : adv.ya_desembolsado ? (
                           <div className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-300/40">
                             <CheckCircle2 className="w-3 h-3 text-amber-600" />
                             Ya desembolsado en comprobante de gasto
                           </div>
-                        )}
+                        ) : null}
                       </div>
 
                       <div className="flex items-center gap-4 self-end sm:self-center shrink-0">
                         <div className="text-right">
-                          <div className="text-[10px] uppercase font-bold text-slate-400">Importe a Desembolsar</div>
+                          <div className="text-[10px] uppercase font-bold text-slate-400">Importe</div>
                           <div className="text-base font-black font-mono text-slate-900 dark:text-white">
                             ₲ {formatPYG(adv.monto)}
                           </div>
@@ -7245,7 +7288,7 @@ export default function ExpensesPage() {
                           <button
                             type="button"
                             onClick={() => handleSelectSueldokAdvance(adv)}
-                            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-blue-600/20"
+                            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-blue-600/20 cursor-pointer"
                           >
                             <Plus className="w-3.5 h-3.5" />
                             <span>Desembolsar en Gastos</span>
@@ -7256,7 +7299,7 @@ export default function ExpensesPage() {
                             disabled
                             className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 text-xs font-medium cursor-not-allowed border border-slate-200 dark:border-slate-700"
                           >
-                            Desembolsado
+                            {adv.descontado_en_nomina ? "Liquidado en Nómina" : "Desembolsado"}
                           </button>
                         )}
                       </div>
