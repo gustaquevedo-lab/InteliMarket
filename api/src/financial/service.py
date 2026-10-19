@@ -1522,13 +1522,34 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
         saldo_cierre = parsed["closing_from_totals"]
 
     duplicadas = await _count_duplicate_transactions(db, bank_account_id, transacciones)
+    nuevas = len(transacciones) - duplicadas
+
+    # Estimación de auto-conciliables de alta certeza (Verde)
+    listas_auto_conciliar = 0
+    from api.src.cheques.models import Cheque
+    chq_nums = [t["nro_cheque"] for t in transacciones if t.get("nro_cheque")]
+    if chq_nums:
+        cid = account.company_id
+        res_chqs = await db.execute(
+            select(Cheque.numero, Cheque.monto).where(
+                Cheque.company_id == cid,
+                Cheque.estado.in_(["pendiente", "entregado"]),
+            )
+        )
+        chq_set = {(c.numero.strip().lstrip("0"), Decimal(str(c.monto))) for c in res_chqs.all()}
+        for t in transacciones:
+            nro = (t.get("nro_cheque") or "").strip().lstrip("0")
+            if (nro, Decimal(str(t["monto"]))) in chq_set:
+                listas_auto_conciliar += 1
+
     return {
         "sheet_matched": sheet_matched,
         "saldo_anterior": saldo_ant,
         "closing_from_totals": saldo_cierre,
         "total_detectadas": len(transacciones),
-        "nuevas": len(transacciones) - duplicadas,
+        "nuevas": nuevas,
         "duplicadas": duplicadas,
+        "listas_auto_conciliar": listas_auto_conciliar,
         "transacciones": [
             {
                 "fecha": t["fecha"].isoformat(),
@@ -1560,7 +1581,8 @@ async def _count_duplicate_transactions(db: AsyncSession, bank_account_id: str, 
 async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_account_id: str, file_bytes: bytes, mes: int, anio: int, filename: Optional[str] = None) -> dict:
     """Carga real de un extracto (Excel o PDF) tal cual lo entrega el banco.
     Idempotente: una transaccion ya presente (misma fecha+tipo+monto+descripcion+referencia en la misma
-    cuenta) se saltea en vez de duplicarse, para poder resubir el archivo sin miedo a duplicar."""
+    cuenta) se saltea en vez de duplicarse.
+    Auto-conciliación: concilia de inmediato las operaciones con coincidencia verde (cheques por N° y monto)."""
     from api.src.financial import statement_import
     from api.src.financial import pdf_parser
 
@@ -1586,34 +1608,73 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
     existing_keys = {(row.fecha, row.tipo, row.monto, row.descripcion or "", row.referencia or "") for row in existing.all()}
 
     nuevas = 0
+    new_inserted: list[tuple[BankTransaction, dict]] = []
     for t in transacciones:
         ref_val = t.get("referencia") or ""
         key = (t["fecha"], t["tipo"], t["monto"], t["descripcion"] or "", ref_val)
         if key in existing_keys:
             continue
-        db.add(BankTransaction(
+        bt = BankTransaction(
             company_id=uuid.UUID(company_id), bank_account_id=uuid.UUID(bank_account_id),
             fecha=t["fecha"], tipo=t["tipo"], monto=t["monto"], moneda=account.moneda,
             descripcion=t["descripcion"], referencia=ref_val or None, categoria="otros",
-        ))
+        )
+        db.add(bt)
         account.saldo_actual = (account.saldo_actual or Decimal("0")) + (t["monto"] if t["tipo"] == "credito" else -t["monto"])
         existing_keys.add(key)
         nuevas += 1
+        new_inserted.append((bt, t))
 
     if nuevas > 0:
-        # el saldo verificado ya no representa el saldo real tras sumar
-        # movimientos nuevos -- hay que volver a verificarlo (Bancos Fase 5).
         account.saldo_verificado_manualmente = False
         account.saldo_verificado_at = None
         account.saldo_verificado_por = None
         db.add(account)
 
     await db.flush()
+
+    # Auto-conciliación inmediata de alta certeza (Verde)
+    auto_conciliadas = 0
+    from api.src.cheques.models import Cheque
+    for bt, t in new_inserted:
+        nro = t.get("nro_cheque")
+        if nro and bt.tipo == "debito":
+            chq_match = await db.execute(
+                select(Cheque).where(
+                    Cheque.company_id == uuid.UUID(company_id),
+                    Cheque.estado.in_(["pendiente", "entregado"]),
+                    Cheque.numero.ilike(f"%{nro}%"),
+                    Cheque.monto == bt.monto,
+                )
+            )
+            found_chq = chq_match.scalar_one_or_none()
+            if found_chq:
+                await reconcile_transaction(db, str(bt.id), "cheque", str(found_chq.id))
+                auto_conciliadas += 1
+        elif bt.tipo == "credito":
+            try:
+                from api.src.caja.models import VaultEntry
+                ve_match = await db.execute(
+                    select(VaultEntry).where(
+                        VaultEntry.company_id == uuid.UUID(company_id),
+                        VaultEntry.estado == "en_boveda",
+                        VaultEntry.monto_pyg == bt.monto,
+                    )
+                )
+                found_ve = ve_match.scalar_one_or_none()
+                if found_ve:
+                    await reconcile_transaction(db, str(bt.id), "vault_entry", str(found_ve.id))
+                    auto_conciliadas += 1
+            except Exception:
+                pass
+
     return {
         "sheet_matched": sheet_matched,
         "total_detectadas": len(transacciones),
         "nuevas": nuevas,
         "duplicadas": len(transacciones) - nuevas,
+        "auto_conciliadas": auto_conciliadas,
+        "pendientes": nuevas - auto_conciliadas,
         "saldo_actual": account.saldo_actual,
     }
 
@@ -1714,6 +1775,34 @@ async def suggest_reconciliation_matches(db: AsyncSession, company_id: str, tran
                     "match_nro": False
                 })
 
+    elif tx.tipo == "credito":
+        from api.src.caja.models import VaultEntry
+        ve_result = await db.execute(
+            select(VaultEntry).where(
+                VaultEntry.company_id == cid,
+                VaultEntry.estado == "en_boveda",
+                VaultEntry.monto_pyg >= monto_abs - tolerancia,
+                VaultEntry.monto_pyg <= monto_abs + tolerancia,
+            )
+        )
+        for ve in ve_result.scalars().all():
+            ve_fecha = ve.created_at.date() if ve.created_at else None
+            dias = abs((tx.fecha - ve_fecha).days) if ve_fecha else 0
+            if dias <= ventana_dias.days:
+                diff_monto = abs(Decimal(str(ve.monto_pyg)) - monto_abs)
+                mismo_monto = diff_monto <= (monto_abs * Decimal("0.001"))
+                conf = "verde" if (mismo_monto and dias <= 3) else "amarillo"
+                sugerencias.append({
+                    "tipo": "vault_entry",
+                    "id": str(ve.id),
+                    "descripcion": f"Depósito Bóveda / Recaudación ({ve.origen})",
+                    "monto": float(ve.monto_pyg),
+                    "fecha": ve_fecha.isoformat() if ve_fecha else None,
+                    "diferencia_dias": dias,
+                    "confidence": conf,
+                    "match_nro": False,
+                })
+
     # Ordenar: nivel verde primero, luego los que coinciden por número, luego por diferencia de días
     sugerencias.sort(key=lambda s: (0 if s["confidence"] == "verde" else 1, 0 if s.get("match_nro") else 1, s["diferencia_dias"]))
     return sugerencias[:10]
@@ -1784,6 +1873,15 @@ async def reconcile_transaction(
             await cheques_service.update_estado(db, matched_id, "cobrado", "Conciliado con extracto bancario", user_id, user_nombre)
         except ValueError:
             pass  # ya estaba cobrado o en un estado que no admite la transicion -- no bloquea la conciliacion bancaria
+    elif matched_type == "vault_entry" and matched_id:
+        from api.src.caja.models import VaultEntry
+        ve_res = await db.execute(select(VaultEntry).where(VaultEntry.id == uuid.UUID(matched_id)))
+        ve = ve_res.scalar_one_or_none()
+        if ve:
+            ve.estado = "depositado"
+            ve.bank_transaction_id = bt.id
+            ve.fecha_deposito = bt.fecha_conciliacion or _now()
+        bt.categoria = "deposito_caja"
 
     await db.flush()
     await db.refresh(bt)

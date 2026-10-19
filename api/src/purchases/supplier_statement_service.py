@@ -105,9 +105,36 @@ async def get_supplier_account_statement(
     nc_res = await db.execute(q_nc)
     credit_notes = nc_res.scalars().all()
 
+    # 3b. Aplicaciones formales de Notas de Crédito a Facturas
+    q_nc_apps = (
+        select(
+            SupplierCreditNoteApplication.id,
+            SupplierCreditNoteApplication.invoice_id,
+            SupplierCreditNoteApplication.credit_note_id,
+            SupplierCreditNoteApplication.monto_aplicado,
+            SupplierCreditNoteApplication.fecha.label("fecha_aplicacion"),
+            SupplierCreditNote.numero.label("nc_numero"),
+            SupplierCreditNote.timbrado.label("nc_timbrado"),
+            SupplierCreditNote.motivo.label("nc_motivo"),
+            SupplierCreditNote.fecha.label("nc_fecha"),
+        )
+        .join(SupplierCreditNote, SupplierCreditNote.id == SupplierCreditNoteApplication.credit_note_id)
+        .where(
+            SupplierCreditNoteApplication.company_id == company_id,
+            SupplierCreditNote.supplier_id == supplier_id,
+            SupplierCreditNote.cancelado == False,
+        )
+    )
+    nc_apps_res = await db.execute(q_nc_apps)
+    nc_applications = nc_apps_res.all()
+    nc_apps_by_inv: dict[uuid.UUID, list] = {}
+    for a in nc_applications:
+        nc_apps_by_inv.setdefault(a.invoice_id, []).append(a)
+
     # 4. Pagos realizados a facturas del proveedor
     inv_ids = [inv.id for inv in invoices]
     payments: List[SupplierInvoicePayment] = []
+    pay_by_inv: dict[uuid.UUID, list] = {}
     if inv_ids:
         q_pay = select(SupplierInvoicePayment).where(
             SupplierInvoicePayment.invoice_id.in_(inv_ids),
@@ -115,6 +142,8 @@ async def get_supplier_account_statement(
         )
         pay_res = await db.execute(q_pay)
         payments = pay_res.scalars().all()
+        for p in payments:
+            pay_by_inv.setdefault(p.invoice_id, []).append(p)
 
     # 5. Cheques emitidos al proveedor (para sección de valores en tránsito)
     q_chq = (
@@ -383,54 +412,202 @@ async def get_supplier_account_statement(
     tot_pago = 0.0
 
     if solo_pendientes:
-        # En modo "Solo Pendientes", filtramos exclusivamente los documentos con saldo vivo exigible/aplicable
+        # En modo "Solo Pendientes", la regla inmutable es:
+        # 1. Las facturas pendientes muestran SIEMPRE su Monto Real Inmutable (debito = monto_total).
+        # 2. Las Notas de Crédito aplicadas a estas facturas se muestran explícitamente como Crédito (-),
+        #    con su número y concepto vinculado a la factura.
+        # 3. Los pagos parciales aplicados a estas facturas se muestran explícitamente como Crédito (-).
+        # 4. Las Notas de Crédito con saldo a favor disponible se muestran como Crédito (-) disponible.
+        # De esta manera, el Débito coincide 100% con las facturas físicas del proveedor,
+        # las NCs quedan totalmente auditables y NUNCA se descuentan dos veces.
         pendientes_list = []
-        tot_debito_pend = 0.0
-        tot_nc_pend = 0.0
-        saldo_running = 0.0
 
-        for m in filtrados:
-            if m["tipo"] == "FACTURA" and m["saldo_documento"] > 0:
-                saldo_doc = m["saldo_documento"]
-                saldo_running += saldo_doc
-                tot_debito_pend += saldo_doc
-                m_copy = dict(m)
-                m_copy["debito"] = saldo_doc
-                m_copy["credito"] = 0.0
-                m_copy["saldo_progresivo"] = saldo_running
-                m_copy["punteado"] = False
-                pendientes_list.append(m_copy)
-            elif m["tipo"] in ("NOTA_CREDITO", "SOLICITUD_NC") and m["saldo_documento"] > 0:
-                saldo_nc = m["saldo_documento"]
-                saldo_running -= saldo_nc
-                tot_nc_pend += saldo_nc
-                m_copy = dict(m)
-                m_copy["debito"] = 0.0
-                m_copy["credito"] = saldo_nc
-                m_copy["saldo_progresivo"] = saldo_running
-                m_copy["punteado"] = False
-                pendientes_list.append(m_copy)
+        pending_invoices = [inv for inv in invoices if (inv.saldo_pendiente or 0) > 0]
 
+        for inv in pending_invoices:
+            f_emision = inv.fecha_emision or (inv.created_at.date() if inv.created_at else today)
+            f_venc = inv.fecha_vencimiento
+            monto_total = _dec_to_float(inv.total)
+            saldo_pend = _dec_to_float(inv.saldo_pendiente if inv.saldo_pendiente is not None else inv.total)
+            dias_venc = (today - f_venc).days if f_venc else 0
+            es_vencida = dias_venc > 0 and saldo_pend > 0
+
+            if saldo_pend < monto_total:
+                est_lbl = "Pago Parcial"
+            elif es_vencida:
+                est_lbl = f"Vencida (+{dias_venc}d)"
+            else:
+                est_lbl = "Al Día"
+
+            concepto_str = "Compra mercaderías"
+            if inv.condicion:
+                concepto_str += f" ({inv.condicion.capitalize()})"
+            if inv.concepto:
+                concepto_str += f" - {inv.concepto}"
+
+            # 1. Movimiento de Factura con su Monto Original Inmutable
+            pendientes_list.append({
+                "id": f"fac_{inv.id}",
+                "entidad_id": str(inv.id),
+                "fecha": f_emision,
+                "fecha_str": _date_str(f_emision),
+                "fecha_vencimiento_str": _date_str(f_venc),
+                "tipo": "FACTURA",
+                "tipo_badge": "FAC",
+                "tipo_label": "Factura Compra",
+                "comprobante": f"FAC {inv.numero_factura or 'S/N'}",
+                "timbrado": inv.timbrado or "",
+                "concepto": concepto_str,
+                "debito": monto_total,
+                "credito": 0.0,
+                "saldo_documento": saldo_pend,
+                "estado": est_lbl,
+                "factura_relacionada": inv.numero_factura or "",
+                "orden_dia": 1,
+                "punteado": False,
+            })
+
+            # 2. Notas de Crédito aplicadas a esta factura
+            for app in nc_apps_by_inv.get(inv.id, []):
+                f_app = app.nc_fecha or app.fecha_aplicacion or f_emision
+                f_app_date = f_app.date() if hasattr(f_app, "date") else f_app
+                pendientes_list.append({
+                    "id": f"nc_app_{app.id}",
+                    "entidad_id": str(app.credit_note_id),
+                    "fecha": f_app_date,
+                    "fecha_str": _date_str(f_app_date),
+                    "fecha_vencimiento_str": "",
+                    "tipo": "NOTA_CREDITO",
+                    "tipo_badge": "NC",
+                    "tipo_label": "Nota de Crédito",
+                    "comprobante": f"NC {app.nc_numero or 'S/N'}",
+                    "timbrado": app.nc_timbrado or "",
+                    "concepto": f"Nota de Crédito - {app.nc_motivo or 'Deducción'} [Aplicada a FAC {inv.numero_factura}]",
+                    "debito": 0.0,
+                    "credito": _dec_to_float(app.monto_aplicado),
+                    "saldo_documento": 0.0,
+                    "estado": "Aplicada",
+                    "factura_relacionada": inv.numero_factura or "",
+                    "orden_dia": 2,
+                    "punteado": False,
+                })
+
+            # 3. Pagos parciales aplicados a esta factura
+            for pay in pay_by_inv.get(inv.id, []):
+                f_pay = pay.fecha_pago or today
+                pendientes_list.append({
+                    "id": f"pay_{pay.id}",
+                    "entidad_id": str(pay.id),
+                    "fecha": f_pay,
+                    "fecha_str": _date_str(f_pay),
+                    "fecha_vencimiento_str": "",
+                    "tipo": "PAGO",
+                    "tipo_badge": "REC",
+                    "tipo_label": "Pago Parcial",
+                    "comprobante": f"REC {pay.referencia or 'PAGO'}",
+                    "timbrado": "",
+                    "concepto": f"Pago Parcial [Aplicado a FAC {inv.numero_factura}]",
+                    "debito": 0.0,
+                    "credito": _dec_to_float(pay.monto),
+                    "saldo_documento": 0.0,
+                    "estado": "Aplicado",
+                    "factura_relacionada": inv.numero_factura or "",
+                    "orden_dia": 3,
+                    "punteado": False,
+                })
+
+        # 4. Notas de Crédito libres / disponibles a favor
+        for cn in credit_notes:
+            saldo_disp = _dec_to_float(cn.saldo_disponible if cn.saldo_disponible is not None else 0.0)
+            if saldo_disp > 0:
+                f_cn = cn.fecha or today
+                pendientes_list.append({
+                    "id": f"nc_free_{cn.id}",
+                    "entidad_id": str(cn.id),
+                    "fecha": f_cn,
+                    "fecha_str": _date_str(f_cn),
+                    "fecha_vencimiento_str": "",
+                    "tipo": "NOTA_CREDITO",
+                    "tipo_badge": "NC",
+                    "tipo_label": "Nota de Crédito",
+                    "comprobante": f"NC {cn.numero or 'S/N'}",
+                    "timbrado": cn.timbrado or "",
+                    "concepto": f"Nota de Crédito - {cn.motivo or 'Devolución de mercadería'} [Saldo disponible a favor]",
+                    "debito": 0.0,
+                    "credito": saldo_disp,
+                    "saldo_documento": saldo_disp,
+                    "estado": "Disponible",
+                    "factura_relacionada": "",
+                    "orden_dia": 2,
+                    "punteado": False,
+                })
+
+        # 5. Solicitudes de NC si están pendientes
+        for s in snc_pendientes_rows:
+            f_snc = s.created_at.date() if s.created_at else today
+            m_rec = _dec_to_float(s.monto_reclamado)
+            pendientes_list.append({
+                "id": f"snc_{s.id}",
+                "entidad_id": str(s.id),
+                "fecha": f_snc,
+                "fecha_str": _date_str(f_snc),
+                "fecha_vencimiento_str": "",
+                "tipo": "SOLICITUD_NC",
+                "tipo_badge": "SNC",
+                "tipo_label": "Solicitud NC",
+                "comprobante": f"SNC {s.numero_solicitud or 'S/N'}",
+                "timbrado": "",
+                "concepto": f"SNC Reclamada - {s.tipo_motivo or 'Discrepancia'}",
+                "debito": 0.0,
+                "credito": m_rec,
+                "saldo_documento": m_rec,
+                "estado": "Pendiente Entrega",
+                "factura_relacionada": invoice_map.get(s.invoice_id).numero_factura if invoice_map.get(s.invoice_id) else "",
+                "orden_dia": 2,
+                "punteado": False,
+            })
+
+        # Aplicar filtros de fecha si se proveyeron
+        filtrados_pend = []
+        for m in pendientes_list:
+            if fecha_desde and m["fecha"] < fecha_desde:
+                continue
+            if fecha_hasta and m["fecha"] > fecha_hasta:
+                continue
+            filtrados_pend.append(m)
+
+        # Ordenar pendientes
         if ordenar_por == "numero_factura":
             def _extract_invoice_sort_key(item):
                 ref = (item.get("factura_relacionada") or item.get("comprobante") or "").strip()
-                return (ref.lower(), str(item.get("fecha", "")))
+                return (ref.lower(), item.get("orden_dia", 1), str(item.get("fecha", "")))
 
-            pendientes_list.sort(key=_extract_invoice_sort_key)
-            running = 0.0
-            for item in pendientes_list:
-                if item["tipo"] == "FACTURA":
-                    running += item["debito"]
-                elif item["tipo"] in ("NOTA_CREDITO", "SOLICITUD_NC"):
-                    running -= item["credito"]
-                item["saldo_progresivo"] = running
+            filtrados_pend.sort(key=_extract_invoice_sort_key)
+        else:
+            filtrados_pend.sort(key=lambda m: (m["fecha"], m.get("orden_dia", 1), m["id"]))
 
-        final_movements = pendientes_list
-        saldo_deudor_final = max(0.0, saldo_running)
-        tot_debito = tot_debito_pend
-        tot_nc = tot_nc_pend
+        running = 0.0
+        tot_debito = 0.0
+        tot_nc = 0.0
+        tot_snc = 0.0
         tot_pago = 0.0
-        tot_credito = tot_nc
+        for item in filtrados_pend:
+            d = item["debito"]
+            c = item["credito"]
+            running += (d - c)
+            item["saldo_progresivo"] = running
+            if item["tipo"] == "FACTURA":
+                tot_debito += d
+            elif item["tipo"] == "NOTA_CREDITO":
+                tot_nc += c
+            elif item["tipo"] == "SOLICITUD_NC":
+                tot_snc += c
+            elif item["tipo"] == "PAGO":
+                tot_pago += c
+
+        final_movements = filtrados_pend
+        saldo_deudor_final = max(0.0, running)
+        tot_credito = tot_nc + tot_pago + tot_snc
     else:
         for m in filtrados:
             d = m["debito"]
@@ -461,7 +638,9 @@ async def get_supplier_account_statement(
 
         tot_credito = tot_nc + tot_pago + tot_snc
         saldo_deudor_final = saldo_acumulado
+
     compromiso_total_con_cheques = saldo_deudor_final + cheques_diferidos_transito_monto
+    saldo_neto_con_cheques = max(0.0, saldo_deudor_final - cheques_diferidos_transito_monto)
 
     return {
         "supplier": supplier_info,
@@ -483,7 +662,7 @@ async def get_supplier_account_statement(
             "cheques_diferidos_transito_monto": cheques_diferidos_transito_monto,
             "cheques_diferidos_count": len(cheques_transito),
             "compromiso_total_con_cheques": compromiso_total_con_cheques,
-            "saldo_neto_con_cheques": saldo_deudor_final,
+            "saldo_neto_con_cheques": saldo_neto_con_cheques,
             "total_snc_reclamado_monto": total_snc_reclamado_monto,
             "snc_pendientes_count": len(solicitudes_nc_pendientes),
         },

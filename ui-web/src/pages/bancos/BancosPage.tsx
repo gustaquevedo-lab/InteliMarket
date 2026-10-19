@@ -391,10 +391,16 @@ export default function BancosPage() {
     setImportLoading(true)
     try {
       const r = await api.financial.banks.importFile(selectedBank, importForm.file, importForm.mes, importForm.anio)
-      toast.success("Extracto importado", `${r.nuevas} movimientos nuevos, ${r.duplicadas} ya existían`)
+      const autoMsg = r.auto_conciliadas > 0 ? `, ${r.auto_conciliadas} conciliadas automáticamente` : ""
+      toast.success("Extracto importado", `${r.nuevas} movimientos nuevos (${r.duplicadas} ya existían)${autoMsg}`)
       setShowImportBank(false); setImportForm({ ...importForm, file: null }); setImportPreview(null)
       fetchAll()
-      if (selectedBank) loadBankTxns(selectedBank)
+      if (selectedBank) {
+        await loadBankTxns(selectedBank)
+        if (r.pendientes > 0) {
+          openAutoReconcile()
+        }
+      }
     } catch (e: any) {
       toast.error("Error", e.message || "No se pudo importar el archivo")
     } finally { setImportLoading(false) }
@@ -2247,12 +2253,18 @@ export default function BancosPage() {
               )}
 
               {importPreview && (
-                <div className="card p-4 bg-gray-50 dark:bg-slate-800 space-y-1.5 border">
+                <div className="card p-4 bg-gray-50 dark:bg-slate-800 space-y-2 border">
                   <div className="text-xs font-bold text-gray-500 uppercase">Resumen de Análisis</div>
                   <div className="text-sm font-semibold text-gray-900 dark:text-white">Hoja detectada: {importPreview.sheet_matched}</div>
                   <div className="text-xs text-gray-600 dark:text-gray-300">{importPreview.total_detectadas} movimientos encontrados</div>
                   <div className="text-xs text-emerald-600 font-bold">{importPreview.nuevas} movimientos nuevos para importar</div>
                   {importPreview.duplicadas > 0 && <div className="text-xs text-gray-400">{importPreview.duplicadas} movimientos ya existían (se omitirán)</div>}
+                  {importPreview.listas_auto_conciliar != null && importPreview.listas_auto_conciliar > 0 && (
+                    <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-medium flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span><strong>{importPreview.listas_auto_conciliar} operaciones</strong> coinciden con cheques o depósitos del sistema y se conciliarán automáticamente al importar.</span>
+                    </div>
+                  )}
                   {importPreview.closing_from_totals != null && (
                     <div className="text-xs text-primary font-semibold mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                       Saldo de cierre según extracto: {formatGs(importPreview.closing_from_totals)}

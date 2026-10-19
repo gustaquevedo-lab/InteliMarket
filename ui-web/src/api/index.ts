@@ -4599,12 +4599,12 @@ export const api = {
       previewImportFile: (id: string, file: File, mes: number, anio: number) => {
         const fd = new FormData()
         fd.append("file", file); fd.append("mes", String(mes)); fd.append("anio", String(anio))
-        return requestMultipart<{ sheet_matched: string; saldo_anterior: number | null; closing_from_totals: number | null; total_detectadas: number; nuevas: number; duplicadas: number; transacciones: any[] }>(`/v1/financial/banks/${id}/import-file/preview`, fd)
+        return requestMultipart<{ sheet_matched: string; saldo_anterior: number | null; closing_from_totals: number | null; total_detectadas: number; nuevas: number; duplicadas: number; listas_auto_conciliar?: number; transacciones: any[] }>(`/v1/financial/banks/${id}/import-file/preview`, fd)
       },
       importFile: (id: string, file: File, mes: number, anio: number) => {
         const fd = new FormData()
         fd.append("file", file); fd.append("mes", String(mes)); fd.append("anio", String(anio)); fd.append("company_id", COMPANY_ID)
-        return requestMultipart<{ sheet_matched: string; total_detectadas: number; nuevas: number; duplicadas: number; saldo_actual: number }>(`/v1/financial/banks/${id}/import-file`, fd)
+        return requestMultipart<{ sheet_matched: string; total_detectadas: number; nuevas: number; duplicadas: number; auto_conciliadas: number; pendientes: number; saldo_actual: number }>(`/v1/financial/banks/${id}/import-file`, fd)
       },
       createTransaction: (bankId: string, data: any) =>
         client.post<BankTransaction>(`/v1/financial/banks/${bankId}/transactions?company_id=${COMPANY_ID}`, { company_id: COMPANY_ID, ...data }),

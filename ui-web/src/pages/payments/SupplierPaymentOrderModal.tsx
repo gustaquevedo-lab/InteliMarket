@@ -279,6 +279,8 @@ export default function SupplierPaymentOrderModal({
               fecha_vencimiento: inv.fecha_vencimiento,
               total: Number(inv.total || inv.total_pyg || 0),
               saldo_pendiente: Number(inv.saldo_pendiente ?? inv.saldo ?? inv.total ?? 0),
+              notas_credito: inv.notas_credito || [],
+              total_nc_aplicadas: inv.total_nc_aplicadas || 0,
               supplier_id: inv.supplier_id || supplier.id,
               supplier_nombre: inv.supplier_nombre || supplier.razon_social,
               tipo_comprobante: inv.tipo_comprobante || "factura",

@@ -8,25 +8,20 @@ def _parse_monto_pyg(val_str: Any) -> Optional[Decimal]:
     if val_str is None:
         return None
     s = str(val_str).strip()
-    if not s or s == "—" or s == "-":
+    if not s or s in ("—", "-", "--"):
         return None
     s = s.replace("Gs.", "").replace("Gs", "").replace("₲", "").replace(" ", "").strip()
     if not s:
         return None
-    if "," in s:
-        parts = s.split(",")
-        entero = parts[0].replace(".", "")
-        dec = parts[1]
-        try:
-            return Decimal(f"{entero}.{dec}")
-        except Exception:
-            return None
-    else:
-        s_clean = s.replace(".", "")
-        try:
-            return Decimal(s_clean)
-        except Exception:
-            return None
+    # En Guaraníes los montos son enteros; si viene con decimales triviales (,00 o .00) se eliminan
+    if s.endswith(",00") or s.endswith(".00"):
+        s = s[:-3]
+    # En Paraguay tanto el punto como la coma se usan como separador de miles según el banco
+    s_clean = s.replace(".", "").replace(",", "")
+    try:
+        return Decimal(s_clean)
+    except Exception:
+        return None
 
 def _extract_nro_cheque(desc: str, ref: str = "") -> Optional[str]:
     desc_upper = (desc or "").upper()
@@ -94,7 +89,8 @@ def _parse_continental_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
     saldo_anterior = _parse_monto_pyg(m_saldo_ant.group(1)) if m_saldo_ant else Decimal("0")
     
     transacciones: List[Dict[str, Any]] = []
-    
+    prev_saldo = saldo_anterior
+
     for page in pdf.pages:
         tables = page.extract_tables()
         for table in tables:
@@ -103,7 +99,7 @@ def _parse_continental_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
                     continue
                 if any("Día" in str(c) or "Dia" in str(c) or "Descripción" in str(c) or "Saldo" in str(c) for c in row if c):
                     continue
-                
+
                 if len(row) == 6:
                     dia_hora = str(row[0] or "").strip()
                     parts = dia_hora.split(" ")
@@ -124,20 +120,31 @@ def _parse_continental_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
                     saldo_str = row[6]
                 else:
                     continue
-                    
+
                 if not dia_str.isdigit() or len(dia_str) > 2:
                     continue
-                    
+
                 dia = int(dia_str)
                 monto_debe = _parse_monto_pyg(debe_str)
                 monto_haber = _parse_monto_pyg(haber_str)
                 saldo_prog = _parse_monto_pyg(saldo_str)
-                
+
                 if monto_debe is None and monto_haber is None:
                     continue
-                    
+
                 tipo = "debito" if monto_debe and monto_debe > 0 else "credito"
                 monto = monto_debe if tipo == "debito" else monto_haber
+
+                # Validación matemática infalible por Saldo Progresivo
+                if prev_saldo is not None and saldo_prog is not None:
+                    delta = saldo_prog - prev_saldo
+                    if delta > 0:
+                        tipo = "credito"
+                        monto = delta
+                    elif delta < 0:
+                        tipo = "debito"
+                        monto = abs(delta)
+                prev_saldo = saldo_prog
                 
                 fecha_txn = date.today()
                 if periodo_desde:
@@ -258,9 +265,27 @@ def _parse_interfisa_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
                 
             tipo = "debito" if monto_deb is not None and monto_deb > 0 else "credito"
             monto = monto_deb if tipo == "debito" else monto_cred
-            
+
+            # Validación matemática infalible por Saldo Progresivo
+            if prev_saldo is not None and saldo_prog is not None:
+                delta = saldo_prog - prev_saldo
+                if delta > 0:
+                    tipo = "credito"
+                    monto = delta
+                elif delta < 0:
+                    tipo = "debito"
+                    monto = abs(delta)
+            else:
+                # Si es el primer movimiento o saldo estático, desambiguar por palabras clave
+                desc_upper = full_desc.upper()
+                if any(k in desc_upper for k in ["RECIBID", "ACREDIT", "DEPOSITO", "CREDITO"]) and tipo == "debito":
+                    tipo = "credito"
+                elif any(k in desc_upper for k in ["ENVIAD", "PAGO", "DEB", "OTORGAD"]) and tipo == "credito":
+                    tipo = "debito"
+
+            prev_saldo = saldo_prog
             nro_cheque = _extract_nro_cheque(full_desc, comp_str)
-            
+
             transacciones.append({
                 "fecha": fecha_txn,
                 "hora": h_str,
@@ -272,9 +297,13 @@ def _parse_interfisa_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
                 "nro_cheque": nro_cheque
             })
             idx += 1
-            
+
     saldo_cierre = transacciones[-1]["saldo_progresivo"] if transacciones else Decimal("0")
-    saldo_ant = transacciones[0]["saldo_progresivo"] if transacciones else Decimal("0")
+    if transacciones:
+        first_tx = transacciones[0]
+        saldo_ant = (first_tx["saldo_progresivo"] - first_tx["monto"]) if first_tx["tipo"] == "credito" else (first_tx["saldo_progresivo"] + first_tx["monto"])
+    else:
+        saldo_ant = Decimal("0")
     
     return {
         "banco": "BANCO INTERFISA",
