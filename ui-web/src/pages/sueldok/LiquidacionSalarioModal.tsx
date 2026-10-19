@@ -287,11 +287,8 @@ export function LiquidacionSalarioModal({
   // ── DESGLOSE DETALLADO DE DESCUENTOS Y OPERACIONES ──
   const descuentos: Array<{ concepto: string; tipo: string; referencia: string; monto: number }> = []
 
-  // 1. Aporte Previsional IPS Obrero (9% sobre Salario Mínimo Legal del Sistema)
-  const ipsMontoCalculado =
-    activeItem.ipsWorker !== undefined && activeItem.ipsWorker > 0
-      ? activeItem.ipsWorker
-      : Math.round(smlvDelSistema * workerRate)
+  // 1. Aporte Previsional IPS Obrero (sólo si el funcionario cotiza en IPS en la nómina)
+  const ipsMontoCalculado = Number(activeItem.ipsWorker || 0)
 
   if (ipsMontoCalculado > 0) {
     descuentos.push({
@@ -391,11 +388,8 @@ export function LiquidacionSalarioModal({
   const totalDescuentos = descuentos.reduce((sum, d) => sum + d.monto, 0)
   const netoACobrar = Math.max(0, totalHaberes - totalDescuentos)
 
-  // Aporte Patronal IPS (Informativo, 16.5% sobre el SMLV del sistema)
-  const ipsPatronalMonto =
-    activeItem.ipsEmployer !== undefined && activeItem.ipsEmployer > 0
-      ? activeItem.ipsEmployer
-      : Math.round(smlvDelSistema * employerRate)
+  // Aporte Patronal IPS (Informativo, 16.5% a cargo exclusivo de la patronal si cotiza en IPS)
+  const ipsPatronalMonto = Number(activeItem.ipsEmployer || 0)
 
   // Descarga limpia en PDF A4 de alta definición
   const handleDownloadPdf = async () => {
@@ -639,7 +633,9 @@ export function LiquidacionSalarioModal({
               </div>
               <div>
                 <span className="text-[9px] uppercase font-bold text-slate-500 block">Base IPS Obrero Declarada</span>
-                <span className="font-bold font-mono text-indigo-700 block">SMLV ₲ {formatPYG(smlvDelSistema)}</span>
+                <span className="font-bold font-mono text-indigo-700 block">
+                  {ipsMontoCalculado > 0 ? `SMLV ₲ ${formatPYG(smlvDelSistema)}` : "Sin Aporte IPS"}
+                </span>
               </div>
               <div>
                 <span className="text-[9px] uppercase font-bold text-slate-500 block">Fecha de Emisión</span>
@@ -716,17 +712,24 @@ export function LiquidacionSalarioModal({
             </div>
 
             {/* ── NOTA PREVISIONAL INFORMATIVA (LEY DE SEGURIDAD SOCIAL) ── */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between text-[11px] text-slate-600">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-indigo-600 shrink-0" />
-                <span>
-                  <strong>Aporte Patronal I.P.S. ({(employerRate * 100).toFixed(1)}%):</strong> Contribución a cargo exclusivo de la patronal sobre base SMLV (₲ {formatPYG(ipsPatronalMonto)}), no deducible del salario.
+            {ipsPatronalMonto > 0 ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between text-[11px] text-slate-600">
+                <div className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>
+                    <strong>Aporte Patronal I.P.S. ({(employerRate * 100).toFixed(1)}%):</strong> Contribución a cargo exclusivo de la patronal sobre base SMLV (₲ {formatPYG(ipsPatronalMonto)}), no deducible del salario.
+                  </span>
+                </div>
+                <span className="font-mono font-bold text-slate-800 bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shrink-0">
+                  {formatPYG(ipsPatronalMonto)}
                 </span>
               </div>
-              <span className="font-mono font-bold text-slate-800 bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shrink-0">
-                {formatPYG(ipsPatronalMonto)}
-              </span>
-            </div>
+            ) : (
+              <div className="bg-slate-50/60 border border-slate-200/80 rounded-xl p-2.5 flex items-center gap-2 text-[10px] text-slate-500 italic">
+                <ShieldCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>Funcionario sin retención previsional I.P.S. para el período liquidado.</span>
+              </div>
+            )}
 
             {/* ── CLÁUSULA LEGAL DE CONFORMIDAD (CÓDIGO DEL TRABAJO - LEY 213/93) ── */}
             <p className="text-[10px] text-slate-500 text-justify leading-relaxed italic border-t border-slate-200 pt-3">
