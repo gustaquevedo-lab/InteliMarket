@@ -129,8 +129,14 @@ class SettlementCreate(BaseModel):
                 data["preaviso"] = data["preaviso_monto"]
             if data.get("indemnizacion_legal") is None and data.get("indemnizacion_monto") is not None:
                 data["indemnizacion_legal"] = data["indemnizacion_monto"]
-            if data.get("descuentos_varios") is None and data.get("descuentos_monto") is not None:
-                data["descuentos_varios"] = data["descuentos_monto"]
+            if data.get("descuentos_varios") is None:
+                if data.get("descuentos_monto") is not None:
+                    extra_club = float(data.get("descuento_extra_club") or 0)
+                    anticipos = float(data.get("descuento_anticipos") or 0)
+                    total_desc = float(data.get("descuentos_monto") or 0)
+                    data["descuentos_varios"] = max(0.0, total_desc - (extra_club + anticipos))
+                else:
+                    data["descuentos_varios"] = 0.0
 
             # Normalizar opciones de pago
             if data.get("generar_op") is None and data.get("generar_orden_pago") is not None:
@@ -148,7 +154,7 @@ class SettlementCreate(BaseModel):
                     data["total_liquidacion_neta"] = data["total_neto"]
                 else:
                     # Calcular automáticamente
-                    salario = float(data.get("salario_base") or 0)
+                    salario = float(data.get("monto_dias_trabajados") or data.get("salario_base") or data.get("salario_mes_monto") or 0)
                     vacaciones = float(data.get("vacaciones_monto") or 0)
                     aguinaldo = float(data.get("aguinaldo_proporcional") or 0)
                     preaviso = float(data.get("preaviso") or 0)

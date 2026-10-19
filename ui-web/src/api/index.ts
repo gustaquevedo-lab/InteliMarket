@@ -4073,9 +4073,12 @@ export const api = {
       const aguinaldo = Number(data.aguinaldo_proporcional ?? data.aguinaldo_proporcional_monto ?? 0)
       const preaviso = Number(data.preaviso ?? data.preaviso_monto ?? 0)
       const indemnizacion = Number(data.indemnizacion_legal ?? data.indemnizacion_monto ?? 0)
-      const descuentosVarios = Number(data.descuentos_varios ?? data.descuentos_monto ?? 0)
       const extraClub = Number(data.descuento_extra_club ?? 0)
       const anticipos = Number(data.descuento_anticipos ?? 0)
+      const totalDesc = Number(data.descuentos_monto ?? 0)
+      const descuentosVarios = data.descuentos_varios !== undefined
+        ? Number(data.descuentos_varios)
+        : Math.max(0, totalDesc - (extraClub + anticipos))
 
       const calculatedNeto = Math.max(0, salario + vacaciones + aguinaldo + preaviso + indemnizacion - (descuentosVarios + extraClub + anticipos))
 
@@ -4084,6 +4087,8 @@ export const api = {
         fecha_salida: data.fecha_salida || data.fecha_egreso,
         motivo: data.motivo || data.motivo_egreso || "despido_sin_causa",
         salario_base: salario,
+        monto_dias_trabajados: data.monto_dias_trabajados ?? salario,
+        dias_trabajados_mes: data.dias_trabajados_mes ?? 0,
         vacaciones_monto: vacaciones,
         aguinaldo_proporcional: aguinaldo,
         preaviso: preaviso,
