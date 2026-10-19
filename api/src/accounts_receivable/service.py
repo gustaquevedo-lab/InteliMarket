@@ -1652,9 +1652,9 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
         row = r_pay.fetchone()
         if not row:
             # Fallback a labor_settlements por si se pasó el ID de la liquidación laboral
-            q_ls = text("SELECT receivable_payment_id FROM labor_settlements WHERE id = :id")
+            q_ls = text("SELECT receivable_payment_id FROM labor_settlements WHERE id::text = :id")
             try:
-                r_ls = await db.execute(q_ls, {"id": payment_id})
+                r_ls = await db.execute(q_ls, {"id": str(payment_id)})
                 ls_row = r_ls.fetchone()
                 if ls_row and ls_row.receivable_payment_id:
                     payment_id = str(ls_row.receivable_payment_id)
