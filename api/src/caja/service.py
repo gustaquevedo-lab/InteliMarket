@@ -1,6 +1,6 @@
 """Caja (Cash Register) service"""
 
-from sqlalchemy import select, func, text, or_, and_, delete
+from sqlalchemy import select, func, text, or_, and_, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone, date, timedelta, time
@@ -1702,6 +1702,14 @@ async def list_sessions_with_totals(
             if isinstance(r, dict):
                 recon_map[sid] = r
 
+    # Pre-cargar cajas registradoras para evitar N+1 en sesiones abiertas
+    open_reg_ids = list({s.register_id for s in sessions if s.estado == "abierta" and s.register_id})
+    registers_map = {}
+    if open_reg_ids:
+        reg_res = await db.execute(select(CashRegister).where(CashRegister.id.in_(open_reg_ids)))
+        for r in reg_res.scalars().all():
+            registers_map[r.id] = r
+
     out = []
     for s in sessions:
         monto_cobrado = cobrado_map.get(s.id, 0.0)
@@ -1713,8 +1721,7 @@ async def list_sessions_with_totals(
         efectivo_usd_acumulado = 0.0
         efectivo_brl_acumulado = 0.0
         if s.estado == "abierta":
-            register_result = await db.execute(select(CashRegister).where(CashRegister.id == s.register_id))
-            register = register_result.scalar_one_or_none()
+            register = registers_map.get(s.register_id)
             if register:
                 desde = s.ultimo_cash_drop_at or s.fecha_apertura
                 monedas_result = await db.execute(
@@ -2718,6 +2725,32 @@ async def reject_vault_deposit(db: AsyncSession, request_id: str, company_id: st
 
 # ── Remitos de Supervisión a Tesorería / Bóveda Central ─────────────────
 
+async def _get_handoffs_metadata_map(db: AsyncSession, handoff_ids: list[uuid.UUID]) -> dict[uuid.UUID, dict[str, str]]:
+    """Carga metadatos de cajero, caja y código para una lista de entregas de caja en una sola consulta batch."""
+    if not handoff_ids:
+        return {}
+    q = (
+        select(
+            CashHandoff.id,
+            CashSession.cajero_nombre,
+            CashRegister.nombre,
+            CashRegister.codigo,
+        )
+        .outerjoin(CashSession, CashSession.id == CashHandoff.session_id)
+        .outerjoin(CashRegister, CashRegister.id == CashSession.register_id)
+        .where(CashHandoff.id.in_(handoff_ids))
+    )
+    res = await db.execute(q)
+    return {
+        row[0]: {
+            "cajero_nombre": row[1] or "—",
+            "caja_nombre": row[2] or "Caja Principal",
+            "caja_codigo": row[3] or "—",
+        }
+        for row in res.all()
+    }
+
+
 async def list_supervisor_pending_sobres(db: AsyncSession, company_id: str, supervisor_id: str | None = None) -> list[dict]:
     cid = uuid.UUID(company_id)
     # Buscamos VaultEntry en estado "custodia_supervisor" o "en_boveda" (no asignadas a remitos)
@@ -2737,26 +2770,17 @@ async def list_supervisor_pending_sobres(db: AsyncSession, company_id: str, supe
 
     available = [e for e in entries if e.id not in used_entry_ids]
 
+    # Pre-cargar metadatos de cajas y cajeros para todos los sobres (anti-N+1)
+    handoff_ids = [e.handoff_id for e in available if e.handoff_id]
+    handoff_map = await _get_handoffs_metadata_map(db, handoff_ids)
+
     results = []
     for e in available:
-        caja_nombre = "Caja Principal"
-        caja_codigo = "—"
-        cajero_nombre = "—"
         tipo_lbl = "sangria" if e.origen == "cash_drop" else ("cierre_turno" if e.origen == "entrega_cajero" else e.origen)
-
-        if e.handoff_id:
-            h_res = await db.execute(select(CashHandoff).where(CashHandoff.id == e.handoff_id))
-            h = h_res.scalar_one_or_none()
-            if h and h.session_id:
-                s_res = await db.execute(select(CashSession).where(CashSession.id == h.session_id))
-                s = s_res.scalar_one_or_none()
-                if s:
-                    cajero_nombre = s.cajero_nombre or "—"
-                    reg_res = await db.execute(select(CashRegister).where(CashRegister.id == s.register_id))
-                    reg = reg_res.scalar_one_or_none()
-                    if reg:
-                        caja_nombre = reg.nombre
-                        caja_codigo = reg.codigo
+        h_info = handoff_map.get(e.handoff_id, {})
+        caja_nombre = h_info.get("caja_nombre", "Caja Principal")
+        caja_codigo = h_info.get("caja_codigo", "—")
+        cajero_nombre = h_info.get("cajero_nombre", "—")
 
         results.append({
             "id": str(e.id),
@@ -2826,25 +2850,16 @@ async def create_treasury_remittance(
     await db.flush()
     await db.refresh(remittance)
 
-    for e in entries:
-        caja_nombre = "Caja Principal"
-        caja_codigo = "—"
-        cajero_nombre = "—"
-        tipo_lbl = "sangria" if e.origen == "cash_drop" else ("cierre_turno" if e.origen == "entrega_cajero" else e.origen)
+    # Pre-cargar metadatos de cajas y cajeros para todos los sobres del remito (anti-N+1)
+    handoff_ids = [e.handoff_id for e in entries if e.handoff_id]
+    handoff_map = await _get_handoffs_metadata_map(db, handoff_ids)
 
-        if e.handoff_id:
-            h_res = await db.execute(select(CashHandoff).where(CashHandoff.id == e.handoff_id))
-            h = h_res.scalar_one_or_none()
-            if h and h.session_id:
-                s_res = await db.execute(select(CashSession).where(CashSession.id == h.session_id))
-                s = s_res.scalar_one_or_none()
-                if s:
-                    cajero_nombre = s.cajero_nombre or "—"
-                    reg_res = await db.execute(select(CashRegister).where(CashRegister.id == s.register_id))
-                    reg = reg_res.scalar_one_or_none()
-                    if reg:
-                        caja_nombre = reg.nombre
-                        caja_codigo = reg.codigo
+    for e in entries:
+        tipo_lbl = "sangria" if e.origen == "cash_drop" else ("cierre_turno" if e.origen == "entrega_cajero" else e.origen)
+        h_info = handoff_map.get(e.handoff_id, {})
+        caja_nombre = h_info.get("caja_nombre", "Caja Principal")
+        caja_codigo = h_info.get("caja_codigo", "—")
+        cajero_nombre = h_info.get("cajero_nombre", "—")
 
         it = TreasuryRemittanceItem(
             remittance_id=remittance.id,
@@ -3006,13 +3021,18 @@ async def receive_treasury_remittance(
         select(TreasuryRemittanceItem).where(TreasuryRemittanceItem.remittance_id == rid)
     )
     items = list(items_res.scalars().all())
+    ve_ids = []
     for it in items:
         it.verificado_tesoreria = True
         if it.vault_entry_id:
-            ve_res = await db.execute(select(VaultEntry).where(VaultEntry.id == it.vault_entry_id))
-            ve = ve_res.scalar_one_or_none()
-            if ve:
-                ve.estado = "en_boveda"
+            ve_ids.append(it.vault_entry_id)
+
+    if ve_ids:
+        await db.execute(
+            update(VaultEntry)
+            .where(VaultEntry.id.in_(ve_ids))
+            .values(estado="en_boveda")
+        )
 
     await db.flush()
     await db.refresh(rem)
@@ -6062,6 +6082,17 @@ async def incorporate_session_to_vault_and_banks(
                 agregados += 1
         return res
 
+    ref_codes = [f"ARQUEO-{str(sid)[:8]}-{canal_key}" for canal_key in mapping_by_key.keys()]
+    existing_refs = set()
+    if ref_codes:
+        chk_res = await db.execute(
+            select(BankTransaction.referencia).where(
+                BankTransaction.company_id == cid,
+                BankTransaction.referencia.in_(ref_codes),
+            )
+        )
+        existing_refs = set(chk_res.scalars().all())
+
     for canal_key, map_info in mapping_by_key.items():
         v_info = summary_methods.get(canal_key, {})
         m_gs = Decimal(str(v_info.get("monto_gs") or 0))
@@ -6076,13 +6107,8 @@ async def incorporate_session_to_vault_and_banks(
 
             ref_code = f"ARQUEO-{str(sid)[:8]}-{canal_key}"
             # Evitar duplicar BankTransaction si ya fue asentado
-            chk_bt = await db.execute(
-                select(BankTransaction).where(
-                    BankTransaction.company_id == cid,
-                    BankTransaction.referencia == ref_code,
-                )
-            )
-            if not chk_bt.scalar_one_or_none():
+            if ref_code not in existing_refs:
+                existing_refs.add(ref_code)
                 desc_comis = f" (Bruto: {m_gs:,.0f} Gs. | Comis. {comis_pct:.2f}%: -{retencion_gs:,.0f} Gs.)" if retencion_gs > 0 else ""
                 bt = BankTransaction(
                     company_id=cid,
