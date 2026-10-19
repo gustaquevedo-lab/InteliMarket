@@ -238,6 +238,7 @@ class PaymentMethodBankMappingUpdate(BaseModel):
     comision_fija_gs: Optional[Decimal] = None
     plazo_acreditacion_dias: Optional[int] = None
     tipo_plazo: Optional[str] = None
+    comision_activa: Optional[bool] = None
     activo: Optional[bool] = True
 
 
@@ -253,6 +254,7 @@ class PaymentMethodBankMappingResponse(BaseModel):
     comision_fija_gs: Optional[float] = 0.0
     plazo_acreditacion_dias: Optional[int] = 1
     tipo_plazo: Optional[str] = "habiles"
+    comision_activa: bool = False
     activo: bool
 
 
@@ -316,3 +318,40 @@ class PaymentAdjustmentResponse(BaseModel):
 
 
 
+
+
+class CashAdvanceCreate(BaseModel):
+    monto: Decimal
+    opcion: int = 2                               # 1 = Red de Pagos, 2 = Dinelco
+    origen: str = "terminal"                      # terminal | manual
+    codigo_autorizacion: Optional[str] = None
+    nro_referencia: Optional[str] = None
+    issuer_id: Optional[str] = None
+    nombre_tarjeta: Optional[str] = None
+    pan_ultimos4: Optional[str] = None
+    terminal: Optional[str] = None
+    terminal_ip: Optional[str] = None
+    punto_emision: Optional[str] = None
+    sale_id: Optional[UUID] = None
+    supervisor_id: Optional[UUID] = None
+    observaciones: Optional[str] = None
+    raw_response: Optional[dict] = None
+
+
+class CashAdvanceResponse(BaseModel):
+    id: UUID
+    session_id: UUID
+    monto: float
+    opcion: Optional[int] = None
+    origen: str
+    codigo_autorizacion: Optional[str] = None
+    nro_referencia: Optional[str] = None
+    issuer_id: Optional[str] = None
+    nombre_tarjeta: Optional[str] = None
+    pan_ultimos4: Optional[str] = None
+    comision_gs: float = 0
+    comision_activa: bool = True
+    supervisor_nombre: Optional[str] = None
+    estado: str
+    observaciones: Optional[str] = None
+    created_at: Optional[datetime] = None

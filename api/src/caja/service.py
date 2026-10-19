@@ -24,7 +24,7 @@ from api.src.caja.models import (
     CashRegister, CashSession, CashCount, CashRegisterMovement, CashHandoff,
     VaultEntry, VaultDepositApprovalRequest, CashDropRequest,
     TreasuryRemittance, TreasuryRemittanceItem,
-    PaymentMethodBankMapping, CashShortageDeductionRequest, CashShortageConfig,
+    PaymentMethodBankMapping, CashShortageDeductionRequest, CashShortageConfig, CashAdvance,
     CashSessionPaymentAdjustment, CashSessionPunteoItem,
 )
 from api.src.sales.models import Sale, SalePayment
@@ -50,6 +50,7 @@ PAYMENT_CHANNEL_DEFINITIONS = [
     ("DINELCO_CREDITO", "Dinelco Tarjeta de Crédito", "tarjeta", "credit-card"),
     ("DINELCO_QR", "Dinelco QR", "qr", "qr-code"),
     ("DINELCO_PIX", "Dinelco PIX", "pix", "smartphone"),
+    ("ADELANTO_DINELCO", "Adelanto de Efectivo Dinelco", "tarjeta", "credit-card"),
     ("PLUGPAY_PIX", "Plug Pay PIX", "pix", "smartphone"),
     ("PLUGPAY_CREDITO", "Plug Pay Crédito Parcelado", "credito_parcelado", "calendar"),
     ("EXTRA_CLUB", "Extra Club", "credito", "award"),
@@ -81,6 +82,7 @@ CHANNEL_TO_INSTRUMENT_TYPE = {
     "TARJETA_BANCARD": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
     "TARJETA_DINELCO": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
     "TARJETA": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
+    "ADELANTO_DINELCO": ("POS_TARJETAS", "Tarjetas de Débito y Crédito (POS Físicos)", "credit-card", 1),
 
     "BANCARD_QR": ("QR_BILLETERAS", "Billeteras Digitales y Pagos QR", "qr-code", 2),
     "DINELCO_QR": ("QR_BILLETERAS", "Billeteras Digitales y Pagos QR", "qr-code", 2),
@@ -679,6 +681,9 @@ def generate_cierre_escpos(recon: dict) -> dict:
     tot_drops = recon.get('total_drops_gs', 0)
     if tot_drops > 0:
         lines.append(_format_two_col("  (-) Retiros / Drops:", f"-{tot_drops:,.0f} Gs.", W))
+    tot_adv = recon.get('adelantos_gs', 0)
+    if tot_adv > 0:
+        lines.append(_format_two_col(f"  (-) Adelantos ({recon.get('adelantos_cantidad', 0)}):", f"-{tot_adv:,.0f} Gs.", W))
     lines.append(_format_two_col("  >> Esperado a Rendir:", f"{recon['esperado_total_gs']:,.0f} Gs.", W))
     lines.append("-" * W)
 
@@ -1056,6 +1061,13 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     d_usd = sum(Decimal(str(d.monto_confirmado_usd or d.monto_usd or 0)) for d in drops if d.estado == "confirmado")
     total_drops_gs = d_pyg + (d_brl * tasa_brl) + (d_usd * tasa_usd)
 
+    # Adelantos de efectivo contra tarjeta ("Cobrá tu salario"): plata que salió de la gaveta hacia el cliente,
+    # respaldada por un voucher que la procesadora le acredita al comercio. Bajan el efectivo esperado.
+    adv_res = await db.execute(select(CashAdvance).where(CashAdvance.session_id == session_obj.id, CashAdvance.estado == "aprobado"))
+    adelantos = list(adv_res.scalars().all())
+    adelantos_gs = sum((Decimal(str(a.monto or 0)) for a in adelantos), Decimal("0"))
+    adelantos_comision_gs = sum((Decimal(str(a.comision_gs or 0)) for a in adelantos if a.comision_activa), Decimal("0"))
+
     # Reclasificaciones de pagos en Tesorería (ej: venta registrada en POS como Efectivo pero entregada como comprobante SIPAP/Tarjeta, o corregida entre medios no efectivo)
     adj_res = await db.execute(
         select(CashSessionPaymentAdjustment).where(CashSessionPaymentAdjustment.session_id == session_obj.id)
@@ -1187,8 +1199,8 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     # Las divisas (R$, US$) son exclusivamente medios de pago, no ventas en moneda extranjera.
     # El monto esperado a rendir a Tesorería en Guaraníes es estrictamente:
     # Total Facturado en Ventas - Ventas Cobradas en Medios No Efectivo - Retiros/Drops
-    esperado_total_gs = max(Decimal("0"), ventas_ef_total_gs - total_drops_gs)
-    esp_pyg = max(Decimal("0"), Decimal(str(efectivo_pyg)) - d_pyg)
+    esperado_total_gs = max(Decimal("0"), ventas_ef_total_gs - total_drops_gs) - adelantos_gs
+    esp_pyg = max(Decimal("0"), Decimal(str(efectivo_pyg)) - d_pyg) - adelantos_gs
     esp_brl = max(Decimal("0"), Decimal(str(efectivo_brl)) - d_brl)
     esp_usd = max(Decimal("0"), Decimal(str(efectivo_usd)) - d_usd)
 
@@ -1311,6 +1323,9 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "drops_brl": float(d_brl),
         "drops_usd": float(d_usd),
         "total_drops_gs": float(total_drops_gs),
+        "adelantos_gs": float(adelantos_gs),
+        "adelantos_cantidad": len(adelantos),
+        "adelantos_comision_gs": float(adelantos_comision_gs),
         "esp_pyg": float(esp_pyg),
         "esp_brl": float(esp_brl),
         "esp_usd": float(esp_usd),
@@ -4203,6 +4218,38 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             vouchers_by_channel[canal_key]["cantidad_esperada"] += 1
             vouchers_by_channel[canal_key]["vouchers"].append(voucher_item)
 
+    # Adelantos de efectivo ("Cobrá tu salario"): no son ventas (no estan en sale_payments) pero su voucher se
+    # puntea igual que cualquier tarjeta -- es lo que la procesadora le acredita al comercio.
+    try:
+        adv_p = await db.execute(select(CashAdvance).where(CashAdvance.session_id == session_obj.id, CashAdvance.estado == "aprobado").order_by(CashAdvance.created_at.asc()))
+        for adv in adv_p.scalars().all():
+            m_adv = float(adv.monto or 0)
+            item_adv = {
+                "id": str(adv.id),
+                "sale_id": str(adv.sale_id) if adv.sale_id else None,
+                "fecha": adv.created_at.isoformat() if adv.created_at else None,
+                "numero_ticket": "Adelanto de efectivo",
+                "tipo_comprobante": "ADELANTO",
+                "medio_pago": "Adelanto de Efectivo Dinelco" + (" (manual)" if adv.origen == "manual" else ""),
+                "canal_key": "ADELANTO_DINELCO",
+                "moneda": "PYG",
+                "monto_original": m_adv,
+                "monto_gs": m_adv,
+                "nro_boleta": adv.nro_referencia or "—",
+                "codigo_autorizacion": adv.codigo_autorizacion or "—",
+                "nsu": "—",
+                "tarjeta_marca": adv.nombre_tarjeta or "Dinelco",
+                "tarjeta_pan": f"•••• {adv.pan_ultimos4}" if adv.pan_ultimos4 else "—",
+                "titular": "—",
+            }
+            vouchers.append(item_adv)
+            if "ADELANTO_DINELCO" in vouchers_by_channel:
+                vouchers_by_channel["ADELANTO_DINELCO"]["total_esperado_gs"] += m_adv
+                vouchers_by_channel["ADELANTO_DINELCO"]["cantidad_esperada"] += 1
+                vouchers_by_channel["ADELANTO_DINELCO"]["vouchers"].append(item_adv)
+    except Exception:
+        pass  # un problema leyendo adelantos no puede tumbar el punteo de las ventas
+
     if auto_linked_count > 0:
         try:
             await db.commit()
@@ -5552,6 +5599,7 @@ DEFAULT_CANALES = [
     ("PLUGPAY_PIX", "Plug Pay PIX Brasil"),
     ("PLUGPAY_CREDITO", "Plug Pay Crédito Parcelado"),
     ("TRANSFERENCIA", "Transferencias Bancarias SIPAP"),
+    ("ADELANTO_DINELCO", "Adelanto de Efectivo Dinelco (Cobrá tu salario)"),
 ]
 
 
@@ -5576,6 +5624,10 @@ async def list_payment_method_bank_mappings(db: AsyncSession, company_id: str) -
             # defaults coherentes por canal: D+0 para SIPAP/PIX, D+1 para debito/QR, D+2 para credito
             dias_def = 0 if ("TRANSFERENCIA" in k or "PIX" in k) else (2 if "CREDITO" in k else 1)
             pct_def = Decimal("2.80") if "CREDITO" in k else (Decimal("1.50") if "DEBITO" in k else (Decimal("0.80") if "QR" in k else Decimal("1.20")))
+            es_adelanto = k == "ADELANTO_DINELCO"
+            if es_adelanto:
+                # Comision ACTIVA: la procesadora le paga al comercio por el servicio. El monto lo define Dinelco.
+                dias_def, pct_def = 1, Decimal("0")
             db.add(PaymentMethodBankMapping(
                 company_id=cid,
                 canal_key=k,
@@ -5584,6 +5636,7 @@ async def list_payment_method_bank_mappings(db: AsyncSession, company_id: str) -
                 comision_fija_gs=Decimal("0"),
                 plazo_acreditacion_dias=dias_def,
                 tipo_plazo="habiles",
+                comision_activa=es_adelanto,
                 activo=True,
             ))
             needs_commit = True
@@ -5610,6 +5663,7 @@ async def list_payment_method_bank_mappings(db: AsyncSession, company_id: str) -
             "comision_fija_gs": float(mapping.comision_fija_gs or 0),
             "plazo_acreditacion_dias": int(mapping.plazo_acreditacion_dias if mapping.plazo_acreditacion_dias is not None else 1),
             "tipo_plazo": mapping.tipo_plazo or "habiles",
+            "comision_activa": bool(mapping.comision_activa),
             "activo": mapping.activo,
         })
     return out
@@ -5625,6 +5679,7 @@ async def update_payment_method_bank_mapping(
     comision_fija_gs: Decimal | None = None,
     plazo_acreditacion_dias: int | None = None,
     tipo_plazo: str | None = None,
+    comision_activa: bool | None = None,
 ) -> dict:
     """Actualiza la cuenta bancaria, comisiones de procesadora y plazo de liquidación de un medio de pago."""
     cid = uuid.UUID(company_id)
@@ -5662,6 +5717,8 @@ async def update_payment_method_bank_mapping(
             mapping.plazo_acreditacion_dias = plazo_acreditacion_dias
         if tipo_plazo is not None:
             mapping.tipo_plazo = tipo_plazo
+        if comision_activa is not None:
+            mapping.comision_activa = comision_activa
         mapping.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -5688,8 +5745,106 @@ async def update_payment_method_bank_mapping(
         "comision_fija_gs": float(mapping.comision_fija_gs or 0),
         "plazo_acreditacion_dias": int(mapping.plazo_acreditacion_dias if mapping.plazo_acreditacion_dias is not None else 1),
         "tipo_plazo": mapping.tipo_plazo or "habiles",
+        "comision_activa": bool(mapping.comision_activa),
         "activo": mapping.activo,
     }
+
+
+# ── Adelantos de efectivo contra tarjeta ("Cobrá tu salario") ─────────────
+
+ADELANTO_MAX_GS = Decimal("1500000")             # tope por adelanto (lo fija Dinelco)
+ADELANTO_SUPERVISOR_DESDE_GS = Decimal("500000")  # desde este monto pide autorizacion de supervisor
+ADELANTO_CANAL = "ADELANTO_DINELCO"
+
+
+async def _es_supervisor(db: AsyncSession, user: User) -> bool:
+    """Misma regla que /auth/verify-supervisor (supervisor / admin / gerente, o rol RBAC equivalente)."""
+    from api.src.rbac.models import Role, UserRole
+    r = (user.rol or "").lower().strip()
+    if "admin" in r or "supervisor" in r or "gerente" in r or user.is_superadmin:
+        return True
+    res = await db.execute(
+        select(UserRole.user_id).join(Role, Role.id == UserRole.role_id).where(
+            UserRole.user_id == user.id,
+            or_(func.lower(Role.name).like("%admin%"), func.lower(Role.name).like("%supervisor%"), func.lower(Role.name).like("%gerente%")),
+        )
+    )
+    return res.first() is not None
+
+
+async def register_cash_advance(db: AsyncSession, session_id: str, data: dict, registrado_por: str | None) -> CashAdvance:
+    """Registra un adelanto de efectivo ya aprobado por el terminal (o cargado a mano si el terminal fallo).
+    Valida tope, supervisor desde ADELANTO_SUPERVISOR_DESDE_GS, y deja la comision ACTIVA calculada con lo que
+    este configurado en el canal ADELANTO_DINELCO al momento del adelanto (foto)."""
+    res = await db.execute(select(CashSession).where(CashSession.id == uuid.UUID(session_id)))
+    sesion = res.scalar_one_or_none()
+    if not sesion or sesion.estado != "abierta":
+        raise ValueError("La sesión de caja no está abierta.")
+
+    monto = Decimal(str(data["monto"])).quantize(Decimal("1"))
+    if monto <= 0:
+        raise ValueError("El monto del adelanto debe ser mayor a cero.")
+    if monto > ADELANTO_MAX_GS:
+        raise ValueError(f"El adelanto máximo por operación es de Gs. {int(ADELANTO_MAX_GS):,}.".replace(",", "."))
+    if data.get("opcion") not in (1, 2):
+        raise ValueError("Tipo de adelanto inválido (1 = Red de Pagos, 2 = Dinelco).")
+    origen = data.get("origen") or "terminal"
+    if origen not in ("terminal", "manual"):
+        raise ValueError("Origen inválido.")
+    autorizacion = (data.get("codigo_autorizacion") or "").strip()
+    if not autorizacion:
+        # Sin código de autorización no hay voucher que respalde la salida de plata.
+        raise ValueError("Falta el código de autorización del voucher.")
+
+    supervisor = None
+    if monto >= ADELANTO_SUPERVISOR_DESDE_GS:
+        if not data.get("supervisor_id"):
+            raise ValueError(f"Un adelanto desde Gs. {int(ADELANTO_SUPERVISOR_DESDE_GS):,} requiere autorización de un supervisor.".replace(",", "."))
+        sres = await db.execute(select(User).where(User.id == uuid.UUID(str(data["supervisor_id"]))))
+        supervisor = sres.scalar_one_or_none()
+        if not supervisor or not supervisor.activo or not await _es_supervisor(db, supervisor):
+            raise ValueError("La autorización no es de un supervisor válido.")
+
+    # Doble clic / reintento: el mismo voucher no puede descontar efectivo dos veces.
+    dup = await db.execute(select(CashAdvance.id).where(
+        CashAdvance.session_id == sesion.id, CashAdvance.codigo_autorizacion == autorizacion, CashAdvance.estado == "aprobado"))
+    if dup.first():
+        raise ValueError("Ese voucher ya está registrado en esta sesión.")
+
+    reg = await db.execute(select(CashRegister).where(CashRegister.id == sesion.register_id))
+    register = reg.scalar_one_or_none()
+    company_id = register.company_id if register else None
+
+    # Comision del canal: foto al momento del adelanto.
+    pct, fija, activa = Decimal("0"), Decimal("0"), True
+    if company_id:
+        mres = await db.execute(select(PaymentMethodBankMapping).where(
+            PaymentMethodBankMapping.company_id == company_id, PaymentMethodBankMapping.canal_key == ADELANTO_CANAL))
+        m = mres.scalar_one_or_none()
+        if m:
+            pct, fija, activa = Decimal(str(m.comision_porcentaje or 0)), Decimal(str(m.comision_fija_gs or 0)), bool(m.comision_activa)
+    comision = (monto * pct / Decimal("100") + fija).quantize(Decimal("0.01"))
+
+    adv = CashAdvance(
+        company_id=company_id, session_id=sesion.id,
+        user_id=uuid.UUID(registrado_por) if registrado_por else sesion.user_id, cajero_nombre=sesion.cajero_nombre,
+        punto_emision=data.get("punto_emision"), proveedor="dinelco", opcion=data["opcion"], monto=monto, origen=origen,
+        codigo_autorizacion=autorizacion, nro_referencia=data.get("nro_referencia"), issuer_id=data.get("issuer_id"),
+        nombre_tarjeta=data.get("nombre_tarjeta"), pan_ultimos4=data.get("pan_ultimos4"), terminal=data.get("terminal"),
+        terminal_ip=data.get("terminal_ip"), comision_gs=comision, comision_activa=activa,
+        comision_porcentaje=pct, comision_fija_gs=fija, sale_id=data.get("sale_id"),
+        supervisor_id=supervisor.id if supervisor else None, supervisor_nombre=supervisor.nombre if supervisor else None,
+        estado="aprobado", observaciones=data.get("observaciones"), raw_response=data.get("raw_response"),
+    )
+    db.add(adv)
+    await db.commit()
+    await db.refresh(adv)
+    return adv
+
+
+async def list_cash_advances(db: AsyncSession, session_id: str) -> list[CashAdvance]:
+    res = await db.execute(select(CashAdvance).where(CashAdvance.session_id == uuid.UUID(session_id)).order_by(CashAdvance.created_at.asc()))
+    return list(res.scalars().all())
 
 
 # ── Configuración y Tratamiento de Faltantes hacia SueldOK ────────────

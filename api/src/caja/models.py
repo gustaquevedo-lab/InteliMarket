@@ -1,7 +1,7 @@
 """Caja (Cash Register) models"""
 
-from sqlalchemy import Column, String, Boolean, DateTime, Text, Numeric, Integer, ForeignKey, ARRAY
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Boolean, DateTime, Text, Numeric, Integer, SmallInteger, ForeignKey, ARRAY
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 
 from api.src.db import Base
@@ -253,6 +253,7 @@ class PaymentMethodBankMapping(Base):
     bank_account_id = Column(UUID(as_uuid=True), ForeignKey("bank_accounts.id"), nullable=True)
     comision_porcentaje = Column(Numeric(6, 4), default=0.0000)  # ej: 1.50% de comision procesadora
     comision_fija_gs = Column(Numeric(12, 0), default=0)         # costo fijo por transaccion en Gs
+    comision_activa = Column(Boolean, nullable=False, default=False, server_default="false")  # True: la procesadora le PAGA la comision al comercio (ingreso), no es una retencion
     plazo_acreditacion_dias = Column(Integer, default=1)         # ej: 0 (D+0), 1 (D+1), 2 (D+2), 30 (D+30)
     tipo_plazo = Column(String(20), default="habiles")           # habiles o corridos
     activo = Column(Boolean, default=True)
@@ -356,3 +357,40 @@ class CashSessionPunteoItem(Base):
 
 
 
+
+
+class CashAdvance(Base):
+    """Adelanto de efectivo contra tarjeta ("Cobrá tu salario" de Dinelco): el cliente pide plata en caja y el
+    terminal la cobra de su tarjeta. No es una venta (sin factura, sin stock): es una SALIDA de efectivo de la
+    sesion de la cajera -- por eso queda atado a la sesion, para que el efectivo esperado del cierre baje por
+    lo entregado -- y un voucher que la procesadora acredita al comercio (mas la comision activa, si hay)."""
+    __tablename__ = "cash_advances"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id"), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True))
+    cajero_nombre = Column(String(100))
+    punto_emision = Column(String(10))
+    proveedor = Column(String(20), nullable=False, default="dinelco")
+    opcion = Column(SmallInteger)                 # 1 = Red de Pagos, 2 = Dinelco (manual Feitian v1.0.5, /pos/adelanto)
+    monto = Column(Numeric(15, 0), nullable=False)  # efectivo entregado al cliente
+    origen = Column(String(10), nullable=False, default="terminal")  # terminal | manual
+    codigo_autorizacion = Column(String(20))
+    nro_referencia = Column(String(20))
+    issuer_id = Column(String(5))
+    nombre_tarjeta = Column(String(100))
+    pan_ultimos4 = Column(String(4))
+    terminal = Column(String(20))
+    terminal_ip = Column(String(45))
+    comision_gs = Column(Numeric(15, 2), nullable=False, default=0)   # foto de la comision al momento del adelanto
+    comision_activa = Column(Boolean, nullable=False, default=True)
+    comision_porcentaje = Column(Numeric(6, 4))
+    comision_fija_gs = Column(Numeric(12, 0))
+    sale_id = Column(UUID(as_uuid=True))          # compra de la misma visita (informativo)
+    supervisor_id = Column(UUID(as_uuid=True))
+    supervisor_nombre = Column(String(100))
+    estado = Column(String(12), nullable=False, default="aprobado")  # aprobado | anulado
+    observaciones = Column(Text)
+    raw_response = Column(JSONB)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

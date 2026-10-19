@@ -24,6 +24,7 @@ from api.src.caja.schemas import (
     ResolveCashShortageRequest, IncorporateSessionVaultAndBanksRequest,
     ConfirmSessionCashReceptionRequest, CashSessionRendicionUpdate,
     CreatePaymentAdjustmentRequest, PaymentAdjustmentResponse,
+    CashAdvanceCreate, CashAdvanceResponse,
 )
 from api.src.caja import service
 from api.src.caja import pdf_reports
@@ -524,6 +525,23 @@ async def cash_drop(session_id: str, body: CashDropCreate, db: AsyncSession = De
     return result
 
 
+@router.post("/cash-sessions/{session_id}/cash-advances", response_model=CashAdvanceResponse, status_code=status.HTTP_201_CREATED)
+async def create_cash_advance(session_id: str, body: CashAdvanceCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """Adelanto de efectivo contra tarjeta ("Cobrá tu salario"): salida de efectivo de la sesion + voucher."""
+    data = body.model_dump()
+    data["sale_id"] = str(body.sale_id) if body.sale_id else None
+    data["supervisor_id"] = str(body.supervisor_id) if body.supervisor_id else None
+    try:
+        return await service.register_cash_advance(db, session_id, data, registrado_por=user.get("id"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/cash-sessions/{session_id}/cash-advances", response_model=list[CashAdvanceResponse])
+async def list_cash_advances(session_id: str, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.list_cash_advances(db, session_id)
+
+
 @router.get("/cash-drop-requests")
 async def list_cash_drop_requests(
     company_id: str = Query(...), estado: str | None = Query("pendiente"), db: AsyncSession = Depends(get_db),
@@ -910,6 +928,7 @@ async def update_bank_mapping(
         comision_fija_gs=body.comision_fija_gs,
         plazo_acreditacion_dias=body.plazo_acreditacion_dias,
         tipo_plazo=body.tipo_plazo,
+        comision_activa=body.comision_activa,
     )
 
 
