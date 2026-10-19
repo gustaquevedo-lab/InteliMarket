@@ -54,6 +54,7 @@ import CurrencyInput from "../../components/CurrencyInput"
 import { useToast } from "../../context/ToastContext"
 import { api, BankAccount, LaborSettlement } from "../../api"
 import PayrollDossierView from "./PayrollDossierView"
+import { LiquidacionSalarioModal } from "./LiquidacionSalarioModal"
 
 // ── Configuración de Integración con SueldOK ──────────────────────────
 const SUELDOK_BASE_URL = "https://sueldok.intellihouse.lat"
@@ -95,6 +96,7 @@ type TabType = "dashboard" | "payroll" | "expediente" | "settlements" | "advance
 
 export interface PayrollItem {
   id: string
+  employeeId?: string
   nombre: string
   ci: string
   cargo: string
@@ -106,7 +108,15 @@ export interface PayrollItem {
   ipsEmployer: number
   advances: number
   deductions: number
+  loanDeductions?: any[]
+  loanDeduction?: number
+  commercialDeduction?: number
+  judicialDeduction?: number
+  otherDeduction?: number
+  attendanceDeduction?: number
+  concepts?: any[]
   totalNet: number
+  rawItem?: any
 }
 
 const estadoConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
@@ -213,6 +223,7 @@ export default function SueldokPage() {
   const [modalAnticipoOpen, setModalAnticipoOpen] = useState(false)
   const [modalDescuentoOpen, setModalDescuentoOpen] = useState(false)
   const [modalNominaOpen, setModalNominaOpen] = useState(false)
+  const [selectedEmpForLiquidacion, setSelectedEmpForLiquidacion] = useState<PayrollItem | null>(null)
   const [selectedPunchPhoto, setSelectedPunchPhoto] = useState<{
     photoUrl: string
     nombre: string
@@ -551,6 +562,7 @@ export default function SueldokPage() {
     if (data?.approvedPayroll?.items && data.approvedPayroll.items.length > 0) {
       return data.approvedPayroll.items.map((item: any): PayrollItem => ({
         id: item.id || item.employeeId,
+        employeeId: item.employeeId,
         nombre: item.nombre,
         ci: item.ci,
         cargo: item.cargo,
@@ -562,7 +574,15 @@ export default function SueldokPage() {
         ipsEmployer: item.ipsEmployer,
         advances: item.advances || 0,
         deductions: item.deductions || 0,
+        loanDeductions: item.loanDeductions || [],
+        loanDeduction: item.loanDeduction || 0,
+        commercialDeduction: item.commercialDeduction || 0,
+        judicialDeduction: item.judicialDeduction || 0,
+        otherDeduction: item.otherDeduction || 0,
+        attendanceDeduction: item.attendanceDeduction || 0,
+        concepts: item.concepts || [],
         totalNet: item.totalNet,
+        rawItem: item.rawItem || item,
       }))
     }
 
@@ -1994,13 +2014,24 @@ export default function SueldokPage() {
                     <th className="px-4 py-3.5 text-right">Anticipos</th>
                     <th className="px-4 py-3.5 text-right">Faltantes / Ded.</th>
                     <th className="px-6 py-3.5 text-right">Salario Neto</th>
+                    <th className="px-4 py-3.5 text-center">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
                   {payrollItems.map((item, idx) => (
                     <tr key={item.id || idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                       <td className="px-6 py-3.5">
-                        <div className="font-black text-slate-900 dark:text-white">{item.nombre}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="font-black text-slate-900 dark:text-white">{item.nombre}</div>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedEmpForLiquidacion(item)}
+                            className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-lg transition-all cursor-pointer"
+                            title="Generar liquidación de salario individual de este funcionario"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                         <div className="text-[11px] text-slate-400">
                           CI: {item.ci || "—"} · {item.cargo} ({item.depto})
                         </div>
@@ -2024,6 +2055,17 @@ export default function SueldokPage() {
                         <span className="font-mono text-sm font-black text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 px-3 py-1 rounded-xl">
                           {formatPYG(item.totalNet)}
                         </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedEmpForLiquidacion(item)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 dark:text-indigo-300 rounded-lg border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer shadow-xs"
+                          title="Generar liquidación de salario individual de este funcionario"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                          <span>Liquidación</span>
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -3560,6 +3602,18 @@ export default function SueldokPage() {
             </div>
           </div>
         </div>
+      )}
+      {/* ── MODAL: LIQUIDACIÓN OFICIAL DE SALARIO INDIVIDUAL ── */}
+      {selectedEmpForLiquidacion && (
+        <LiquidacionSalarioModal
+          isOpen={!!selectedEmpForLiquidacion}
+          onClose={() => setSelectedEmpForLiquidacion(null)}
+          employee={selectedEmpForLiquidacion}
+          periodoActivo={periodoNomina}
+          availablePayrolls={data?.availablePayrolls || []}
+          company={selectedCompany}
+          sueldokOverviewUrl={SUELDOK_OVERVIEW_URL}
+        />
       )}
     </div>
   )
