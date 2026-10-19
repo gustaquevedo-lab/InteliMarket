@@ -599,8 +599,8 @@ async def get_labor_settlement_receipt_pdf(
     from api.src.accounts_receivable.models import ReceivablePayment, ReceivablePaymentAllocation, Account
     from api.src.sueldok.pdf_settlement import generate_labor_settlement_receipt_pdf
 
-    cid = uuid.UUID(company_id)
-    sid = uuid.UUID(settlement_id)
+    cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
+    sid = settlement_id if isinstance(settlement_id, uuid.UUID) else uuid.UUID(str(settlement_id))
 
     # 1. Datos de la empresa
     company = {
