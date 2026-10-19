@@ -109,9 +109,11 @@ def calculate_taxes(item: dict) -> dict:
 
 async def generate_sale_number(db: AsyncSession, company_id: str, branch_id: str | None) -> str:
     date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
+    # Solo números propios: el sync horario del legacy inserta ventas con numero "NC291612" o "2291234".
+    # shortcut: último+1 sin bloqueo (la UNIQUE de numero evita duplicar, no reintenta), rediseñar con secuencia por punto de emisión.
     result = await db.execute(
         select(Sale)
-        .where(Sale.company_id == company_id)
+        .where(Sale.company_id == company_id, Sale.numero.op("~")(r"^\d{8}-\w{3}-\d+$"))
         .order_by(Sale.created_at.desc())
         .limit(1)
     )
