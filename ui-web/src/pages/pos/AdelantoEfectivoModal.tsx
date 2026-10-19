@@ -27,6 +27,13 @@ export const ADELANTO_SUPERVISOR_DESDE_GS = 500_000
 // El terminal espera la tarjeta y la autorización un buen rato antes de contestar.
 const ADELANTO_TIMEOUT_MS = 130_000
 
+// Cargo que el terminal le cobra al cliente: max(mínimo, porcentaje del adelanto). Medido el 19-oct-2026 en un POS
+// Dinelco (1.000 y 50.000 -> 1.000 · 150.000 -> 1.500 · 155.000 -> 1.550 · 1.500.000 -> 15.000). Estos valores son
+// los de respaldo; los reales se leen de Caja > comisiones de procesadoras (canal ADELANTO_DINELCO).
+const CARGO_DEFECTO = { porcentaje: 1, minimo: 1000 }
+export const calcularCargoCliente = (monto: number, regla: { porcentaje: number; minimo: number }) =>
+  monto > 0 ? Math.max(regla.minimo, Math.round((monto * regla.porcentaje) / 100)) : 0
+
 interface Supervisor { id: string; email: string; nombre?: string }
 
 interface Props {
@@ -66,17 +73,32 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
   const [guardando, setGuardando] = useState(false)
   const [manual, setManual] = useState(false)
   const [manualAut, setManualAut] = useState("")
-  const [resultado, setResultado] = useState<{ monto: number; autorizacion: string; comision: number; supervisor?: string } | null>(null)
+  const [resultado, setResultado] = useState<{ monto: number; autorizacion: string; comision: number; cargo: number; supervisor?: string } | null>(null)
   const [supUsado, setSupUsado] = useState<{ id: string; nombre: string } | null>(null)
+  const [regla, setRegla] = useState(CARGO_DEFECTO)
+  const [reglaLeida, setReglaLeida] = useState(false)
+  const [manualCargo, setManualCargo] = useState("")
 
   const montoNum = soloDigitos(monto)
   const compraNum = soloDigitos(compra)
   const pideSupervisor = montoNum >= ADELANTO_SUPERVISOR_DESDE_GS
+  const cargoCliente = calcularCargoCliente(montoNum, regla)
+  const totalTarjeta = montoNum + cargoCliente
+
+  useEffect(() => {
+    if (!open) return
+    let vivo = true
+    api.caja.bankMappings.list().then((lista) => {
+      const c = (lista || []).find((m) => m.canal_key === "ADELANTO_DINELCO")
+      if (vivo && c) { setRegla({ porcentaje: Number(c.cargo_cliente_porcentaje ?? 0), minimo: Number(c.cargo_cliente_minimo_gs ?? 0) }); setReglaLeida(true) }
+    }).catch(() => { /* sin conexión: queda la regla medida como estimación */ })
+    return () => { vivo = false }
+  }, [open])
 
   useEffect(() => {
     if (!open) return
     setMonto(""); setCompra(""); setOpcion(2); setSupEmail(""); setSupPin(""); setEstado("form"); setError("")
-    setVoucherPendiente(null); setManual(false); setManualAut(""); setResultado(null); setSupUsado(null)
+    setVoucherPendiente(null); setManual(false); setManualAut(""); setManualCargo(""); setResultado(null); setSupUsado(null)
   }, [open])
 
   if (!open) return null
@@ -114,9 +136,10 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
         nro_referencia: v.nro_referencia, issuer_id: v.issuer_id, nombre_tarjeta: v.nombre_tarjeta,
         pan_ultimos4: v.pan_ultimos4, terminal: v.terminal, terminal_ip: terminalIp, punto_emision: puntoEmision,
         supervisor_id: sup?.id, raw_response: v.raw,
+        cargo_cliente_gs: origen === "manual" && manualCargo.trim() !== "" ? soloDigitos(manualCargo) : undefined,
       })
       setVoucherPendiente(null)
-      setResultado({ monto: montoNum, autorizacion: v.codigo_autorizacion, comision: Number(r.comision_gs || 0), supervisor: r.supervisor_nombre })
+      setResultado({ monto: montoNum, autorizacion: v.codigo_autorizacion, comision: Number(r.comision_gs || 0), cargo: Number(r.cargo_cliente_gs || 0), supervisor: r.supervisor_nombre })
       setEstado("aprobado")
       toast.success("Adelanto registrado", `Entregá Gs. ${formatPYG(montoNum)} en efectivo al cliente.`)
     } catch (e: any) {
@@ -209,6 +232,7 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
             <div className="text-xs text-slate-500 dark:text-slate-400 space-y-0.5">
               <div>Autorización {resultado.autorizacion}{resultado.supervisor ? ` · autorizó ${resultado.supervisor}` : ""}</div>
               <div>El voucher lo imprime el terminal: guardalo con el cierre de caja.</div>
+              {resultado.cargo > 0 && <div>Al cliente se le cobró Gs. {formatPYG(resultado.monto + Math.round(resultado.cargo))} en la tarjeta (adelanto + comisión de Gs. {formatPYG(Math.round(resultado.cargo))}, que es de la procesadora).</div>}
               {resultado.comision > 0 && <div>Comisión a favor del comercio: Gs. {formatPYG(Math.round(resultado.comision))}</div>}
             </div>
             <button onClick={onClose} className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black cursor-pointer">Listo</button>
@@ -226,6 +250,12 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                 Máximo Gs. {formatPYG(ADELANTO_MAX_GS)} por adelanto · desde Gs. {formatPYG(ADELANTO_SUPERVISOR_DESDE_GS)} pide autorización de supervisor.
               </p>
+              {montoNum > 0 && (
+                <div className="mt-2 rounded-xl border border-sky-300/60 bg-sky-50 dark:bg-sky-950/20 p-2.5 text-xs text-sky-800 dark:text-sky-200">
+                  El terminal le cobra al cliente una comisión de <b>Gs. {formatPYG(cargoCliente)}</b>{!reglaLeida && " (estimada)"}: de su tarjeta salen <b>Gs. {formatPYG(totalTarjeta)}</b>.
+                  Vos entregás <b>Gs. {formatPYG(montoNum)}</b>. Avisale antes de pasar la tarjeta; esa comisión es de la procesadora.
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -246,7 +276,7 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-2 font-posMono tabular-nums outline-none"
                 />
                 <div className="text-slate-600 dark:text-slate-300">
-                  Del plástico del cliente salen <b>Gs. {formatPYG(total)}</b> en total (compra Gs. {formatPYG(compraNum)} + adelanto Gs. {formatPYG(montoNum)}), pero en <b>dos pasadas</b>: cobrá la compra por el POS de siempre y este adelanto aparte.
+                  Del plástico del cliente salen <b>Gs. {formatPYG(total + cargoCliente)}</b> en total (compra Gs. {formatPYG(compraNum)} + adelanto Gs. {formatPYG(montoNum)} + comisión Gs. {formatPYG(cargoCliente)}), pero en <b>dos pasadas</b>: cobrá la compra por el POS de siempre y este adelanto aparte.
                 </div>
               </div>
             </details>
@@ -293,6 +323,9 @@ export default function AdelantoEfectivoModal({ open, onClose, cashSessionId, te
                   <div className="mt-2 space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">Solo si el terminal ya aprobó e imprimió el voucher. El código de autorización es obligatorio y no se puede repetir.</p>
                     <input type="text" value={manualAut} onChange={(e) => setManualAut(e.target.value)} placeholder="Código de autorización del voucher"
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-sm font-posMono" />
+                    <input type="text" inputMode="numeric" value={manualCargo} onChange={(e) => { const n = soloDigitos(e.target.value); setManualCargo(n ? n.toLocaleString("es-PY") : "") }}
+                      placeholder={`Comisión impresa en el voucher (estimada Gs. ${formatPYG(cargoCliente)})`}
                       className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-2 text-sm font-posMono" />
                     <button onClick={registrarManual} disabled={guardando}
                       className="w-full py-2 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-sm font-bold cursor-pointer disabled:opacity-50">

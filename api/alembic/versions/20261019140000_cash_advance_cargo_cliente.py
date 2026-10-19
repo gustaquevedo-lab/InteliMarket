@@ -24,6 +24,11 @@ def upgrade() -> None:
             ADD COLUMN IF NOT EXISTS cargo_cliente_minimo_gs NUMERIC(12, 0) NOT NULL DEFAULT 0
     """)
     op.execute("ALTER TABLE cash_advances ADD COLUMN IF NOT EXISTS cargo_cliente_gs NUMERIC(15, 2) NOT NULL DEFAULT 0")
+    # El canal de adelantos puede existir ya (se crea solo al abrir la pantalla de comisiones): cargarle lo medido.
+    op.execute("""
+        UPDATE payment_method_bank_mappings SET cargo_cliente_porcentaje = 1, cargo_cliente_minimo_gs = 1000
+        WHERE canal_key = 'ADELANTO_DINELCO' AND cargo_cliente_porcentaje = 0 AND cargo_cliente_minimo_gs = 0
+    """)
     op.execute("""
         DO $$
         BEGIN

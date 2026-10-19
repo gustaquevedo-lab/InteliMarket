@@ -60,6 +60,8 @@ interface BankMappingItem {
   plazo_acreditacion_dias?: number
   tipo_plazo?: string
   comision_activa?: boolean
+  cargo_cliente_porcentaje?: number
+  cargo_cliente_minimo_gs?: number
   activo: boolean
 }
 
@@ -937,6 +939,8 @@ export default function CajaPage() {
     plazoAcreditacionDias?: number,
     tipoPlazo?: string,
     comisionActiva?: boolean,
+    cargoClientePct?: number,
+    cargoClienteMin?: number,
   ) => {
     setSavingMappingKey(canalKey)
     try {
@@ -948,6 +952,8 @@ export default function CajaPage() {
         plazo_acreditacion_dias: plazoAcreditacionDias,
         tipo_plazo: tipoPlazo,
         comision_activa: comisionActiva,
+        cargo_cliente_porcentaje: cargoClientePct,
+        cargo_cliente_minimo_gs: cargoClienteMin,
       })
       toast.success("Mapeo Bancario Actualizado", `Canal ${canalKey} configurado exitosamente.`)
       fetchBankMappings()
@@ -3126,6 +3132,9 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 const currentActivo = draft.activo !== undefined ? draft.activo : m.activo
                 const currentFija = draft.comision_fija_gs !== undefined ? draft.comision_fija_gs : (m.comision_fija_gs || 0)
                 const currentComisionActiva = draft.comision_activa !== undefined ? draft.comision_activa : !!m.comision_activa
+                const esAdelanto = m.canal_key === "ADELANTO_DINELCO"
+                const currentCargoPct = draft.cargo_cliente_porcentaje !== undefined ? draft.cargo_cliente_porcentaje : (m.cargo_cliente_porcentaje || 0)
+                const currentCargoMin = draft.cargo_cliente_minimo_gs !== undefined ? draft.cargo_cliente_minimo_gs : (m.cargo_cliente_minimo_gs || 0)
                 const isSaving = savingMappingKey === m.canal_key
 
                 // Cálculo simulado sobre 1.000.000 Gs. Comisión pasiva = la procesadora retiene (se resta);
@@ -3352,6 +3361,41 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           </label>
                         </div>
 
+                        {esAdelanto && (
+                          <div className="p-2.5 rounded-xl bg-sky-50 dark:bg-sky-950/20 border border-sky-200 dark:border-sky-800/40 space-y-2">
+                            <div className="text-[10px] font-black text-sky-700 dark:text-sky-300 leading-tight">
+                              Cargo que el terminal le cobra al CLIENTE (es de la procesadora, no del comercio)
+                            </div>
+                            <div className="grid grid-cols-2 gap-2.5">
+                              <div>
+                                <label className="input-label text-[10px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Porcentaje:</label>
+                                <div className="relative">
+                                  <input
+                                    type="number" step="0.01" min="0" value={currentCargoPct} disabled={isSaving}
+                                    onChange={(e) => { const val = Math.max(0, parseFloat(e.target.value) || 0); setEditingMappings(prev => ({ ...prev, [m.canal_key]: { ...prev[m.canal_key], cargo_cliente_porcentaje: val } })) }}
+                                    className="input-field text-xs font-mono pr-7 bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
+                                  />
+                                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">%</span>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="input-label text-[10px] font-bold text-slate-600 dark:text-slate-300 block mb-1">Mínimo por adelanto:</label>
+                                <div className="relative">
+                                  <input
+                                    type="number" step="1" min="0" value={currentCargoMin} disabled={isSaving}
+                                    onChange={(e) => { const val = Math.max(0, parseFloat(e.target.value) || 0); setEditingMappings(prev => ({ ...prev, [m.canal_key]: { ...prev[m.canal_key], cargo_cliente_minimo_gs: val } })) }}
+                                    className="input-field text-xs font-mono pr-7 bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
+                                  />
+                                  <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">₲</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-[10px] text-sky-700/80 dark:text-sky-300/80">
+                              Medido en el terminal: Gs. 1.000 hasta Gs. 100.000 y 1 % desde ahí (Gs. 155.000 → Gs. 1.550). Se suma a lo que sale de la tarjeta del cliente.
+                            </div>
+                          </div>
+                        )}
+
                         {/* Simulador Dinámico de Acreditación Neta */}
                         <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 space-y-1 text-[10px]">
                           <div className="flex items-center justify-between font-semibold text-slate-600 dark:text-slate-300">
@@ -3401,7 +3445,9 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           currentFija,
                           currentPlazo,
                           currentTipoPlazo,
-                          currentComisionActiva
+                          currentComisionActiva,
+                          esAdelanto ? currentCargoPct : undefined,
+                          esAdelanto ? currentCargoMin : undefined
                         )}
                         disabled={isSaving}
                         className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
