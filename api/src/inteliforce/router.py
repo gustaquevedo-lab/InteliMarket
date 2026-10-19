@@ -130,7 +130,6 @@ async def update_customer_location(
 async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     from api.src.sales.service import create_sale
     from api.src.sales.schemas import SaleCreate, SaleItemInput
-    from api.src.credit_accounts.service import CreditAuthorizationRequired
     from api.src.price_lists.service import resolve_customer_price
     from api.src.products.models import Product
     from sqlalchemy import select
@@ -167,8 +166,6 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
 
     try:
         sale = await create_sale(db, sale_data)
-    except CreditAuthorizationRequired as e:
-        raise HTTPException(status_code=409, detail={"requiere_autorizacion": True, **e.details})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
