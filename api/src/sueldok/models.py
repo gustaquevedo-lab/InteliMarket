@@ -1,7 +1,8 @@
 """SueldOK integration models"""
 
-from sqlalchemy import Column, String, Boolean, DateTime, Text, Numeric, JSON
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, String, Boolean, DateTime, Date, Text, Numeric, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from api.src.db import Base
@@ -55,9 +56,7 @@ class LaborSettlement(Base):
 
 # ── PayrollDossier ──────────────────────────────────────────────────────────
 
-from sqlalchemy import Date, ForeignKey
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import relationship
+
 
 
 class PayrollDossier(Base):

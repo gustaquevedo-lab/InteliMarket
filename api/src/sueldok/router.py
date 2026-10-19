@@ -1,6 +1,7 @@
 """SueldOK integration API router with SSO, shifts and productivity bonuses"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi.responses import Response, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List, Dict, Any
 
@@ -280,9 +281,6 @@ async def execute_dossier_compensations(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
-
-from fastapi.responses import Response, FileResponse
 
 
 @router.post("/dossiers/{dossier_id}/phases/{phase_id}/execute-third-party")
