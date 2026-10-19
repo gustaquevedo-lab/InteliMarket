@@ -1273,12 +1273,21 @@ class SupplierNcRequestResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SupplierNcItemInput(BaseModel):
+    numero: str
+    timbrado: str
+    monto: Decimal
+    fecha: Optional[date] = None
+    cdc: Optional[str] = None
+
+
 class ResolveSupplierNcRequest(BaseModel):
-    nc_recibida_numero: str
-    nc_recibida_timbrado: str
-    nc_recibida_monto: Decimal
-    nc_recibida_fecha: date
+    nc_recibida_numero: Optional[str] = None
+    nc_recibida_timbrado: Optional[str] = None
+    nc_recibida_monto: Optional[Decimal] = None
+    nc_recibida_fecha: Optional[date] = None
     nc_recibida_cdc: Optional[str] = None
+    notas_credito: Optional[list[SupplierNcItemInput]] = None
     observaciones: Optional[str] = None
     user_id: Optional[UUID] = None
 

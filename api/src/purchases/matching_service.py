@@ -522,18 +522,19 @@ async def perform_3way_match(
 async def resolve_supplier_nc(
     db: AsyncSession,
     request_id: str,
-    nc_recibida_numero: str,
-    nc_recibida_timbrado: str,
-    nc_recibida_monto: Decimal,
-    nc_recibida_fecha: date,
+    nc_recibida_numero: Optional[str] = None,
+    nc_recibida_timbrado: Optional[str] = None,
+    nc_recibida_monto: Optional[Decimal] = None,
+    nc_recibida_fecha: Optional[date] = None,
     nc_recibida_cdc: Optional[str] = None,
+    notas_credito: Optional[list[Any]] = None,
     observaciones: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Registra la entrega física/fiscal de la Nota de Crédito por parte del proveedor.
+    """Registra la entrega física/fiscal de una o más Notas de Crédito por parte del proveedor.
 
     Descuenta el monto de la factura en cuentas por pagar y, si el reclamo queda
-    satisfecho, libera la factura para que Tesorería pueda proceder al pago neto.
+    satisfecho de forma total o acumulada, libera la factura para que Tesorería pueda proceder al pago neto.
     """
     req_uuid = uuid.UUID(request_id)
     req_q = select(SupplierNcRequest).where(SupplierNcRequest.id == req_uuid)
@@ -551,76 +552,129 @@ async def resolve_supplier_nc(
     if not invoice:
         raise ValueError("Factura asociada a la solicitud no encontrada.")
 
-    # Actualizar la solicitud de NC
-    nc_req.nc_recibida_numero = nc_recibida_numero
-    nc_req.nc_recibida_timbrado = nc_recibida_timbrado
-    nc_req.nc_recibida_cdc = nc_recibida_cdc
-    nc_req.nc_recibida_monto = nc_recibida_monto
-    nc_req.nc_recibida_fecha = nc_recibida_fecha
-    nc_req.observaciones = f"{nc_req.observaciones or ''} | Resuelto: {observaciones or ''}".strip()
+    # Construir lista de NCs a aplicar
+    nc_list: list[dict[str, Any]] = []
+    if notas_credito and len(notas_credito) > 0:
+        for item in notas_credito:
+            if hasattr(item, "model_dump"):
+                d = item.model_dump()
+            elif isinstance(item, dict):
+                d = item
+            else:
+                d = {
+                    "numero": getattr(item, "numero"),
+                    "timbrado": getattr(item, "timbrado"),
+                    "monto": getattr(item, "monto"),
+                    "fecha": getattr(item, "fecha", None),
+                    "cdc": getattr(item, "cdc", None),
+                }
+            if Decimal(str(d.get("monto") or 0)) > 0:
+                nc_list.append(d)
+    elif nc_recibida_numero and nc_recibida_monto and Decimal(str(nc_recibida_monto)) > 0:
+        nc_list.append({
+            "numero": nc_recibida_numero,
+            "timbrado": nc_recibida_timbrado or "",
+            "monto": nc_recibida_monto,
+            "fecha": nc_recibida_fecha or date.today(),
+            "cdc": nc_recibida_cdc,
+        })
+    else:
+        raise ValueError("Debe ingresar al menos una Nota de Crédito con monto mayor a 0.")
+
+    nuevos_numeros: list[str] = []
+    total_monto_agregado = Decimal("0")
+
+    for nc_data in nc_list:
+        n_num = str(nc_data["numero"]).strip()
+        n_timb = str(nc_data.get("timbrado") or "").strip()
+        n_monto = Decimal(str(nc_data["monto"]))
+        n_fecha = nc_data.get("fecha") or date.today()
+        n_cdc = nc_data.get("cdc")
+
+        # 1. Crear o reutilizar la entidad fiscal formal SupplierCreditNote
+        existing_nc_q = select(SupplierCreditNote).where(
+            SupplierCreditNote.company_id == nc_req.company_id,
+            SupplierCreditNote.supplier_id == nc_req.supplier_id,
+            SupplierCreditNote.numero == n_num,
+            SupplierCreditNote.timbrado == n_timb,
+            SupplierCreditNote.cancelado == False,
+        )
+        existing_nc_res = await db.execute(existing_nc_q)
+        credit_note = existing_nc_res.scalar_one_or_none()
+
+        if not credit_note:
+            credit_note = SupplierCreditNote(
+                company_id=nc_req.company_id,
+                supplier_id=nc_req.supplier_id,
+                numero=n_num,
+                numero_factura_origen=invoice.numero_factura,
+                timbrado=n_timb,
+                fecha=n_fecha,
+                fecha_recepcion=date.today(),
+                motivo=f"SNC {nc_req.numero_solicitud} - {nc_req.tipo_motivo or 'Diferencia en recepción'}",
+                motivo_categoria="faltante_recepcion",
+                impacto_contable="recuperacion_merma",
+                monto=n_monto,
+                saldo_disponible=Decimal("0"),  # Aplicada directamente a esta factura
+                moneda=invoice.moneda or "PYG",
+                observaciones=f"Generada por resolución de {nc_req.numero_solicitud} sobre factura {invoice.numero_factura}",
+                cancelado=False,
+            )
+            db.add(credit_note)
+            await db.flush()
+        else:
+            if not credit_note.numero_factura_origen:
+                credit_note.numero_factura_origen = invoice.numero_factura
+            credit_note.saldo_disponible = max(Decimal("0"), (credit_note.saldo_disponible or Decimal("0")) - n_monto)
+
+        # 2. Registrar la aplicación formal de la NC a la factura en supplier_credit_note_applications
+        db.add(SupplierCreditNoteApplication(
+            company_id=nc_req.company_id,
+            credit_note_id=credit_note.id,
+            invoice_id=invoice.id,
+            monto_aplicado=n_monto,
+            observaciones=f"Compensación automática por resolución de {nc_req.numero_solicitud}",
+        ))
+
+        # Descontar del saldo pendiente de la factura
+        invoice.saldo_pendiente = max(Decimal("0"), (invoice.saldo_pendiente or invoice.total) - n_monto)
+        nuevos_numeros.append(n_num)
+        total_monto_agregado += n_monto
+
+    # 3. Calcular acumulado histórico total de NCs para esta factura
+    nc_apps_q = select(func.coalesce(func.sum(SupplierCreditNoteApplication.monto_aplicado), 0)).where(
+        SupplierCreditNoteApplication.invoice_id == invoice.id
+    )
+    total_acumulado_ncs = Decimal(str((await db.execute(nc_apps_q)).scalar() or 0)) + total_monto_agregado
+
+    # Concatenar números de NC en nc_req.nc_recibida_numero
+    numeros_existentes = [x.strip() for x in (nc_req.nc_recibida_numero or "").split(",") if x.strip()]
+    for num in nuevos_numeros:
+        if num not in numeros_existentes:
+            numeros_existentes.append(num)
+
+    nc_req.nc_recibida_numero = ", ".join(numeros_existentes)
+    nc_req.nc_recibida_monto = total_acumulado_ncs
+    nc_req.nc_recibida_fecha = nc_list[-1].get("fecha") or date.today()
+    if nc_list[-1].get("timbrado"):
+        nc_req.nc_recibida_timbrado = nc_list[-1]["timbrado"]
+    if nc_list[-1].get("cdc"):
+        nc_req.nc_recibida_cdc = nc_list[-1]["cdc"]
+    nc_req.observaciones = f"{nc_req.observaciones or ''} | Resuelto con NCs: {', '.join(nuevos_numeros)} ({observaciones or ''})".strip()
     nc_req.resolved_at = datetime.now(timezone.utc)
 
-    # 1. Crear o reutilizar la entidad fiscal formal SupplierCreditNote
-    existing_nc_q = select(SupplierCreditNote).where(
-        SupplierCreditNote.company_id == nc_req.company_id,
-        SupplierCreditNote.supplier_id == nc_req.supplier_id,
-        SupplierCreditNote.numero == nc_recibida_numero,
-        SupplierCreditNote.timbrado == nc_recibida_timbrado,
-        SupplierCreditNote.cancelado == False,
-    )
-    existing_nc_res = await db.execute(existing_nc_q)
-    credit_note = existing_nc_res.scalar_one_or_none()
-
-    if not credit_note:
-        credit_note = SupplierCreditNote(
-            company_id=nc_req.company_id,
-            supplier_id=nc_req.supplier_id,
-            numero=nc_recibida_numero,
-            numero_factura_origen=invoice.numero_factura,
-            timbrado=nc_recibida_timbrado,
-            fecha=nc_recibida_fecha or date.today(),
-            fecha_recepcion=date.today(),
-            motivo=f"SNC {nc_req.numero_solicitud} - {nc_req.tipo_motivo or 'Diferencia en recepción'}",
-            motivo_categoria="faltante_recepcion",
-            impacto_contable="recuperacion_merma",
-            monto=nc_recibida_monto,
-            saldo_disponible=Decimal("0"),  # Aplicada directamente a esta factura
-            moneda=invoice.moneda or "PYG",
-            observaciones=f"Generada por resolución de {nc_req.numero_solicitud} sobre factura {invoice.numero_factura}",
-            cancelado=False,
-        )
-        db.add(credit_note)
-        await db.flush()
-    else:
-        # Si ya existía, asegurarse de asociar la factura origen
-        if not credit_note.numero_factura_origen:
-            credit_note.numero_factura_origen = invoice.numero_factura
-        credit_note.saldo_disponible = max(Decimal("0"), (credit_note.saldo_disponible or Decimal("0")) - nc_recibida_monto)
-
-    # 2. Registrar la aplicación formal de la NC a la factura en supplier_credit_note_applications
-    db.add(SupplierCreditNoteApplication(
-        company_id=nc_req.company_id,
-        credit_note_id=credit_note.id,
-        invoice_id=invoice.id,
-        monto_aplicado=nc_recibida_monto,
-        observaciones=f"Compensación automática por resolución de {nc_req.numero_solicitud}",
-    ))
-
-    # Descontar del saldo pendiente de la factura
-    invoice.saldo_pendiente = max(Decimal("0"), (invoice.saldo_pendiente or invoice.total) - nc_recibida_monto)
-    
-    # Evaluar si cubre el total reclamado
-    if nc_recibida_monto >= nc_req.monto_reclamado:
+    # 4. Evaluar si cubre el total reclamado
+    if total_acumulado_ncs >= nc_req.monto_reclamado:
         nc_req.estado = "resuelta"
         invoice.monto_retenido_nc = Decimal("0")
         invoice.bloqueada_para_pago = False
         invoice.estado = "aprobada" if invoice.saldo_pendiente > 0 else "pagada"
-        invoice.motivo_bloqueo = f"Liberada para pago: Nota de Crédito N° {nc_recibida_numero} recibida y aplicada por {nc_recibida_monto:,.0f} Gs."
+        invoice.motivo_bloqueo = f"Liberada para pago: Notas de Crédito ({nc_req.nc_recibida_numero}) aplicadas por total {total_acumulado_ncs:,.0f} Gs."
     else:
         nc_req.estado = "entregada_parcial"
-        rem = nc_req.monto_reclamado - nc_recibida_monto
+        rem = nc_req.monto_reclamado - total_acumulado_ncs
         invoice.monto_retenido_nc = rem
-        invoice.motivo_bloqueo = f"Retención parcial restante de {rem:,.0f} Gs pendiente de NC complementaria."
+        invoice.motivo_bloqueo = f"Retención parcial restante de {rem:,.0f} Gs pendiente de NC complementaria (Recibido acumulado: {total_acumulado_ncs:,.0f} Gs)."
 
     await db.commit()
 
@@ -633,5 +687,5 @@ async def resolve_supplier_nc(
         "factura_numero": invoice.numero_factura,
         "nuevo_saldo_pendiente": float(invoice.saldo_pendiente),
         "bloqueada_para_pago": invoice.bloqueada_para_pago,
-        "mensaje": f"Nota de Crédito {nc_recibida_numero} aplicada con éxito. Nuevo saldo a pagar: {invoice.saldo_pendiente:,.0f} Gs."
+        "mensaje": f"Notas de Crédito ({', '.join(nuevos_numeros)}) aplicadas con éxito por {total_monto_agregado:,.0f} Gs. Nuevo saldo a pagar: {invoice.saldo_pendiente:,.0f} Gs."
     }

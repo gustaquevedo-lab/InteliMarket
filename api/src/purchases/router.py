@@ -1097,6 +1097,7 @@ async def resolve_supplier_nc_request(
             nc_recibida_monto=body.nc_recibida_monto,
             nc_recibida_fecha=body.nc_recibida_fecha,
             nc_recibida_cdc=body.nc_recibida_cdc,
+            notas_credito=body.notas_credito,
             observaciones=body.observaciones,
             user_id=str(body.user_id) if body.user_id else None
         )

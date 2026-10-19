@@ -3586,17 +3586,25 @@ async def apply_supplier_credit_note(db: AsyncSession, company_id: str, credit_n
     for snc in pending_sncs:
         if monto_remanente_aplicado <= Decimal("0"):
             break
-        snc.nc_recibida_numero = credit_note.numero
+        nums = [x.strip() for x in (snc.nc_recibida_numero or "").split(",") if x.strip()]
+        if credit_note.numero and credit_note.numero not in nums:
+            nums.append(credit_note.numero)
+        snc.nc_recibida_numero = ", ".join(nums)
         snc.nc_recibida_timbrado = credit_note.timbrado
-        snc.nc_recibida_monto = min(monto_remanente_aplicado, snc.monto_reclamado or Decimal("0"))
         snc.nc_recibida_fecha = credit_note.fecha
         snc.resolved_at = datetime.now(timezone.utc)
-        snc.observaciones = f"{snc.observaciones or ''} | Resuelta por aplicación de NC {credit_note.numero}".strip()
-        if monto_remanente_aplicado >= (snc.monto_reclamado or Decimal("0")):
+        snc.observaciones = f"{snc.observaciones or ''} | Aplicación NC {credit_note.numero}".strip()
+
+        monto_previo = Decimal(str(snc.nc_recibida_monto or 0)) if snc.estado == "entregada_parcial" else Decimal("0")
+        monto_total_para_snc = monto_previo + monto_remanente_aplicado
+
+        if monto_total_para_snc >= (snc.monto_reclamado or Decimal("0")):
             snc.estado = "resuelta"
-            monto_remanente_aplicado -= (snc.monto_reclamado or Decimal("0"))
+            snc.nc_recibida_monto = snc.monto_reclamado
+            monto_remanente_aplicado = monto_total_para_snc - (snc.monto_reclamado or Decimal("0"))
         else:
             snc.estado = "entregada_parcial"
+            snc.nc_recibida_monto = monto_total_para_snc
             monto_remanente_aplicado = Decimal("0")
 
     # Si todas las SNCs quedaron resueltas, desbloquear factura para pago
