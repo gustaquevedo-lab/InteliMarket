@@ -442,6 +442,12 @@ def sync_precios(pg, my):
             max_ts = fecmod
     n = upsert(pg, "price_list_items", ["id", "price_list_id", "product_id", "precio",
                                          "moneda", "activo"], rows)
+    # products.precio_venta = Precio 1 (con IVA): el mismo precio en POS, catálogo móvil y reportes.
+    p1 = [(precio, pid) for (_id, plid, pid, precio, _m, _a) in rows if plid == plist_id("pl1")]
+    if p1 and not DRY_RUN:
+        with pg.cursor() as cur:
+            cur.executemany("UPDATE products SET precio_venta = %s, updated_at = now() WHERE id = %s", p1)
+        pg.commit()
     log(f"  precios: {n} filas actualizadas (FECMOD > {since})")
     set_watermark(pg, "precios", last_synced_at=max_ts)
 
