@@ -35,7 +35,7 @@ import {
 } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
+import { formatPYG, formatDate, formatCurrency, getTodayAsuncion } from "../../utils/format"
 import { DevolucionProveedorPrintModal } from "./DevolucionProveedorPrintModal"
 import { PdfViewerModal } from "../../components/PdfViewerModal"
 import { ConsignacionesTab } from "./ConsignacionesTab"
@@ -332,6 +332,14 @@ export default function PurchasesPage() {
     nc_recibida_cdc: "",
     observaciones: "",
   })
+  const [resolveNcItems, setResolveNcItems] = useState<Array<{
+    id: string
+    numero: string
+    timbrado: string
+    monto: number
+    fecha: string
+    cdc: string
+  }>>([])
   const [resolvingNc, setResolvingNc] = useState(false)
 
   // Estados para Recepción de Factura y Matching contra Pedido
@@ -1785,10 +1793,25 @@ export default function PurchasesPage() {
 
   const handleOpenResolveNc = (ncReq: any) => {
     setSelectedNcRequestForResolve(ncReq)
+    const montoReclamado = Number(ncReq.monto_reclamado || 0)
+    const montoPrevio = ncReq.estado === "entregada_parcial" ? Number(ncReq.nc_recibida_monto || 0) : 0
+    const rem = Math.max(0, montoReclamado - montoPrevio)
+    const montoInicial = rem > 0 ? rem : montoReclamado
+
+    setResolveNcItems([
+      {
+        id: Math.random().toString(36).substring(2, 9),
+        numero: "",
+        timbrado: "",
+        monto: montoInicial,
+        fecha: new Date().toISOString().split("T")[0],
+        cdc: "",
+      }
+    ])
     setResolveNcForm({
       nc_recibida_numero: "",
       nc_recibida_timbrado: "",
-      nc_recibida_monto: Number(ncReq.monto_reclamado || 0),
+      nc_recibida_monto: montoInicial,
       nc_recibida_fecha: new Date().toISOString().split("T")[0],
       nc_recibida_cdc: "",
       observaciones: "",
@@ -1799,13 +1822,41 @@ export default function PurchasesPage() {
   const handleSaveResolveNc = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedNcRequestForResolve) return
+    if (resolveNcItems.length === 0) {
+      toast.warning("Nota de Crédito requerida", "Debe agregar al menos una Nota de Crédito.")
+      return
+    }
+
+    for (let i = 0; i < resolveNcItems.length; i++) {
+      const item = resolveNcItems[i]
+      if (!item.numero.trim()) {
+        toast.warning("Número requerido", `Ingrese el número de la Nota de Crédito #${i + 1}.`)
+        return
+      }
+      if (!item.timbrado.trim()) {
+        toast.warning("Timbrado requerido", `Ingrese el timbrado de la Nota de Crédito #${i + 1}.`)
+        return
+      }
+      if (Number(item.monto) <= 0) {
+        toast.warning("Monto requerido", `El monto de la Nota de Crédito #${i + 1} debe ser mayor a 0.`)
+        return
+      }
+    }
+
     setResolvingNc(true)
     try {
       const res = await api.purchases.resolveSupplierNcRequest(selectedNcRequestForResolve.id, {
-        ...resolveNcForm,
+        notas_credito: resolveNcItems.map(it => ({
+          numero: it.numero.trim(),
+          timbrado: it.timbrado.trim(),
+          monto: Number(it.monto),
+          fecha: it.fecha,
+          cdc: it.cdc.trim() || undefined,
+        })),
+        observaciones: resolveNcForm.observaciones.trim() || undefined,
         user_id: user?.id,
       })
-      toast.success("Nota de Crédito Aplicada", res.mensaje || "Se actualizó el saldo y se liberó la factura para Tesorería.")
+      toast.success("Notas de Crédito Aplicadas", res.mensaje || "Se actualizó el saldo y se liberó la factura para Tesorería.")
       setShowResolveNcModal(false)
       fetchAll()
     } catch (e: any) {
@@ -9347,17 +9398,18 @@ export default function PurchasesPage() {
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          MODAL: REGISTRAR NOTA DE CRÉDITO RECIBIDA DEL PROVEEDOR
+          MODAL: REGISTRAR NOTA DE CRÉDITO RECIBIDA DEL PROVEEDOR (MULTI-NC)
       ────────────────────────────────────────────────────────────────────────── */}
       {showResolveNcModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={() => !resolvingNc && setShowResolveNcModal(false)}>
+          <div className="bg-white dark:bg-slate-850 rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
               <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
                 <FileCheck className="w-5 h-5 text-emerald-500" /> Registrar Nota de Crédito Recibida
               </h3>
               <button
-                onClick={() => setShowResolveNcModal(false)}
+                type="button"
+                onClick={() => !resolvingNc && setShowResolveNcModal(false)}
                 className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
               >
                 <X className="w-5 h-5" />
@@ -9365,84 +9417,184 @@ export default function PurchasesPage() {
             </div>
 
             <p className="text-xs text-gray-500">
-              Al cargar la Nota de Crédito emitida por el proveedor, se aplica el descuento formal sobre la factura, se reduce el saldo en Cuentas por Pagar y se habilita para pago en Tesorería.
+              Al cargar las Notas de Crédito emitidas por el proveedor, se aplica el descuento formal sobre la factura, se reduce el saldo en Cuentas por Pagar y se habilita para pago en Tesorería.
             </p>
 
             <form onSubmit={handleSaveResolveNc} className="space-y-4">
               <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl space-y-1 text-xs font-mono">
                 <div>Proveedor: <strong className="text-gray-900 dark:text-white">{selectedNcRequestForResolve?.supplier?.razon_social}</strong></div>
                 <div>Factura: <strong className="text-indigo-600">{selectedNcRequestForResolve?.invoice?.numero_factura}</strong></div>
-                <div>Monto Reclamado Original: <strong className="text-red-600">{formatPYG(selectedNcRequestForResolve?.monto_reclamado || 0)}</strong></div>
+                <div>Monto Reclamado: <strong className="text-red-600">{formatPYG(selectedNcRequestForResolve?.monto_reclamado || 0)}</strong></div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
-                    N° Nota de Crédito *
-                  </label>
-                  <input
-                    type="text"
-                    value={resolveNcForm.nc_recibida_numero}
-                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_numero: e.target.value }))}
-                    className="input-field w-full text-xs font-mono"
-                    placeholder="001-001-0004512"
-                    required
-                  />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Notas de Crédito a Aplicar ({resolveNcItems.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const totalCargado = resolveNcItems.reduce((acc, it) => acc + Number(it.monto || 0), 0)
+                      const remSnc = Math.max(0, Number(selectedNcRequestForResolve?.monto_reclamado || 0) - (selectedNcRequestForResolve?.estado === "entregada_parcial" ? Number(selectedNcRequestForResolve?.nc_recibida_monto || 0) : 0) - totalCargado)
+                      setResolveNcItems(prev => [
+                        ...prev,
+                        {
+                          id: Math.random().toString(36).substring(2, 9),
+                          numero: "",
+                          timbrado: prev[0]?.timbrado || "",
+                          monto: remSnc > 0 ? remSnc : 0,
+                          fecha: new Date().toISOString().split("T")[0],
+                          cdc: "",
+                        }
+                      ])
+                    }}
+                    className="text-xs font-bold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Agregar otra NC</span>
+                  </button>
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
-                    Timbrado NC *
-                  </label>
-                  <input
-                    type="text"
-                    value={resolveNcForm.nc_recibida_timbrado}
-                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_timbrado: e.target.value }))}
-                    className="input-field w-full text-xs font-mono"
-                    placeholder="18545636"
-                    required
-                  />
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
-                    Monto Real de la NC (Gs.) *
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={resolveNcForm.nc_recibida_monto}
-                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_monto: Number(e.target.value) }))}
-                    className="input-field w-full text-xs font-mono font-bold"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
-                    Fecha Emisión NC *
-                  </label>
-                  <input
-                    type="date"
-                    value={resolveNcForm.nc_recibida_fecha}
-                    onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_fecha: e.target.value }))}
-                    className="input-field w-full text-xs"
-                    required
-                  />
-                </div>
-              </div>
+                {resolveNcItems.map((item, idx) => (
+                  <div key={item.id} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase font-mono">
+                        Nota de Crédito #{idx + 1}
+                      </span>
+                      {resolveNcItems.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setResolveNcItems(prev => prev.filter(it => it.id !== item.id))}
+                          className="text-rose-500 hover:text-rose-700 p-1 rounded cursor-pointer"
+                          title="Eliminar esta Nota de Crédito"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
 
-              <div>
-                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
-                  CDC SIFEN de la Nota de Crédito (44 dígitos, opcional)
-                </label>
-                <input
-                  type="text"
-                  value={resolveNcForm.nc_recibida_cdc}
-                  onChange={(e) => setResolveNcForm(prev => ({ ...prev, nc_recibida_cdc: e.target.value }))}
-                  className="input-field w-full text-xs font-mono"
-                  placeholder="01801503779001001000451212026090412345678901"
-                />
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                          N° Nota de Crédito *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={item.numero}
+                          onChange={e => {
+                            const val = e.target.value
+                            setResolveNcItems(prev => prev.map(it => it.id === item.id ? { ...it, numero: val } : it))
+                          }}
+                          placeholder="001-001-0004512"
+                          className="input-field w-full text-xs font-mono font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                          Timbrado NC *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={item.timbrado}
+                          onChange={e => {
+                            const val = e.target.value
+                            setResolveNcItems(prev => prev.map(it => it.id === item.id ? { ...it, timbrado: val } : it))
+                          }}
+                          placeholder="18545636"
+                          className="input-field w-full text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                          Monto Real Recibido (₲) *
+                        </label>
+                        <CurrencyInput
+                          value={item.monto}
+                          onChangeValue={num => {
+                            setResolveNcItems(prev => prev.map(it => it.id === item.id ? { ...it, monto: num } : it))
+                          }}
+                          currency="PYG"
+                          className="input-field w-full text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400"
+                          placeholder="0"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                          Fecha Emisión NC *
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={item.fecha}
+                          onChange={e => {
+                            const val = e.target.value
+                            setResolveNcItems(prev => prev.map(it => it.id === item.id ? { ...it, fecha: val } : it))
+                          }}
+                          className="input-field w-full text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-bold text-gray-500 block mb-0.5">
+                        CDC Electrónico SIFEN (opcional)
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={44}
+                        value={item.cdc}
+                        onChange={e => {
+                          const val = e.target.value
+                          setResolveNcItems(prev => prev.map(it => it.id === item.id ? { ...it, cdc: val } : it))
+                        }}
+                        placeholder="01801503779001001000451212026090412345678901"
+                        className="input-field w-full text-xs font-mono text-[11px]"
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                {/* Resumen de cobertura */}
+                {(() => {
+                  const montoTotalSnc = Number(selectedNcRequestForResolve?.monto_reclamado || 0)
+                  const yaRecibido = selectedNcRequestForResolve?.estado === "entregada_parcial" ? Number(selectedNcRequestForResolve?.nc_recibida_monto || 0) : 0
+                  const sumaCargando = resolveNcItems.reduce((acc, it) => acc + Number(it.monto || 0), 0)
+                  const acumuladoFinal = yaRecibido + sumaCargando
+                  const restante = Math.max(0, montoTotalSnc - acumuladoFinal)
+                  const isFullyCovered = acumuladoFinal >= montoTotalSnc
+
+                  return (
+                    <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1 text-xs font-mono">
+                      <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                        <span>Total reclamado:</span>
+                        <span className="font-bold">{formatPYG(montoTotalSnc)}</span>
+                      </div>
+                      {yaRecibido > 0 && (
+                        <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
+                          <span>Ya recibido previamente:</span>
+                          <span className="font-bold">{formatPYG(yaRecibido)}</span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
+                        <span>Total en esta carga ({resolveNcItems.length} NCs):</span>
+                        <span className="font-bold">{formatPYG(sumaCargando)}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200 dark:border-slate-800 font-bold">
+                        <span>Saldo pendiente tras aplicación:</span>
+                        <span className={isFullyCovered ? "text-emerald-600 dark:text-emerald-400 flex items-center gap-1" : "text-rose-600"}>
+                          {isFullyCovered ? "₲ 0 (100% Cubierto)" : formatPYG(restante)}
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })()}
               </div>
 
               <div>
@@ -9454,13 +9606,14 @@ export default function PurchasesPage() {
                   value={resolveNcForm.observaciones}
                   onChange={(e) => setResolveNcForm(prev => ({ ...prev, observaciones: e.target.value }))}
                   className="input-field w-full text-xs"
-                  placeholder="Ej. NC aplicada por reposición de 10 paquetes de fideos vencidos"
+                  placeholder="Ej. 2 NCs emitidas por el proveedor para cubrir devolución total"
                 />
               </div>
 
               <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
                 <button
                   type="button"
+                  disabled={resolvingNc}
                   onClick={() => setShowResolveNcModal(false)}
                   className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
                 >
@@ -9472,7 +9625,7 @@ export default function PurchasesPage() {
                   className="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 shadow-sm"
                 >
                   {resolvingNc ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                  {resolvingNc ? "Aplicando NC..." : "Aplicar NC y Habilitar Factura"}
+                  {resolvingNc ? "Aplicando NCs..." : "Aplicar NCs y Habilitar Factura"}
                 </button>
               </div>
             </form>
