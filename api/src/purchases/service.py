@@ -980,20 +980,28 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                 (Decimal(str(itm.cantidad_recibida or 0)) + Decimal(str(itm.cantidad_rechazada or 0))) * (itm.costo_unitario or Decimal("0"))
                 for itm in data.items
             ).quantize(Decimal("1"))
+            tot_ordenado = sum(
+                Decimal(str(getattr(itm, "cantidad_ordenada", None) or itm.cantidad_recibida or 0)) * (itm.costo_unitario or Decimal("0"))
+                for itm in data.items
+            ).quantize(Decimal("1"))
 
             diff_redondeo = Decimal("0")
             if data.total_factura_impreso is not None and data.total_factura_impreso > 0:
                 factura_total = data.total_factura_impreso.quantize(Decimal("1"))
                 diff_redondeo = (factura_total - receipt.total).quantize(Decimal("1"))
+            elif tot_ordenado > receipt.total:
+                factura_total = tot_ordenado
             elif tot_despachado > receipt.total:
                 factura_total = tot_despachado
             else:
                 factura_total = receipt.total
 
-            # El saldo pendiente inicial a pagar es el valor neto recibido en muelle (receipt.total)
-            # La diferencia por rechazo/faltante queda como retención preventiva pendiente de NC
+            # El monto retenido es la discrepancia que requiere NC del proveedor (faltante o rechazo)
             monto_retenido_inicial = max(Decimal("0"), factura_total - receipt.total)
-            saldo_a_pagar_inicial = min(factura_total, receipt.total)
+            # Regla canónica de inmutabilidad: la factura nace con su valor facial nominal total.
+            # JAMÁS se pre-netea el saldo_pendiente a receipt.total, de lo contrario al aplicar la NC
+            # el sistema descontaría el monto dos veces.
+            saldo_a_pagar_inicial = factura_total
 
             iva_10 = (factura_total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
@@ -1016,6 +1024,8 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                 saldo_pendiente=saldo_a_pagar_inicial,
                 monto_retenido_nc=monto_retenido_inicial,
                 requiere_nc=(monto_retenido_inicial > 0),
+                bloqueada_para_pago=(monto_retenido_inicial > 0),
+                motivo_bloqueo=f"Retención preventiva por faltante/rechazo en muelle: {monto_retenido_inicial:,.0f} Gs. (Pendiente de NC)" if monto_retenido_inicial > 0 else None,
                 moneda=inv_moneda,
                 tipo_cambio=inv_tc,
                 total_brl=inv_total_brl,
