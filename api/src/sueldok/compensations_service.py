@@ -501,8 +501,7 @@ async def get_dossier_compensations_pdf(
         ("TOPPADDING", (0, 0), (-1, -1), 0),
     ]))
     elements.append(header_table)
-    elements.append(Spacer(1, 3 * mm))
-    elements.append(_accent_bar(w=182 * mm, h=1.5 * mm))
+    elements.append(_accent_bar("ACTA DE COMPENSACIONES INTERNAS NO-CASH — RC-NOMINA"))
     elements.append(Spacer(1, 3.5 * mm))
 
     # Resumen de Compensaciones
