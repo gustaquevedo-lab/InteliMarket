@@ -684,9 +684,13 @@ export default function BancosPage() {
     }
   }
 
+  // Helper de resiliencia para tipos de transacción bancaria
+  const isCreditTx = (tipo: string) => tipo === "credito" || tipo === "ingreso" || tipo === "deposito"
+
   // Filtrado de movimientos
   const filteredBankTxns = bankTxns.filter(t => {
-    if (txFilterTipo !== "todos" && t.tipo !== txFilterTipo) return false
+    if (txFilterTipo === "credito" && !isCreditTx(t.tipo)) return false
+    if (txFilterTipo === "debito" && isCreditTx(t.tipo)) return false
     if (txFilterCategoria !== "todas" && t.categoria !== txFilterCategoria) return false
     if (txFilterConciliado === "conciliados" && !t.conciliado) return false
     if (txFilterConciliado === "pendientes" && t.conciliado) return false
@@ -1359,8 +1363,8 @@ export default function BancosPage() {
               {/* Resumen de Extracto de la Cuenta Seleccionada */}
               {(() => {
                 const currentAccount = banks.find(b => b.id === selectedBank)
-                const totalCred = filteredBankTxns.filter(t => t.tipo === "credito").reduce((acc, t) => acc + Number(t.monto || 0), 0)
-                const totalDeb = filteredBankTxns.filter(t => t.tipo === "debito").reduce((acc, t) => acc + Number(t.monto || 0), 0)
+                const totalCred = filteredBankTxns.filter(t => isCreditTx(t.tipo)).reduce((acc, t) => acc + Number(t.monto || 0), 0)
+                const totalDeb = filteredBankTxns.filter(t => !isCreditTx(t.tipo)).reduce((acc, t) => acc + Number(t.monto || 0), 0)
                 const ccy = currentAccount?.moneda || "PYG"
                 return (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1377,12 +1381,12 @@ export default function BancosPage() {
                     <div className="card p-3.5 bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200/60 dark:border-emerald-800/40">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">Total Ingresos (+)</div>
                       <div className="font-mono font-black text-base text-emerald-600 dark:text-emerald-400 mt-0.5">+{formatCurrency(totalCred, ccy)}</div>
-                      <div className="text-[10px] text-gray-500 mt-0.5">{filteredBankTxns.filter(t => t.tipo === "credito").length} movimientos</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{filteredBankTxns.filter(t => isCreditTx(t.tipo)).length} movimientos</div>
                     </div>
                     <div className="card p-3.5 bg-red-50/40 dark:bg-red-950/20 border-red-200/60 dark:border-red-800/40">
                       <div className="text-[10px] font-bold uppercase tracking-wider text-red-700 dark:text-red-400">Total Egresos (-)</div>
                       <div className="font-mono font-black text-base text-red-600 dark:text-red-400 mt-0.5">-{formatCurrency(totalDeb, ccy)}</div>
-                      <div className="text-[10px] text-gray-500 mt-0.5">{filteredBankTxns.filter(t => t.tipo === "debito").length} movimientos</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{filteredBankTxns.filter(t => !isCreditTx(t.tipo)).length} movimientos</div>
                     </div>
                   </div>
                 )
@@ -1495,11 +1499,11 @@ export default function BancosPage() {
                             </td>
                             <td className="p-3.5 whitespace-nowrap">
                               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                                t.tipo === "credito"
+                                isCreditTx(t.tipo)
                                   ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
                                   : "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
                               }`}>
-                                {t.tipo === "credito" ? "+ Ingreso" : "- Egreso"}
+                                {isCreditTx(t.tipo) ? "+ Ingreso" : "- Egreso"}
                               </span>
                             </td>
                             <td className="p-3.5 whitespace-nowrap">
@@ -2075,9 +2079,9 @@ export default function BancosPage() {
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
                             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                              t.tipo === "credito" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                              isCreditTx(t.tipo) ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
                             }`}>
-                              {t.tipo === "credito" ? "+ Ingreso" : "- Egreso"}
+                              {isCreditTx(t.tipo) ? "+ Ingreso" : "- Egreso"}
                             </span>
                             <span className="font-bold text-sm text-gray-900 dark:text-white font-mono">{formatGs(t.monto)}</span>
                             <span className="text-xs text-gray-400">· {t.fecha ? new Date(t.fecha).toLocaleDateString("es-PY") : ""}</span>

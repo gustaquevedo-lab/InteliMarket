@@ -9402,8 +9402,8 @@ export default function PurchasesPage() {
       ────────────────────────────────────────────────────────────────────────── */}
       {showResolveNcModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={() => !resolvingNc && setShowResolveNcModal(false)}>
-          <div className="bg-white dark:bg-slate-850 rounded-2xl shadow-xl max-w-lg w-full p-6 border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
+          <div className="bg-white dark:bg-slate-850 rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] flex flex-col border border-slate-200 dark:border-slate-700 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 p-5 shrink-0">
               <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
                 <FileCheck className="w-5 h-5 text-emerald-500" /> Registrar Nota de Crédito Recibida
               </h3>
@@ -9416,11 +9416,11 @@ export default function PurchasesPage() {
               </button>
             </div>
 
-            <p className="text-xs text-gray-500">
-              Al cargar las Notas de Crédito emitidas por el proveedor, se aplica el descuento formal sobre la factura, se reduce el saldo en Cuentas por Pagar y se habilita para pago en Tesorería.
-            </p>
-
-            <form onSubmit={handleSaveResolveNc} className="space-y-4">
+            <form onSubmit={handleSaveResolveNc} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                <p className="text-xs text-gray-500">
+                  Al cargar las Notas de Crédito emitidas por el proveedor, se aplica el descuento formal sobre la factura, se reduce el saldo en Cuentas por Pagar y se habilita para pago en Tesorería.
+                </p>
               <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl space-y-1 text-xs font-mono">
                 <div>Proveedor: <strong className="text-gray-900 dark:text-white">{selectedNcRequestForResolve?.supplier?.razon_social}</strong></div>
                 <div>Factura: <strong className="text-indigo-600">{selectedNcRequestForResolve?.invoice?.numero_factura}</strong></div>
@@ -9609,13 +9609,14 @@ export default function PurchasesPage() {
                   placeholder="Ej. 2 NCs emitidas por el proveedor para cubrir devolución total"
                 />
               </div>
+            </div>
 
-              <div className="flex justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700">
+              <div className="flex justify-end gap-3 p-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 shrink-0">
                 <button
                   type="button"
                   disabled={resolvingNc}
                   onClick={() => setShowResolveNcModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
                   Cancelar
                 </button>

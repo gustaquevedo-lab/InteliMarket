@@ -5228,8 +5228,8 @@ export default function FinancialPage() {
       {/* ── MODAL: CARGAR NOTA DE CRÉDITO RECIBIDA DEL PROVEEDOR (RESOLVER SNC) ── */}
       {showResolveNcModal && selectedNcRequestForResolve && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in" onClick={() => !resolvingNc && setShowResolveNcModal(false)}>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full border border-gray-200 dark:border-slate-800 overflow-hidden" onClick={e => e.stopPropagation()}>
-            <div className="p-5 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-850">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col border border-gray-200 dark:border-slate-800 overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-850 shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
                   <FileCheck className="w-5 h-5" />
@@ -5252,7 +5252,8 @@ export default function FinancialPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveResolveNc} className="p-5 space-y-4">
+            <form onSubmit={handleSaveResolveNc} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-5 space-y-4 overflow-y-auto flex-1">
               {(() => {
                 const linkedInv = invoices.find((i: any) => String(i.id) === String(selectedNcRequestForResolve.invoice_id))
                 const sncFecha = selectedNcRequestForResolve.created_at ? formatDate(selectedNcRequestForResolve.created_at) : (selectedNcRequestForResolve.fecha ? formatDate(selectedNcRequestForResolve.fecha) : "—")
@@ -5495,8 +5496,9 @@ export default function FinancialPage() {
                   className="input-field w-full text-xs"
                 />
               </div>
+            </div>
 
-              <div className="pt-3 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between">
+              <div className="p-4 bg-gray-50 dark:bg-slate-850 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between shrink-0">
                 <span className="text-[11px] text-gray-400">
                   Aplica la deducción y libera la factura.
                 </span>
@@ -5512,7 +5514,7 @@ export default function FinancialPage() {
                   <button
                     type="submit"
                     disabled={resolvingNc}
-                    className="btn-primary text-xs py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5"
+                    className="btn-primary text-xs py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 shadow-sm"
                   >
                     {resolvingNc ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                     <span>{resolvingNc ? "Aplicando..." : "Aplicar NC y Habilitar"}</span>
