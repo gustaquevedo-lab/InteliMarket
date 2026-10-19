@@ -586,6 +586,9 @@ async def register_payment(db: AsyncSession, invoice_id: str, data: SupplierInvo
     if invoice.saldo_pendiente <= 0:
         invoice.saldo_pendiente = Decimal("0")
         invoice.estado = "pagada"
+        invoice.monto_retenido_nc = Decimal("0")
+        invoice.bloqueada_para_pago = False
+        invoice.requiere_nc = False
     else:
         invoice.estado = "parcial"
 
@@ -3414,11 +3417,18 @@ async def apply_supplier_credit_note(db: AsyncSession, company_id: str, credit_n
     nuevo_saldo_inv = saldo_factura - monto_aplicar
 
     credit_note.saldo_disponible = nuevo_saldo_nc
-    invoice.saldo_pendiente = nuevo_saldo_inv
+    invoice.saldo_pendiente = max(Decimal("0"), nuevo_saldo_inv)
+    invoice.monto_retenido_nc = max(Decimal("0"), (invoice.monto_retenido_nc or Decimal("0")) - monto_aplicar)
     if nuevo_saldo_inv <= 0:
-        invoice.estado = "pagado"
+        invoice.estado = "pagada"
+        invoice.monto_retenido_nc = Decimal("0")
+        invoice.bloqueada_para_pago = False
+        invoice.requiere_nc = False
     else:
         invoice.estado = "parcial"
+        if invoice.monto_retenido_nc == Decimal("0"):
+            invoice.bloqueada_para_pago = False
+            invoice.requiere_nc = False
 
     # Registrar aplicacion
     app_record = SupplierCreditNoteApplication(
@@ -4498,6 +4508,9 @@ async def _execute_disbursements_internal(
                 order.diferencia_cambio = (order.diferencia_cambio or Decimal("0")) + diff_centavos
             elif inv.saldo_pendiente <= Decimal("0"):
                 inv.estado = "pagada"
+                inv.monto_retenido_nc = Decimal("0")
+                inv.bloqueada_para_pago = False
+                inv.requiere_nc = False
                 if inv.saldo_pendiente_brl is not None:
                     inv.saldo_pendiente_brl = Decimal("0")
             else:
@@ -5131,8 +5144,8 @@ async def delete_supplier_payment_order(
             inv = await db.get(SupplierInvoice, alloc.invoice_id)
             if inv:
                 inv.saldo_pendiente = (inv.saldo_pendiente or Decimal("0")) + alloc.monto_aplicado
-                if inv.estado == "pagada":
-                    inv.estado = "pendiente"
+                if inv.estado in ("pagada", "pagado"):
+                    inv.estado = "pendiente" if inv.saldo_pendiente >= (inv.total or Decimal("0")) else "parcial"
 
         # 2. Revertir Desembolsos
         disb_res = await db.execute(

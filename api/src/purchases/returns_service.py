@@ -1006,11 +1006,17 @@ async def complete_supplier_return(
                 monto_aplicar = min(saldo_inv, disponible_para_aplicar)
                 if monto_aplicar > 0:
                     inv.saldo_pendiente = max(Decimal(0), saldo_inv - monto_aplicar)
-                    inv.monto_retenido_nc = Decimal(str(inv.monto_retenido_nc or 0)) + monto_aplicar
+                    inv.monto_retenido_nc = max(Decimal(0), Decimal(str(inv.monto_retenido_nc or 0)) - monto_aplicar)
                     if inv.saldo_pendiente <= 0:
                         inv.estado = "pagada"
+                        inv.monto_retenido_nc = Decimal(0)
+                        inv.bloqueada_para_pago = False
+                        inv.requiere_nc = False
                     else:
                         inv.estado = "parcial"
+                        if inv.monto_retenido_nc == Decimal(0):
+                            inv.bloqueada_para_pago = False
+                            inv.requiere_nc = False
 
                     scn.saldo_disponible = max(Decimal(0), (scn.saldo_disponible or Decimal(0)) - monto_aplicar)
 
@@ -1188,11 +1194,17 @@ async def add_nc_to_supplier_return(
                 monto_aplicar = min(saldo_inv, disponible_para_aplicar)
                 if monto_aplicar > 0:
                     inv.saldo_pendiente = max(Decimal(0), saldo_inv - monto_aplicar)
-                    inv.monto_retenido_nc = Decimal(str(inv.monto_retenido_nc or 0)) + monto_aplicar
+                    inv.monto_retenido_nc = max(Decimal(0), Decimal(str(inv.monto_retenido_nc or 0)) - monto_aplicar)
                     if inv.saldo_pendiente <= 0:
                         inv.estado = "pagada"
+                        inv.monto_retenido_nc = Decimal(0)
+                        inv.bloqueada_para_pago = False
+                        inv.requiere_nc = False
                     else:
                         inv.estado = "parcial"
+                        if inv.monto_retenido_nc == Decimal(0):
+                            inv.bloqueada_para_pago = False
+                            inv.requiere_nc = False
 
                     scn.saldo_disponible = max(Decimal(0), (scn.saldo_disponible or Decimal(0)) - monto_aplicar)
 

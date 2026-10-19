@@ -493,11 +493,11 @@ export default function FinancialPage() {
         inv.supplier_nombre?.toLowerCase().includes(search.toLowerCase()) ||
         inv.timbrado?.includes(search)
 
-      const isPendiente = !!inv.estado && ["pendiente", "aprobada", "parcial"].includes(inv.estado) && Number(inv.saldo_pendiente ?? inv.total ?? 0) > 0
+      const isPendiente = !!inv.estado && ["pendiente", "aprobada", "parcial", "retenida_discrepancia"].includes(inv.estado) && Number(inv.saldo_pendiente ?? inv.total ?? 0) > 0
       const isVencida = isPendiente && !!inv.fecha_vencimiento && new Date(inv.fecha_vencimiento) < new Date()
       let matchEstado = true
       if (filterEstado === "pendiente") matchEstado = isPendiente
-      if (filterEstado === "pagada") matchEstado = inv.estado === "pagada"
+      if (filterEstado === "pagada") matchEstado = inv.estado === "pagada" || inv.estado === "pagado" || Number(inv.saldo_pendiente ?? 0) <= 0
       if (filterEstado === "vencida") matchEstado = !!isVencida
 
       let matchSupplier = true
@@ -522,13 +522,13 @@ export default function FinancialPage() {
   const totalDeudaAP = useMemo(() => {
     if (dashboard?.total_pendiente != null) return Number(dashboard.total_pendiente)
     return invoices
-      .filter(i => i.estado === "pendiente")
+      .filter(i => !!i.estado && ["pendiente", "aprobada", "parcial", "retenida_discrepancia"].includes(i.estado) && Number(i.saldo_pendiente ?? i.total ?? 0) > 0)
       .reduce((sum, i) => sum + Number(i.saldo_pendiente ?? i.total ?? 0), 0)
   }, [dashboard, invoices])
 
   const facturasVencidas = useMemo(() => {
     const today = getTodayAsuncion()
-    return invoices.filter(i => i.estado === "pendiente" && i.fecha_vencimiento && i.fecha_vencimiento < today)
+    return invoices.filter(i => !!i.estado && ["pendiente", "aprobada", "parcial", "retenida_discrepancia"].includes(i.estado) && Number(i.saldo_pendiente ?? i.total ?? 0) > 0 && i.fecha_vencimiento && i.fecha_vencimiento < today)
   }, [invoices])
 
   const montoVencidoAP = useMemo(() => {
@@ -537,7 +537,7 @@ export default function FinancialPage() {
   }, [dashboard, facturasVencidas])
 
   const cantFacturasPendientes = useMemo(() => {
-    return dashboard?.facturas_pendientes ?? invoices.filter(i => i.estado === "pendiente").length
+    return dashboard?.facturas_pendientes ?? invoices.filter(i => !!i.estado && ["pendiente", "aprobada", "parcial", "retenida_discrepancia"].includes(i.estado) && Number(i.saldo_pendiente ?? i.total ?? 0) > 0).length
   }, [dashboard, invoices])
 
   const cantFacturasVencidas = useMemo(() => {

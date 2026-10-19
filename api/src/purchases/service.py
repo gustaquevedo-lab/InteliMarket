@@ -948,7 +948,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                     SupplierInvoice.company_id == company_id,
                     SupplierInvoice.supplier_id == supplier_id,
                     SupplierInvoice.numero_factura.in_(cands),
-                    SupplierInvoice.estado.not_in(["pagada", "cancelada"]),
+                    SupplierInvoice.estado.not_in(["pagada", "pagado", "cancelada", "anulada"]),
                     (SupplierInvoice.receipt_id == None) | (SupplierInvoice.receipt_id == receipt.id)
                 )
             )
@@ -961,7 +961,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                     SupplierInvoice.company_id == company_id,
                     SupplierInvoice.supplier_id == supplier_id,
                     SupplierInvoice.purchase_order_id == data.purchase_order_id,
-                    SupplierInvoice.estado.not_in(["pagada", "cancelada"]),
+                    SupplierInvoice.estado.not_in(["pagada", "pagado", "cancelada", "anulada"]),
                     (SupplierInvoice.receipt_id == None) | (SupplierInvoice.receipt_id == receipt.id)
                 ).order_by(SupplierInvoice.created_at.desc())
             )
