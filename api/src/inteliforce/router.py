@@ -130,9 +130,10 @@ async def update_customer_location(
 async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     from api.src.sales.service import create_sale
     from api.src.sales.schemas import SaleCreate, SaleItemInput
-    from api.src.price_lists.service import resolve_customer_price
+    from api.src.price_lists.models import PriceList, PriceListItem
     from api.src.products.models import Product
     from sqlalchemy import select
+    from decimal import Decimal, ROUND_HALF_UP
 
     from api.src.inventory.models import Warehouse
 
@@ -141,20 +142,30 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
     if not warehouse:
         raise HTTPException(status_code=400, detail=f"El vendedor {rep.nombre} no tiene depósito asignado")
 
-    # Precio e IVA los decide el servidor y los preventistas no dan descuentos: lo del celular es referencia.
+    # Igual que la preventa legacy: PRECIO1 + IVA (la lista guarda el precio SIN IVA y la app vieja
+    # ignora clientes.LISTA; medido en fac_ventas: 97% de las líneas). Precio, IVA y descuento los decide
+    # el servidor; lo que manda el celular es referencia.
+    # shortcut: sin escalas PRECIO2/3 (0,3% de líneas) ni actividades de proveedor (~19% con descuento), ver informe 01 §P1.7.
+    ids = [i.product_id for i in data.items]
     products = {p.id: p for p in (await db.execute(select(Product).where(
-        Product.company_id == rep.company_id, Product.id.in_([i.product_id for i in data.items]),
+        Product.company_id == rep.company_id, Product.id.in_(ids),
     ))).scalars()}
+    precio1 = dict((await db.execute(
+        select(PriceListItem.product_id, PriceListItem.precio)
+        .join(PriceList, PriceList.id == PriceListItem.price_list_id)
+        .where(PriceList.company_id == rep.company_id, PriceList.nombre == "Precio 1",
+               PriceListItem.activo == True, PriceListItem.product_id.in_(ids))
+    )).all())
     items = []
     for item in data.items:
         product = products.get(item.product_id)
-        if not product:
-            raise HTTPException(status_code=400, detail=f"Producto {item.product_id} no existe")
-        price = await resolve_customer_price(db, str(rep.company_id), str(data.customer_id), str(item.product_id), int(item.cantidad))
+        if not product or not precio1.get(item.product_id):
+            raise HTTPException(status_code=400, detail=f"Producto {item.product_id} no existe o no tiene Precio 1")
+        iva = Decimal(str(product.iva_tasa if product.iva_tasa is not None else 10))
         items.append(SaleItemInput(
             product_id=item.product_id, cantidad=item.cantidad,
-            precio_unitario=price["precio"] if price else (product.precio_venta or 0),
-            descuento_pct=0, iva_tasa=product.iva_tasa if product.iva_tasa is not None else 10,
+            precio_unitario=(Decimal(str(precio1[item.product_id])) * (1 + iva / 100)).quantize(Decimal("1"), rounding=ROUND_HALF_UP),
+            descuento_pct=0, iva_tasa=iva,
         ))
 
     sale_data = SaleCreate(
