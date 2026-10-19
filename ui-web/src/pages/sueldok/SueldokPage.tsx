@@ -2008,17 +2008,17 @@ export default function SueldokPage() {
           {/* Tabla de Nómina */}
           <section className="rounded-3xl border border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[900px]">
+              <table className="w-full text-sm min-w-[1050px]">
                 <thead>
                   <tr className="text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-100 dark:border-slate-800/80 text-left bg-slate-50/40 dark:bg-slate-800/20">
-                    <th className="px-6 py-3.5">Funcionario</th>
-                    <th className="px-4 py-3.5 text-right">Salario Base</th>
-                    <th className="px-4 py-3.5 text-right">Bonos / Extras</th>
-                    <th className="px-4 py-3.5 text-right">IPS Obrero (9%)</th>
-                    <th className="px-4 py-3.5 text-right">Anticipos</th>
-                    <th className="px-4 py-3.5 text-right">Faltantes / Ded.</th>
-                    <th className="px-6 py-3.5 text-right">Salario Neto</th>
-                    <th className="px-4 py-3.5 text-center">Acción</th>
+                    <th className="px-6 py-3.5 whitespace-nowrap">Funcionario</th>
+                    <th className="px-4 py-3.5 text-right whitespace-nowrap">Salario Base</th>
+                    <th className="px-4 py-3.5 text-right whitespace-nowrap">Bonos / Extras</th>
+                    <th className="px-4 py-3.5 text-right whitespace-nowrap">IPS Obrero (9%)</th>
+                    <th className="px-4 py-3.5 text-right whitespace-nowrap">Anticipos</th>
+                    <th className="px-4 py-3.5 text-right whitespace-nowrap">Faltantes / Ded.</th>
+                    <th className="px-6 py-3.5 text-right whitespace-nowrap">Salario Neto</th>
+                    <th className="px-4 py-3.5 text-center whitespace-nowrap">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
@@ -2026,45 +2026,45 @@ export default function SueldokPage() {
                     <tr key={item.id || idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
                       <td className="px-6 py-3.5">
                         <div className="flex items-center gap-2">
-                          <div className="font-black text-slate-900 dark:text-white">{item.nombre}</div>
+                          <div className="font-black text-slate-900 dark:text-white whitespace-nowrap">{item.nombre}</div>
                           <button
                             type="button"
                             onClick={() => setSelectedEmpForLiquidacion(item)}
-                            className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-lg transition-all cursor-pointer"
+                            className="p-1 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 rounded-lg transition-all cursor-pointer shrink-0"
                             title="Generar liquidación de salario individual de este funcionario"
                           >
                             <FileText className="w-3.5 h-3.5" />
                           </button>
                         </div>
-                        <div className="text-[11px] text-slate-400">
+                        <div className="text-[11px] text-slate-400 whitespace-nowrap">
                           CI: {item.ci || "—"} · {item.cargo} ({item.depto})
                         </div>
                       </td>
-                      <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-800 dark:text-slate-200">
+                      <td className="px-4 py-3.5 text-right font-mono font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap">
                         {formatPYG(item.baseSalary)}
                       </td>
-                      <td className="px-4 py-3.5 text-right font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                      <td className="px-4 py-3.5 text-right font-mono text-emerald-600 dark:text-emerald-400 font-bold whitespace-nowrap">
                         {item.bonus > 0 ? `+${formatPYG(item.bonus)}` : "—"}
                       </td>
-                      <td className="px-4 py-3.5 text-right font-mono text-blue-600 dark:text-blue-400">
-                        -{formatPYG(item.ipsWorker)}
+                      <td className="px-4 py-3.5 text-right font-mono text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                        {item.ipsWorker > 0 ? `-${formatPYG(item.ipsWorker)}` : "—"}
                       </td>
-                      <td className="px-4 py-3.5 text-right font-mono text-violet-600 dark:text-violet-400">
+                      <td className="px-4 py-3.5 text-right font-mono text-violet-600 dark:text-violet-400 whitespace-nowrap">
                         {item.advances > 0 ? `-${formatPYG(item.advances)}` : "—"}
                       </td>
-                      <td className="px-4 py-3.5 text-right font-mono text-amber-600 dark:text-amber-400">
+                      <td className="px-4 py-3.5 text-right font-mono text-amber-600 dark:text-amber-400 whitespace-nowrap">
                         {item.deductions > 0 ? `-${formatPYG(item.deductions)}` : "—"}
                       </td>
-                      <td className="px-6 py-3.5 text-right">
-                        <span className="font-mono text-sm font-black text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 px-3 py-1 rounded-xl">
+                      <td className="px-6 py-3.5 text-right whitespace-nowrap">
+                        <span className="inline-flex items-center justify-end font-mono text-xs sm:text-sm font-black text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 px-3 py-1 rounded-xl whitespace-nowrap shadow-2xs">
                           {formatPYG(item.totalNet)}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5 text-center">
+                      <td className="px-4 py-3.5 text-center whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => setSelectedEmpForLiquidacion(item)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 dark:text-indigo-300 rounded-lg border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer shadow-xs"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 dark:text-indigo-300 rounded-lg border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer shadow-xs whitespace-nowrap"
                           title="Generar liquidación de salario individual de este funcionario"
                         >
                           <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />

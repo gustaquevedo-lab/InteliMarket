@@ -16,7 +16,7 @@ export function cleanOptionalPayload<T extends Record<string, any>>(obj: T): Par
 }
 
 export function formatPYG(value: number | string | null | undefined): string {
-  if (value == null) return "₲ 0"
+  if (value == null) return "₲\u00A00"
   let num: number
   if (typeof value === "string") {
     const trimmed = value.trim()
@@ -28,8 +28,8 @@ export function formatPYG(value: number | string | null | undefined): string {
   } else {
     num = Math.round(value)
   }
-  if (isNaN(num)) return "₲ 0"
-  return `₲ ${num.toLocaleString("es-PY", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+  if (isNaN(num)) return "₲\u00A00"
+  return `₲\u00A0${num.toLocaleString("es-PY", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 }
 
 export function formatUSD(value: number | string | null | undefined): string {
