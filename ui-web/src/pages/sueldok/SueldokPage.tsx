@@ -570,11 +570,11 @@ export default function SueldokPage() {
         baseSalary: item.baseSalary,
         bonus: item.bonus || 0,
         totalGross: item.totalGross,
-        ipsWorker: item.ipsWorker,
-        ipsEmployer: item.ipsEmployer,
+        ipsWorker: item.ipsWorker !== undefined ? item.ipsWorker : 251848,
+        ipsEmployer: item.ipsEmployer !== undefined ? item.ipsEmployer : 461721,
         advances: item.advances || 0,
         deductions: item.deductions || 0,
-        loanDeductions: item.loanDeductions || [],
+        loanDeductions: item.loanDeductionsDetails || item.typedDeductions || item.loanDeductions || [],
         loanDeduction: item.loanDeduction || 0,
         commercialDeduction: item.commercialDeduction || 0,
         judicialDeduction: item.judicialDeduction || 0,
@@ -588,8 +588,10 @@ export default function SueldokPage() {
 
     return employees.map((emp: any): PayrollItem => {
       const baseSalary = emp.salario || 0
-      const ipsWorker = Math.round(baseSalary * 0.09)
-      const ipsEmployer = Math.round(baseSalary * 0.165)
+      const SMLV = 2798309
+      // En Extra Supermercado el IPS obrero y patronal se calcula con la base del Salario Mínimo Legal
+      const ipsWorker = emp.ipsWorker !== undefined ? emp.ipsWorker : (emp.hasIps === false ? 0 : Math.round(SMLV * 0.09))
+      const ipsEmployer = emp.ipsEmployer !== undefined ? emp.ipsEmployer : (emp.hasIps === false ? 0 : Math.round(SMLV * 0.165))
 
       // Anticipos aprobados de este funcionario
       const empAdvances = advances
