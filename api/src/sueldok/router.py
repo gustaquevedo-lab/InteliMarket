@@ -192,6 +192,30 @@ async def list_settlements(
     return await service.list_labor_settlements(db, company_id)
 
 
+@router.get("/settlements/{settlement_id}/receipt-pdf")
+async def download_settlement_receipt_pdf(
+    settlement_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Genera y descarga el Recibo Oficial Premium en PDF de una liquidación final / compensación de finiquito.
+    """
+    user_name = user.get("username", "") if isinstance(user, dict) else getattr(user, "username", "")
+    try:
+        pdf_bytes = await service.get_labor_settlement_receipt_pdf(
+            db, company_id, settlement_id, user_name=user_name
+        )
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=recibo_finiquito_{settlement_id[:8]}.pdf"}
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 
 # ── PayrollDossier Endpoints ──────────────────────────────────────────────
 

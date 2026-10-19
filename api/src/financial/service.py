@@ -4349,6 +4349,31 @@ async def _execute_disbursements_internal(
             ))
             disb_record.petty_cash_fund_id = fund.id
 
+            from api.src.petty_cash.models import Expense
+            exp = Expense(
+                company_id=cid,
+                fund_id=fund.id,
+                monto=m_pyg,
+                descripcion=f"Pago OP {order.numero_orden} - {contraparte_str}",
+                proveedor=contraparte_str,
+                numero_factura=f"OP-{order.numero_orden}",
+                fecha_comprobante=payload.fecha_pago or _today(),
+                tipo_comprobante="orden_pago",
+                condicion_compra="contado",
+                moneda="PYG",
+                tipo_cambio=Decimal("1"),
+                total_original=m_pyg,
+                gravado_10=Decimal("0"),
+                iva_10=Decimal("0"),
+                gravado_5=Decimal("0"),
+                iva_5=Decimal("0"),
+                exento=m_pyg,
+                estado="pagado",
+                observaciones=f"Desembolso orden de pago {order.numero_orden}. Subtipo: {order.subtipo or 'proveedor'}",
+                created_by=uuid.UUID(user_id) if user_id else None,
+            )
+            db.add(exp)
+
         # ── C. BANCO - TRANSFERENCIA ─────────────────────────────────────────
         elif fp == "transferencia":
             if not d.bank_account_id:

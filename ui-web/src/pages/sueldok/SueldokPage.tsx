@@ -339,12 +339,15 @@ export default function SueldokPage() {
 
   // Finiquitos consolidados (SueldOK + Intelimarket local)
   const allSettlements = useMemo(() => {
-    // Mapa de registros locales indexados por employee_ci y por employee_id
+    const cleanCi = (ci: any) => String(ci || "").replace(/\D/g, "")
+    // Mapa de registros locales indexados por employee_ci (normalizada y cruda) y por employee_id
     const localByCi = new Map<string, any>()
     const localByEmpId = new Map<string, any>()
     const localById = new Map<string, any>()
 
     for (const s of (settlements || [])) {
+      const c = cleanCi(s.employee_ci)
+      if (c) localByCi.set(c, s)
       if (s.employee_ci) localByCi.set(String(s.employee_ci).trim(), s)
       if (s.employee_id) localByEmpId.set(String(s.employee_id).trim(), s)
       if (s.id) localById.set(String(s.id).trim(), s)
@@ -353,9 +356,10 @@ export default function SueldokPage() {
     const processedLocalIds = new Set<string>()
 
     const remoteList: any[] = (data?.liquidations || []).map((l: any) => {
+      const ciClean = cleanCi(l.ci)
       const ciStr = l.ci ? String(l.ci).trim() : ""
       const empIdStr = l.employeeId ? String(l.employeeId).trim() : ""
-      const localMatch = (ciStr && localByCi.get(ciStr)) || (empIdStr && localByEmpId.get(empIdStr)) || localById.get(String(l.id))
+      const localMatch = (ciClean && localByCi.get(ciClean)) || (ciStr && localByCi.get(ciStr)) || (empIdStr && localByEmpId.get(empIdStr)) || localById.get(String(l.id))
 
       if (localMatch) {
         processedLocalIds.add(localMatch.id)
@@ -363,6 +367,19 @@ export default function SueldokPage() {
 
       const motivoRaw = l.motivo || localMatch?.motivo
       const motivoNorm = motivoRaw === "Despido Injustificado" ? "despido_sin_causa" : (motivoRaw === "Renuncia Voluntaria" ? "renuncia" : motivoRaw)
+
+      const isCompensado = Boolean(
+        localMatch?.receivable_payment_numero ||
+        localMatch?.receivable_payment_id ||
+        (localMatch && Number(localMatch.total_liquidacion_neta || 0) <= 0 && localMatch.estado === "pagado")
+      )
+      const isPagado = Boolean(
+        localMatch?.estado === "pagado" ||
+        localMatch?.payment_order_id ||
+        l.estado === "paid" ||
+        l.payoutConfirmed ||
+        isCompensado
+      )
 
       return {
         id: localMatch?.id || l.id,
@@ -381,8 +398,8 @@ export default function SueldokPage() {
         preaviso_monto: l.preaviso ?? localMatch?.preaviso ?? 0,
         indemnizacion_legal_monto: l.indemnizacion ?? localMatch?.indemnizacion_legal ?? 0,
         descuentos_salariales_monto: l.descuentoComercial ?? (Number(localMatch?.descuento_extra_club || 0) + Number(localMatch?.descuento_anticipos || 0)),
-        total_liquidacion_neta: l.montoNeto ?? localMatch?.total_liquidacion_neta ?? 0,
-        total_neto: l.montoNeto ?? localMatch?.total_liquidacion_neta ?? 0,
+        total_liquidacion_neta: localMatch?.total_liquidacion_neta ?? l.montoNeto ?? 0,
+        total_neto: localMatch?.total_liquidacion_neta ?? l.montoNeto ?? 0,
         payment_order_id: localMatch?.payment_order_id || l.payoutReference,
         payment_order_num: localMatch?.payment_order_numero || l.payoutReference,
         payment_order: localMatch?.payment_order_numero ? {
@@ -394,7 +411,8 @@ export default function SueldokPage() {
         } : null),
         receivable_payment_id: localMatch?.receivable_payment_id,
         receivable_payment_numero: localMatch?.receivable_payment_numero,
-        estado_pago: localMatch?.estado === "pagado" || l.estado === "paid" || l.payoutConfirmed ? "pagado" : "pendiente",
+        estado_pago: isPagado ? "pagado" : "pendiente",
+        is_compensado: isCompensado,
         origen: localMatch ? "intelimarket" : "sueldok",
       }
     })
@@ -402,35 +420,43 @@ export default function SueldokPage() {
     // Finiquitos exclusivamente locales (no presentes en el overview remoto de SueldOK)
     const localOnly = (settlements || [])
       .filter((s: any) => !processedLocalIds.has(s.id))
-      .map((s: any) => ({
-        id: s.id,
-        company_id: selectedCompany.id,
-        employee_id: s.employee_id,
-        employee_nombre: s.employee_nombre,
-        employee_ci: s.employee_ci,
-        employee_cargo: s.employee_cargo,
-        fecha_ingreso: s.fecha_ingreso,
-        fecha_egreso: s.fecha_salida,
-        motivo_egreso: s.motivo,
-        salario_mes_monto: s.salario_base || 0,
-        vacaciones_causadas_monto: s.vacaciones_monto || 0,
-        aguinaldo_proporcional_monto: s.aguinaldo_proporcional || 0,
-        preaviso_monto: s.preaviso || 0,
-        indemnizacion_legal_monto: s.indemnizacion_legal || 0,
-        descuentos_salariales_monto: (Number(s.descuento_extra_club || 0) + Number(s.descuento_anticipos || 0)) || s.descuentos_varios || 0,
-        total_liquidacion_neta: s.total_liquidacion_neta || 0,
-        total_neto: s.total_liquidacion_neta || 0,
-        payment_order_id: s.payment_order_id,
-        payment_order_num: s.payment_order_numero,
-        payment_order: s.payment_order_numero ? {
-          numero_orden: s.payment_order_numero,
-          estado: s.estado || "pagado"
-        } : null,
-        receivable_payment_id: s.receivable_payment_id,
-        receivable_payment_numero: s.receivable_payment_numero,
-        estado_pago: s.estado === "pagado" ? "pagado" : "pendiente",
-        origen: "intelimarket",
-      }))
+      .map((s: any) => {
+        const isCompensado = Boolean(
+          s.receivable_payment_numero ||
+          s.receivable_payment_id ||
+          (Number(s.total_liquidacion_neta || 0) <= 0 && s.estado === "pagado")
+        )
+        return {
+          id: s.id,
+          company_id: selectedCompany.id,
+          employee_id: s.employee_id,
+          employee_nombre: s.employee_nombre,
+          employee_ci: s.employee_ci,
+          employee_cargo: s.employee_cargo,
+          fecha_ingreso: s.fecha_ingreso,
+          fecha_egreso: s.fecha_salida,
+          motivo_egreso: s.motivo,
+          salario_mes_monto: s.salario_base || 0,
+          vacaciones_causadas_monto: s.vacaciones_monto || 0,
+          aguinaldo_proporcional_monto: s.aguinaldo_proporcional || 0,
+          preaviso_monto: s.preaviso || 0,
+          indemnizacion_legal_monto: s.indemnizacion_legal || 0,
+          descuentos_salariales_monto: (Number(s.descuento_extra_club || 0) + Number(s.descuento_anticipos || 0)) || s.descuentos_varios || 0,
+          total_liquidacion_neta: s.total_liquidacion_neta || 0,
+          total_neto: s.total_liquidacion_neta || 0,
+          payment_order_id: s.payment_order_id,
+          payment_order_num: s.payment_order_numero,
+          payment_order: s.payment_order_numero ? {
+            numero_orden: s.payment_order_numero,
+            estado: s.estado || "pagado"
+          } : null,
+          receivable_payment_id: s.receivable_payment_id,
+          receivable_payment_numero: s.receivable_payment_numero,
+          estado_pago: s.estado === "pagado" ? "pagado" : "pendiente",
+          is_compensado: isCompensado,
+          origen: "intelimarket",
+        }
+      })
 
     return [...remoteList, ...localOnly]
   }, [data?.liquidations, settlements, selectedCompany.id])
@@ -797,11 +823,15 @@ export default function SueldokPage() {
       })
 
       const msgParts = []
-      if (res.receipt?.numero_recibo) {
-        msgParts.push(`Recibo de Compensación ${res.receipt.numero_recibo} por ₲ ${formatPYG(res.receipt.monto).replace('₲ ', '')}`)
+      const anyRes = res as any
+      const rcNum = anyRes.receipt?.numero_recibo || anyRes.receivable_payment_numero
+      const opNum = anyRes.payment_order?.numero_orden || anyRes.payment_order_numero
+
+      if (rcNum) {
+        msgParts.push(`Recibo de Compensación ${rcNum}`)
       }
-      if (res.payment_order?.numero_orden) {
-        msgParts.push(`OP N° ${res.payment_order.numero_orden} por ₲ ${formatPYG(neto).replace('₲ ', '')}`)
+      if (opNum) {
+        msgParts.push(`OP N° ${opNum} por ₲ ${formatPYG(neto).replace('₲ ', '')}`)
       }
 
       toast.success(
@@ -816,6 +846,17 @@ export default function SueldokPage() {
       toast.error("Error al procesar liquidación", err.message || String(err))
     } finally {
       setSavingFiniquitoOP(false)
+    }
+  }
+
+  // Descarga del Recibo Oficial Premium en PDF de Finiquito y Compensación
+  const handleDownloadReceiptPdf = async (settlementId: string, employeeCi?: string) => {
+    try {
+      toast.info("Generando Recibo", "Generando documento oficial de liquidación y compensación en PDF...")
+      await api.sueldok.downloadSettlementReceiptPdf(settlementId, `recibo_finiquito_${employeeCi || settlementId.slice(0, 8)}.pdf`)
+      toast.success("Recibo Descargado", "El recibo oficial se ha descargado correctamente.")
+    } catch (err: any) {
+      toast.error("Error al descargar recibo", err.message || String(err))
     }
   }
 
@@ -2128,7 +2169,7 @@ export default function SueldokPage() {
                         </td>
                         <td className="px-4 py-3.5 text-center">
                           {s.payment_order ? (
-                            <div className="flex flex-col items-center gap-0.5">
+                            <div className="flex flex-col items-center gap-1">
                               <span className="font-mono font-bold text-[11px] text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-lg border border-indigo-500/20">
                                 OP {s.payment_order.numero_orden}
                               </span>
@@ -2139,6 +2180,33 @@ export default function SueldokPage() {
                               }`}>
                                 {s.payment_order.estado === "pagado" ? "Liquidada" : "Pte. Desembolso"}
                               </span>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
+                                className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-semibold border border-slate-300 dark:border-slate-600 flex items-center gap-1 cursor-pointer transition-all"
+                                title="Descargar Recibo Oficial de Finiquito en PDF"
+                              >
+                                <FileText className="w-3 h-3 text-indigo-500" />
+                                <span>Recibo PDF</span>
+                              </button>
+                            </div>
+                          ) : (s.receivable_payment_numero || s.estado_pago === "pagado" || s.is_compensado) ? (
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="font-mono font-bold text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-lg border border-emerald-500/20">
+                                {s.receivable_payment_numero || "RC-FINIQUITO"}
+                              </span>
+                              <span className="text-[9px] font-bold uppercase text-emerald-600 dark:text-emerald-400">
+                                Compensado
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
+                                className="px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1 cursor-pointer transition-all shadow-xs"
+                                title="Descargar Recibo Oficial de Compensación y Finiquito en PDF"
+                              >
+                                <FileText className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                <span>Recibo PDF</span>
+                              </button>
                             </div>
                           ) : Number(s.total_neto || 0) > 0 ? (
                             <button
@@ -2149,15 +2217,6 @@ export default function SueldokPage() {
                               <Plus className="w-3 h-3" />
                               <span>Emitir OP</span>
                             </button>
-                          ) : s.receivable_payment_numero ? (
-                            <div className="flex flex-col items-center gap-0.5">
-                              <span className="font-mono font-bold text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-lg border border-emerald-500/20">
-                                {s.receivable_payment_numero}
-                              </span>
-                              <span className="text-[9px] font-bold uppercase text-emerald-600 dark:text-emerald-400">
-                                Compensado
-                              </span>
-                            </div>
                           ) : (
                             <button
                               type="button"

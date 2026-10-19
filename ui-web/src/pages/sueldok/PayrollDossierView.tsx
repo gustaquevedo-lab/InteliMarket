@@ -251,7 +251,7 @@ export default function PayrollDossierView({
     p.phase_type.startsWith("salario_neto_")
   ) || []
   const compPhases = selectedDossier?.phases.filter(p =>
-    p.phase_type === "compensacion_no_cash"
+    p.phase_type === "compensacion_no_cash" || p.phase_type.startsWith("compensacion_")
   ) || []
   const thirdPartyPhases = selectedDossier?.phases.filter(p =>
     p.phase_type.startsWith("convenio_tercero_") || p.phase_type === "judiciales"
@@ -508,17 +508,17 @@ export default function PayrollDossierView({
               </div>
 
               {compPhases.map(phase => (
-                <div key={phase.id} className="space-y-3">
-                  <div className="flex items-center justify-between text-xs text-gray-500">
-                    <span>Desglose: Extra Club ({formatPYG(selectedDossier.total_extra_club)}) + Uniformes ({formatPYG(selectedDossier.total_uniformes)})</span>
-                    <span className="font-medium text-gray-700 dark:text-gray-300">
-                      Total: {formatPYG(phase.monto)}
+                <div key={phase.id} className="space-y-3 p-3.5 rounded-xl border border-gray-100 dark:border-gray-700/60 bg-gray-50/50 dark:bg-gray-900/30">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-gray-900 dark:text-white">{phase.phase_label}</span>
+                    <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                      {formatPYG(phase.monto)}
                     </span>
                   </div>
 
                   {phase.estado === "ejecutado" ? (
-                    <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+                    <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
                         <CheckCircle className="w-4 h-4" /> Neteo ejecutado correctamente
                       </div>
                       <span className="text-[11px] text-gray-500">
@@ -529,14 +529,14 @@ export default function PayrollDossierView({
                     <button
                       onClick={handleExecuteCompensations}
                       disabled={actionLoading === "compensations"}
-                      className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
+                      className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
                     >
                       {actionLoading === "compensations" ? (
-                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                       ) : (
-                        <ShieldCheck className="w-4 h-4" />
+                        <ShieldCheck className="w-3.5 h-3.5" />
                       )}
-                      Ejecutar Compensaciones Internas (Generar RC-NOMINA)
+                      Ejecutar Compensación (Generar RC-NOMINA)
                     </button>
                   )}
                 </div>

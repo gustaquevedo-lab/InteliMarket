@@ -407,14 +407,32 @@ async def create_labor_settlement(
     """Registra una liquidación final / finiquito laboral y opcionalmente emite su Orden de Pago."""
     from decimal import Decimal
     import uuid
+    import re
+    from sqlalchemy import select, or_, func
     from api.src.financial.schemas import SupplierPaymentOrderCreate, PaymentOrderDisbursementCreate
     from api.src.financial import service as financial_service
     from api.src.sueldok.models import LaborSettlement
+    from api.src.accounts_receivable.models import ReceivablePayment
 
     cid = uuid.UUID(company_id)
     payment_order = None
     payment_order_id = None
     payment_order_num = None
+
+    # 1. Buscar si ya existe un settlement previo para este colaborador
+    clean_emp_ci = re.sub(r"[^\w]", "", data.employee_ci or "")
+    existing_settlement = None
+    if clean_emp_ci or data.employee_id:
+        conditions = []
+        if data.employee_id:
+            conditions.append(LaborSettlement.employee_id == data.employee_id)
+        if clean_emp_ci:
+            conditions.append(func.replace(func.replace(LaborSettlement.employee_ci, ".", ""), " ", "") == clean_emp_ci)
+            conditions.append(LaborSettlement.employee_ci == data.employee_ci)
+        
+        q = select(LaborSettlement).where(LaborSettlement.company_id == cid, or_(*conditions))
+        res_ex = await db.execute(q)
+        existing_settlement = res_ex.scalars().first()
 
     monto_neto_dec = Decimal(str(data.total_liquidacion_neta or 0))
 
@@ -452,12 +470,15 @@ async def create_labor_settlement(
         payment_order_num = payment_order.get("numero_orden")
 
     # Compensación formal de Cuentas por Cobrar (Extra Club / Vales) si corresponde
-    rec_payment = None
-    rec_payment_id = None
+    rec_payment_id = existing_settlement.receivable_payment_id if existing_settlement else None
     rec_payment_num = None
     monto_extra_club_dec = Decimal(str(data.descuento_extra_club or 0))
 
-    if data.confirmar_compensacion and monto_extra_club_dec > Decimal("0"):
+    # Si ya tiene receivable_payment_id, obtener su número de recibo sin duplicar
+    if rec_payment_id:
+        rp_res = await db.execute(select(ReceivablePayment.numero_recibo).where(ReceivablePayment.id == rec_payment_id))
+        rec_payment_num = rp_res.scalar_one_or_none()
+    elif data.confirmar_compensacion and monto_extra_club_dec > Decimal("0"):
         from api.src.sueldok.compensations_service import process_settlement_compensation
         rec_payment = await process_settlement_compensation(
             db=db,
@@ -472,33 +493,63 @@ async def create_labor_settlement(
             rec_payment_id = rec_payment.id
             rec_payment_num = rec_payment.numero_recibo
 
-    settlement = LaborSettlement(
-        company_id=cid,
-        employee_id=data.employee_id,
-        employee_nombre=data.employee_nombre,
-        employee_ci=data.employee_ci,
-        employee_cargo=data.employee_cargo,
-        fecha_ingreso=datetime.fromisoformat(data.fecha_ingreso) if data.fecha_ingreso else None,
-        fecha_salida=datetime.fromisoformat(data.fecha_salida) if data.fecha_salida else datetime.now(timezone.utc),
-        motivo=data.motivo or "despido_injustificado",
-        salario_base=Decimal(str(data.salario_base)),
-        dias_trabajados_mes=Decimal(str(data.dias_trabajados_mes or 0)),
-        monto_dias_trabajados=Decimal(str(data.monto_dias_trabajados or 0)),
-        vacaciones_monto=Decimal(str(data.vacaciones_monto or 0)),
-        aguinaldo_proporcional=Decimal(str(data.aguinaldo_proporcional or 0)),
-        preaviso=Decimal(str(data.preaviso or 0)),
-        indemnizacion_legal=Decimal(str(data.indemnizacion_legal or 0)),
-        descuentos_varios=Decimal(str(data.descuentos_varios or 0)),
-        descuento_extra_club=monto_extra_club_dec,
-        descuento_anticipos=Decimal(str(data.descuento_anticipos or 0)),
-        total_liquidacion_neta=Decimal(str(data.total_liquidacion_neta)),
-        payment_order_id=payment_order_id,
-        receivable_payment_id=rec_payment_id,
-        estado="pagado" if (data.liquidar_inmediato or Decimal(str(data.total_liquidacion_neta)) <= 0) else "pendiente",
-        observaciones=data.observaciones,
-        created_by=uuid.UUID(user_id) if user_id else None,
-    )
-    db.add(settlement)
+    if existing_settlement:
+        settlement = existing_settlement
+        settlement.employee_nombre = data.employee_nombre
+        settlement.employee_ci = data.employee_ci
+        settlement.employee_cargo = data.employee_cargo
+        if data.fecha_ingreso:
+            settlement.fecha_ingreso = datetime.fromisoformat(data.fecha_ingreso)
+        if data.fecha_egreso:
+            settlement.fecha_salida = datetime.fromisoformat(data.fecha_egreso)
+        settlement.motivo = data.motivo or settlement.motivo or "despido_injustificado"
+        settlement.salario_base = Decimal(str(data.salario_base))
+        settlement.dias_trabajados_mes = Decimal(str(data.dias_trabajados_mes or 0))
+        settlement.monto_dias_trabajados = Decimal(str(data.monto_dias_trabajados or 0))
+        settlement.vacaciones_monto = Decimal(str(data.vacaciones_monto or 0))
+        settlement.aguinaldo_proporcional = Decimal(str(data.aguinaldo_proporcional or 0))
+        settlement.preaviso = Decimal(str(data.preaviso or 0))
+        settlement.indemnizacion_legal = Decimal(str(data.indemnizacion_legal or 0))
+        settlement.descuentos_varios = Decimal(str(data.descuentos_varios or 0))
+        settlement.descuento_extra_club = monto_extra_club_dec
+        settlement.descuento_anticipos = Decimal(str(data.descuento_anticipos or 0))
+        settlement.total_liquidacion_neta = Decimal(str(data.total_liquidacion_neta))
+        if payment_order_id:
+            settlement.payment_order_id = payment_order_id
+        if rec_payment_id:
+            settlement.receivable_payment_id = rec_payment_id
+        settlement.estado = "pagado" if (data.liquidar_inmediato or Decimal(str(data.total_liquidacion_neta)) <= 0) else "pendiente"
+        if data.observaciones:
+            settlement.observaciones = data.observaciones
+    else:
+        settlement = LaborSettlement(
+            company_id=cid,
+            employee_id=data.employee_id,
+            employee_nombre=data.employee_nombre,
+            employee_ci=data.employee_ci,
+            employee_cargo=data.employee_cargo,
+            fecha_ingreso=datetime.fromisoformat(data.fecha_ingreso) if data.fecha_ingreso else None,
+            fecha_salida=datetime.fromisoformat(data.fecha_egreso) if data.fecha_egreso else (datetime.fromisoformat(data.fecha_salida) if data.fecha_salida else datetime.now(timezone.utc)),
+            motivo=data.motivo or "despido_injustificado",
+            salario_base=Decimal(str(data.salario_base)),
+            dias_trabajados_mes=Decimal(str(data.dias_trabajados_mes or 0)),
+            monto_dias_trabajados=Decimal(str(data.monto_dias_trabajados or 0)),
+            vacaciones_monto=Decimal(str(data.vacaciones_monto or 0)),
+            aguinaldo_proporcional=Decimal(str(data.aguinaldo_proporcional or 0)),
+            preaviso=Decimal(str(data.preaviso or 0)),
+            indemnizacion_legal=Decimal(str(data.indemnizacion_legal or 0)),
+            descuentos_varios=Decimal(str(data.descuentos_varios or 0)),
+            descuento_extra_club=monto_extra_club_dec,
+            descuento_anticipos=Decimal(str(data.descuento_anticipos or 0)),
+            total_liquidacion_neta=Decimal(str(data.total_liquidacion_neta)),
+            payment_order_id=payment_order_id,
+            receivable_payment_id=rec_payment_id,
+            estado="pagado" if (data.liquidar_inmediato or Decimal(str(data.total_liquidacion_neta)) <= 0) else "pendiente",
+            observaciones=data.observaciones,
+            created_by=uuid.UUID(user_id) if user_id else None,
+        )
+        db.add(settlement)
+
     await db.commit()
 
     return {
@@ -522,20 +573,113 @@ async def create_labor_settlement(
         "descuento_extra_club": float(settlement.descuento_extra_club or 0),
         "descuento_anticipos": float(settlement.descuento_anticipos or 0),
         "total_liquidacion_neta": float(settlement.total_liquidacion_neta),
-        "payment_order_id": str(payment_order_id) if payment_order_id else None,
+        "payment_order_id": str(payment_order_id) if payment_order_id else (str(settlement.payment_order_id) if settlement.payment_order_id else None),
         "payment_order_numero": payment_order_num,
         "receivable_payment_id": str(rec_payment_id) if rec_payment_id else None,
         "receivable_payment_numero": rec_payment_num,
+        # Enlaces amigables para el frontend
+        "payment_order": {"numero_orden": payment_order_num, "estado": "pagado" if data.liquidar_inmediato else "pendiente"} if payment_order_num else None,
+        "receipt": {"numero_recibo": rec_payment_num, "monto": float(monto_extra_club_dec)} if rec_payment_num else None,
         "estado": settlement.estado,
         "observaciones": settlement.observaciones,
-        "created_at": settlement.created_at.isoformat() if settlement.created_at else None,
-        "order": payment_order,
-        "receipt": {
-            "id": str(rec_payment.id),
-            "numero_recibo": rec_payment.numero_recibo,
-            "monto": float(rec_payment.monto_total)
-        } if rec_payment else None
     }
+
+
+async def get_labor_settlement_receipt_pdf(
+    db: AsyncSession,
+    company_id: str,
+    settlement_id: str,
+    user_name: str = ""
+) -> bytes:
+    """Genera el Recibo Oficial Premium en PDF de una liquidación / compensación de finiquito laboral."""
+    import uuid
+    from sqlalchemy import select
+    from api.src.sueldok.models import LaborSettlement
+    from api.src.financial.models import SupplierPaymentOrder
+    from api.src.accounts_receivable.models import ReceivablePayment, ReceivablePaymentAllocation, Account
+    from api.src.sueldok.pdf_settlement import generate_labor_settlement_receipt_pdf
+
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(settlement_id)
+
+    # 1. Datos de la empresa
+    company = {
+        "razon_social": "GRUPO SANTA TERESA E.A.S.",
+        "nombre_fantasia": "Extra Supermercado Mayorista",
+        "ruc": "80150377-9",
+        "direccion": "Alejo Garcia esq. Carlos Antonio López",
+        "ciudad": "Pedro Juan Caballero",
+        "logo_url": None
+    }
+
+    # 2. Obtener registro de liquidación
+    query = (
+        select(
+            LaborSettlement,
+            SupplierPaymentOrder.numero_orden.label("op_numero"),
+            ReceivablePayment.numero_recibo.label("rc_numero")
+        )
+        .outerjoin(SupplierPaymentOrder, SupplierPaymentOrder.id == LaborSettlement.payment_order_id)
+        .outerjoin(ReceivablePayment, ReceivablePayment.id == LaborSettlement.receivable_payment_id)
+        .where(LaborSettlement.id == sid, LaborSettlement.company_id == cid)
+    )
+    res = (await db.execute(query)).first()
+    if not res:
+        raise ValueError(f"Liquidación laboral {settlement_id} no encontrada.")
+
+    s = res.LaborSettlement
+    num_op = getattr(res, "op_numero", None)
+    num_rc = getattr(res, "rc_numero", None)
+
+    settlement_dict = {
+        "id": str(s.id),
+        "employee_id": s.employee_id,
+        "employee_nombre": s.employee_nombre,
+        "employee_ci": s.employee_ci,
+        "employee_cargo": s.employee_cargo,
+        "fecha_ingreso": s.fecha_ingreso,
+        "fecha_salida": s.fecha_salida,
+        "motivo": s.motivo,
+        "salario_base": float(s.salario_base or 0),
+        "dias_trabajados_mes": int(s.dias_trabajados_mes or 0),
+        "monto_dias_trabajados": float(s.monto_dias_trabajados or 0),
+        "vacaciones_monto": float(s.vacaciones_monto or 0),
+        "aguinaldo_proporcional": float(s.aguinaldo_proporcional or 0),
+        "preaviso": float(s.preaviso or 0),
+        "indemnizacion_legal": float(s.indemnizacion_legal or 0),
+        "descuentos_varios": float(s.descuentos_varios or 0),
+        "descuento_extra_club": float(s.descuento_extra_club or 0),
+        "descuento_anticipos": float(s.descuento_anticipos or 0),
+        "total_liquidacion_neta": float(s.total_liquidacion_neta or 0),
+        "payment_order_id": str(s.payment_order_id) if s.payment_order_id else None,
+        "payment_order_numero": num_op,
+        "receivable_payment_id": str(s.receivable_payment_id) if s.receivable_payment_id else None,
+        "receivable_payment_numero": num_rc,
+        "estado": s.estado,
+        "observaciones": s.observaciones,
+    }
+
+    # 3. Detalle de documentos compensados si existen
+    allocations = []
+    if s.receivable_payment_id:
+        alloc_q = (
+            select(
+                ReceivablePaymentAllocation.monto,
+                Account.numero_documento,
+                Account.tipo
+            )
+            .join(Account, Account.id == ReceivablePaymentAllocation.accounts_receivable_id)
+            .where(ReceivablePaymentAllocation.receivable_payment_id == s.receivable_payment_id)
+        )
+        alloc_rows = (await db.execute(alloc_q)).all()
+        for ar in alloc_rows:
+            allocations.append({
+                "monto": float(ar.monto or 0),
+                "numero_documento": ar.numero_documento or "Ticket / Vale",
+                "tipo": ar.tipo or "compra_credito"
+            })
+
+    return generate_labor_settlement_receipt_pdf(company, settlement_dict, allocations, user_name)
 
 
 async def list_labor_settlements(db: AsyncSession, company_id: str) -> list[dict]:

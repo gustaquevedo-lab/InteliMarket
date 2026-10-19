@@ -1621,6 +1621,7 @@ export interface LaborSettlement {
   total_neto: number
   estado: string
   payment_order_id?: string | null
+  payment_order_numero?: string | null
   receivable_payment_id?: string | null
   receivable_payment_numero?: string | null
   observaciones?: string | null
@@ -4096,6 +4097,8 @@ export const api = {
       })
     },
     listSettlements: () => client.get<LaborSettlement[]>(`/v1/sueldok/settlements`, { company_id: COMPANY_ID }),
+    downloadSettlementReceiptPdf: (settlementId: string, filename?: string) =>
+      downloadAuthenticated(`/v1/sueldok/settlements/${settlementId}/receipt-pdf?company_id=${COMPANY_ID}`, {}, filename || `recibo_finiquito_${settlementId.slice(0, 8)}.pdf`),
     createDossier: (data: any) => client.post<any>(`/v1/sueldok/dossiers?company_id=${COMPANY_ID}`, data),
     syncFromSueldok: (periodo: string = "2026-09", apiKey?: string, force: boolean = false) => {
       const q = new URLSearchParams({ company_id: COMPANY_ID, periodo, force: String(force) })
