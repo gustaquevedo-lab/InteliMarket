@@ -81,6 +81,12 @@ async function initSchema(db: SQLite.SQLiteDatabase) {
       gps_lng REAL,
       cached_at INTEGER
     );
+
+    CREATE TABLE IF NOT EXISTS cached_catalog (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      json TEXT NOT NULL,
+      cached_at INTEGER NOT NULL
+    );
   `);
 }
 
@@ -194,5 +200,20 @@ export const offlineDb = {
     return await db.getAllAsync<CachedRouteItem>(
       `SELECT * FROM cached_route ORDER BY orden_visita ASC`
     );
+  },
+
+  // Catálogo completo para tomar pedidos sin señal (una sola fila JSON: ~11k productos)
+  saveCatalog: async (products: unknown[]) => {
+    const db = await getDb();
+    await db.runAsync(
+      `INSERT OR REPLACE INTO cached_catalog (id, json, cached_at) VALUES (1, ?, ?)`,
+      [JSON.stringify(products), Date.now()]
+    );
+  },
+
+  getCatalog: async <T>(): Promise<T[]> => {
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ json: string }>(`SELECT json FROM cached_catalog WHERE id = 1`);
+    return row ? JSON.parse(row.json) : [];
   },
 };

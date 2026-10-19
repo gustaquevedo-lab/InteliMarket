@@ -167,6 +167,7 @@ class MobileOrderCreate(BaseModel):
     items: list[MobileOrderItem]
     observaciones: Optional[str] = None
     credit_authorization_id: Optional[uuid.UUID] = None
+    client_op_id: Optional[str] = None  # generado una vez en el celular; reenvíos devuelven la misma venta
 
 
 class ProductSearchResult(BaseModel):

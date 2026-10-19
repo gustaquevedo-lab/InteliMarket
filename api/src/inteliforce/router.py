@@ -131,21 +131,35 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
     from api.src.sales.service import create_sale
     from api.src.sales.schemas import SaleCreate, SaleItemInput
     from api.src.credit_accounts.service import CreditAuthorizationRequired
+    from api.src.price_lists.service import resolve_customer_price
+    from api.src.products.models import Product
+    from sqlalchemy import select
 
     rep = await _current_rep(db, user)
 
+    # El precio y el IVA los decide el servidor; lo que manda el celular es solo referencia.
+    products = {p.id: p for p in (await db.execute(select(Product).where(
+        Product.company_id == rep.company_id, Product.id.in_([i.product_id for i in data.items]),
+    ))).scalars()}
+    items = []
+    for item in data.items:
+        product = products.get(item.product_id)
+        if not product:
+            raise HTTPException(status_code=400, detail=f"Producto {item.product_id} no existe")
+        price = await resolve_customer_price(db, str(rep.company_id), str(data.customer_id), str(item.product_id), int(item.cantidad))
+        items.append(SaleItemInput(
+            product_id=item.product_id, cantidad=item.cantidad,
+            precio_unitario=price["precio"] if price else (product.precio_venta or 0),
+            descuento_pct=item.descuento_pct, iva_tasa=product.iva_tasa if product.iva_tasa is not None else 10,
+        ))
+
     sale_data = SaleCreate(
+        id=uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, f"inteliforce:{rep.company_id}:{data.client_op_id}") if data.client_op_id else None,
         company_id=rep.company_id,
         customer_id=data.customer_id,
         tipo_comprobante="factura",
         condicion=data.condicion,
-        items=[
-            SaleItemInput(
-                product_id=item.product_id, cantidad=item.cantidad, precio_unitario=item.precio_unitario,
-                descuento_pct=item.descuento_pct, iva_tasa=item.iva_tasa,
-            )
-            for item in data.items
-        ],
+        items=items,
         observaciones=data.observaciones or f"Pedido tomado en campo por {rep.nombre}",
         user_id=rep.user_id,
         credit_authorization_id=data.credit_authorization_id,

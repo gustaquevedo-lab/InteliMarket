@@ -18,7 +18,8 @@ import { CartSummary } from '@/components/pedido/CartSummary';
 import { useVisit } from '@/hooks/useVisit';
 import { useTheme } from '@/hooks/useTheme';
 import { haptic } from '@/lib/haptics';
-import { api } from '@/lib/api';
+import { api, isNetworkError } from '@/lib/api';
+import { offlineDb } from '@/lib/offline/db';
 import { ThemeColors } from '@/constants/colors';
 
 export default function PedidoCatalogScreen() {
@@ -38,12 +39,28 @@ export default function PedidoCatalogScreen() {
     return () => clearTimeout(timer);
   }, [search]);
 
+  // Con señal, refresca el catálogo guardado; sin señal, se usa el último guardado.
+  useEffect(() => {
+    api.get<ProductItem[]>('/products?search=&limit=20000')
+      .then((all) => offlineDb.saveCatalog(all))
+      .catch(() => {});
+  }, []);
+
   const { data: products = [], isLoading } = useQuery<ProductItem[]>({
     queryKey: ['products-direct-search', debouncedSearch],
     queryFn: async () => {
-      return await api.get<ProductItem[]>(
-        `/products?search=${encodeURIComponent(debouncedSearch)}&limit=100`
-      );
+      try {
+        return await api.get<ProductItem[]>(
+          `/products?search=${encodeURIComponent(debouncedSearch)}&limit=100`
+        );
+      } catch (err) {
+        if (!isNetworkError(err)) throw err;
+        const q = debouncedSearch.toLowerCase();
+        const cached = await offlineDb.getCatalog<ProductItem>();
+        return cached
+          .filter((p) => p.nombre.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q))
+          .slice(0, 100);
+      }
     },
   });
 

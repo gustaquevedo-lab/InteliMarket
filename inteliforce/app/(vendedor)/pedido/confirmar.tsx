@@ -74,6 +74,8 @@ export default function ConfirmarPedidoScreen() {
       })),
       observaciones: observaciones.trim() || undefined,
       credit_authorization_id: null,
+      // Mismo id en el envío directo y en el reintento de la cola: el servidor no duplica la venta.
+      client_op_id: `ord_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
     };
 
     try {
