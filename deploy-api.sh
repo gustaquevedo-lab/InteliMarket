@@ -14,8 +14,8 @@ wait_healthy() {
   local port="$1" name="$2" tries=0
   until curl -s -f "http://127.0.0.1:${port}/api/health" > /dev/null; do
     tries=$((tries + 1))
-    if [ "$tries" -ge 20 ]; then
-      echo "✗ ${name} (puerto ${port}) no respondio sano tras 20s. Abortando sin tocar la otra instancia."
+    if [ "$tries" -ge 120 ]; then
+      echo "✗ ${name} (puerto ${port}) no respondio sano tras 120s. Abortando sin tocar la otra instancia."
       exit 1
     fi
     sleep 1
