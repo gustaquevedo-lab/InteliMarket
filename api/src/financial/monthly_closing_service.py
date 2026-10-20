@@ -128,9 +128,10 @@ class MonthlyClosingService:
             try:
                 from sqlalchemy import text
                 from calendar import monthrange
+                import datetime
                 _, last_day = monthrange(year, month)
-                desde = f"{year}-{month:02d}-01"
-                hasta = f"{year}-{month:02d}-{last_day}"
+                desde = datetime.date(year, month, 1)
+                hasta = datetime.date(year, month, last_day)
 
                 # 1. Total Materias Primas devengadas
                 mp_res = await self.session.execute(text("""
@@ -329,7 +330,10 @@ class MonthlyClosingService:
                 try:
                     from sqlalchemy import text
                     import calendar
+                    import datetime
                     _, last_day = calendar.monthrange(year, month)
+                    desde = datetime.date(year, month, 1)
+                    hasta = datetime.date(year, month, last_day)
                     res = await self.session.execute(text("""
                         SELECT 
                             scn.id::text as id,
@@ -347,8 +351,8 @@ class MonthlyClosingService:
                           AND scn.cancelado = false
                         ORDER BY scn.fecha ASC, scn.monto DESC;
                     """), {
-                        "desde": f"{year}-{month:02d}-01",
-                        "hasta": f"{year}-{month:02d}-{last_day}"
+                        "desde": desde,
+                        "hasta": hasta
                     })
                     return [dict(r._mapping) for r in res.fetchall()]
                 except Exception:
@@ -359,7 +363,10 @@ class MonthlyClosingService:
                 try:
                     from sqlalchemy import text
                     import calendar
+                    import datetime
                     _, last_day = calendar.monthrange(year, month)
+                    desde = datetime.date(year, month, 1)
+                    hasta = datetime.date(year, month, last_day)
                     res = await self.session.execute(text("""
                         SELECT 
                             id::text as id,
@@ -376,8 +383,8 @@ class MonthlyClosingService:
                           AND naturaleza_economica = 'CMV_MATERIA_PRIMA'
                         ORDER BY fecha_gasto ASC, monto DESC;
                     """), {
-                        "desde": f"{year}-{month:02d}-01",
-                        "hasta": f"{year}-{month:02d}-{last_day}"
+                        "desde": desde,
+                        "hasta": hasta
                     })
                     return [dict(r._mapping) for r in res.fetchall()]
                 except Exception:
@@ -389,7 +396,10 @@ class MonthlyClosingService:
                 try:
                     from sqlalchemy import text
                     import calendar
+                    import datetime
                     _, last_day = calendar.monthrange(year, month)
+                    desde = datetime.date(year, month, 1)
+                    hasta = datetime.date(year, month, last_day)
                     query = text("""
                         SELECT 
                             fecha_gasto::text as fecha,
@@ -405,8 +415,8 @@ class MonthlyClosingService:
                         ORDER BY fecha_gasto ASC, id ASC
                     """)
                     res = await self.session.execute(query, {
-                        "desde": f"{year}-{month:02d}-01",
-                        "hasta": f"{year}-{month:02d}-{last_day}"
+                        "desde": desde,
+                        "hasta": hasta
                     })
                     db_rows = res.fetchall()
                     if db_rows:
