@@ -75,7 +75,7 @@ export default function HaccpPage() {
     try {
       const cps = await api.haccp.criticalPoints.list(planId)
       setCriticos(Array.isArray(cps) ? cps : [])
-      setShowMonitoreoForm(true)
+      setTab("monitoreos")
     } catch { setCriticos([]) }
   }
 
@@ -90,7 +90,7 @@ export default function HaccpPage() {
         observaciones: monitorForm.observaciones,
       })
       toast.success("Monitoreo registrado", "Control de punto crítico guardado.")
-      setShowMonitoreoForm(false)
+      setMonitorForm({ valor_medido: "", valor_correcto: true, observaciones: "" })
       loadData()
     } catch (err: any) {
       toast.error("Error", err.message)
