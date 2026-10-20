@@ -100,8 +100,9 @@ def calculate_taxes(item: dict) -> dict:
         iva_monto = Decimal("0")
         base = total
     else:
-        base = _gs(total / (Decimal("1") + iva_tasa / Decimal("100")))
-        iva_monto = total - base
+        # Excepción a "siempre hacia arriba": el IVA se liquida al más próximo (DNIT); base = total - IVA.
+        iva_monto = (total * iva_tasa / (Decimal("100") + iva_tasa)).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        base = total - iva_monto
 
     return {
         "precio_unitario": precio,

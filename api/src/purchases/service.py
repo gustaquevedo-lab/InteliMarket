@@ -53,7 +53,9 @@ def calculate_taxes(precio: Decimal, cantidad: Decimal, descuento_pct: Decimal, 
     descuento_monto = gs(total_bruto * (Decimal(str(descuento_pct or 0)) / Decimal("100")))
     total_linea = total_bruto - descuento_monto
     iva_tasa = Decimal(str(iva_tasa))
-    base = gs(total_linea / (Decimal("1") + iva_tasa / Decimal("100"))) if iva_tasa in (Decimal("10"), Decimal("5")) else total_linea
+    # IVA al más próximo (DNIT), única excepción al redondeo hacia arriba.
+    iva = (total_linea * iva_tasa / (Decimal("100") + iva_tasa)).quantize(Decimal("1"), rounding="ROUND_HALF_UP") if iva_tasa in (Decimal("10"), Decimal("5")) else Decimal("0")
+    base = total_linea - iva
     return {
         "precio_unitario": precio,
         "subtotal_bruto": total_bruto,
@@ -934,7 +936,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         fecha_vencimiento = fecha_emision + timedelta(days=plazo_dias)
 
         invoice_num = (data.proveedor_ref or receipt.numero).strip()
-        iva_10 = receipt.total - (receipt.total * Decimal("10") / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_CEILING")
+        iva_10 = (receipt.total / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")  # IVA al más próximo (DNIT)
 
         is_br_sup = bool(sup and (sup.tipo_proveedor in ("brasilero", "br") or (getattr(sup, "moneda_default", "") == "BRL"))) or (data.total_brl is not None)
         inv_moneda = "BRL" if is_br_sup else "PYG"

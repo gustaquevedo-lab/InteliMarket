@@ -129,7 +129,7 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
             item_base = item_total
             iva_monto = Decimal("0")
         else:
-            item_base = (item_total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_CEILING")
+            item_base = item_total - (item_total * iva_tasa / (Decimal("100") + iva_tasa)).quantize(Decimal("1"), rounding="ROUND_HALF_UP")  # IVA al más próximo (DNIT)
             iva_monto = item_total - item_base
 
         # Si no viene descripción, buscamos el producto
