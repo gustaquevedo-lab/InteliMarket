@@ -483,18 +483,38 @@ async def get_third_party_punteo(
     total_monto = float(phase.monto or 0)
     periodo = phase.dossier.periodo if phase.dossier else "2026-09"
 
+    items = []
+    for idx, e in enumerate(employees, start=1):
+        items.append({
+            "nro": idx,
+            "ci": e.get("ci", ""),
+            "nombre": e.get("name") or e.get("nombre", ""),
+            "name": e.get("name") or e.get("nombre", ""),
+            "concepto": e.get("concepto") or third_party_name,
+            "monto": float(e.get("monto", 0)),
+        })
+
+    deducciones = float(metadata.get("gasto_institucional_factura") or 0)
+    neto_op = total_monto - deducciones if (deducciones and total_monto > deducciones) else total_monto
+
     return {
         "phase_id": str(phase.id),
         "phase_type": phase.phase_type,
         "phase_label": phase.phase_label,
+        "nombre_fase": phase.phase_label,
         "third_party_name": third_party_name,
         "third_party_ruc": third_party_ruc,
         "periodo": periodo,
         "total_monto": total_monto,
+        "monto_total": total_monto,
+        "deducciones_extra": deducciones,
+        "monto_neto_op": neto_op,
         "estado": phase.estado,
         "payment_order_id": str(phase.payment_order_id) if phase.payment_order_id else None,
         "count_employees": len(employees),
-        "employees": employees,
+        "total_empleados": len(employees),
+        "employees": items,
+        "items": items,
         "nota_conciliacion": metadata.get("nota_conciliacion"),
         "factura_numero": metadata.get("factura_numero"),
         "total_transferencia_banco": metadata.get("total_transferencia_banco"),
