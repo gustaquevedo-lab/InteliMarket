@@ -43,28 +43,24 @@ from api.src.products.models import Product
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def calculate_taxes(precio: Decimal, cantidad: Decimal, descuento_pct: Decimal, iva_tasa: Decimal) -> dict:
-    # En Paraguay y retail de supermercados, los precios de compra se pactan IVA INCLUIDO.
-    # El total de la línea es precio * cantidad menos descuento.
-    # El IVA se liquida a partir del total (IVA 10% = Total/11, IVA 5% = Total/21), no se adiciona encima.
-    total_bruto = precio * cantidad
-    descuento_monto = total_bruto * (descuento_pct / Decimal("100"))
-    total_linea = total_bruto - descuento_monto
-    if iva_tasa == Decimal("10"):
-        iva_monto = (total_linea / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-        base = total_linea - iva_monto
-    elif iva_tasa == Decimal("5"):
-        iva_monto = (total_linea / Decimal("21")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-        base = total_linea - iva_monto
-    else:
-        iva_monto = Decimal("0")
-        base = total_linea
+    # Precio de compra IVA incluido. Guaraníes enteros: el precio unitario se redondea hacia arriba ANTES de
+    # multiplicar y cada importe derivado también; la diferencia con la factura del proveedor va en ajuste_redondeo.
+    def gs(x):
+        return Decimal(str(x)).quantize(Decimal("1"), rounding="ROUND_CEILING")
 
+    precio = gs(precio)
+    total_bruto = gs(precio * Decimal(str(cantidad)))
+    descuento_monto = gs(total_bruto * (Decimal(str(descuento_pct or 0)) / Decimal("100")))
+    total_linea = total_bruto - descuento_monto
+    iva_tasa = Decimal(str(iva_tasa))
+    base = gs(total_linea / (Decimal("1") + iva_tasa / Decimal("100"))) if iva_tasa in (Decimal("10"), Decimal("5")) else total_linea
     return {
-        "subtotal_bruto": total_bruto.quantize(Decimal("1")),
-        "descuento_monto": descuento_monto.quantize(Decimal("1")),
-        "iva_monto": iva_monto,
-        "total": total_linea.quantize(Decimal("1")),
-        "base": base.quantize(Decimal("1")),
+        "precio_unitario": precio,
+        "subtotal_bruto": total_bruto,
+        "descuento_monto": descuento_monto,
+        "iva_monto": total_linea - base,
+        "total": total_linea,
+        "base": base,
     }
 
 
@@ -244,7 +240,7 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
             variant_id=item_data.variant_id,
             descripcion=item_data.descripcion,
             cantidad=item_data.cantidad,
-            precio_unitario=item_data.precio_unitario,
+            precio_unitario=taxes["precio_unitario"],
             descuento_pct=item_data.descuento_pct,
             iva_tasa=iva_tasa,
             total=taxes["total"],
@@ -260,9 +256,20 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
     order.iva_10 = iva_10
     order.iva_5 = iva_5
 
-    landed = shipping_total + subtotal - descuento_total
-    order.costo_landed_total = landed.quantize(Decimal("1"))
-    order.total = landed.quantize(Decimal("1"))
+    landed = (shipping_total + subtotal - descuento_total).quantize(Decimal("1"), rounding="ROUND_CEILING")
+    order.costo_landed_total = landed
+    order.total = landed
+    # Manda el total de la factura del proveedor: la diferencia de redondeo va al final de la factura.
+    if data.total_factura_proveedor is not None:
+        ajuste = Decimal(str(data.total_factura_proveedor)).quantize(Decimal("1"), rounding="ROUND_CEILING") - landed
+        tope = sum(Decimal(str(i.cantidad)) for i in data.items) + len(data.items)  # máximo que explica el redondeo
+        if abs(ajuste) > tope:
+            raise ValueError(
+                f"La factura del proveedor difiere en {ajuste:,.0f} Gs. de la suma de líneas: es demasiado para "
+                f"ser redondeo (máx. {tope:,.0f} Gs.). Revisá precios y cantidades."
+            )
+        order.ajuste_redondeo = ajuste
+        order.total = landed + ajuste
 
     # Distribuye el costo landed (flete + seguro + aduana + otros) proporcionalmente
     # al peso de cada linea sobre el neto de la orden, para tener un costo unitario
@@ -272,7 +279,7 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
         for item, base in items_with_base:
             if item.cantidad and item.cantidad > 0:
                 landed_share = shipping_total * (base / net_base)
-                item.costo_unitario_estimado = (item.precio_unitario + landed_share / item.cantidad).quantize(Decimal("1"))
+                item.costo_unitario_estimado = (item.precio_unitario + landed_share / item.cantidad).quantize(Decimal("1"), rounding="ROUND_CEILING")
     else:
         for item, _base in items_with_base:
             item.costo_unitario_estimado = item.precio_unitario
@@ -424,7 +431,7 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate) ->
                 variant_id=item_data.variant_id,
                 descripcion=item_data.descripcion,
                 cantidad=item_data.cantidad,
-                precio_unitario=item_data.precio_unitario,
+                precio_unitario=taxes["precio_unitario"],
                 descuento_pct=item_data.descuento_pct,
                 iva_tasa=iva_tasa,
                 total=taxes["total"],
@@ -1324,7 +1331,7 @@ async def convert_requisition_to_po(db: AsyncSession, req_id: str, user_id: str 
             variant_id=req_item.variant_id,
             descripcion=req_item.descripcion,
             cantidad=cantidad,
-            precio_unitario=precio,
+            precio_unitario=taxes["precio_unitario"],
             descuento_pct=Decimal("0"),
             iva_tasa=iva_tasa,
             total=taxes["total"],
@@ -2851,7 +2858,7 @@ async def award_rfq(db: AsyncSession, rfq_id: str, supplier_id: str,
             purchase_order_id=order.id,
             product_id=resp_item.product_id,
             cantidad=cantidad,
-            precio_unitario=resp_item.precio_unitario,
+            precio_unitario=taxes["precio_unitario"],
             descuento_pct=Decimal("0"),
             iva_tasa=iva_tasa,
             total=taxes["total"],

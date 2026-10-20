@@ -190,6 +190,7 @@ class POCreate(BaseModel):
     created_by_name: Optional[str] = None
     seguimiento_numero: Optional[str] = None
     update_default_supplier: bool = False
+    total_factura_proveedor: Optional[Decimal] = None  # si difiere por redondeo, se ajusta al final (ajuste_redondeo)
 
 
 class POUpdate(BaseModel):
@@ -237,6 +238,7 @@ class POResponse(BaseModel):
     customs_cost: Optional[Decimal] = None
     otros_costos: Optional[Decimal] = None
     costo_landed_total: Optional[Decimal] = None
+    ajuste_redondeo: Optional[Decimal] = None
     fecha_envio: Optional[datetime] = None
     fecha_confirmacion_proveedor: Optional[datetime] = None
     aprobado_por: Optional[UUID] = None

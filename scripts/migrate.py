@@ -75,6 +75,7 @@ COLUMN_MIGRATIONS = [
     ("receivable_payments",      "delivery_note_monto",   "NUMERIC(15,0)"),
     ("sales_reps",               "warehouse_id",          "UUID"),
     ("sales",                    "warehouse_id",          "UUID"),
+    ("purchase_orders",          "ajuste_redondeo",       "NUMERIC(15,0) DEFAULT 0"),
     # companies
     ("companies",                "condicion_iva",         "VARCHAR(50) DEFAULT 'responsable_inscripto'"),
     ("companies",                "config",                "JSONB DEFAULT '{}'"),

@@ -94,6 +94,7 @@ class PurchaseOrder(Base):
     customs_cost = Column(Numeric(15, 0), default=0)
     otros_costos = Column(Numeric(15, 0), default=0)
     costo_landed_total = Column(Numeric(15, 0), default=0)
+    ajuste_redondeo = Column(Numeric(15, 0), default=0)  # total factura proveedor - suma de líneas enteras
     fecha_envio = Column(DateTime(timezone=True))
     fecha_confirmacion_proveedor = Column(DateTime(timezone=True))
     aprobado_por = Column(UUID(as_uuid=True))

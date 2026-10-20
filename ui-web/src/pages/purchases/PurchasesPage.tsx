@@ -224,6 +224,7 @@ export default function PurchasesPage() {
   const [manualPOTipoCambio, setManualPOTipoCambio] = useState<number>(1)
   const [manualPODiasValidez, setManualPODiasValidez] = useState<number>(30)
   const [manualPOObservaciones, setManualPOObservaciones] = useState("")
+  const [manualPOTotalFactura, setManualPOTotalFactura] = useState("")
   const [manualPOFilterBySupplier, setManualPOFilterBySupplier] = useState(false) // false = Catálogo completo sin restricción de proveedor
   const [manualPOUpdateDefaultSupplier, setManualPOUpdateDefaultSupplier] = useState(false) // Actualizar este proveedor como nuevo habitual
   const [manualPOItems, setManualPOItems] = useState<any[]>([])
@@ -1276,7 +1277,7 @@ export default function PurchasesPage() {
     const isBrl = manualInvoiceForm.moneda === "BRL"
     const totalBrl = isBrl ? Number(manualInvoiceForm.total_brl) : 0
     const tc = isBrl ? Number(manualInvoiceForm.tipo_cambio || 1) : 1
-    const totalPyg = isBrl ? Math.round(totalBrl * tc) : Number(manualInvoiceForm.total_pyg)
+    const totalPyg = isBrl ? Math.ceil(totalBrl * tc) : Math.ceil(Number(manualInvoiceForm.total_pyg))
 
     if (totalPyg <= 0) {
       toast.error("Importe Inválido", "El monto de la factura debe ser mayor a 0.")
@@ -1378,7 +1379,7 @@ export default function PurchasesPage() {
     setManualPOFechaEntrega(defDate.toISOString().split("T")[0])
     setManualPOPrioridad("normal")
     setManualPOCondiciones("30 Días")
-    setManualPOObservaciones("")
+    setManualPOObservaciones(""); setManualPOTotalFactura("")
     setManualPOItems([])
     setSearchProductPO("")
     setProductSearchResultsPO([])
@@ -1517,6 +1518,7 @@ export default function PurchasesPage() {
           condiciones_pago: manualPOCondiciones,
           observaciones: manualPOObservaciones || undefined,
           update_default_supplier: manualPOUpdateDefaultSupplier,
+          total_factura_proveedor: manualPOTotalFactura ? Math.ceil(Number(manualPOTotalFactura)) : undefined,
           items: manualPOItems.map(it => ({
             product_id: it.product_id,
             descripcion: it.nombre,
@@ -7131,6 +7133,30 @@ export default function PurchasesPage() {
                   className="input-field w-full text-xs"
                 />
               </div>
+
+              {!editingPOId && (() => {
+                const sumaLineas = manualPOItems.reduce((acc, it) => acc + Math.ceil(Number(it.precio_unitario) || 0) * (Number(it.cantidad) || 0), 0)
+                const ajuste = manualPOTotalFactura ? Math.ceil(Number(manualPOTotalFactura)) - sumaLineas : 0
+                return (
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
+                      Total según factura del proveedor (opcional)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      placeholder="Si la factura del proveedor totaliza distinto por redondeo"
+                      value={manualPOTotalFactura}
+                      onChange={(e) => setManualPOTotalFactura(e.target.value)}
+                      className="input-field w-full text-xs"
+                    />
+                    {manualPOTotalFactura && (
+                      <p className="text-xs mt-1 text-gray-500">Ajuste de redondeo al final de la factura: <b>{formatPYG(ajuste)}</b></p>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* Buscador reactivo de productos */}
               <div className="p-3.5 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2.5">
