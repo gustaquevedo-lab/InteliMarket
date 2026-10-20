@@ -1,3 +1,4 @@
+from api.src.common.money import gs, iva_incluido
 from decimal import Decimal
 from datetime import datetime, timezone
 import uuid
@@ -124,12 +125,12 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
 
     for item_data in data.items:
         iva_tasa = Decimal(str(item_data.iva_tasa if item_data.iva_tasa is not None else 10))
-        item_total = (Decimal(str(item_data.precio_unitario)).quantize(Decimal("1"), rounding="ROUND_CEILING") * Decimal(str(item_data.cantidad))).quantize(Decimal("1"), rounding="ROUND_CEILING")
+        item_total = gs(gs(Decimal(str(item_data.precio_unitario))) * Decimal(str(item_data.cantidad)))
         if iva_tasa == Decimal("0"):
             item_base = item_total
             iva_monto = Decimal("0")
         else:
-            item_base = item_total - (item_total * iva_tasa / (Decimal("100") + iva_tasa)).quantize(Decimal("1"), rounding="ROUND_HALF_UP")  # IVA al más próximo (DNIT)
+            item_base = item_total - iva_incluido(item_total, iva_tasa)
             iva_monto = item_total - item_base
 
         # Si no viene descripción, buscamos el producto

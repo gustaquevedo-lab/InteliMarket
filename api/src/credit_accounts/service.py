@@ -1,5 +1,6 @@
 """Credit account service"""
 
+from api.src.common.money import gs
 from sqlalchemy import select, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -624,7 +625,7 @@ def calculate_mora_surcharge(monto_original: Decimal, dias_mora: int, config: Mo
         return Decimal("0")
     tasa = Decimal(str(config.porcentaje_mensual)) / Decimal("100")
     recargo = monto_original * tasa * (Decimal(dias_aplicables) / Decimal("30"))
-    return recargo.quantize(Decimal("1"), rounding="ROUND_CEILING")
+    return gs(recargo)
 
 
 async def _get_mora_candidates(db: AsyncSession, company_id: str, config: MoraConfig) -> list[dict]:

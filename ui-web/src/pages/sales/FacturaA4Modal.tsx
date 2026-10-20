@@ -7,6 +7,7 @@ import jsPDF from "jspdf"
 import { type Sale, type Customer, api } from "../../api"
 import { formatPYG } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
+import { ivaIncluido } from "../../utils/money"
 
 interface FacturaA4ModalProps {
   sale: Sale
@@ -242,8 +243,8 @@ export default function FacturaA4Modal({
 
     const totalFactura = Number(sale.total || (subtotalExenta + subtotal5 + subtotal10))
     // La factura imprime el IVA guardado en la venta; el cálculo (al más próximo, DNIT) es solo respaldo.
-    const iva5 = sale.iva_5 != null ? Number(sale.iva_5) : Math.round(subtotal5 / 21)
-    const iva10 = sale.iva_10 != null ? Number(sale.iva_10) : Math.round(subtotal10 / 11)
+    const iva5 = sale.iva_5 != null ? Number(sale.iva_5) : ivaIncluido(subtotal5, 5)
+    const iva10 = sale.iva_10 != null ? Number(sale.iva_10) : ivaIncluido(subtotal10, 10)
     const totalIva = iva5 + iva10
 
     return {

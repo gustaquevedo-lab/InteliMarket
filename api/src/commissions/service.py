@@ -1,3 +1,4 @@
+from api.src.common.money import gs
 from decimal import Decimal
 from datetime import date, datetime, timezone
 import uuid
@@ -229,7 +230,7 @@ async def calculate_batch_commissions(db: AsyncSession, company_id: str) -> dict
 
         rule = rules[0]
         porc = Decimal(str(rule.porcentaje or "1.5"))
-        monto_com = (base * porc / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_CEILING")
+        monto_com = gs(base * porc / Decimal("100"))
 
         comm = SalesCommission(
             company_id=company_id,

@@ -38,6 +38,7 @@ import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
 import { DevolucionProveedorPrintModal } from "./DevolucionProveedorPrintModal"
 import CurrencyInput from "../../components/CurrencyInput"
+import { gs } from "../../utils/money"
 
 type MainTab = "asistente_ia" | "demandas_clientes" | "ordenes" | "recepciones" | "facturas_p2p" | "devoluciones" | "matching" | "proveedores" | "requisiciones" | "cotizaciones" | "presupuestos" | "reportes"
 
@@ -1491,7 +1492,7 @@ export default function PurchasesPage() {
       if (field === "cantidad" || field === "precio_unitario") {
         const c = Number(field === "cantidad" ? (value === "" ? 0 : value) : (copy[idx].cantidad || 0))
         const p = Number(field === "precio_unitario" ? (value === "" ? 0 : value) : (copy[idx].precio_unitario || 0))
-        copy[idx].subtotal = Math.ceil(p) * c
+        copy[idx].subtotal = gs(p) * c
       }
       return copy
     })
@@ -1518,7 +1519,7 @@ export default function PurchasesPage() {
           condiciones_pago: manualPOCondiciones,
           observaciones: manualPOObservaciones || undefined,
           update_default_supplier: manualPOUpdateDefaultSupplier,
-          total_factura_proveedor: manualPOTotalFactura ? Math.ceil(Number(manualPOTotalFactura)) : undefined,
+          total_factura_proveedor: manualPOTotalFactura ? gs(Number(manualPOTotalFactura)) : undefined,
           items: manualPOItems.map(it => ({
             product_id: it.product_id,
             descripcion: it.nombre,
@@ -7135,8 +7136,8 @@ export default function PurchasesPage() {
               </div>
 
               {!editingPOId && (() => {
-                const sumaLineas = manualPOItems.reduce((acc, it) => acc + Math.ceil(Number(it.precio_unitario) || 0) * (Number(it.cantidad) || 0), 0)
-                const ajuste = manualPOTotalFactura ? Math.ceil(Number(manualPOTotalFactura)) - sumaLineas : 0
+                const sumaLineas = manualPOItems.reduce((acc, it) => acc + gs(Number(it.precio_unitario)) * (Number(it.cantidad) || 0), 0)
+                const ajuste = manualPOTotalFactura ? gs(Number(manualPOTotalFactura)) - sumaLineas : 0
                 return (
                   <div>
                     <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">

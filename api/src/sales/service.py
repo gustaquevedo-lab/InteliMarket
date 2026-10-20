@@ -1,5 +1,6 @@
 """Sales service"""
 
+from api.src.common.money import gs, iva_incluido
 import logging
 import base64
 import os
@@ -9,7 +10,7 @@ from sqlalchemy import select, update, func, cast, Integer, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal
 import uuid
 import hashlib
 import json
@@ -74,19 +75,14 @@ def get_escpos_logo_bytes(max_width_px: int = 384) -> bytes:
 
 
 
-def _gs(x: Decimal) -> Decimal:
-    """Guaraníes: entero, siempre hacia arriba, en el momento (no máscara de formato)."""
-    return Decimal(str(x)).quantize(Decimal("1"), rounding=ROUND_CEILING)
-
-
 def calculate_taxes(item: dict) -> dict:
-    precio = _gs(item["precio_unitario"])
+    precio = gs(item["precio_unitario"])
     cantidad = Decimal(str(item["cantidad"]))
     descuento_pct = Decimal(str(item.get("descuento_pct", 0)))
     iva_tasa = Decimal(str(item.get("iva_tasa", 10)))
 
-    subtotal_bruto = _gs(precio * cantidad)
-    descuento_monto = _gs(subtotal_bruto * (descuento_pct / Decimal("100")))
+    subtotal_bruto = gs(precio * cantidad)
+    descuento_monto = gs(subtotal_bruto * (descuento_pct / Decimal("100")))
     # El precio de venta en Paraguay ya viene con el IVA incluido (precio de
     # gondola/vidriera) -- esta funcion trataba precio_unitario como una
     # base SIN IVA y le sumaba el impuesto encima, inflando ~9-10% el total
@@ -101,7 +97,7 @@ def calculate_taxes(item: dict) -> dict:
         base = total
     else:
         # Excepción a "siempre hacia arriba": el IVA se liquida al más próximo (DNIT); base = total - IVA.
-        iva_monto = (total * iva_tasa / (Decimal("100") + iva_tasa)).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        iva_monto = iva_incluido(total, iva_tasa)
         base = total - iva_monto
 
     return {

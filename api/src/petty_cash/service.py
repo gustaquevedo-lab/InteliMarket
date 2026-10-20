@@ -1,3 +1,4 @@
+from api.src.common.money import iva_incluido
 from decimal import Decimal
 from datetime import date, datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -495,12 +496,12 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
             exen = monto
         else:
             grav_10 = monto
-            iva_10 = round(grav_10 / Decimal("11"))
+            iva_10 = iva_incluido(grav_10, 10)
     else:
         if grav_10 > 0 and iva_10 == 0:
-            iva_10 = round(grav_10 / Decimal("11"))
+            iva_10 = iva_incluido(grav_10, 10)
         if grav_5 > 0 and iva_5 == 0:
-            iva_5 = round(grav_5 / Decimal("21"))
+            iva_5 = iva_incluido(grav_5, 5)
 
     # 3. Control de Límite Máximo por Comprobante
     auditoria_estado = "pendiente"
@@ -2012,7 +2013,7 @@ async def get_fiscal_purchases_report(
             ex = float(exentas_val or 0)
         else:
             # Estándar IVA 10% incluido en el total
-            i10 = round(monto / 11)
+            i10 = iva_incluido(monto, 10)
             g10 = monto - i10
             i5 = 0.0
             ex = 0.0

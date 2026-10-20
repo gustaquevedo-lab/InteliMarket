@@ -1,5 +1,6 @@
 """SIFEN service — integrando InteliFact para generación, firma y envío SOAP de facturación electrónica."""
 
+from api.src.common.money import iva_incluido
 from sqlalchemy import select, or_, desc, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date
@@ -237,7 +238,7 @@ async def get_kude_data(db: AsyncSession, identifier: str) -> dict | None:
             "items": items,
             "subtotal": float(sale.subtotal or sale.total or 0),
             "total": float(sale.total or 0),
-            "iva_10": float(sale.iva_10 or (float(sale.total or 0) / 11.0 if float(sale.total or 0) > 0 else 0)),
+            "iva_10": float(sale.iva_10 if sale.iva_10 is not None else iva_incluido(sale.total or 0, 10)),
             "iva_5": float(sale.iva_5 or 0),
             "exentas": float(sale.base_exenta or 0),
             "cdc": sale.cdc,

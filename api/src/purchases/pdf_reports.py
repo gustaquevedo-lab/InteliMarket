@@ -2,6 +2,7 @@
 Reutiliza el mismo encabezado/pie de pagina de integrated_finance/pdf_reports.py,
 igual que ya hacen accounts_receivable, Bancos y Cuentas por Pagar."""
 
+from api.src.common.money import iva_incluido
 import io
 from datetime import date
 from decimal import Decimal
@@ -265,10 +266,10 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
 
         if tasa == 10:
             subtotal_10 += sub
-            iva_10 += (sub / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+            iva_10 += iva_incluido(sub, 10)
         elif tasa == 5:
             subtotal_5 += sub
-            iva_5 += (sub / Decimal("21")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+            iva_5 += iva_incluido(sub, 5)
         else:
             subtotal_exenta += sub
 

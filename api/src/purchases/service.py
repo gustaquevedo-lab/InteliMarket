@@ -1,5 +1,6 @@
 """Purchases service — suppliers, orders, receipts, requisitions, forecasting, suggestions, budgets, reports"""
 
+from api.src.common.money import gs, iva_incluido
 from sqlalchemy import select, text, case, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -45,16 +46,13 @@ from api.src.products.models import Product
 def calculate_taxes(precio: Decimal, cantidad: Decimal, descuento_pct: Decimal, iva_tasa: Decimal) -> dict:
     # Precio de compra IVA incluido. Guaraníes enteros: el precio unitario se redondea hacia arriba ANTES de
     # multiplicar y cada importe derivado también; la diferencia con la factura del proveedor va en ajuste_redondeo.
-    def gs(x):
-        return Decimal(str(x)).quantize(Decimal("1"), rounding="ROUND_CEILING")
-
     precio = gs(precio)
     total_bruto = gs(precio * Decimal(str(cantidad)))
     descuento_monto = gs(total_bruto * (Decimal(str(descuento_pct or 0)) / Decimal("100")))
     total_linea = total_bruto - descuento_monto
     iva_tasa = Decimal(str(iva_tasa))
     # IVA al más próximo (DNIT), única excepción al redondeo hacia arriba.
-    iva = (total_linea * iva_tasa / (Decimal("100") + iva_tasa)).quantize(Decimal("1"), rounding="ROUND_HALF_UP") if iva_tasa in (Decimal("10"), Decimal("5")) else Decimal("0")
+    iva = iva_incluido(total_linea, iva_tasa)
     base = total_linea - iva
     return {
         "precio_unitario": precio,
@@ -263,12 +261,12 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
     order.iva_10 = iva_10
     order.iva_5 = iva_5
 
-    landed = (shipping_total + subtotal - descuento_total).quantize(Decimal("1"), rounding="ROUND_CEILING")
+    landed = gs(shipping_total + subtotal - descuento_total)
     order.costo_landed_total = landed
     order.total = landed
     # Manda el total de la factura del proveedor: la diferencia de redondeo va al final de la factura.
     if data.total_factura_proveedor is not None:
-        ajuste = Decimal(str(data.total_factura_proveedor)).quantize(Decimal("1"), rounding="ROUND_CEILING") - landed
+        ajuste = gs(Decimal(str(data.total_factura_proveedor))) - landed
         tope = sum(Decimal(str(i.cantidad)) for i in data.items) + len(data.items)  # máximo que explica el redondeo
         if abs(ajuste) > tope:
             raise ValueError(
@@ -286,7 +284,7 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
         for item, base in items_with_base:
             if item.cantidad and item.cantidad > 0:
                 landed_share = shipping_total * (base / net_base)
-                item.costo_unitario_estimado = (item.precio_unitario + landed_share / item.cantidad).quantize(Decimal("1"), rounding="ROUND_CEILING")
+                item.costo_unitario_estimado = gs(item.precio_unitario + landed_share / item.cantidad)
     else:
         for item, _base in items_with_base:
             item.costo_unitario_estimado = item.precio_unitario
@@ -852,7 +850,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         old_qty = stock_obj.cantidad
         stock_obj.cantidad += qty
         if old_qty + qty > 0:
-            stock_obj.costo_unitario = ((old_cost * old_qty + cost * qty) / (old_qty + qty)).quantize(Decimal("1"), rounding="ROUND_CEILING")
+            stock_obj.costo_unitario = gs((old_cost * old_qty + cost * qty) / (old_qty + qty))
         stock_obj.updated_at = datetime.now(timezone.utc)
 
         stock_lot = StockLot(
@@ -936,7 +934,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         fecha_vencimiento = fecha_emision + timedelta(days=plazo_dias)
 
         invoice_num = (data.proveedor_ref or receipt.numero).strip()
-        iva_10 = (receipt.total / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")  # IVA al más próximo (DNIT)
+        iva_10 = iva_incluido(receipt.total, 10)
 
         is_br_sup = bool(sup and (sup.tipo_proveedor in ("brasilero", "br") or (getattr(sup, "moneda_default", "") == "BRL"))) or (data.total_brl is not None)
         inv_moneda = "BRL" if is_br_sup else "PYG"

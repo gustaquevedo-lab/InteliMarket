@@ -1,5 +1,6 @@
 """Financial service — AP, banking, cash flow, budgets, payment runs, dashboards"""
 
+from api.src.common.money import iva_incluido
 from sqlalchemy import select, func, and_, or_, text, case
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -3283,7 +3284,7 @@ async def _process_payment_order_legal_invoices(
         monto_leg = Decimal(str(leg.monto or 0))
         f_emision = leg.fecha_emision or order.fecha_emision or _today()
         f_venc = leg.fecha_vencimiento or f_emision
-        iva_10 = (monto_leg / Decimal("11")).quantize(Decimal("1"))
+        iva_10 = iva_incluido(monto_leg, 10)
         subtotal = monto_leg - iva_10
 
         if not existing_legal:

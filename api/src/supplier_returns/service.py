@@ -1,3 +1,4 @@
+from api.src.common.money import iva_sobre_neto
 from decimal import Decimal
 from datetime import datetime, timezone, date
 import uuid
@@ -62,7 +63,7 @@ async def create_return(db: AsyncSession, data: SupplierReturnCreate) -> Purchas
             iva_monto = Decimal("0")
             item_total = base
         else:
-            iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")  # IVA al más próximo (DNIT)
+            iva_monto = iva_sobre_neto(base, iva_tasa)
             item_total = base + iva_monto
 
         item = PurchaseReturnItem(
