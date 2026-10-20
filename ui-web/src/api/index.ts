@@ -396,7 +396,7 @@ export interface CashRegister { id: string; nombre: string; codigo?: string; tip
 export interface CashHandoff { id: string; session_id: string; register_nombre: string | null; entregado_por_nombre: string | null; recibido_por_nombre?: string | null; monto_pyg: number; monto_usd: number; monto_brl: number; monto_confirmado_pyg?: number | null; monto_confirmado_usd?: number | null; monto_confirmado_brl?: number | null; discrepancia_confirmacion?: boolean; requiere_revision: boolean; estado: string; created_at: string; fecha_confirmacion?: string | null }
 export interface KioskPriceTier { min_qty: number; max_qty: number | null; precio_unitario: number; moneda: string }
 export interface KioskPackInfo { etiqueta: string; unidades_por_paquete: number; precio_pack: number }
-export interface KioskProductLookup { id: string; nombre: string; sku?: string | null; codigo_barra?: string | null; precio_venta: number; imagen_url?: string | null; categoria_nombre?: string | null; tipo_venta?: string | null; escalas: KioskPriceTier[]; packs: KioskPackInfo[]; pack_escaneado?: KioskPackInfo | null; escaneado_como_pack?: string | null; en_promocion?: boolean; badge_promo?: string; ahorro_unitario?: number; ahorro_porcentaje?: number; precio_regular?: number; limite_por_compra?: number; mensaje_dias?: string; promocion_nombre?: string | null; valido_hasta?: string | null }
+export interface KioskProductLookup { id: string; nombre: string; sku?: string | null; codigo_barra?: string | null; precio_venta: number; imagen_url?: string | null; categoria_nombre?: string | null; tipo_venta?: string | null; escalas: KioskPriceTier[]; packs: KioskPackInfo[]; pack_escaneado?: KioskPackInfo | null; escaneado_como_pack?: string | null; en_promocion?: boolean; badge_promo?: string; ahorro_unitario?: number; ahorro_porcentaje?: number; precio_regular?: number; limite_por_compra?: number; mensaje_dias?: string; promocion_nombre?: string | null; valido_hasta?: string | null; es_pesable?: boolean; peso_leido_kg?: number | null; importe_etiqueta_gs?: number | null; plu_balanza?: number | null }
 export interface KioskBanner { id: string; company_id: string; titulo: string; subtitulo?: string | null; etiqueta?: string | null; descuento_texto?: string | null; color?: string | null; imagen_url?: string | null; orden: number; activo: boolean; fecha_inicio?: string | null; fecha_fin?: string | null; created_at: string; updated_at?: string | null }
 export interface VaultEntry { id: string; origen: string; monto_pyg: number; monto_usd: number; monto_brl: number; estado: string; bank_transaction_id?: string | null; created_at: string; fecha_deposito?: string | null }
 export interface VaultDashboard { saldo_en_boveda_pyg: number; saldo_en_boveda_usd: number; saldo_en_boveda_brl: number; entradas_en_boveda: number; entregas_pendientes: number; entregas_pendientes_detalle: CashHandoff[]; retiros_pendientes: number; retiros_pendientes_detalle: any[]; movimientos_recientes: VaultEntry[] }
@@ -4157,8 +4157,14 @@ export const api = {
     listDossiers: () => client.get<any[]>(`/v1/sueldok/dossiers`, { company_id: COMPANY_ID }),
     getDossier: (id: string) => client.get<any>(`/v1/sueldok/dossiers/${id}`, { company_id: COMPANY_ID }),
     executeCompensations: (dossierId: string) => client.post<any>(`/v1/sueldok/dossiers/${dossierId}/execute-compensations?company_id=${COMPANY_ID}`),
-    downloadCompensationsPdf: (dossierId: string, filename = "comprobante_compensaciones_nomina.pdf") =>
-      downloadAuthenticated(`/v1/sueldok/dossiers/${dossierId}/compensations-pdf?company_id=${COMPANY_ID}`, {}, filename),
+    downloadCompensationsPdf: (dossierId: string, tipo?: string, filename?: string) => {
+      const q = new URLSearchParams({ company_id: COMPANY_ID })
+      if (tipo) q.set("tipo", tipo)
+      const defaultFilename = tipo === "uniformes"
+        ? "recibo_neteo_uniformes.pdf"
+        : (tipo === "extra_club" ? "comprobante_neteo_extraclub.pdf" : "comprobante_compensaciones_nomina.pdf")
+      return downloadAuthenticated(`/v1/sueldok/dossiers/${dossierId}/compensations-pdf?${q.toString()}`, {}, filename || defaultFilename)
+    },
     executeNetPhase: (dossierId: string, phaseId: string, banco?: string, referencia?: string) => {
       const q = new URLSearchParams({ company_id: COMPANY_ID })
       if (banco) q.set("banco", banco)
@@ -4482,7 +4488,7 @@ export const api = {
     },
     staffCandidates: (search?: string) => client.get<{ id: string; nombre: string; email?: string; rol?: string; ci?: string; cargo?: string; depto?: string; salario?: number }[]>("/v1/expenses/staff-candidates", { search }),
     sueldokAdvances: (search?: string) => client.get<{ id: string; employeeId: string; nombre: string; ci: string; cargo: string; depto: string; monto: number; motivo: string; fecha: string; estado: string; ya_desembolsado: boolean; expense_id?: string; expense_estado?: string }[]>("/v1/expenses/sueldok-advances", { search }),
-    list: (params?: { branch_id?: string; fund_id?: string; rendicion_id?: string; sin_rendicion?: boolean; category_id?: string; estado?: string; desde?: string; hasta?: string; search?: string; monto?: number; monto_min?: number; monto_max?: number; limit?: number; offset?: number }) => client.get<Expense[]>("/v1/expenses", params as any),
+    list: (params?: { branch_id?: string; fund_id?: string; rendicion_id?: string; sin_rendicion?: boolean; category_id?: string; estado?: string; desde?: string; hasta?: string; search?: string; monto?: number; monto_min?: number; monto_max?: number; limit?: number; offset?: number }) => client.get<Expense[]>("/v1/expenses/", params as any),
     rendiciones: {
       list: (params?: { fund_id?: string; estado?: string }) => client.get<PettyCashRendicion[]>("/v1/petty-cash-funds/rendiciones", params as any),
       get: (id: string) => client.get<{ rendicion: PettyCashRendicion; expenses: Expense[]; fund: PettyCashFund }>(`/v1/petty-cash-funds/rendiciones/${id}`),

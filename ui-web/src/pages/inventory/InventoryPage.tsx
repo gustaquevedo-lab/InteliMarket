@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useSearchParams } from "react-router-dom"
-import { createPortal } from "react-dom"
 import {
   Warehouse, ArrowLeftRight, AlertTriangle, Package, Search, Plus, Loader2, X,
   Send, Trash2, Minus, Scale, ThermometerSnowflake, HeartPulse, ClipboardCheck,
@@ -21,6 +20,9 @@ import { useToast } from "../../context/ToastContext"
 import { formatPYG } from "../../utils/format"
 import AjustesTab from "./AjustesTab"
 import TomaFisicaTab from "./TomaFisicaTab"
+import WarehouseModal, { type WarehouseFormData } from "./WarehouseModal"
+import KardexProductoDetalleModal from "./KardexProductoDetalleModal"
+import KardexProductPickerModal from "./KardexProductPickerModal"
 
 export default function InventoryPage() {
   const toast = useToast()
@@ -159,9 +161,6 @@ export default function InventoryPage() {
   const [loadingKardexSummary, setLoadingKardexSummary] = useState(false)
   const [exportingKardex, setExportingKardex] = useState<"xlsx" | "pdf" | null>(null)
   const [showProductKardexPicker, setShowProductKardexPicker] = useState(false)
-  const [pickerProductSearch, setPickerProductSearch] = useState("")
-  const [pickerProductResults, setPickerProductResults] = useState<any[]>([])
-  const [loadingPickerProducts, setLoadingPickerProducts] = useState(false)
 
   const loadKardexSummary = useCallback(async () => {
     setLoadingKardexSummary(true)
@@ -443,25 +442,7 @@ export default function InventoryPage() {
     return () => clearTimeout(timer)
   }, [activeTab, loadKardexSummary, loadMovementsData, kardexSearch, kardexTipo, kardexFechaDesde, kardexFechaHasta])
 
-  useEffect(() => {
-    if (!showProductKardexPicker) return
-    if (!pickerProductSearch.trim()) {
-      setPickerProductResults([])
-      return
-    }
-    const timer = setTimeout(async () => {
-      setLoadingPickerProducts(true)
-      try {
-        const prods = await api.products.list({ search: pickerProductSearch.trim(), limit: 10 })
-        setPickerProductResults(prods || [])
-      } catch (err) {
-        setPickerProductResults([])
-      } finally {
-        setLoadingPickerProducts(false)
-      }
-    }, 250)
-    return () => clearTimeout(timer)
-  }, [pickerProductSearch, showProductKardexPicker])
+
 
   // Filtrado de stock
   const filteredStock = useMemo(() => {
@@ -521,19 +502,18 @@ export default function InventoryPage() {
     setShowWarehouseModal(true)
   }
 
-  const handleSaveWarehouse = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!whForm.nombre.trim() || !whForm.codigo.trim()) return
+  const handleSaveWarehouse = async (formData: WarehouseFormData) => {
+    if (!formData.nombre.trim() || !formData.codigo.trim()) return
     setSavingWh(true)
     try {
       const payload = {
-        codigo: whForm.codigo.trim().toUpperCase(),
-        nombre: whForm.nombre.trim(),
-        direccion: whForm.direccion.trim() || undefined,
-        tipo: whForm.tipo,
-        parent_id: whForm.parent_id || undefined,
-        responsable: whForm.responsable.trim() || undefined,
-        descripcion: whForm.descripcion.trim() || undefined,
+        codigo: formData.codigo.trim().toUpperCase(),
+        nombre: formData.nombre.trim(),
+        direccion: formData.direccion.trim() || undefined,
+        tipo: formData.tipo,
+        parent_id: formData.parent_id || undefined,
+        responsable: formData.responsable.trim() || undefined,
+        descripcion: formData.descripcion.trim() || undefined,
         activo: true,
       }
       if (editingWh) {
@@ -548,15 +528,6 @@ export default function InventoryPage() {
       }
       setShowWarehouseModal(false)
       setEditingWh(null)
-      setWhForm({
-        codigo: "",
-        nombre: "",
-        direccion: "",
-        tipo: "principal",
-        parent_id: null,
-        responsable: "",
-        descripcion: "",
-      })
       loadStockData()
     } catch (e: any) {
       toast.error("Error al guardar depósito", e.message || "No se pudo procesar la solicitud.")
@@ -937,19 +908,21 @@ export default function InventoryPage() {
             {/* Paginación */}
             {totalPagesStock > 1 && (
               <div className="p-3.5 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                <span className="text-gray-400 font-mono">Página {pageStock} de {totalPagesStock}</span>
+                <span className="text-gray-400 font-mono text-[11px]">
+                  Mostrando página {pageStock} de {totalPagesStock} · {filteredStock.length.toLocaleString("es-PY")} artículos totales
+                </span>
                 <div className="flex gap-1.5">
                   <button
                     onClick={() => setPageStock(p => Math.max(1, p - 1))}
                     disabled={pageStock === 1}
-                    className="px-3 py-1 rounded-lg border border-gray-200 dark:border-slate-700 disabled:opacity-40"
+                    className="px-3 py-1 rounded-lg border border-gray-200 dark:border-slate-700 disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-slate-800 transition cursor-pointer font-medium"
                   >
                     Anterior
                   </button>
                   <button
                     onClick={() => setPageStock(p => Math.min(totalPagesStock, p + 1))}
                     disabled={pageStock === totalPagesStock}
-                    className="px-3 py-1 rounded-lg border border-gray-200 dark:border-slate-700 disabled:opacity-40"
+                    className="px-3 py-1 rounded-lg border border-gray-200 dark:border-slate-700 disabled:opacity-40 hover:bg-gray-100 dark:hover:bg-slate-800 transition cursor-pointer font-medium"
                   >
                     Siguiente
                   </button>
@@ -1596,74 +1569,15 @@ export default function InventoryPage() {
             </div>
           </div>
 
-          {/* Modal Picker para consultar Kardex de cualquier producto en la Base de Datos */}
-          {showProductKardexPicker && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-5 shadow-2xl animate-in fade-in zoom-in-95 duration-150">
-                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 flex items-center justify-center font-bold">
-                      <Search className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">Consultar Kardex en Base de Datos</h3>
-                      <p className="text-[10px] text-slate-400">Buscá entre todos los productos de la empresa en la BD</p>
-                    </div>
-                  </div>
-                  <button onClick={() => setShowProductKardexPicker(false)} className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="relative mb-3">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    autoFocus
-                    value={pickerProductSearch}
-                    onChange={(e) => setPickerProductSearch(e.target.value)}
-                    placeholder="Escribí nombre, código de barras o SKU..."
-                    className="input-field pl-9 py-2 text-xs w-full"
-                  />
-                </div>
-
-                <div className="max-h-64 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-                  {loadingPickerProducts ? (
-                    <div className="p-6 text-center text-slate-400 flex items-center justify-center gap-2 text-xs">
-                      <Loader2 className="w-4 h-4 animate-spin text-indigo-500" /> Consultando base de datos...
-                    </div>
-                  ) : pickerProductResults.length === 0 ? (
-                    <div className="p-6 text-center text-slate-400 text-xs">
-                      {pickerProductSearch.trim() ? "No se encontraron productos coincidentes" : "Escribí para buscar en los 11.000+ productos"}
-                    </div>
-                  ) : (
-                    pickerProductResults.map((p) => (
-                      <div
-                        key={p.id}
-                        onClick={() => {
-                          setShowProductKardexPicker(false)
-                          openKardexProductoDetalle(p.id, p.nombre, p.sku)
-                        }}
-                        className="p-2.5 hover:bg-indigo-50/60 dark:hover:bg-indigo-950/40 cursor-pointer flex items-center justify-between rounded-lg transition"
-                      >
-                        <div className="min-w-0 pr-2">
-                          <p className="font-bold text-xs text-slate-900 dark:text-white truncate">{p.nombre}</p>
-                          <div className="text-[10px] text-slate-400 flex items-center gap-2 font-mono">
-                            <span>SKU: {p.sku}</span>
-                            {p.codigo_barra && <span>CB: {p.codigo_barra}</span>}
-                            {p.supplier_nombre && <span className="text-slate-500 font-sans truncate max-w-[150px]">Prov: {p.supplier_nombre}</span>}
-                          </div>
-                        </div>
-                        <span className="text-[10px] font-bold px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 shrink-0">
-                          Ver Kardex →
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Modal Picker para consultar Kardex de cualquier producto en la Base de Datos (Regla 14) */}
+          <KardexProductPickerModal
+            isOpen={showProductKardexPicker}
+            onClose={() => setShowProductKardexPicker(false)}
+            onSelectProduct={(p) => {
+              setShowProductKardexPicker(false)
+              openKardexProductoDetalle(p.id, p.nombre, p.sku)
+            }}
+          />
 
           <div className="card bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
             {loadingMovements ? (
@@ -1759,82 +1673,16 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* ── MODAL: HISTORIAL COMPLETO DE UN PRODUCTO (clic en fila del Kardex) ── */}
-      {kardexProductoDetalle && createPortal(
-        <div className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col">
-            <div className="p-4 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between shrink-0">
-              <div>
-                <h3 className="font-extrabold text-sm text-gray-900 dark:text-white">{kardexProductoDetalle.nombre}</h3>
-                <p className="text-[10px] font-mono text-gray-400">SKU: {kardexProductoDetalle.sku} · Historial completo (hasta 500 movimientos más recientes)</p>
-              </div>
-              <button
-                onClick={() => { setKardexProductoDetalle(null); setKardexDetalleMovs([]) }}
-                className="text-gray-400 hover:text-gray-700 dark:hover:text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1">
-              {loadingKardexDetalle ? (
-                <div className="p-16 text-center">
-                  <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mx-auto mb-2" />
-                  <p className="text-xs text-gray-400 font-bold">Cargando historial...</p>
-                </div>
-              ) : kardexDetalleMovs.length === 0 ? (
-                <div className="p-16 text-center text-gray-400">
-                  <p className="font-bold text-xs">Sin movimientos registrados para este producto.</p>
-                </div>
-              ) : (
-                <table className="w-full text-left text-xs min-w-[600px]">
-                  <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800 sticky top-0">
-                    <tr>
-                      <th className="p-3">Fecha & Hora</th>
-                      <th className="p-3">Tipo</th>
-                      <th className="p-3">Depósito</th>
-                      <th className="p-3 text-right">Cantidad</th>
-                      <th className="p-3 text-right">Saldo</th>
-                      <th className="p-3">Usuario</th>
-                      <th className="p-3">Motivo / Documento</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100 dark:divide-slate-800/80 font-medium">
-                    {kardexDetalleMovs.map((m) => {
-                      const isPositive = m.tipo === "ENTRADA" || (m.cantidad ?? 0) > 0
-                      return (
-                        <tr key={m.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
-                          <td className="p-3 font-mono text-[11px] text-gray-500">
-                            {new Date(m.created_at).toLocaleString("es-PY", { dateStyle: "short", timeStyle: "short" })}
-                          </td>
-                          <td className="p-3">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                              m.tipo === "ENTRADA"
-                                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                                : m.tipo === "SALIDA"
-                                ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
-                                : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-                            }`}>
-                              {m.tipo}
-                            </span>
-                          </td>
-                          <td className="p-3 text-gray-600 dark:text-gray-300">{m.warehouse_nombre || "Depósito Central"}</td>
-                          <td className={`p-3 text-right font-mono font-black ${isPositive ? "text-emerald-600" : "text-red-600"}`}>
-                            {isPositive ? `+${Math.abs(m.cantidad ?? 0)}` : `-${Math.abs(m.cantidad ?? 0)}`}
-                          </td>
-                          <td className="p-3 text-right font-mono font-black text-gray-900 dark:text-white">{m.saldo_acumulado ?? "—"}</td>
-                          <td className="p-3 text-gray-500 text-[11px]">{m.user_nombre || "—"}</td>
-                          <td className="p-3 text-gray-500 text-[11px]">{m.motivo || "Movimiento operativo"}</td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      {/* ── MODAL: HISTORIAL COMPLETO DE UN PRODUCTO (Regla 14) ── */}
+      <KardexProductoDetalleModal
+        producto={kardexProductoDetalle}
+        movimientos={kardexDetalleMovs}
+        loading={loadingKardexDetalle}
+        onClose={() => {
+          setKardexProductoDetalle(null)
+          setKardexDetalleMovs([])
+        }}
+      />
 
       {/* ── CONTENIDO PESTAÑA 4: AJUSTES DE STOCK ──────────────────────────── */}
       {activeTab === "ajustes" && (
@@ -2171,227 +2019,19 @@ export default function InventoryPage() {
         )
       })()}
 
-      {/* ── MODAL NUEVO / EDITAR DEPÓSITO Y SUBDEPÓSITO ──────────────────────── */}
-      {showWarehouseModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl my-8">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center border border-purple-200 dark:border-purple-800 shrink-0">
-                  <FolderTree className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-black text-base text-gray-900 dark:text-white">
-                    {editingWh
-                      ? "Editar Depósito / Subdepósito"
-                      : whForm.parent_id
-                      ? "Crear Nuevo Subdepósito de Sector"
-                      : "Crear Nuevo Depósito o Subdepósito"}
-                  </h3>
-                  <p className="text-[11px] text-gray-500 dark:text-slate-400">
-                    Estructura logística bimonetaria y sectorizada de Extra Supermercado
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowWarehouseModal(false)
-                  setEditingWh(null)
-                }}
-                className="text-gray-400 hover:text-gray-700 dark:hover:text-white p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveWarehouse} className="space-y-4 text-xs">
-              {/* Selector de Jerarquía: Principal vs Subdepósito */}
-              {!editingWh && (
-                <div className="space-y-2 p-3 rounded-2xl bg-gray-50 dark:bg-slate-800/60 border border-gray-200 dark:border-slate-700/60">
-                  <label className="block font-bold text-gray-500 dark:text-slate-400 uppercase text-[10px]">
-                    Nivel de Almacén:
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setWhForm({ ...whForm, parent_id: null, tipo: "principal" })}
-                      className={`px-3 py-2 rounded-xl font-bold text-xs border transition flex items-center justify-center gap-1.5 ${
-                        !whForm.parent_id
-                          ? "bg-blue-600 text-white border-blue-600 shadow-xs"
-                          : "bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-300 border-gray-200 dark:border-slate-700 hover:border-gray-300"
-                      }`}
-                    >
-                      <Building2 className="w-3.5 h-3.5" />
-                      Depósito Principal
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const firstParent = warehouses.find(w => !w.parent_id)?.id || warehouses[0]?.id || null
-                        setWhForm({ ...whForm, parent_id: firstParent, tipo: "subdeposito" })
-                      }}
-                      className={`px-3 py-2 rounded-xl font-bold text-xs border transition flex items-center justify-center gap-1.5 ${
-                        whForm.parent_id
-                          ? "bg-purple-600 text-white border-purple-600 shadow-xs"
-                          : "bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-300 border-gray-200 dark:border-slate-700 hover:border-gray-300"
-                      }`}
-                    >
-                      <CornerDownRight className="w-3.5 h-3.5" />
-                      Subdepósito / Sector
-                    </button>
-                  </div>
-
-                  {/* Selector del Depósito Padre */}
-                  {whForm.parent_id && (
-                    <div className="pt-2 space-y-1">
-                      <label className="block font-semibold text-gray-600 dark:text-slate-300 text-[11px]">
-                        Seleccione el Depósito Principal al que pertenece: *
-                      </label>
-                      <select
-                        required
-                        value={whForm.parent_id}
-                        onChange={(e) => setWhForm({ ...whForm, parent_id: e.target.value })}
-                        className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      >
-                        {warehouses
-                          .filter(w => !w.parent_id)
-                          .map(pw => (
-                            <option key={pw.id} value={pw.id}>
-                              🏢 {pw.nombre} ({pw.codigo})
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Selector de Tipo */}
-              <div className="space-y-1.5">
-                <label className="block font-bold text-gray-500 dark:text-slate-400 uppercase text-[10px]">
-                  Tipo Funcional de Almacén: *
-                </label>
-                <select
-                  value={whForm.tipo}
-                  onChange={(e) => setWhForm({ ...whForm, tipo: e.target.value })}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="principal">🏢 Depósito Central / Principal</option>
-                  <option value="subdeposito">📦 Subdepósito Operativo de Sector</option>
-                  <option value="camara">❄️ Cámara Frigorífica / Climatizada</option>
-                  <option value="salon">🛒 Salón de Ventas / Góndolas</option>
-                  <option value="produccion">🥩 Área de Producción (Carnicería, Panadería, Rotisería)</option>
-                  <option value="merma">⚠️ Depósito de Averías / Mermas / Devoluciones</option>
-                </select>
-              </div>
-
-              {/* Código y Nombre */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <label className="block font-bold text-gray-500 dark:text-slate-400 uppercase text-[10px]">
-                    Código *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={whForm.codigo}
-                    onChange={(e) => setWhForm({ ...whForm, codigo: e.target.value.toUpperCase() })}
-                    placeholder="Ej: SUB-01"
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white font-mono font-bold focus:outline-none focus:ring-2 focus:ring-purple-500 uppercase"
-                  />
-                </div>
-                <div className="sm:col-span-2 space-y-1">
-                  <label className="block font-bold text-gray-500 dark:text-slate-400 uppercase text-[10px]">
-                    Nombre del Depósito / Sector *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={whForm.nombre}
-                    onChange={(e) => setWhForm({ ...whForm, nombre: e.target.value })}
-                    placeholder="Ej: Subdepósito Carnicería / Salón de Ventas"
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                </div>
-              </div>
-
-              {/* Responsable y Ubicación */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block font-bold text-gray-500 dark:text-slate-400 uppercase text-[10px]">
-                    Responsable / Encargado
-                  </label>
-                  <input
-                    type="text"
-                    value={whForm.responsable}
-                    onChange={(e) => setWhForm({ ...whForm, responsable: e.target.value })}
-                    placeholder="Ej: Carlos Maidana (Encargado)"
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-bold text-gray-500 dark:text-slate-400 uppercase text-[10px]">
-                    Ubicación Física / Pasillo
-                  </label>
-                  <input
-                    type="text"
-                    value={whForm.direccion}
-                    onChange={(e) => setWhForm({ ...whForm, direccion: e.target.value })}
-                    placeholder="Ej: Sector Frescos - Pasillo 2"
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                </div>
-              </div>
-
-              {/* Descripción */}
-              <div className="space-y-1">
-                <label className="block font-bold text-gray-500 dark:text-slate-400 uppercase text-[10px]">
-                  Descripción u Observaciones Operativas
-                </label>
-                <textarea
-                  rows={2}
-                  value={whForm.descripcion}
-                  onChange={(e) => setWhForm({ ...whForm, descripcion: e.target.value })}
-                  placeholder="Detalles sobre temperatura, mercaderías asignadas o procesos internos..."
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                />
-              </div>
-
-              {/* Botones de Acción */}
-              <div className="flex gap-2.5 pt-3 border-t border-gray-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowWarehouseModal(false)
-                    setEditingWh(null)
-                  }}
-                  className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 font-bold hover:bg-gray-100 dark:hover:bg-slate-800 transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingWh}
-                  className="flex-1 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold transition shadow-md shadow-purple-600/30 flex items-center justify-center gap-1.5"
-                >
-                  {savingWh ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Guardando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      <span>{editingWh ? "Actualizar Depósito" : (whForm.parent_id ? "Crear Subdepósito" : "Guardar Depósito")}</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* ── MODAL NUEVO / EDITAR DEPÓSITO Y SUBDEPÓSITO (Regla 14) ──────────── */}
+      <WarehouseModal
+        isOpen={showWarehouseModal}
+        onClose={() => {
+          setShowWarehouseModal(false)
+          setEditingWh(null)
+        }}
+        editingWh={editingWh}
+        warehouses={warehouses}
+        initialParentId={whForm.parent_id}
+        onSave={handleSaveWarehouse}
+        isSaving={savingWh}
+      />
 
       {/* ── MODAL: ACCIÓN DE LOTE (MERMA / DEVOLUCIÓN A PROVEEDOR) ── */}
       {lotActionModal.open && lotActionModal.lot && (

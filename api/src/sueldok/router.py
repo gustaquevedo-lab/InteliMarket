@@ -309,22 +309,27 @@ async def execute_dossier_compensations(
 @router.get("/dossiers/{dossier_id}/compensations-pdf")
 async def download_dossier_compensations_pdf(
     dossier_id: str,
+    tipo: Optional[str] = Query(None),
     company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     db: AsyncSession = Depends(get_db),
     user: Any = Depends(require_auth)
 ):
     """
     Descarga el Comprobante y Planilla Oficial en PDF de las Compensaciones No-Cash
-    (Extra Club y Uniformes) con detalle de recibos oficiales RC-NOMINA.
+    (Extra Club, Uniformes o Consolidado).
     """
     from api.src.sueldok.compensations_service import get_dossier_compensations_pdf
     user_name = user.get("username", "") if isinstance(user, dict) else getattr(user, "username", "")
     try:
-        pdf_bytes = await get_dossier_compensations_pdf(db, company_id, dossier_id, user_name=user_name)
+        pdf_bytes = await get_dossier_compensations_pdf(db, company_id, dossier_id, tipo=tipo, user_name=user_name)
+        
+        prefix = "recibo_neteo_uniformes" if tipo == "uniformes" else ("comprobante_neteo_extraclub" if tipo == "extra_club" else "comprobante_compensaciones")
+        filename = f"{prefix}_{dossier_id[:8]}.pdf"
+        
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",
-            headers={"Content-Disposition": f"inline; filename=comprobante_compensaciones_{dossier_id[:8]}.pdf"}
+            headers={"Content-Disposition": f"inline; filename={filename}"}
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

@@ -226,15 +226,25 @@ export default function PayrollDossierView({
   }
 
   // Handle Compensations PDF Download (Fase 2)
-  const handleDownloadCompensationsPdf = async () => {
+  const handleDownloadCompensationsPdf = async (tipo?: string) => {
     if (!selectedDossier) return
     try {
-      setActionLoading("download-comp")
+      const loadKey = tipo ? `download-comp-${tipo}` : "download-comp"
+      setActionLoading(loadKey)
+      const filename = tipo === "uniformes"
+        ? `recibo_neteo_uniformes_${selectedDossier.periodo}.pdf`
+        : (tipo === "extra_club" ? `acta_neteo_extraclub_${selectedDossier.periodo}.pdf` : `comprobante_compensaciones_${selectedDossier.periodo}.pdf`)
       await api.sueldok.downloadCompensationsPdf(
         selectedDossier.id,
-        `comprobante_compensaciones_${selectedDossier.periodo}.pdf`
+        tipo,
+        filename
       )
-      toast.success("Comprobante Descargado", "El reporte oficial RC-NOMINA se generó correctamente.")
+      toast.success(
+        tipo === "uniformes" ? "Recibo de Uniformes Descargado" : "Comprobante Descargado",
+        tipo === "uniformes"
+          ? "El recibo oficial de neteo de uniformes (RC-UNIFORMES) se generó correctamente."
+          : "El reporte oficial se generó correctamente."
+      )
     } catch (err: any) {
       toast.error("Error al descargar comprobante", err.response?.data?.detail || err.message)
     } finally {
@@ -764,58 +774,104 @@ export default function PayrollDossierView({
                 </span>
               </div>
 
-              {/* Botón de Descarga Oficial RC-NOMINA */}
+              {/* Botón de Descarga Oficial Consolidado */}
               <button
-                onClick={handleDownloadCompensationsPdf}
+                onClick={() => handleDownloadCompensationsPdf()}
                 disabled={actionLoading === "download-comp"}
-                className="w-full py-2.5 px-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-sm"
+                className="w-full py-2 px-3 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-700/60 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-600 font-medium text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-sm"
               >
                 {actionLoading === "download-comp" ? (
-                  <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-gray-500" />
                 ) : (
-                  <Download className="w-4 h-4 text-indigo-600" />
+                  <Download className="w-3.5 h-3.5 text-gray-500" />
                 )}
-                <span>📄 Descargar Comprobante Oficial RC-NOMINA (PDF)</span>
+                <span>📄 Descargar Planilla Consolidada de Compensaciones (PDF)</span>
               </button>
 
               <div className="space-y-3">
-                {compPhases.map(phase => (
-                  <div key={phase.id} className="p-3.5 rounded-xl border border-gray-100 dark:border-gray-700/60 bg-gray-50/50 dark:bg-gray-900/30 space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <div>
-                        <div className="font-semibold text-gray-900 dark:text-white">{phase.phase_label}</div>
-                        <div className="text-[11px] text-gray-500">Monto compensado:</div>
-                      </div>
-                      <span className="font-bold text-emerald-700 dark:text-emerald-400 text-sm">
-                        {formatPYG(phase.monto)}
-                      </span>
-                    </div>
+                {compPhases.map(phase => {
+                  const isUniformes = phase.phase_type.includes("uniforme")
+                  const isExtraClub = phase.phase_type.includes("extra_club")
+                  const tipoKey = isUniformes ? "uniformes" : (isExtraClub ? "extra_club" : undefined)
 
-                    {phase.estado === "ejecutado" ? (
-                      <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
-                          <CheckCircle className="w-3.5 h-3.5" /> Neteo ejecutado correctamente
+                  return (
+                    <div key={phase.id} className="p-3.5 rounded-xl border border-gray-100 dark:border-gray-700/60 bg-gray-50/50 dark:bg-gray-900/30 space-y-2.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <div>
+                          <div className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">
+                            {phase.phase_label}
+                            {isUniformes && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 font-semibold">
+                                29 Colaboradores
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-gray-500">
+                            {isUniformes
+                              ? "Amortización interna de indumentaria (Sin afectación comercial)"
+                              : "Compensado vía Remisión Corporativa REM-202609-020"}
+                          </div>
                         </div>
-                        <span className="text-[10px] text-gray-500">
-                          {phase.executed_at ? new Date(phase.executed_at).toLocaleDateString() : ""}
+                        <span className="font-bold text-emerald-700 dark:text-emerald-400 text-sm">
+                          {formatPYG(phase.monto)}
                         </span>
                       </div>
-                    ) : (
-                      <button
-                        onClick={handleExecuteCompensations}
-                        disabled={actionLoading === "compensations"}
-                        className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
-                      >
-                        {actionLoading === "compensations" ? (
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                        )}
-                        Ejecutar Neteo Interno (Generar RC-NOMINA)
-                      </button>
-                    )}
-                  </div>
-                ))}
+
+                      {/* Botón de Comprobante / Recibo Separado por Concepto */}
+                      {isUniformes ? (
+                        <button
+                          onClick={() => handleDownloadCompensationsPdf("uniformes")}
+                          disabled={actionLoading === "download-comp-uniformes"}
+                          className="w-full py-2 px-3 rounded-lg bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/50 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-semibold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-sm"
+                        >
+                          {actionLoading === "download-comp-uniformes" ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-600" />
+                          ) : (
+                            <Download className="w-3.5 h-3.5 text-purple-600" />
+                          )}
+                          <span>📄 Descargar Recibo Oficial Neteo Uniformes (PDF)</span>
+                        </button>
+                      ) : isExtraClub ? (
+                        <button
+                          onClick={() => handleDownloadCompensationsPdf("extra_club")}
+                          disabled={actionLoading === "download-comp-extra_club"}
+                          className="w-full py-2 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-semibold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-sm"
+                        >
+                          {actionLoading === "download-comp-extra_club" ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                          ) : (
+                            <Download className="w-3.5 h-3.5 text-emerald-600" />
+                          )}
+                          <span>📄 Descargar Acta de Neteo Extra Club (PDF)</span>
+                        </button>
+                      ) : null}
+
+                      {phase.estado === "ejecutado" ? (
+                        <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+                            <CheckCircle className="w-3.5 h-3.5" /> Neteo ejecutado correctamente
+                          </div>
+                          <span className="text-[10px] text-gray-500">
+                            {phase.executed_at ? new Date(phase.executed_at).toLocaleDateString() : ""}
+                          </span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={handleExecuteCompensations}
+                          disabled={actionLoading === "compensations"}
+                          className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                        >
+                          {actionLoading === "compensations" ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                          )}
+                          Ejecutar Neteo Interno
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
 
