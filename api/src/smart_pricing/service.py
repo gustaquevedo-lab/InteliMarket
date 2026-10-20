@@ -1,3 +1,4 @@
+import math
 from sqlalchemy import select, delete, func as sa_func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date
@@ -576,7 +577,7 @@ async def generate_dynamic_price(db: AsyncSession, company_id: str, data: Dynami
     source = "_".join(source_parts) if source_parts else "mixto"
 
     return {
-        "suggested_price": round(suggested, 2),
+        "suggested_price": math.ceil(suggested),
         "confidence": round(confidence, 1),
         "factors": factors,
         "source": source,

@@ -2,7 +2,7 @@ import io
 import logging
 import os
 import uuid
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from datetime import date, datetime, time, timezone
 from typing import Optional, List, Dict, Any
 
@@ -120,6 +120,10 @@ def _aplicar_terminacion_psicologica(
     return max(Decimal("0"), candidato)
 
 
+def _gs(x) -> Decimal:
+    """Guaraníes: entero, siempre hacia arriba, en el momento."""
+    return Decimal(str(x)).quantize(Decimal("1"), rounding=ROUND_CEILING)
+
 def calcular_precio_promocional(
     tipo: str,
     precio_regular: Decimal,
@@ -135,40 +139,40 @@ def calcular_precio_promocional(
     motor de caja (calculate_applicable) para que ambos vean siempre el mismo
     numero, incluyendo el redondeo psicologico y precios especificos por producto."""
     if precio_producto_especifico is not None and precio_producto_especifico > Decimal("0"):
-        return round(precio_producto_especifico)
+        return _gs(precio_producto_especifico)
 
     precio_promo = precio_regular
 
     if tipo == "precio_fijo_oferta" and precio_fijo_promocional:
-        precio_promo = round(precio_fijo_promocional)
+        precio_promo = _gs(precio_fijo_promocional)
     elif tipo == "porcentaje" and valor is not None:
         pct = max(Decimal("0"), valor) / Decimal("100")
         if base_calculo_pct == "costo" and costo_unitario_referencia and costo_unitario_referencia > 0:
             # Markup objetivo sobre el costo: precio = costo * (1 + markup%)
-            precio_promo = round(costo_unitario_referencia * (Decimal("1") + pct))
+            precio_promo = _gs(costo_unitario_referencia * (Decimal("1") + pct))
         else:
             pct_desc = min(pct, Decimal("1"))
-            precio_promo = round(precio_regular * (Decimal("1") - pct_desc))
+            precio_promo = _gs(precio_regular * (Decimal("1") - pct_desc))
     elif tipo == "monto_fijo" and valor:
-        precio_promo = max(Decimal("0"), round(precio_regular - valor))
+        precio_promo = max(Decimal("0"), _gs(precio_regular - valor))
     elif tipo == "dos_por_uno":
         # 2x1: Lleva 2, paga 1. Precio unitario equivalente = precio regular / 2
-        precio_promo = round(precio_regular / Decimal("2"))
+        precio_promo = _gs(precio_regular / Decimal("2"))
     elif tipo == "tres_por_dos":
         # 3x2: Lleva 3, paga 2. Precio unitario equivalente = (precio regular * 2) / 3
-        precio_promo = round((precio_regular * Decimal("2")) / Decimal("3"))
+        precio_promo = _gs((precio_regular * Decimal("2")) / Decimal("3"))
     elif tipo in ("nxm", "cantidad_lleva") and valor:
         # Lleva N, paga M (donde valor es M). Si no hay N, default 2.
         n = Decimal("2")
         m = Decimal(str(valor)) if valor > 0 else Decimal("1")
         if n > m:
-            precio_promo = round((precio_regular * m) / n)
+            precio_promo = _gs((precio_regular * m) / n)
     elif tipo == "segunda_unidad_pct":
         # 2da unidad al X% OFF: promedio unitario = precio * (1 - (X / 200))
         pct_descuento_segunda = valor if valor else Decimal("50")
-        precio_promo = round(precio_regular * (Decimal("1") - (pct_descuento_segunda / Decimal("200"))))
+        precio_promo = _gs(precio_regular * (Decimal("1") - (pct_descuento_segunda / Decimal("200"))))
     elif tipo in ("combo_pack", "combo_precio") and precio_fijo_promocional:
-        precio_promo = round(precio_fijo_promocional)
+        precio_promo = _gs(precio_fijo_promocional)
 
     precio_promo = _aplicar_terminacion_psicologica(
         precio_promo, terminacion_psicologica, base_calculo_pct, costo_unitario_referencia
