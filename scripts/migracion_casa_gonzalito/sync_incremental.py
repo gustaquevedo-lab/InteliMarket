@@ -1327,33 +1327,47 @@ def sync_limite_credito(pg, my):
                 "FROM credit_accounts lc WHERE lc.customer_id = c.id "
                 "AND lc.limite_credito > 0 AND c.id = ANY(%s::uuid[])", (cust_ids,),
             )
-            # saldo_utilizado/disponible en las tablas nuevas: AR real si tiene
-            # pendiente, si no el agregado de customer_accounts — mismo criterio
-            # CASE/EXISTS ya usado en financial/service.py para no duplicar.
-            for tbl in ("credit_accounts", "customer_credit_limits"):
-                cur.execute(f"""
-                    UPDATE {tbl} t SET
-                      saldo_utilizado = COALESCE(CASE
-                        WHEN EXISTS (SELECT 1 FROM accounts_receivable ar
-                                     WHERE ar.customer_id = t.customer_id AND ar.estado = 'pendiente')
-                        THEN (SELECT SUM(ar.saldo_pendiente) FROM accounts_receivable ar
-                              WHERE ar.customer_id = t.customer_id AND ar.estado = 'pendiente')
-                        ELSE (SELECT ca.saldo_actual FROM customer_accounts ca
-                              WHERE ca.customer_id = t.customer_id)
-                      END, 0)
-                    WHERE t.company_id = %s AND t.customer_id = ANY(%s::uuid[])
-                """, (str(COMPANY_ID), cust_ids))
-                disp_col = "limite_disponible" if tbl == "customer_credit_limits" else "saldo_disponible"
-                cur.execute(f"""
-                    UPDATE {tbl} SET {disp_col} = GREATEST(limite_credito - saldo_utilizado, 0)
-                    WHERE company_id = %s AND customer_id = ANY(%s::uuid[])
-                """, (str(COMPANY_ID), cust_ids))
         pg.commit()
 
     log(f"  limite_de_credito: {len(por_cliente)} clientes con limite real "
         f"(ID {last_id} -> {max_id}, {saltados} sin cliente valido)")
     set_watermark(pg, "limite_credito", last_id=max_id)
     return max_id
+
+
+def sync_saldo_credito(pg, my):
+    """Deuda del cliente como en el legacy (Deudas/Index.asp): facturas a crédito + pagarés + cheques devueltos
+    + cheques a plazo sin cobrar, más las cuentas por cobrar de ventas hechas en InteliMarket. Recálculo completo
+    cada corrida: la deuda cambia todo el día y credit_accounts.saldo_disponible decide si una venta a crédito pasa."""
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT c, SUM(m) FROM ("
+            " SELECT IDCLIENTES c, MONTO-COBRO m FROM ctas_a_cobrar WHERE MONTO-COBRO <> 0"
+            " UNION ALL SELECT IDCLIENTES, MONTO-COBRO FROM pagares WHERE MONTO-COBRO <> 0"
+            " UNION ALL SELECT IDCLIENTES, VALOR-COBRO FROM chequesdevuelta WHERE VALOR-COBRO <> 0"
+            " UNION ALL SELECT IDCLIENTES, VALOR-COBRO FROM cheques_recibidos WHERE VALOR-COBRO <> 0"
+            ") t GROUP BY c")
+        deuda = {str(uuid.uuid5(NS, f"cli:{txt_keep(c, 15)}")): int(m or 0) for c, m in cur.fetchall() if txt_keep(c, 15)}
+    if DRY_RUN:
+        return
+    with pg.cursor() as cur:
+        cur.execute("CREATE TEMP TABLE _deuda (customer_id uuid PRIMARY KEY, monto numeric) ON COMMIT DROP")
+        cur.executemany("INSERT INTO _deuda VALUES (%s, %s)", list(deuda.items()))
+        cur.execute("""
+            UPDATE credit_accounts ca SET
+              saldo_utilizado = COALESCE(d.monto, 0) + COALESCE(im.monto, 0),
+              saldo_disponible = GREATEST(ca.limite_credito - COALESCE(d.monto, 0) - COALESCE(im.monto, 0), 0)
+            FROM credit_accounts ca2
+            LEFT JOIN _deuda d ON d.customer_id = ca2.customer_id
+            LEFT JOIN (SELECT ar.customer_id, SUM(ar.saldo_pendiente) monto FROM accounts_receivable ar
+                       JOIN sales s ON s.id = ar.sale_id
+                       WHERE ar.estado = 'pendiente' AND s.numero ~ '^[0-9]{8}-[A-Z0-9]{3}-[0-9]+$'
+                       GROUP BY ar.customer_id) im ON im.customer_id = ca2.customer_id
+            WHERE ca.id = ca2.id AND ca.company_id = %s
+        """, (str(COMPANY_ID),))
+        n = cur.rowcount
+    pg.commit()
+    log(f"  saldo de crédito: {n} cuentas recalculadas ({len(deuda)} clientes con deuda en el legacy)")
 
 
 # ----------------------------------------------------------------------------
@@ -1434,6 +1448,7 @@ def main():
         "efectivo": lambda: sync_efectivo(pg, my),
         "pedidos_ruta": lambda: sync_pedidos(pg, my),
         "limite_credito": lambda: sync_limite_credito(pg, my),
+        "saldo_credito": lambda: sync_saldo_credito(pg, my),
     }
     if ONLY and ONLY not in entities:
         log(f"ERROR: entidad desconocida '{ONLY}'. Opciones: {', '.join(entities)}")
@@ -1508,6 +1523,8 @@ def main():
     log("\n[4h] Limite de credito por cliente")
     if not ONLY or ONLY == "limite_credito":
         sync_limite_credito(pg, my)
+    if not ONLY or ONLY in ("limite_credito", "saldo_credito"):
+        sync_saldo_credito(pg, my)
 
     log("\n[5] Post-proceso")
     recalcular_iva(pg, sale_ids, set())
