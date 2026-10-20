@@ -21,7 +21,7 @@ import { formatPYG } from "../../utils/format"
 import AjustesTab from "./AjustesTab"
 import TomaFisicaTab from "./TomaFisicaTab"
 import WarehouseModal, { type WarehouseFormData } from "./WarehouseModal"
-import KardexProductoDetalleModal from "./KardexProductoDetalleModal"
+import KardexProductoDetalleModal, { type KardexProductoInfo } from "./KardexProductoDetalleModal"
 import KardexProductPickerModal from "./KardexProductPickerModal"
 
 export default function InventoryPage() {
@@ -1542,7 +1542,7 @@ export default function InventoryPage() {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => { setShowProductKardexPicker(true); setPickerProductSearch("") }}
+                onClick={() => setShowProductKardexPicker(true)}
                 className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-950/70 cursor-pointer flex items-center gap-1.5 shadow-xs"
                 title="Buscar cualquier producto en toda la base de datos para ver su Kardex"
               >
@@ -1573,7 +1573,7 @@ export default function InventoryPage() {
           <KardexProductPickerModal
             isOpen={showProductKardexPicker}
             onClose={() => setShowProductKardexPicker(false)}
-            onSelectProduct={(p) => {
+            onSelectProduct={(p: any) => {
               setShowProductKardexPicker(false)
               openKardexProductoDetalle(p.id, p.nombre, p.sku)
             }}
