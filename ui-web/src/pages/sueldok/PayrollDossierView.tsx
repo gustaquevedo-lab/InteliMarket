@@ -842,6 +842,9 @@ export default function PayrollDossierView({
                   thirdPartyPhases.map(phase => {
                     const isJudicial = phase.phase_type === "judiciales"
                     const inputs = chequeInputs[phase.id] || { num: "", banco: "" }
+                    const isPagadoEnTesoreria = phase.estado === "pagado" || phase.payment_order_estado === "pagado"
+                    const isEjecutado = phase.estado === "ejecutado"
+                    const isPendiente = !isPagadoEnTesoreria && !isEjecutado
 
                     return (
                       <div
@@ -872,11 +875,11 @@ export default function PayrollDossierView({
                             )}
                           </div>
 
-                          {phase.estado === "pagado" || phase.payment_order_estado === "pagado" ? (
+                          {isPagadoEnTesoreria ? (
                             <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 font-bold border border-emerald-300 dark:border-emerald-800">
                               <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Liquidada en Tesorería {phase.payment_order_numero ? `(${phase.payment_order_numero})` : ""}
                             </span>
-                          ) : phase.estado === "ejecutado" ? (
+                          ) : isEjecutado ? (
                             <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 font-semibold border border-blue-200 dark:border-blue-800">
                               <Clock className="w-3.5 h-3.5 text-blue-600" /> OP Emitida {phase.payment_order_numero ? `(${phase.payment_order_numero})` : ""}
                             </span>
@@ -887,7 +890,8 @@ export default function PayrollDossierView({
                           )}
                         </div>
 
-                        {phase.estado !== "ejecutado" && !isJudicial && (
+                        {/* Entradas de Cheque SOLO si está pendiente */}
+                        {isPendiente && !isJudicial && (
                           <div className="grid grid-cols-2 gap-2 pt-1">
                             <input
                               type="text"
@@ -944,8 +948,8 @@ export default function PayrollDossierView({
                             Planilla Anexa (PDF)
                           </button>
 
-                          {/* Estado Pendiente: Emitir OP */}
-                          {phase.estado !== "ejecutado" && (
+                          {/* Estado Pendiente: Emitir OP (SOLO cuando isPendiente) */}
+                          {isPendiente && (
                             <button
                               type="button"
                               onClick={() => handleExecuteThirdParty(phase.id)}
@@ -962,7 +966,7 @@ export default function PayrollDossierView({
                           )}
 
                           {/* Estado Liquidado en Tesorería */}
-                          {(phase.estado === "pagado" || phase.payment_order_estado === "pagado") && (
+                          {isPagadoEnTesoreria && (
                             <a
                               href="/payments?tab=pagadas"
                               className="py-1.5 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-semibold text-xs flex items-center gap-1.5 transition border border-emerald-200 dark:border-emerald-800"
@@ -974,7 +978,7 @@ export default function PayrollDossierView({
                           )}
 
                           {/* Estado Ejecutado: OP Emitida pendiente de desembolso */}
-                          {phase.estado === "ejecutado" && phase.payment_order_estado !== "pagado" && (
+                          {isEjecutado && !isPagadoEnTesoreria && (
                             <>
                               <a
                                 href="/payments"
@@ -1017,6 +1021,9 @@ export default function PayrollDossierView({
                 const isOpen = ipsAdjustmentOpen[phase.id] ?? false
                 const customAmount = ipsCustomAmounts[phase.id] !== undefined ? ipsCustomAmounts[phase.id] : (isAdjusted ? currentMonto : theoreticalAmount)
                 const diff = (customAmount || 0) - theoreticalAmount
+                const isIpsPagado = phase.estado === "pagado" || phase.payment_order_estado === "pagado"
+                const isIpsEjecutado = phase.estado === "ejecutado"
+                const isIpsPendiente = !isIpsPagado && !isIpsEjecutado
 
                 return (
                   <div key={phase.id} className="space-y-4">
@@ -1086,8 +1093,8 @@ export default function PayrollDossierView({
                       </div>
                     )}
 
-                    {/* Adjustment Box (Toggle) */}
-                    {phase.estado !== "ejecutado" && (
+                    {/* Adjustment Box (Toggle) - SOLO si está pendiente */}
+                    {isIpsPendiente && (
                       <div className="pt-1">
                         <div className="flex items-center justify-between mb-2">
                           <button
@@ -1187,9 +1194,13 @@ export default function PayrollDossierView({
                           {phase.fecha_vencimiento || "Día 12 del mes subsiguiente"}
                         </b>
                       </div>
-                      {phase.estado === "ejecutado" ? (
-                        <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
-                          <CheckCircle className="w-3.5 h-3.5" /> OP Programada
+                      {isIpsPagado ? (
+                        <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 font-bold border border-emerald-300 dark:border-emerald-800">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Liquidada en Tesorería {phase.payment_order_numero ? `(${phase.payment_order_numero})` : ""}
+                        </span>
+                      ) : isIpsEjecutado ? (
+                        <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 font-semibold border border-blue-200 dark:border-blue-800">
+                          <Clock className="w-3.5 h-3.5 text-blue-600" /> OP Programada {phase.payment_order_numero ? `(${phase.payment_order_numero})` : ""}
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-semibold">
@@ -1198,8 +1209,8 @@ export default function PayrollDossierView({
                       )}
                     </div>
 
-                    {/* Botón de Emisión */}
-                    {phase.estado !== "ejecutado" && (
+                    {/* Botón de Emisión - SOLO si está pendiente */}
+                    {isIpsPendiente && (
                       <button
                         onClick={() => handleExecuteIps(phase.id)}
                         disabled={actionLoading === "ips"}
