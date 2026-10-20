@@ -1014,12 +1014,14 @@ export default function ExpensesPage() {
       ? (e as any).linked_invoice_ids.map(String)
       : (currentInvId ? [String(currentInvId)] : [])
 
-    const isPagoProv = Boolean(
-      (e as any).es_pago_proveedor ||
-      currentInvId ||
-      initialLinkedIds.length > 0 ||
-      resolvedSupplierId ||
-      (e.proveedor && e.proveedor.trim().length > 0)
+    const resolvedNaturaleza = (e as any).naturaleza_economica || (
+      (e as any).es_anticipo_sueldo ? "ANTICIPO_PERSONAL" :
+      ((e as any).es_pago_proveedor || currentInvId || initialLinkedIds.length > 0) ? "CMV_REVENTA" :
+      "OPEX_GASTO_OPERATIVO"
+    )
+
+    const isPagoProv = resolvedNaturaleza === "CMV_REVENTA" || Boolean(
+      (e as any).es_pago_proveedor && resolvedNaturaleza !== "OPEX_GASTO_OPERATIVO" && !(e as any).es_anticipo_sueldo
     )
 
     setForm({
@@ -1058,6 +1060,12 @@ export default function ExpensesPage() {
       periodo_nomina: (e as any).periodo_nomina || getTodayAsuncion().slice(0, 7),
       cuotas_anticipo: (e as any).cuotas_anticipo ? String((e as any).cuotas_anticipo) : "1",
       sueldok_sync_id: (e as any).sueldok_sync_id || "",
+      naturaleza_economica: resolvedNaturaleza,
+      production_area: (e as any).production_area || "panaderia",
+      periodo_devengado: (e as any).periodo_devengado || "",
+      cuota_actual: (e as any).cuota_actual || 1,
+      total_cuotas: (e as any).total_cuotas || 10,
+      requisicion_id: (e as any).requisicion_id || "",
     })
     setComprobanteFile(null)
     setLinkedInvoicesDetails((e as any).linked_invoices || [])
@@ -4244,7 +4252,7 @@ export default function ExpensesPage() {
                       es_anticipo_sueldo: false
                     }))}
                     className={`p-2.5 rounded-lg border text-left flex items-center gap-2 transition ${
-                      form.naturaleza_economica === "CMV_REVENTA" || (form.es_pago_proveedor && !form.es_anticipo_sueldo)
+                      form.naturaleza_economica === "CMV_REVENTA"
                         ? "bg-purple-50 border-purple-400 text-purple-800 dark:bg-purple-950/40 dark:border-purple-700 dark:text-purple-200 font-bold shadow-sm"
                         : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-400 hover:bg-slate-50"
                     }`}
@@ -4454,7 +4462,7 @@ export default function ExpensesPage() {
                   </div>
                 )}
 
-                {form.es_pago_proveedor && (
+                {(form.naturaleza_economica === "CMV_REVENTA" || (form.es_pago_proveedor && form.naturaleza_economica !== "OPEX_GASTO_OPERATIVO" && !form.es_anticipo_sueldo)) && (
                   <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700 space-y-3 animate-in fade-in">
                     <div className="flex items-center justify-between">
                       <label className="font-bold text-purple-900 dark:text-purple-200 block text-[11px] flex items-center gap-1.5">
