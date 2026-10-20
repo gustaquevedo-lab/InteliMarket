@@ -15,7 +15,17 @@ import CurrencyInput from "../../components/CurrencyInput"
 
 const COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
-type TabType = "documentos" | "aging" | "scoring" | "recibos" | "empresas_vinculadas" | "reportes"
+type TabType = "documentos" | "aging" | "scoring" | "recibos" | "empresas_vinculadas" | "consumo_interno" | "reportes"
+
+const SANTA_TERESA_CUSTOMER_ID = "8349e0d7-d3fc-4d90-92fe-541d93e81c11"
+
+const isSantaTeresa = (c?: { customer_id?: string; customer_ruc?: string; customer_name?: string; ruc?: string; razon_social?: string } | null) => {
+  if (!c) return false
+  const ruc = c.customer_ruc || c.ruc || ""
+  const name = (c.customer_name || c.razon_social || "").toUpperCase()
+  const cid = c.customer_id || (c as any).id || ""
+  return cid === SANTA_TERESA_CUSTOMER_ID || ruc.includes("80150377") || name.includes("SANTA TERESA")
+}
 
 const BANCOS_PARAGUAY = [
   "BANCO CONTINENTAL", "BANCO ITAÚ PARAGUAY", "BANCO GNB PARAGUAY",
@@ -212,6 +222,25 @@ export default function AccountsReceivablePage() {
   const [availableRequisitions, setAvailableRequisitions] = useState<any[]>([])
   const [payRequisicionId, setPayRequisicionId] = useState("")
   const [payProductionArea, setPayProductionArea] = useState("")
+
+  // 🏢 Consumo Interno (Grupo Santa Teresa E.A.S.)
+  const [internalDocs, setInternalDocs] = useState<AccountsReceivable[]>([])
+  const [internalLoading, setInternalLoading] = useState(false)
+  const [internalFilterStatus, setInternalFilterStatus] = useState<"pendiente" | "pagado" | "todos">("pendiente")
+  const [internalSearch, setInternalSearch] = useState("")
+  const [selectedInternalDocIds, setSelectedInternalDocIds] = useState<Record<string, boolean>>({})
+
+  // Modal Dedicado de Compensación
+  const [showCompensarModal, setShowCompensarModal] = useState(false)
+  const [compensateTargetDocs, setCompensateTargetDocs] = useState<AccountsReceivable[]>([])
+  const [compCategoryId, setCompCategoryId] = useState("")
+  const [compCostCenterId, setCompCostCenterId] = useState("")
+  const [compProductionArea, setCompProductionArea] = useState("")
+  const [compNaturaleza, setCompNaturaleza] = useState<"CMV_MATERIA_PRIMA" | "OPEX_GASTO_OPERATIVO">("CMV_MATERIA_PRIMA")
+  const [compRequisicionId, setCompRequisicionId] = useState("")
+  const [compObservaciones, setCompObservaciones] = useState("")
+  const [compFecha, setCompFecha] = useState(() => getTodayAsuncion())
+  const [submittingCompensacion, setSubmittingCompensacion] = useState(false)
 
   // ⚡ Modal de Inicio Rápido de Cobro (Cabecera)
   const [showQuickCobroModal, setShowQuickCobroModal] = useState(false)
@@ -823,6 +852,142 @@ export default function AccountsReceivablePage() {
     api.expenses.categories.list().then(setExpenseCategories).catch(() => [])
     api.expenses.costCenters.list().then(setCostCenters).catch(() => [])
   }, [])
+
+  const fetchInternalDocs = async () => {
+    setInternalLoading(true)
+    try {
+      const data = await api.accountsReceivable.list({
+        customer_id: SANTA_TERESA_CUSTOMER_ID,
+        limit: 300,
+      })
+      setInternalDocs(data || [])
+    } catch (err) {
+      console.error("Error al cargar facturas de Santa Teresa:", err)
+    } finally {
+      setInternalLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchInternalDocs()
+  }, [])
+
+  useEffect(() => {
+    if (tab === "consumo_interno") {
+      fetchInternalDocs()
+      api.supermer.requisitions.list({ limit: 50 }).then(res => {
+        if (Array.isArray(res)) {
+          setAvailableRequisitions(res.filter((r: any) => r.estado !== "COMPENSADA" && r.estado !== "ANULADA"))
+        }
+      }).catch(() => {})
+    }
+  }, [tab])
+
+  const santaTeresaPendingCount = useMemo(() => {
+    return internalDocs.filter(d => d.estado === "pendiente").length
+  }, [internalDocs])
+
+  const filteredInternalDocs = useMemo(() => {
+    return internalDocs.filter(d => {
+      if (internalFilterStatus === "pendiente" && d.estado !== "pendiente") return false
+      if (internalFilterStatus === "pagado" && d.estado !== "pagado") return false
+      if (internalSearch.trim()) {
+        const s = internalSearch.toLowerCase().trim()
+        const matchNum = d.numero_documento?.toLowerCase().includes(s)
+        const matchFecha = d.fecha_emision?.toLowerCase().includes(s)
+        if (!matchNum && !matchFecha) return false
+      }
+      return true
+    })
+  }, [internalDocs, internalFilterStatus, internalSearch])
+
+  const internalPendingDocs = useMemo(() => {
+    return internalDocs.filter(d => d.estado === "pendiente")
+  }, [internalDocs])
+
+  const selectedInternalDocs = useMemo(() => {
+    return internalPendingDocs.filter(d => selectedInternalDocIds[d.id])
+  }, [internalPendingDocs, selectedInternalDocIds])
+
+  const totalSelectedInternalMonto = useMemo(() => {
+    return selectedInternalDocs.reduce((acc, d) => acc + (d.saldo_pendiente || 0), 0)
+  }, [selectedInternalDocs])
+
+  const handleToggleAllInternal = () => {
+    const allSelected = internalPendingDocs.length > 0 && internalPendingDocs.every(d => selectedInternalDocIds[d.id])
+    const next: Record<string, boolean> = {}
+    if (!allSelected) {
+      internalPendingDocs.forEach(d => { next[d.id] = true })
+    }
+    setSelectedInternalDocIds(next)
+  }
+
+  const handleOpenCompensateSingle = (doc: AccountsReceivable) => {
+    setCompensateTargetDocs([doc])
+    setCompObservaciones(`Consumo Interno - Factura ${doc.numero_documento} (Grupo Santa Teresa)`)
+    setCompFecha(getTodayAsuncion())
+    if (!compCategoryId && expenseCategories.length > 0) {
+      const matPrima = expenseCategories.find(c => c.nombre.toLowerCase().includes("materia prima") || c.nombre.toLowerCase().includes("producci"))
+      setCompCategoryId(matPrima?.id || expenseCategories[0].id)
+    }
+    setShowCompensarModal(true)
+  }
+
+  const handleOpenCompensateBatch = () => {
+    if (selectedInternalDocs.length === 0) {
+      toast.warning("Selección vacía", "Seleccioná al menos una factura para compensar.")
+      return
+    }
+    setCompensateTargetDocs(selectedInternalDocs)
+    setCompObservaciones(`Consumo Interno - Lote de ${selectedInternalDocs.length} facturas (Grupo Santa Teresa)`)
+    setCompFecha(getTodayAsuncion())
+    if (!compCategoryId && expenseCategories.length > 0) {
+      const matPrima = expenseCategories.find(c => c.nombre.toLowerCase().includes("materia prima") || c.nombre.toLowerCase().includes("producci"))
+      setCompCategoryId(matPrima?.id || expenseCategories[0].id)
+    }
+    setShowCompensarModal(true)
+  }
+
+  const handleConfirmCompensacion = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (compensateTargetDocs.length === 0) return
+    if (!compCategoryId) {
+      toast.warning("Rubro requerido", "Seleccioná el Rubro / Categoría de Gasto para imputar el egreso.")
+      return
+    }
+    setSubmittingCompensacion(true)
+    try {
+      const docIds = compensateTargetDocs.map(d => d.id)
+      const totalMonto = compensateTargetDocs.reduce((acc, d) => acc + (d.saldo_pendiente || 0), 0)
+
+      await api.accountsReceivable.applyGlobalPayment({
+        customer_id: SANTA_TERESA_CUSTOMER_ID,
+        monto_total: totalMonto,
+        forma_pago: "compensacion_interna",
+        fecha: compFecha,
+        observaciones: compObservaciones || `Compensación Consumo Interno (${docIds.length} facturas)`,
+        accounts_receivable_ids: docIds,
+        monto_facturas_canceladas: totalMonto,
+        category_id: compCategoryId,
+        cost_center_id: compCostCenterId || undefined,
+        production_area: compProductionArea || undefined,
+        requisicion_id: compRequisicionId || undefined,
+      })
+
+      toast.success(
+        "Compensación Registrada",
+        `Se saldaron ${docIds.length} factura(s) por ${formatPYG(totalMonto)} y se imputó al módulo de Gastos.`
+      )
+      setShowCompensarModal(false)
+      setSelectedInternalDocIds({})
+      fetchInternalDocs()
+      fetchData()
+    } catch (err: any) {
+      toast.error("Error al compensar", err?.response?.data?.detail || err.message)
+    } finally {
+      setSubmittingCompensacion(false)
+    }
+  }
 
   const fetchScoring = async () => {
     setScoresLoading(true)
@@ -1593,6 +1758,7 @@ export default function AccountsReceivablePage() {
           { key: "aging", label: "Matriz de Aging (Antigüedad)", icon: BarChart2, count: aging?.por_clientes?.length },
           { key: "scoring", label: "Scoring Crediticio & Riesgo", icon: ShieldCheck, count: scores.length },
           { key: "empresas_vinculadas", label: "Convenios & Nóminas", icon: Building2, count: agreements?.length },
+          { key: "consumo_interno", label: "Consumo Interno (Grupo Santa Teresa)", icon: Building, count: santaTeresaPendingCount },
           { key: "reportes", label: "Centro de Reportes", icon: Layers },
         ].map((t) => {
           const Icon = t.icon
@@ -1737,21 +1903,15 @@ export default function AccountsReceivablePage() {
                                 </button>
                                 {d.estado === "pendiente" && d.customer_id && (
                                   <>
-                                    <button
-                                      onClick={() => openCompensacionModal(
-                                        d.customer_id!,
-                                        {
-                                          razon_social: d.customer_name || "Cliente",
-                                          ruc: d.customer_ruc,
-                                          empresa_vinculada: (d as any).customer?.empresa_vinculada_nombre,
-                                        },
-                                        { id: d.id, saldo_pendiente: d.saldo_pendiente || 0 }
-                                      )}
-                                      className="py-1 px-2.5 text-xs rounded-lg font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 flex items-center gap-1 transition-colors"
-                                      title="Compensar a Gasto de Consumo Interno"
-                                    >
-                                      <RotateCcw className="w-3 h-3" /> Compensar
-                                    </button>
+                                    {isSantaTeresa(d) && (
+                                      <button
+                                        onClick={() => handleOpenCompensateSingle(d)}
+                                        className="py-1 px-2.5 text-xs rounded-lg font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 flex items-center gap-1 transition-colors"
+                                        title="Compensar a Gasto de Consumo Interno (Grupo Santa Teresa)"
+                                      >
+                                        <RotateCcw className="w-3 h-3" /> Compensar
+                                      </button>
+                                    )}
                                     <button
                                       onClick={() => openPaymentModal(
                                         d.customer_id!,
@@ -1896,17 +2056,15 @@ export default function AccountsReceivablePage() {
                                   >
                                     <FileDown className="w-3.5 h-3.5 text-red-500" /> Estado de Cuenta
                                   </button>
-                                  <button
-                                    onClick={() => openCompensacionModal(c.customer_id, {
-                                      razon_social: c.customer_name || "Cliente",
-                                      ruc: c.customer_ruc,
-                                      empresa_vinculada: (c as any).empresa_vinculada_nombre,
-                                    })}
-                                    className="py-1 px-2.5 text-xs rounded-lg font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 flex items-center gap-1 transition-colors"
-                                    title="Compensar facturas a Gastos de Consumo Interno"
-                                  >
-                                    <RotateCcw className="w-3.5 h-3.5" /> Compensar
-                                  </button>
+                                  {isSantaTeresa(c) && (
+                                    <button
+                                      onClick={() => setTab("consumo_interno")}
+                                      className="py-1 px-2.5 text-xs rounded-lg font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 flex items-center gap-1 transition-colors"
+                                      title="Ver y Compensar Facturas de Consumo Interno"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5" /> Consumo Interno
+                                    </button>
+                                  )}
                                   <button
                                     onClick={() => openPaymentModal(c.customer_id, {
                                       razon_social: c.customer_name || "Cliente",
@@ -1936,17 +2094,15 @@ export default function AccountsReceivablePage() {
                                         )}
                                       </div>
                                       <div className="flex items-center gap-2">
-                                        <button
-                                          onClick={() => openCompensacionModal(c.customer_id, {
-                                            razon_social: c.customer_name || "Cliente",
-                                            ruc: c.customer_ruc,
-                                            empresa_vinculada: (c as any).empresa_vinculada_nombre,
-                                          })}
-                                          className="py-1 px-2.5 text-xs rounded-lg font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 flex items-center gap-1 transition-colors"
-                                          title="Compensar facturas de este cliente a Gastos de Consumo Interno"
-                                        >
-                                          <RotateCcw className="w-3.5 h-3.5" /> Compensar a Gastos
-                                        </button>
+                                        {isSantaTeresa(c) && (
+                                          <button
+                                            onClick={() => setTab("consumo_interno")}
+                                            className="py-1 px-2.5 text-xs rounded-lg font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 flex items-center gap-1 transition-colors"
+                                            title="Ver panel de facturas de consumo interno"
+                                          >
+                                            <RotateCcw className="w-3.5 h-3.5" /> Consumo Interno
+                                          </button>
+                                        )}
                                         <button
                                           onClick={() => setShowCollectionForm(true)}
                                           className="btn-outline py-1 px-2.5 text-xs flex items-center gap-1"
@@ -1975,21 +2131,15 @@ export default function AccountsReceivablePage() {
                                             </div>
                                             {d.estado !== "pagado" && (
                                               <div className="flex items-center gap-1">
-                                                <button
-                                                  onClick={() => openCompensacionModal(
-                                                    c.customer_id,
-                                                    {
-                                                      razon_social: c.customer_name || "Cliente",
-                                                      ruc: c.customer_ruc,
-                                                      empresa_vinculada: (c as any).empresa_vinculada_nombre,
-                                                    },
-                                                    { id: d.id, saldo_pendiente: d.saldo_pendiente || 0 }
-                                                  )}
-                                                  className="py-1 px-2 text-[11px] rounded font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300"
-                                                  title="Compensar a Gasto Interno"
-                                                >
-                                                  Compensar
-                                                </button>
+                                                {isSantaTeresa(c) && (
+                                                  <button
+                                                    onClick={() => handleOpenCompensateSingle(d)}
+                                                    className="py-1 px-2 text-[11px] rounded font-semibold bg-purple-100 hover:bg-purple-200 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300"
+                                                    title="Compensar a Gasto Interno (Grupo Santa Teresa)"
+                                                  >
+                                                    Compensar
+                                                  </button>
+                                                )}
                                                 <button
                                                   onClick={() => openPaymentModal(
                                                     c.customer_id,
@@ -2626,6 +2776,288 @@ export default function AccountsReceivablePage() {
                                     <span>Anular</span>
                                   </button>
                                 )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 🏢 TAB: CONSUMO INTERNO (GRUPO SANTA TERESA E.A.S.) */}
+          {tab === "consumo_interno" && (
+            <div className="space-y-6">
+              {/* Header Luxury Command Deck */}
+              <div className="card p-5 bg-gradient-to-r from-purple-950 via-slate-900 to-indigo-950 text-white border border-purple-500/20 shadow-xl rounded-2xl">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-black tracking-widest uppercase">
+                        AUTOCONSUMO & INSUMOS INTERNOS
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-purple-900/50 text-purple-200 text-[10px] font-mono font-bold">
+                        RUC 80150377-9
+                      </span>
+                    </div>
+                    <h2 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
+                      <Building2 className="w-5 h-5 text-purple-400" />
+                      Grupo Santa Teresa E.A.S. — Consumo Interno
+                    </h2>
+                    <p className="text-xs text-purple-200/80 max-w-2xl leading-relaxed">
+                      Facturas de mercaderías retiradas de góndola para producción de panadería, rotisería, carnicería, o insumos de salón. Al compensar una o varias facturas, se salda la cuenta por cobrar y se traslada automáticamente el costo a <b>Materia Prima (CMV)</b> o <b>Gasto Operativo (OPEX)</b> sin mover dinero físico.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={fetchInternalDocs}
+                      disabled={internalLoading}
+                      className="px-3 py-2 rounded-xl bg-purple-900/40 hover:bg-purple-900/60 text-purple-200 border border-purple-700/50 text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                      title="Refrescar lista de facturas"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${internalLoading ? "animate-spin" : ""}`} />
+                      <span>Actualizar</span>
+                    </button>
+                    {selectedInternalDocs.length > 0 && (
+                      <button
+                        onClick={handleOpenCompensateBatch}
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-black transition flex items-center gap-2 shadow-lg shadow-purple-950/50 active:scale-95 cursor-pointer"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Compensar Lote ({selectedInternalDocs.length}) · {formatPYG(totalSelectedInternalMonto)}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Métricas rápidas */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-5 mt-4 border-t border-purple-800/30">
+                  <div className="p-3 bg-purple-900/30 rounded-xl border border-purple-700/30">
+                    <span className="text-[11px] font-bold text-purple-300 block uppercase">Pendientes de Compensar</span>
+                    <span className="text-2xl font-black font-mono text-amber-300 mt-1 block">
+                      {formatPYG(internalPendingDocs.reduce((acc, d) => acc + (d.saldo_pendiente || 0), 0))}
+                    </span>
+                    <span className="text-[10px] text-purple-300/80 mt-0.5 block">{internalPendingDocs.length} facturas emitidas por cobrar</span>
+                  </div>
+
+                  <div className="p-3 bg-purple-900/30 rounded-xl border border-purple-700/30">
+                    <span className="text-[11px] font-bold text-purple-300 block uppercase">Compensadas / Saldadas</span>
+                    <span className="text-2xl font-black font-mono text-emerald-400 mt-1 block">
+                      {formatPYG(internalDocs.filter(d => d.estado === "pagado").reduce((acc, d) => acc + (d.monto_original || 0), 0))}
+                    </span>
+                    <span className="text-[10px] text-purple-300/80 mt-0.5 block">{internalDocs.filter(d => d.estado === "pagado").length} facturas imputadas a costos</span>
+                  </div>
+
+                  <div className="p-3 bg-purple-900/30 rounded-xl border border-purple-700/30">
+                    <span className="text-[11px] font-bold text-purple-300 block uppercase">Total Histórico Registrado</span>
+                    <span className="text-2xl font-black font-mono text-purple-200 mt-1 block">
+                      {formatPYG(internalDocs.reduce((acc, d) => acc + (d.monto_original || 0), 0))}
+                    </span>
+                    <span className="text-[10px] text-purple-300/80 mt-0.5 block">{internalDocs.length} facturas totales en el ejercicio</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filtros y Barra de Acciones */}
+              <div className="card p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 flex-1 max-w-md">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Buscar por N° factura o fecha (ej: 001-015-...)"
+                        value={internalSearch}
+                        onChange={e => setInternalSearch(e.target.value)}
+                        className="input-field pl-9 w-full text-xs"
+                      />
+                      {internalSearch && (
+                        <button onClick={() => setInternalSearch("")} className="absolute right-3 top-3 text-gray-400 hover:text-gray-600">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-center rounded-xl bg-gray-100 dark:bg-slate-800 p-1 border border-gray-200 dark:border-slate-700 text-xs font-semibold">
+                      {(["pendiente", "pagado", "todos"] as const).map(st => (
+                        <button
+                          key={st}
+                          onClick={() => setInternalFilterStatus(st)}
+                          className={`px-3 py-1.5 rounded-lg transition capitalize ${
+                            internalFilterStatus === st
+                              ? "bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-xs font-bold"
+                              : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                          }`}
+                        >
+                          {st === "pendiente" ? "Pendientes" : st === "pagado" ? "Compensadas" : "Todas"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={handleToggleAllInternal}
+                      className="btn-outline text-xs py-1.5 px-3 flex items-center gap-1.5 font-bold cursor-pointer"
+                    >
+                      {internalPendingDocs.length > 0 && internalPendingDocs.every(d => selectedInternalDocIds[d.id]) ? (
+                        <>
+                          <CheckSquare className="w-4 h-4 text-purple-600" />
+                          <span>Deseleccionar Todas</span>
+                        </>
+                      ) : (
+                        <>
+                          <Square className="w-4 h-4 text-gray-400" />
+                          <span>Seleccionar Todas las Pendientes ({internalPendingDocs.length})</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Barra Flotante de Selección */}
+                {selectedInternalDocs.length > 0 && (
+                  <div className="p-3 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 rounded-xl flex items-center justify-between gap-3 text-xs animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                      <span className="font-extrabold text-purple-900 dark:text-purple-200">
+                        {selectedInternalDocs.length} factura(s) seleccionada(s)
+                      </span>
+                      <span className="text-gray-400">•</span>
+                      <span className="font-mono font-black text-purple-700 dark:text-purple-300">
+                        Total: {formatPYG(totalSelectedInternalMonto)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedInternalDocIds({})}
+                        className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 font-semibold px-2 py-1 cursor-pointer"
+                      >
+                        Limpiar selección
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOpenCompensateBatch}
+                        className="py-1.5 px-3 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-extrabold flex items-center gap-1.5 shadow-sm transition active:scale-95 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Compensar Selección</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Tabla de Facturas de Santa Teresa */}
+              <div className="card p-0 overflow-hidden shadow-sm">
+                {internalLoading ? (
+                  <div className="py-20 text-center text-gray-400 flex flex-col items-center gap-2">
+                    <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
+                    <span className="text-xs">Cargando facturas de consumo interno...</span>
+                  </div>
+                ) : filteredInternalDocs.length === 0 ? (
+                  <div className="py-16 text-center text-gray-400 space-y-2">
+                    <CheckCircle2 className="w-10 h-10 mx-auto text-gray-300 dark:text-gray-600" />
+                    <p className="text-sm font-bold text-gray-700 dark:text-gray-300">No se encontraron facturas para este filtro</p>
+                    <p className="text-xs text-gray-400">Las facturas emitidas a Grupo Santa Teresa E.A.S. en caja aparecerán automáticamente aquí.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-gray-50 dark:bg-slate-800/60 border-b border-gray-200 dark:border-slate-700 font-bold text-gray-600 dark:text-gray-300">
+                        <tr>
+                          <th className="p-3.5 w-10 text-center">
+                            <span className="sr-only">Seleccionar</span>
+                          </th>
+                          <th className="p-3.5">Fecha</th>
+                          <th className="p-3.5">N° Factura</th>
+                          <th className="p-3.5">Entidad / Razón Social</th>
+                          <th className="p-3.5 text-right">Monto Original</th>
+                          <th className="p-3.5 text-right">Saldo a Compensar</th>
+                          <th className="p-3.5 text-center">Estado</th>
+                          <th className="p-3.5 text-right">Acción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
+                        {filteredInternalDocs.map(d => {
+                          const isPend = d.estado === "pendiente"
+                          const isSelected = !!selectedInternalDocIds[d.id]
+                          return (
+                            <tr
+                              key={d.id}
+                              className={`transition hover:bg-purple-50/40 dark:hover:bg-purple-950/20 ${
+                                isSelected ? "bg-purple-50/80 dark:bg-purple-950/40 font-medium" : ""
+                              }`}
+                            >
+                              <td className="p-3.5 text-center" onClick={e => e.stopPropagation()}>
+                                {isPend ? (
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={e => {
+                                      setSelectedInternalDocIds(prev => ({
+                                        ...prev,
+                                        [d.id]: e.target.checked,
+                                      }))
+                                    }}
+                                    className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                  />
+                                ) : (
+                                  <Check className="w-3.5 h-3.5 text-emerald-500 mx-auto" />
+                                )}
+                              </td>
+                              <td className="p-3.5 font-medium whitespace-nowrap">
+                                {d.fecha_emision ? formatDate(d.fecha_emision) : "—"}
+                              </td>
+                              <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white whitespace-nowrap">
+                                {d.numero_documento}
+                              </td>
+                              <td className="p-3.5 text-gray-600 dark:text-gray-300">
+                                <div>
+                                  <span className="font-semibold text-gray-900 dark:text-white block">{d.customer_name || "Grupo Santa Teresa E.A.S."}</span>
+                                  <span className="text-[11px] text-gray-400 font-mono">RUC: {d.customer_ruc || "80150377-9"}</span>
+                                </div>
+                              </td>
+                              <td className="p-3.5 text-right font-mono text-gray-600 dark:text-gray-300 whitespace-nowrap">
+                                {formatPYG(d.monto_original)}
+                              </td>
+                              <td className="p-3.5 text-right font-mono font-black text-gray-900 dark:text-white whitespace-nowrap">
+                                {formatPYG(d.saldo_pendiente)}
+                              </td>
+                              <td className="p-3.5 text-center whitespace-nowrap">
+                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                                  d.estado === "pagado"
+                                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-300/40"
+                                    : "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-300/40"
+                                }`}>
+                                  {d.estado === "pagado" ? "Compensada" : "Pendiente de Compensar"}
+                                </span>
+                              </td>
+                              <td className="p-3.5 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => openInvoice(d)}
+                                    className="btn-outline py-1 px-2.5 text-xs flex items-center gap-1 cursor-pointer"
+                                    title="Ver los productos retirados de góndola"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" /> Detalle
+                                  </button>
+                                  {isPend && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenCompensateSingle(d)}
+                                      className="py-1 px-2.5 text-xs rounded-lg font-bold bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-1 transition shadow-xs active:scale-95 cursor-pointer"
+                                      title="Compensar esta factura a Gastos de Producción / OPEX"
+                                    >
+                                      <RotateCcw className="w-3 h-3" /> Compensar
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           )
@@ -5608,6 +6040,294 @@ export default function AccountsReceivablePage() {
                 <span>Guardar Política</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Compensación de Consumo Interno (Grupo Santa Teresa E.A.S.) */}
+      {showCompensarModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-slate-950/80 backdrop-blur-sm" onClick={() => setShowCompensarModal(false)}>
+          <div
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Cabecera */}
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-600 dark:text-purple-400">
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
+                      Compensar Facturas de Consumo Interno
+                    </h3>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                      {compensateTargetDocs.length} {compensateTargetDocs.length === 1 ? "factura" : "facturas"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                    Grupo Santa Teresa E.A.S. (RUC 80150377-9) · Imputación a Gastos
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCompensarModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Cuerpo Scrollable */}
+            <form onSubmit={handleConfirmCompensacion} className="flex-1 overflow-y-auto p-6 space-y-5 text-xs">
+              {/* Tarjeta de Resumen del Lote */}
+              <div className="p-4 rounded-xl bg-purple-50/60 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800/50 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-bold text-purple-800 dark:text-purple-300 uppercase tracking-wider block">
+                      Monto Total a Compensar
+                    </span>
+                    <span className="text-2xl font-black font-mono text-purple-900 dark:text-purple-200 tracking-tight">
+                      {formatPYG(compensateTargetDocs.reduce((acc, d) => acc + (d.saldo_pendiente || 0), 0))}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-xs text-purple-700 dark:text-purple-400 font-bold block">
+                      {compensateTargetDocs.length} factura(s) seleccionada(s)
+                    </span>
+                    <span className="text-[11px] text-purple-600 dark:text-purple-400">
+                      Saldo Cuentas por Cobrar a cancelar
+                    </span>
+                  </div>
+                </div>
+
+                {/* Desglose de Facturas */}
+                <div className="pt-2 border-t border-purple-200/80 dark:border-purple-800/40">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-purple-800 dark:text-purple-300 block mb-1.5">
+                    Detalle de Documentos del Lote:
+                  </span>
+                  <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                    {compensateTargetDocs.map((d) => (
+                      <div
+                        key={d.id}
+                        className="p-1.5 rounded-lg bg-white/80 dark:bg-slate-800/80 border border-purple-100 dark:border-purple-900/40 flex items-center justify-between text-[11px]"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                            {d.numero_documento || "Doc s/n"}
+                          </span>
+                          <span className="text-slate-400">·</span>
+                          <span className="text-slate-500 font-mono">
+                            {d.fecha_emision ? new Date(d.fecha_emision).toLocaleDateString("es-PY") : "—"}
+                          </span>
+                        </div>
+                        <span className="font-mono font-bold text-purple-700 dark:text-purple-300">
+                          {formatPYG(d.saldo_pendiente || 0)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Formulario de Imputación */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Fecha */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block mb-1">
+                    Fecha de Compensación <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={compFecha}
+                    onChange={(e) => setCompFecha(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+
+                {/* Rubro / Categoría de Gasto */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block mb-1">
+                    Rubro de Gasto <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={compCategoryId}
+                    onChange={(e) => setCompCategoryId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">-- Seleccionar Rubro --</option>
+                    {expenseCategories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Centro de Costo / Sector */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block mb-1">
+                    Centro de Costo / Sector
+                  </label>
+                  <select
+                    value={compCostCenterId}
+                    onChange={(e) => {
+                      const ccId = e.target.value
+                      setCompCostCenterId(ccId)
+                      const cc = costCenters.find((c) => c.id === ccId)
+                      if (cc) {
+                        const nom = cc.nombre.toLowerCase()
+                        if (nom.includes("panad") || nom.includes("confiter")) {
+                          setCompProductionArea("panaderia")
+                          setCompNaturaleza("CMV_MATERIA_PRIMA")
+                        } else if (nom.includes("rotis") || nom.includes("cocina")) {
+                          setCompProductionArea("rotiseria")
+                          setCompNaturaleza("CMV_MATERIA_PRIMA")
+                        } else if (nom.includes("carni")) {
+                          setCompProductionArea("carniceria")
+                          setCompNaturaleza("CMV_MATERIA_PRIMA")
+                        } else {
+                          setCompProductionArea("")
+                          setCompNaturaleza("OPEX_GASTO_OPERATIVO")
+                        }
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">-- Sin Centro de Costo Específico --</option>
+                    {costCenters.map((cc) => (
+                      <option key={cc.id} value={cc.id}>
+                        {cc.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Naturaleza Económica */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block mb-1">
+                    Naturaleza Económica
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCompNaturaleza("CMV_MATERIA_PRIMA")}
+                      className={`px-2.5 py-2 rounded-xl text-xs font-bold border transition text-center ${
+                        compNaturaleza === "CMV_MATERIA_PRIMA"
+                          ? "bg-purple-600 text-white border-purple-600 shadow-sm"
+                          : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-100"
+                      }`}
+                    >
+                      CMV Materia Prima
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCompNaturaleza("OPEX_GASTO_OPERATIVO")}
+                      className={`px-2.5 py-2 rounded-xl text-xs font-bold border transition text-center ${
+                        compNaturaleza === "OPEX_GASTO_OPERATIVO"
+                          ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                          : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 hover:bg-slate-100"
+                      }`}
+                    >
+                      OPEX Gasto Op.
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Selector de Requisición de Producción Vinculada (Opcional) */}
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Warehouse className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                    Vale de Requisición de Producción Vinculado:
+                  </label>
+                  <span className="text-[10px] text-slate-500 font-medium">Opcional</span>
+                </div>
+                <select
+                  value={compRequisicionId}
+                  onChange={(e) => {
+                    const rId = e.target.value
+                    setCompRequisicionId(rId)
+                    const req = availableRequisitions.find((r) => r.id === rId)
+                    if (req) {
+                      setCompProductionArea(req.area_destino || "panaderia")
+                      setCompNaturaleza("CMV_MATERIA_PRIMA")
+                      setCompObservaciones(
+                        `Compensación Vale ${req.numero_requisicion} (${req.area_destino?.toUpperCase()}) - ${compensateTargetDocs.length} facturas`
+                      )
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="">-- Sin Vale Específico --</option>
+                  {availableRequisitions.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.numero_requisicion} • {r.area_destino?.toUpperCase()} • {r.solicitante_nombre} ({formatPYG(r.total_costo_estimado || 0)})
+                    </option>
+                  ))}
+                </select>
+                {compRequisicionId && (
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                    <Check className="w-3 h-3" />
+                    El vale pasará automáticamente a estado COMPENSADA y se imputará al Costo de Ventas.
+                  </p>
+                )}
+              </div>
+
+              {/* Observaciones */}
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block mb-1">
+                  Observaciones / Justificación
+                </label>
+                <textarea
+                  rows={2}
+                  value={compObservaciones}
+                  onChange={(e) => setCompObservaciones(e.target.value)}
+                  placeholder="Detalle o justificación de la compensación..."
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
+                />
+              </div>
+
+              {/* Info Banner */}
+              <div className="p-3 bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200/80 dark:border-purple-800/40 rounded-xl flex items-start gap-2.5">
+                <span className="text-base shrink-0">ℹ️</span>
+                <p className="text-[11px] text-purple-900 dark:text-purple-200/90 leading-relaxed">
+                  <strong>Sin impacto en dinero físico:</strong> Esta operación cancela los documentos en Cuentas por Cobrar y crea el comprobante correspondiente en el módulo de Gastos con forma de pago <code>COMPENSACION_CONSUMO_INTERNO</code>. Ni los Fondos Fijos (Caja de Administración) ni Bóveda sufren variaciones de saldo.
+                </p>
+              </div>
+
+              {/* Pie de Acciones anclado dentro del modal */}
+              <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowCompensarModal(false)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingCompensacion || compensateTargetDocs.length === 0}
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-extrabold text-xs transition flex items-center gap-2 shadow-lg shadow-purple-950/30 disabled:opacity-50"
+                >
+                  {submittingCompensacion ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="w-4 h-4" />
+                  )}
+                  <span>
+                    Confirmar Compensación ({formatPYG(compensateTargetDocs.reduce((acc, d) => acc + (d.saldo_pendiente || 0), 0))})
+                  </span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
