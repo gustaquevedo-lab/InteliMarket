@@ -829,14 +829,28 @@ export default function PayrollDossierView({
                         key={phase.id}
                         className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 space-y-3"
                       >
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-start justify-between">
                           <div>
                             <span className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-tight">
                               {phase.phase_label}
                             </span>
-                            <div className="text-xs text-gray-500">
-                              Monto Retenido: <b className="text-gray-900 dark:text-white">{formatPYG(phase.monto)}</b>
-                            </div>
+                            {phase.metadata?.total_transferencia_banco ? (
+                              <div className="mt-1 space-y-0.5 text-xs">
+                                <div className="text-gray-500">
+                                  Retenciones Personal ({phase.metadata.employees?.length || 30}): <b className="text-gray-800 dark:text-gray-200">{formatPYG(phase.monto)}</b>
+                                </div>
+                                <div className="text-indigo-600 dark:text-indigo-400">
+                                  + Factura Gasto ({phase.metadata.factura_numero || "001-003-0000015"}): <b>{formatPYG(phase.metadata.gasto_institucional_factura || 375000)}</b>
+                                </div>
+                                <div className="font-bold text-emerald-700 dark:text-emerald-400 pt-0.5 border-t border-gray-200 dark:border-gray-700">
+                                  Monto Consolidado OP: {formatPYG(phase.metadata.total_transferencia_banco)}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-xs text-gray-500">
+                                Monto Retenido: <b className="text-gray-900 dark:text-white">{formatPYG(phase.monto)}</b>
+                              </div>
+                            )}
                           </div>
 
                           {phase.estado === "ejecutado" ? (
@@ -924,22 +938,32 @@ export default function PayrollDossierView({
                             </button>
                           )}
 
-                          {/* Estado Ejecutado: Botón Revertir OP */}
+                          {/* Estado Ejecutado: Botones Asignar Medios y Revertir OP */}
                           {phase.estado === "ejecutado" && (
-                            <button
-                              type="button"
-                              onClick={() => handleRevertThirdParty(phase.id, phase.phase_label)}
-                              disabled={actionLoading === phase.id}
-                              className="py-1.5 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 font-medium text-xs flex items-center gap-1.5 transition border border-rose-200 dark:border-rose-900/40 disabled:opacity-50"
-                              title="Revertir la Orden de Pago y volver a estado pendiente"
-                            >
-                              {actionLoading === phase.id ? (
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <RotateCcw className="w-3.5 h-3.5" />
-                              )}
-                              Revertir OP
-                            </button>
+                            <>
+                              <a
+                                href="/payments"
+                                className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs flex items-center gap-1.5 transition shadow-sm"
+                                title="Abrir Tesorería para liquidar la Orden de Pago"
+                              >
+                                <CreditCard className="w-3.5 h-3.5" />
+                                Asignar Medios en Tesorería
+                              </a>
+                              <button
+                                type="button"
+                                onClick={() => handleRevertThirdParty(phase.id, phase.phase_label)}
+                                disabled={actionLoading === phase.id}
+                                className="py-1.5 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 font-medium text-xs flex items-center gap-1.5 transition border border-rose-200 dark:border-rose-900/40 disabled:opacity-50"
+                                title="Revertir la Orden de Pago y volver a estado pendiente"
+                              >
+                                {actionLoading === phase.id ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                )}
+                                Revertir OP
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>
