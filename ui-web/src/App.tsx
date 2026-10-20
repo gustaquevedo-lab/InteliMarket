@@ -266,9 +266,11 @@ function AppRoutes() {
       <Route path="/tienda/dashboard" element={<Suspense fallback={<PageLoader />}><EcommerceOrders /></Suspense>} />
       <Route path="/verificador" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
       <Route path="/consulta-precios" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
+      <Route path="/kiosk/verificador-precios" element={<Suspense fallback={<PageLoader />}><PriceCheckerKioskPage /></Suspense>} />
       <Route path="/verificar-recibo" element={<Suspense fallback={<PageLoader />}><VerificarReciboPage /></Suspense>} />
       <Route path="/verificar-recibo/:paymentId" element={<Suspense fallback={<PageLoader />}><VerificarReciboPage /></Suspense>} />
       <Route path="/tv/carniceria" element={<Suspense fallback={<PageLoader />}><CarniceriaTvDigitalPage /></Suspense>} />
+      <Route path="/kiosk/carniceria-tv" element={<Suspense fallback={<PageLoader />}><CarniceriaTvDigitalPage /></Suspense>} />
 
       <Route path="/operaciones-salon" element={<Suspense fallback={<PageLoader />}><SalonOperacionesPwaPage /></Suspense>} />
       <Route path="/conteo-vencimientos" element={<Suspense fallback={<PageLoader />}><ConteoVencimientosPage /></Suspense>} />
