@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.products.schemas import (
-    ProductCreate, ProductUpdate, ProductResponse,
+    ProductCreate, ProductUpdate, ProductResponse, PaginatedProductResponse,
     CategoryCreate, CategoryResponse,
 )
 from api.src.products import service
@@ -159,6 +159,29 @@ async def list_products(
     )
     await annotate_products_with_promos(db, company_id, products)
     return products
+
+
+@router.get("/companies/{company_id}/products/paginated", response_model=PaginatedProductResponse)
+async def list_products_paginated(
+    company_id: str,
+    categoria_id: str | None = Query(None),
+    supplier_id: str | None = Query(None),
+    search: str | None = Query(None),
+    activo: bool | None = Query(None),
+    tipo_producto: str | None = Query(None),
+    include_inactive: bool = Query(False),
+    updated_since: datetime | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await service.list_products_paginated(
+        db, company_id, categoria_id, search, activo, limit, offset,
+        supplier_id=supplier_id, tipo_producto=tipo_producto, include_inactive=include_inactive,
+        updated_since=updated_since,
+    )
+    await annotate_products_with_promos(db, company_id, result["items"])
+    return result
 
 
 @router.get("/companies/{company_id}/products/stats")

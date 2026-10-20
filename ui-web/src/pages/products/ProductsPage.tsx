@@ -29,300 +29,10 @@ import { useAuth } from "../../context/AuthContext"
 import { usePermissions } from "../../context/PermissionsContext"
 import CurrencyInput from "../../components/CurrencyInput"
 import Product360Modal from "./Product360Modal"
-import { useSearchParams } from "react-router-dom" 
-
-// Presets rápidos para carga veloz de códigos de pack/caja
-const PACK_PRESETS = [
-  { label: "Pack x6", unidades: 6, tag: "Pack x6" },
-  { label: "Pack x12", unidades: 12, tag: "Pack x12" },
-  { label: "Fardo x12", unidades: 12, tag: "Fardo x12" },
-  { label: "Caja x24", unidades: 24, tag: "Caja x24" },
-  { label: "Caja x48", unidades: 48, tag: "Caja x48" },
-  { label: "Display x12", unidades: 12, tag: "Display x12" },
-  { label: "Six-Pack", unidades: 6, tag: "Six-Pack" },
-  { label: "Pack x4", unidades: 4, tag: "Pack x4" },
-]
-
-// Buscador de productos con autocompletado por código de barra / SKU / nombre.
-// Soporta lectura ultra-rápida por pistola/lector (Enter automático con coincidencia exacta o 1 resultado),
-// selección directa y mensaje claro e inequívoco si el código no existe en el catálogo.
-function ProductSearchPicker({
-  selectedProduct,
-  onSelect,
-  onClear,
-  placeholder = "Buscar por código de barra, SKU o nombre...",
-  disabled = false,
-  autoFocus = false,
-  onAfterSelect,
-}: {
-  selectedProduct: Product | null
-  onSelect: (p: Product) => void
-  onClear?: () => void
-  placeholder?: string
-  disabled?: boolean
-  autoFocus?: boolean
-  onAfterSelect?: (p: Product) => void
-}) {
-  const [query, setQuery] = useState("")
-  const [results, setResults] = useState<Product[]>([])
-  const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [selectedIndex, setSelectedIndex] = useState<number>(-1)
-
-  const inputRef = useRef<HTMLInputElement>(null)
-  const searchTimeoutRef = useRef<any>(null)
-
-  const selectProduct = useCallback((p: Product) => {
-    setQuery("")
-    setResults([])
-    setOpen(false)
-    setErrorMessage(null)
-    setSelectedIndex(-1)
-    onSelect(p)
-    onAfterSelect?.(p)
-  }, [onSelect, onAfterSelect])
-
-  const executeSearchAndSelect = useCallback(async (term: string) => {
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current)
-    }
-    const cleanTerm = term.trim()
-    if (!cleanTerm) return
-
-    setLoading(true)
-    setErrorMessage(null)
-
-    try {
-      const res = (await api.products.list({ search: cleanTerm, limit: 25 })) || []
-      const qLower = cleanTerm.toLowerCase()
-
-      // 1. Coincidencia exacta por código de barra
-      const exactBarcode = res.find(p => p.codigo_barra && p.codigo_barra.trim().toLowerCase() === qLower)
-      if (exactBarcode) {
-        selectProduct(exactBarcode)
-        return
-      }
-
-      // 2. Coincidencia exacta por SKU
-      const exactSku = res.find(p => p.sku && p.sku.trim().toLowerCase() === qLower)
-      if (exactSku) {
-        selectProduct(exactSku)
-        return
-      }
-
-      // 3. Coincidencia exacta por nombre
-      const exactName = res.find(p => p.nombre && p.nombre.trim().toLowerCase() === qLower)
-      if (exactName) {
-        selectProduct(exactName)
-        return
-      }
-
-      // 4. Si hay exactamente 1 resultado
-      if (res.length === 1) {
-        selectProduct(res[0])
-        return
-      }
-
-      // 5. Si no se encontró ningún producto
-      if (res.length === 0) {
-        setResults([])
-        setOpen(false)
-        setErrorMessage(`No se encontró ningún producto con el código "${cleanTerm}"`)
-        inputRef.current?.select()
-        return
-      }
-
-      // 6. Múltiples resultados sin coincidencia exacta: desplegar para que el operador elija
-      setResults(res)
-      setSelectedIndex(0)
-      setOpen(true)
-      setErrorMessage(null)
-    } catch (err: any) {
-      setResults([])
-      setOpen(false)
-      setErrorMessage("Error al conectar con el servidor para buscar el producto.")
-    } finally {
-      setLoading(false)
-    }
-  }, [selectProduct])
-
-  // Debounce para búsqueda interactiva por tipeo normal
-  useEffect(() => {
-    if (!open || query.trim().length < 2) {
-      setResults([])
-      setSelectedIndex(-1)
-      return
-    }
-    let cancelled = false
-    setLoading(true)
-    const timer = setTimeout(() => {
-      api.products.list({ search: query.trim(), limit: 20 })
-        .then((res) => {
-          if (!cancelled) {
-            setResults(res || [])
-            setSelectedIndex(-1)
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setResults([])
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false)
-        })
-    }, 250)
-    searchTimeoutRef.current = timer
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-  }, [query, open])
-
-  // Manejador de teclado para lector de código de barras (Enter) y navegación con flechas
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      e.preventDefault()
-      e.stopPropagation()
-      if (selectedIndex >= 0 && results[selectedIndex]) {
-        selectProduct(results[selectedIndex])
-        return
-      }
-      executeSearchAndSelect(query)
-    } else if (e.key === "ArrowDown") {
-      if (!open && results.length > 0) {
-        setOpen(true)
-        setSelectedIndex(0)
-      } else if (results.length > 0) {
-        e.preventDefault()
-        setSelectedIndex((prev) => (prev < results.length - 1 ? prev + 1 : 0))
-      }
-    } else if (e.key === "ArrowUp") {
-      if (results.length > 0) {
-        e.preventDefault()
-        setSelectedIndex((prev) => (prev > 0 ? prev - 1 : results.length - 1))
-      }
-    } else if (e.key === "Escape") {
-      setOpen(false)
-      setErrorMessage(null)
-    }
-  }
-
-  if (disabled && selectedProduct) {
-    return (
-      <div className="input-field w-full text-xs font-bold opacity-60 flex items-center justify-between">
-        <span>{selectedProduct.nombre} (SKU: {selectedProduct.sku})</span>
-      </div>
-    )
-  }
-
-  return (
-    <div className="relative">
-      {selectedProduct && !open ? (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => { setQuery(""); setErrorMessage(null); setOpen(true) }}
-          className="input-field w-full text-xs font-bold flex items-center justify-between disabled:opacity-60 bg-amber-50/50 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800"
-        >
-          <span className="truncate text-left">
-            {selectedProduct.nombre}{" "}
-            <span className="font-mono text-slate-400 font-normal">
-              ({selectedProduct.codigo_barra ? `Cód: ${selectedProduct.codigo_barra} · ` : ""}SKU: {selectedProduct.sku})
-            </span>
-          </span>
-          {!disabled && (
-            <X
-              className="w-3.5 h-3.5 text-slate-400 hover:text-rose-500 shrink-0 ml-2"
-              onClick={(e) => { e.stopPropagation(); setQuery(""); setErrorMessage(null); onClear?.() }}
-            />
-          )}
-        </button>
-      ) : (
-        <div>
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              ref={inputRef}
-              type="text"
-              autoFocus={autoFocus || open}
-              disabled={disabled}
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value)
-                if (errorMessage) setErrorMessage(null)
-              }}
-              onFocus={() => setOpen(true)}
-              onBlur={() => setTimeout(() => setOpen(false), 200)}
-              onKeyDown={handleKeyDown}
-              placeholder={placeholder}
-              className={`input-field w-full text-xs font-bold pl-8 pr-8 ${
-                errorMessage ? "border-rose-400 dark:border-rose-700 bg-rose-50/40 dark:bg-rose-950/20 focus:border-rose-500" : ""
-              }`}
-            />
-            {loading && (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600 absolute right-2.5 top-1/2 -translate-y-1/2" />
-            )}
-          </div>
-
-          {errorMessage && (
-            <div className="mt-2 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 flex items-center gap-2 text-xs font-semibold text-rose-600 dark:text-rose-400 animate-fade-in shadow-sm">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
-              <div className="flex-1">{errorMessage}</div>
-              <button
-                type="button"
-                onClick={() => setErrorMessage(null)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {open && query.trim().length >= 2 && (
-        <div className="absolute z-[100] mt-1 w-full max-h-72 overflow-y-auto bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-2xl">
-          {loading ? (
-            <div className="p-3.5 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600" /> Buscando productos...
-            </div>
-          ) : results.length === 0 ? (
-            <div className="p-3.5 text-center text-xs text-rose-500 font-semibold flex items-center justify-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
-              Sin resultados para "{query}"
-            </div>
-          ) : (
-            results.map((p, idx) => (
-              <button
-                key={p.id}
-                type="button"
-                onMouseDown={(e) => { e.preventDefault(); selectProduct(p) }}
-                className={`w-full text-left px-3.5 py-2.5 border-b border-slate-100 dark:border-slate-700/60 last:border-0 flex items-center justify-between gap-3 transition-colors ${
-                  selectedIndex === idx
-                    ? "bg-amber-100 dark:bg-amber-900/50"
-                    : "hover:bg-amber-50 dark:hover:bg-amber-950/40"
-                }`}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-bold text-slate-900 dark:text-white truncate">{p.nombre}</div>
-                  <div className="text-[10px] font-mono text-slate-400 flex items-center gap-2 mt-0.5">
-                    {p.codigo_barra && <span>Cod: <strong className="text-slate-600 dark:text-slate-300">{p.codigo_barra}</strong></span>}
-                    {p.sku && <span>SKU: {p.sku}</span>}
-                  </div>
-                </div>
-                {p.precio_venta != null && (
-                  <span className="text-[11px] font-mono font-bold text-amber-600 dark:text-amber-400 shrink-0">
-                    Gs. {Number(p.precio_venta).toLocaleString("es-PY")}
-                  </span>
-                )}
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
+import ProductSearchPicker from "./ProductSearchPicker"
+import PackBarcodeModal, { PACK_PRESETS } from "./PackBarcodeModal"
+import VariantModal from "./VariantModal"
+import { useSearchParams } from "react-router-dom"
 
 export default function ProductsPage() {
   const toast = useToast()
@@ -418,9 +128,11 @@ export default function ProductsPage() {
   const [filterEstado, setFilterEstado] = useState<"todos" | "activos" | "inactivos">("activos")
   const [sortBy, setSortBy] = useState<"nombre" | "precio_desc" | "precio_asc" | "margen_desc">("nombre")
   
-  // Paginación Catálogo
+  // Paginación Catálogo Server-Side
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(25)
+  const [pageSize, setPageSize] = useState(50)
+  const [totalCount, setTotalCount] = useState(0)
+  const [serverTotalPages, setServerTotalPages] = useState(1)
 
   // Ficha 360° del Producto
   const [selectedProduct360Id, setSelectedProduct360Id] = useState<string | null>(null)
@@ -610,12 +322,14 @@ export default function ProductsPage() {
       const isActivoOnly = filterEstado === "activos"
       const isInactivoOnly = filterEstado === "inactivos"
       const [prodsRes, catsRes, suppsRes, promosRes] = await Promise.allSettled([
-        api.products.list({
+        api.products.listPaginated({
           search: debouncedSearch || undefined,
           categoria_id: selectedCategory || undefined,
           tipo_producto: filterTipoProducto !== "todos" ? filterTipoProducto : undefined,
           activo: isActivoOnly ? true : isInactivoOnly ? false : undefined,
           include_inactive: !isActivoOnly,
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
         }),
         api.categories.list(),
         api.purchases.suppliers(),
@@ -628,16 +342,20 @@ export default function ProductsPage() {
         setActivePromotions([])
       }
 
-      if (prodsRes.status === "fulfilled" && Array.isArray(prodsRes.value)) {
-        // Filtrar nombres válidos y dar prioridad a productos con precio/stock
-        const validProds = prodsRes.value.filter(p => p.nombre && p.nombre.replace(/\./g, "").trim().length > 0)
-        setProducts(validProds.length > 0 ? validProds : prodsRes.value)
+      if (prodsRes.status === "fulfilled" && prodsRes.value) {
+        const pag = prodsRes.value
+        const validProds = (pag.items || []).filter(p => p.nombre && p.nombre.replace(/\./g, "").trim().length > 0)
+        setProducts(validProds)
+        setTotalCount(pag.total || 0)
+        setServerTotalPages(pag.total_pages || 1)
         if (validProds.length > 0 && !selectedParentProductId) {
           setSelectedParentProductId(validProds[0].id)
           setSelectedParentProduct(validProds[0])
         }
       } else {
         setProducts([])
+        setTotalCount(0)
+        setServerTotalPages(1)
       }
 
       if (catsRes.status === "fulfilled" && Array.isArray(catsRes.value)) {
@@ -654,7 +372,13 @@ export default function ProductsPage() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, selectedCategory, filterTipoProducto, filterEstado, selectedParentProductId])
+  }, [debouncedSearch, selectedCategory, filterTipoProducto, filterEstado, page, pageSize, selectedParentProductId])
+
+  // Resetear a página 1 al cambiar filtros o búsqueda
+  useEffect(() => {
+    setPage(1)
+  }, [debouncedSearch, selectedCategory, filterTipoProducto, filterEstado])
+
 
   const loadVariants = useCallback(async () => {
     setLoadingVariants(true)
@@ -880,12 +604,9 @@ export default function ProductsPage() {
     return list
   }, [products, filterStockTag, filterTipoProducto, filterEstado, sortBy, activePromosMap])
 
-  // Paginación
-  const totalPages = Math.ceil(filteredAndSortedProducts.length / pageSize) || 1
-  const paginatedProducts = useMemo(() => {
-    const start = (page - 1) * pageSize
-    return filteredAndSortedProducts.slice(start, start + pageSize)
-  }, [filteredAndSortedProducts, page, pageSize])
+  // Paginación Server-Side
+  const totalPages = serverTotalPages
+  const paginatedProducts = filteredAndSortedProducts
 
   // Guardar Formulario Alta / Edición
   const handleSaveProduct = async (e?: React.FormEvent) => {
@@ -1680,7 +1401,7 @@ export default function ProductsPage() {
           <div className="card bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm rounded-2xl overflow-hidden">
             <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
               <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                Mostrando {paginatedProducts.length} de {filteredAndSortedProducts.length} productos
+                Mostrando {paginatedProducts.length} de {totalCount.toLocaleString("es-PY")} productos
               </span>
 
               <div className="flex items-center gap-2 text-xs">
@@ -2699,348 +2420,39 @@ export default function ProductsPage() {
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          MODAL: ALTA / EDICIÓN DE CÓDIGO DE PACK
-      ────────────────────────────────────────────────────────────────────────── */}
-      {/* ──────────────────────────────────────────────────────────────────────────
-          MODAL: ALTA / EDICIÓN DE CÓDIGO DE PACK
+          MODAL: ALTA / EDICIÓN DE CÓDIGO DE PACK (Regla 14)
       ────────────────────────────────────────────────────────────────────────── */}
       {showPackBarcodeModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-xl w-full flex flex-col my-8">
-            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-amber-50/50 dark:bg-amber-950/20 rounded-t-3xl">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-amber-600 text-white flex items-center justify-center shadow-md">
-                  <Box className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-slate-900 dark:text-white">
-                    {editingPackBarcode ? "Editar Código de Pack" : "Nuevo Código de Pack / Caja"}
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Asignar código de barra a una presentación por cantidad (ej. Six-Pack, Caja x24)
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  setShowPackBarcodeModal(false)
-                  setEditingPackBarcode(null)
-                  setPackModalProductId("")
-                  setPackModalProduct(null)
-                }}
-                className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={(e) => handleSavePackBarcode(e, false)} className="p-6 space-y-5">
-              {/* Selector o Ficha del Producto Base */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-                  Producto Base *
-                </label>
-                {packModalProduct ? (
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0 font-bold text-xs">
-                        <Package className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-black text-slate-900 dark:text-white truncate">
-                          {packModalProduct.nombre}
-                        </p>
-                        <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400 mt-0.5">
-                          {packModalProduct.codigo_barra && (
-                            <span>
-                              Cod: <strong className="text-slate-600 dark:text-slate-300">{packModalProduct.codigo_barra}</strong>
-                            </span>
-                          )}
-                          {packModalProduct.sku && <span>SKU: {packModalProduct.sku}</span>}
-                        </div>
-                      </div>
-                    </div>
-                    {!editingPackBarcode && (
-                      <button
-                        type="button"
-                        onClick={() => { setPackModalProduct(null); setPackModalProductId("") }}
-                        className="text-[11px] font-bold text-amber-600 hover:text-amber-700 hover:underline shrink-0"
-                      >
-                        Cambiar
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <ProductSearchPicker
-                    autoFocus={!packModalProduct}
-                    selectedProduct={packModalProduct}
-                    onSelect={(p) => { setPackModalProductId(p.id); setPackModalProduct(p) }}
-                    onAfterSelect={() => {
-                      setTimeout(() => packBarcodeInputRef.current?.focus(), 80)
-                    }}
-                    onClear={() => { setPackModalProductId(""); setPackModalProduct(null) }}
-                    disabled={!!editingPackBarcode}
-                    placeholder="Escanear con lectora o buscar por código de barra, SKU o nombre..."
-                  />
-                )}
-              </div>
-
-              {/* Presets Rápidos */}
-              <div className="bg-amber-50/40 dark:bg-amber-950/20 p-3.5 rounded-2xl border border-amber-200/50 dark:border-amber-900/40 space-y-2">
-                <div className="flex items-center gap-1.5 text-[11px] font-bold text-amber-800 dark:text-amber-300">
-                  <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" /> Atajos de Presentación Frecuentes:
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {PACK_PRESETS.map((pr) => (
-                    <button
-                      key={pr.label}
-                      type="button"
-                      onClick={() => {
-                        setPackBarcodeForm(prev => ({
-                          ...prev,
-                          etiqueta: pr.tag,
-                          unidades_por_paquete: pr.unidades,
-                        }))
-                      }}
-                      className="px-2.5 py-1 text-[11px] font-bold bg-white dark:bg-slate-800 hover:bg-amber-500 hover:text-white dark:hover:bg-amber-600 text-slate-700 dark:text-slate-200 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm transition-all"
-                    >
-                      {pr.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Código de Barras de la Caja */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                  Código de Barras de la Caja/Pack *
-                </label>
-                <div className="relative">
-                  <Barcode className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    ref={packBarcodeInputRef}
-                    type="text"
-                    required
-                    autoFocus={!!packModalProduct}
-                    placeholder="Escaneá con la lectora o tipeá el código impreso en la caja"
-                    value={packBarcodeForm.codigo_barra}
-                    onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, codigo_barra: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        if (!packBarcodeForm.etiqueta.trim()) {
-                          e.preventDefault()
-                          packEtiquetaInputRef.current?.focus()
-                        }
-                      }
-                    }}
-                    className="input-field w-full text-xs font-mono font-bold pl-9 py-2.5"
-                  />
-                </div>
-              </div>
-
-              {/* Etiqueta y Unidades */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                    Etiqueta Descriptiva *
-                  </label>
-                  <input
-                    ref={packEtiquetaInputRef}
-                    type="text"
-                    required
-                    placeholder="Ej. Caja x24, Six-Pack, Fardo x12"
-                    value={packBarcodeForm.etiqueta}
-                    onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, etiqueta: e.target.value })}
-                    className="input-field w-full text-xs font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                    Unidades sueltas contenidas *
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      required
-                      min="1"
-                      step="1"
-                      value={packBarcodeForm.unidades_por_paquete}
-                      onChange={(e) => setPackBarcodeForm({ ...packBarcodeForm, unidades_por_paquete: Number(e.target.value) })}
-                      className="input-field w-full text-xs font-mono font-black text-amber-600 dark:text-amber-400 text-right pr-14"
-                    />
-                    <span className="text-[10px] font-bold text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                      unidades
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Botonera de Acciones */}
-              <div className="flex flex-col-reverse sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowPackBarcodeModal(false)
-                    setEditingPackBarcode(null)
-                    setPackModalProductId("")
-                    setPackModalProduct(null)
-                  }}
-                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-                >
-                  Cancelar
-                </button>
-
-                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                  {!editingPackBarcode && (
-                    <button
-                      type="button"
-                      disabled={savingPackBarcode}
-                      onClick={() => handleSavePackBarcode(undefined, true)}
-                      className="px-4 py-2.5 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:text-amber-300 dark:hover:bg-amber-900/60 border border-amber-200 dark:border-amber-800 transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-60"
-                      title="Guarda este pack y deja el producto listo para agregar la siguiente presentación"
-                    >
-                      {savingPackBarcode ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                      Guardar y agregar otro pack
-                    </button>
-                  )}
-                  <button
-                    type="submit"
-                    disabled={savingPackBarcode}
-                    className="btn-primary text-xs px-5 py-2.5 flex items-center gap-1.5 shadow-md disabled:opacity-60"
-                  >
-                    {savingPackBarcode ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    {editingPackBarcode ? "Guardar Cambios" : "Guardar y Cerrar"}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
+        <PackBarcodeModal
+          open={showPackBarcodeModal}
+          onClose={() => {
+            setShowPackBarcodeModal(false)
+            setEditingPackBarcode(null)
+            setPackModalProductId("")
+            setPackModalProduct(null)
+          }}
+          product={packModalProduct}
+          editingPackBarcode={editingPackBarcode}
+          onSaved={() => {
+            loadPackBarcodes()
+            fetchData()
+          }}
+        />
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
-          MODAL: ALTA DE VARIANTE
+          MODAL: ALTA DE VARIANTE (Regla 14)
       ────────────────────────────────────────────────────────────────────────── */}
       {showVariantModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col">
-            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-indigo-50/50 dark:bg-indigo-950/20">
-              <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <Palette className="w-5 h-5 text-indigo-600" /> Nueva Variante de Producto
-              </h3>
-              <button onClick={() => setShowVariantModal(false)} className="p-1 text-slate-400 hover:text-slate-700">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveVariant} className="p-6 space-y-4">
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Producto Padre *</label>
-                <ProductSearchPicker
-                  selectedProduct={selectedParentProduct}
-                  onSelect={(p) => { setSelectedParentProductId(p.id); setSelectedParentProduct(p) }}
-                  onClear={() => { setSelectedParentProductId(""); setSelectedParentProduct(null) }}
-                  placeholder="Buscar producto por código de barra, SKU o nombre..."
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Tipo de Variante *</label>
-                  <select
-                    value={variantForm.tipo}
-                    onChange={(e) => setVariantForm({ ...variantForm, tipo: e.target.value })}
-                    className="input-field w-full text-xs font-bold"
-                  >
-                    <option value="talle">Talle (S, M, L, XL)</option>
-                    <option value="color">Color</option>
-                    <option value="sabor">Sabor</option>
-                    <option value="presentacion">Presentación / Pack</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Valor / Opción *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ej. XL, Rojo, 6-Pack"
-                    value={variantForm.valor}
-                    onChange={(e) => setVariantForm({ ...variantForm, valor: e.target.value })}
-                    className="input-field w-full text-xs font-bold"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">SKU Derivado</label>
-                  <input
-                    type="text"
-                    placeholder="Auto o Ej. 120480-XL"
-                    value={variantForm.sku_variante}
-                    onChange={(e) => setVariantForm({ ...variantForm, sku_variante: e.target.value })}
-                    className="input-field w-full text-xs font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Código de Barras</label>
-                  <input
-                    type="text"
-                    placeholder="784..."
-                    value={variantForm.codigo_barra}
-                    onChange={(e) => setVariantForm({ ...variantForm, codigo_barra: e.target.value })}
-                    className="input-field w-full text-xs font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Precio Extra (+Gs.)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={variantForm.precio_extra}
-                    onChange={(e) => setVariantForm({ ...variantForm, precio_extra: Number(e.target.value) })}
-                    className="input-field w-full text-xs font-mono font-bold text-emerald-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Stock Inicial</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={variantForm.stock}
-                    onChange={(e) => setVariantForm({ ...variantForm, stock: Number(e.target.value) })}
-                    className="input-field w-full text-xs font-mono font-bold"
-                  />
-                </div>
-              </div>
-
-              <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowVariantModal(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingVariant}
-                  className="btn-primary text-xs px-5 py-2 flex items-center gap-2 shadow-md disabled:opacity-50"
-                >
-                  {savingVariant && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  Crear Variante
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <VariantModal
+          open={showVariantModal}
+          onClose={() => setShowVariantModal(false)}
+          parentProduct={selectedParentProduct}
+          onSaved={() => {
+            loadVariants()
+            fetchData()
+          }}
+        />
       )}
 
       {/* ──────────────────────────────────────────────────────────────────────────

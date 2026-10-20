@@ -271,35 +271,155 @@ async def get_product_by_barcode(db: AsyncSession, company_id: str, barcode: str
     return None
 
 
-async def list_products(
-    db: AsyncSession,
-    company_id: str,
+async def _enrich_products_details(db: AsyncSession, c_uuid: UUID, products: list[Product]) -> list[Product]:
+    """Enriquece en lote los productos con stock real en depósitos, último proveedor, escalas mayoristas y precio promedio real de venta."""
+    if not products:
+        return products
+
+    p_ids = [p.id for p in products]
+
+    # 1. Asociar Stock Físico Real y Disponible en lote
+    stock_map_res = await db.execute(
+        text("""
+            SELECT product_id,
+                   coalesce(sum(cantidad), 0) as stock_total,
+                   coalesce(sum(cantidad - coalesce(cantidad_reservada, 0)), 0) as stock_disponible
+            FROM stock
+            WHERE product_id = ANY(:p_ids)
+            GROUP BY product_id
+        """),
+        {"p_ids": p_ids}
+    )
+    stock_map = {r.product_id: (int(r.stock_total), int(r.stock_disponible)) for r in stock_map_res}
+    for p in products:
+        st, sd = stock_map.get(p.id, (0, 0))
+        p.__dict__["stock_actual"] = st
+        p.__dict__["stock_disponible"] = sd
+
+    # 2. Asociar Proveedor (Último proveedor de compra registrado con fallback a products.supplier_id)
+    last_sup_rows = await db.execute(
+        text("""
+            SELECT DISTINCT ON (ap.product_id)
+                ap.product_id,
+                ap.supplier_id,
+                s.razon_social as supplier_nombre,
+                ap.fecha as last_purchase_date
+            FROM (
+                SELECT pri.product_id, pr.supplier_id, pr.fecha
+                FROM purchase_receipt_items pri
+                JOIN purchase_receipts pr ON pr.id = pri.receipt_id
+                WHERE pr.company_id = :c_uuid AND pr.estado != 'cancelado' AND pr.supplier_id IS NOT NULL
+                  AND pri.product_id = ANY(:p_ids)
+
+                UNION ALL
+
+                SELECT poi.product_id, po.supplier_id, po.fecha
+                FROM purchase_order_items poi
+                JOIN purchase_orders po ON po.id = poi.purchase_order_id
+                WHERE po.company_id = :c_uuid AND po.estado != 'cancelado' AND po.supplier_id IS NOT NULL
+                  AND poi.product_id = ANY(:p_ids)
+
+                UNION ALL
+
+                SELECT sii.product_id, si.supplier_id, COALESCE(si.fecha_emision::timestamptz, si.created_at) as fecha
+                FROM supplier_invoice_items sii
+                JOIN supplier_invoices si ON si.id = sii.invoice_id
+                WHERE si.company_id = :c_uuid AND si.supplier_id IS NOT NULL AND sii.product_id IS NOT NULL
+                  AND sii.product_id = ANY(:p_ids)
+            ) ap
+            JOIN suppliers s ON s.id = ap.supplier_id
+            ORDER BY ap.product_id, ap.fecha DESC NULLS LAST
+        """),
+        {"c_uuid": c_uuid, "p_ids": p_ids}
+    )
+    all_official_supp_ids = [p.supplier_id for p in products if getattr(p, "supplier_id", None)]
+    suppliers_by_id = {}
+    if all_official_supp_ids:
+        supp_rows = await db.execute(
+            text("SELECT id, razon_social FROM suppliers WHERE id = ANY(:s_ids)"),
+            {"s_ids": list(set(all_official_supp_ids))}
+        )
+        suppliers_by_id = {r.id: r.razon_social for r in supp_rows}
+
+    last_sup_map = {
+        r.product_id: (r.supplier_id, r.supplier_nombre, r.last_purchase_date)
+        for r in last_sup_rows
+    }
+
+    for p in products:
+        oficial_id = getattr(p, "supplier_id", None)
+        oficial_nombre = suppliers_by_id.get(oficial_id) if oficial_id else None
+
+        ultimo_id = last_sup_map[p.id][0] if p.id in last_sup_map else oficial_id
+        ultimo_nombre = last_sup_map[p.id][1] if p.id in last_sup_map else oficial_nombre
+        fecha_ult = last_sup_map[p.id][2] if p.id in last_sup_map else None
+
+        p.__dict__["proveedor_oficial_id"] = oficial_id
+        p.__dict__["proveedor_oficial_nombre"] = oficial_nombre
+        p.__dict__["ultimo_proveedor_id"] = ultimo_id
+        p.__dict__["ultimo_proveedor_nombre"] = ultimo_nombre
+        p.__dict__["fecha_ultima_compra"] = fecha_ult
+
+        p.__dict__["supplier_nombre"] = ultimo_nombre or oficial_nombre
+        p.__dict__["supplier_id"] = oficial_id
+
+    # 3. Asociar Escala Mayorista preferencial (sp_tiered_prices)
+    tier_res = await db.execute(
+        text("""
+            SELECT DISTINCT ON (product_id)
+                product_id, min_qty, precio_unitario
+            FROM sp_tiered_prices
+            WHERE product_id = ANY(:p_ids) AND activo = true
+            ORDER BY product_id, min_qty ASC
+        """),
+        {"p_ids": p_ids}
+    )
+    tier_map = {r.product_id: (int(r.min_qty), float(r.precio_unitario)) for r in tier_res}
+    for p in products:
+        if p.id in tier_map:
+            p.__dict__["precio_mayorista"] = tier_map[p.id][1]
+            p.__dict__["precio_mayorista_min_qty"] = tier_map[p.id][0]
+        else:
+            p.__dict__["precio_mayorista"] = None
+            p.__dict__["precio_mayorista_min_qty"] = None
+
+    # 4. Asociar Precio de Venta Promedio Ponderado Real (PVPromedio efectivo de ventas)
+    sales_agg_res = await db.execute(
+        text("""
+            SELECT product_id,
+                   COALESCE(SUM(total), 0) as total_monto,
+                   COALESCE(SUM(cantidad), 0) as total_qty
+            FROM sale_items
+            WHERE product_id = ANY(:p_ids)
+            GROUP BY product_id
+        """),
+        {"p_ids": p_ids}
+    )
+    sales_agg_map = {
+        r.product_id: (float(r.total_monto) / float(r.total_qty)) if float(r.total_qty) > 0 else None
+        for r in sales_agg_res
+    }
+    for p in products:
+        pvp_real = sales_agg_map.get(p.id)
+        if pvp_real is not None:
+            p.__dict__["precio_promedio_real"] = Decimal(str(round(pvp_real, 0)))
+        else:
+            p.__dict__["precio_promedio_real"] = None
+
+    return products
+
+
+def _build_products_where_clause(
+    c_uuid: UUID,
     categoria_id: Optional[str] = None,
     search: Optional[str] = None,
     activo: Optional[bool] = None,
-    limit: Optional[int] = None,
-    offset: int = 0,
     supplier_id: Optional[str] = None,
     tipo_producto: Optional[str] = None,
     include_inactive: bool = False,
     updated_since: Optional[datetime] = None,
-) -> list[Product]:
-    try:
-        c_uuid = UUID(company_id)
-    except ValueError:
-        c_uuid = UUID("00000000-0000-0000-0000-000000000010")
-
-    # supplier va cargado SI O SI: ProductResponse expone supplier_nombre, que es
-    # una propiedad de Python sobre la relacion. Sin el selectinload, pydantic la
-    # dereferencia al serializar --fuera del contexto async-- y SQLAlchemy corta
-    # con MissingGreenlet, devolviendo 500. Y solo falla cuando hay resultados,
-    # asi que una busqueda sin coincidencias parece sana: el error se ve como
-    # "a veces no busca".
-    query = (
-        select(Product)
-        .options(selectinload(Product.categoria), selectinload(Product.supplier))
-        .where(Product.company_id == c_uuid)
-    )
+) -> list:
+    conds = []
 
     if supplier_id:
         try:
@@ -342,26 +462,24 @@ async def list_products(
                 )
                 .params(c_uuid=c_uuid, supp_uuid=supp_uuid)
             )
-            query = query.where(Product.id.in_(last_sup_subquery))
+            conds.append(Product.id.in_(last_sup_subquery))
         except ValueError:
             pass
 
     if categoria_id:
         try:
             cat_uuid = UUID(categoria_id)
-            query = query.where(Product.categoria_id == cat_uuid)
+            conds.append(Product.categoria_id == cat_uuid)
         except ValueError:
             pass
 
     if activo is not None:
-        query = query.where(Product.activo == activo)
+        conds.append(Product.activo == activo)
     elif not include_inactive:
-        # Por defecto, servir únicamente productos activos para POS, catálogo y ventas
-        query = query.where(Product.activo == True)
+        conds.append(Product.activo == True)
 
-    # Filtro opcional por tipo de producto (materia_prima, insumo, servicio, producto)
     if tipo_producto and tipo_producto.strip():
-        query = query.where(Product.tipo_producto == tipo_producto.strip())
+        conds.append(Product.tipo_producto == tipo_producto.strip())
 
     if search and search.strip():
         tokens = [t.strip() for t in search.split() if t.strip()]
@@ -382,7 +500,7 @@ async def list_products(
                         ),
                     )
                 )
-            query = query.where(and_(*token_conds))
+            conds.append(and_(*token_conds))
         elif len(tokens) == 1:
             t = tokens[0]
             single_conds = [
@@ -405,159 +523,132 @@ async def list_products(
                 if scale_match.plu is not None:
                     single_conds.append(Product.plu_balanza == scale_match.plu)
                     single_conds.append(Product.codigo_barra == f"2000{scale_match.plu:03d}")
-            query = query.where(or_(*single_conds))
+            conds.append(or_(*single_conds))
 
     if updated_since is not None:
-        query = query.where(Product.updated_at >= updated_since)
+        conds.append(Product.updated_at >= updated_since)
+
+    return conds
+
+
+async def list_products(
+    db: AsyncSession,
+    company_id: str,
+    categoria_id: Optional[str] = None,
+    search: Optional[str] = None,
+    activo: Optional[bool] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    supplier_id: Optional[str] = None,
+    tipo_producto: Optional[str] = None,
+    include_inactive: bool = False,
+    updated_since: Optional[datetime] = None,
+) -> list[Product]:
+    try:
+        c_uuid = UUID(company_id)
+    except ValueError:
+        c_uuid = UUID("00000000-0000-0000-0000-000000000010")
+
+    conds = _build_products_where_clause(
+        c_uuid=c_uuid,
+        categoria_id=categoria_id,
+        search=search,
+        activo=activo,
+        supplier_id=supplier_id,
+        tipo_producto=tipo_producto,
+        include_inactive=include_inactive,
+        updated_since=updated_since,
+    )
+
+    query = (
+        select(Product)
+        .options(selectinload(Product.categoria), selectinload(Product.supplier))
+        .where(Product.company_id == c_uuid, *conds)
+    )
+
+    if updated_since is not None:
         query = query.order_by(Product.updated_at.asc())
-        if limit is not None and limit > 0:
-            query = query.limit(limit).offset(offset)
-        elif offset > 0:
-            query = query.offset(offset)
     else:
-        # Filtrar productos con nombres válidos primero y activos con máxima prioridad
         query = query.order_by(Product.activo.desc(), Product.nombre.asc())
-        if limit is not None and limit > 0:
-            query = query.limit(limit).offset(offset)
-        elif offset > 0:
-            query = query.offset(offset)
+
+    if limit is not None and limit > 0:
+        query = query.limit(limit).offset(offset)
+    elif offset > 0:
+        query = query.offset(offset)
+
     result = await db.execute(query)
     products = list(result.scalars().all())
 
-    if products:
-        p_ids = [p.id for p in products]
+    return await _enrich_products_details(db, c_uuid, products)
 
-        # 1. Asociar Stock Físico Real y Disponible en lote
-        stock_map_res = await db.execute(
-            text("""
-                SELECT product_id,
-                       coalesce(sum(cantidad), 0) as stock_total,
-                       coalesce(sum(cantidad - coalesce(cantidad_reservada, 0)), 0) as stock_disponible
-                FROM stock
-                WHERE product_id = ANY(:p_ids)
-                GROUP BY product_id
-            """),
-            {"p_ids": p_ids}
-        )
-        stock_map = {r.product_id: (int(r.stock_total), int(r.stock_disponible)) for r in stock_map_res}
-        for p in products:
-            st, sd = stock_map.get(p.id, (0, 0))
-            p.__dict__["stock_actual"] = st
-            p.__dict__["stock_disponible"] = sd
 
-        # 2. Asociar Proveedor (Último proveedor de compra registrado con fallback a products.supplier_id)
-        last_sup_rows = await db.execute(
-            text("""
-                SELECT DISTINCT ON (ap.product_id)
-                    ap.product_id,
-                    ap.supplier_id,
-                    s.razon_social as supplier_nombre,
-                    ap.fecha as last_purchase_date
-                FROM (
-                    SELECT pri.product_id, pr.supplier_id, pr.fecha
-                    FROM purchase_receipt_items pri
-                    JOIN purchase_receipts pr ON pr.id = pri.receipt_id
-                    WHERE pr.company_id = :c_uuid AND pr.estado != 'cancelado' AND pr.supplier_id IS NOT NULL
-                      AND pri.product_id = ANY(:p_ids)
+async def list_products_paginated(
+    db: AsyncSession,
+    company_id: str,
+    categoria_id: Optional[str] = None,
+    search: Optional[str] = None,
+    activo: Optional[bool] = None,
+    limit: int = 50,
+    offset: int = 0,
+    supplier_id: Optional[str] = None,
+    tipo_producto: Optional[str] = None,
+    include_inactive: bool = False,
+    updated_since: Optional[datetime] = None,
+) -> dict:
+    try:
+        c_uuid = UUID(company_id)
+    except ValueError:
+        c_uuid = UUID("00000000-0000-0000-0000-000000000010")
 
-                    UNION ALL
+    conds = _build_products_where_clause(
+        c_uuid=c_uuid,
+        categoria_id=categoria_id,
+        search=search,
+        activo=activo,
+        supplier_id=supplier_id,
+        tipo_producto=tipo_producto,
+        include_inactive=include_inactive,
+        updated_since=updated_since,
+    )
 
-                    SELECT poi.product_id, po.supplier_id, po.fecha
-                    FROM purchase_order_items poi
-                    JOIN purchase_orders po ON po.id = poi.purchase_order_id
-                    WHERE po.company_id = :c_uuid AND po.estado != 'cancelado' AND po.supplier_id IS NOT NULL
-                      AND poi.product_id = ANY(:p_ids)
+    # 1. Total matching count
+    count_query = select(func.count(Product.id)).where(Product.company_id == c_uuid, *conds)
+    count_res = await db.execute(count_query)
+    total = count_res.scalar() or 0
 
-                    UNION ALL
+    # 2. Paginated items
+    query = (
+        select(Product)
+        .options(selectinload(Product.categoria), selectinload(Product.supplier))
+        .where(Product.company_id == c_uuid, *conds)
+    )
 
-                    SELECT sii.product_id, si.supplier_id, COALESCE(si.fecha_emision::timestamptz, si.created_at) as fecha
-                    FROM supplier_invoice_items sii
-                    JOIN supplier_invoices si ON si.id = sii.invoice_id
-                    WHERE si.company_id = :c_uuid AND si.supplier_id IS NOT NULL AND sii.product_id IS NOT NULL
-                      AND sii.product_id = ANY(:p_ids)
-                ) ap
-                JOIN suppliers s ON s.id = ap.supplier_id
-                ORDER BY ap.product_id, ap.fecha DESC NULLS LAST
-            """),
-            {"c_uuid": c_uuid, "p_ids": p_ids}
-        )
-        all_official_supp_ids = [p.supplier_id for p in products if getattr(p, "supplier_id", None)]
-        suppliers_by_id = {}
-        if all_official_supp_ids:
-            supp_rows = await db.execute(
-                text("SELECT id, razon_social FROM suppliers WHERE id = ANY(:s_ids)"),
-                {"s_ids": list(set(all_official_supp_ids))}
-            )
-            suppliers_by_id = {r.id: r.razon_social for r in supp_rows}
+    if updated_since is not None:
+        query = query.order_by(Product.updated_at.asc())
+    else:
+        query = query.order_by(Product.activo.desc(), Product.nombre.asc())
 
-        last_sup_map = {
-            r.product_id: (r.supplier_id, r.supplier_nombre, r.last_purchase_date)
-            for r in last_sup_rows
-        }
+    effective_limit = limit if limit and limit > 0 else 50
+    effective_offset = offset if offset and offset >= 0 else 0
+    query = query.limit(effective_limit).offset(effective_offset)
 
-        for p in products:
-            oficial_id = getattr(p, "supplier_id", None)
-            oficial_nombre = suppliers_by_id.get(oficial_id) if oficial_id else None
+    result = await db.execute(query)
+    products = list(result.scalars().all())
 
-            ultimo_id = last_sup_map[p.id][0] if p.id in last_sup_map else oficial_id
-            ultimo_nombre = last_sup_map[p.id][1] if p.id in last_sup_map else oficial_nombre
-            fecha_ult = last_sup_map[p.id][2] if p.id in last_sup_map else None
+    enriched_products = await _enrich_products_details(db, c_uuid, products)
 
-            p.__dict__["proveedor_oficial_id"] = oficial_id
-            p.__dict__["proveedor_oficial_nombre"] = oficial_nombre
-            p.__dict__["ultimo_proveedor_id"] = ultimo_id
-            p.__dict__["ultimo_proveedor_nombre"] = ultimo_nombre
-            p.__dict__["fecha_ultima_compra"] = fecha_ult
+    page = (effective_offset // effective_limit) + 1
+    total_pages = max(1, (total + effective_limit - 1) // effective_limit)
 
-            # En la lista del catálogo se muestra el último proveedor de compra (o el oficial si no hubo compra)
-            p.__dict__["supplier_nombre"] = ultimo_nombre or oficial_nombre
-            # Conservamos p.supplier_id como el OFICIAL (para edición en formularios)
-            p.__dict__["supplier_id"] = oficial_id
+    return {
+        "items": enriched_products,
+        "total": total,
+        "limit": effective_limit,
+        "offset": effective_offset,
+        "page": page,
+        "total_pages": total_pages,
+    }
 
-        # 3. Asociar Escala Mayorista preferencial (sp_tiered_prices)
-        tier_res = await db.execute(
-            text("""
-                SELECT DISTINCT ON (product_id)
-                    product_id, min_qty, precio_unitario
-                FROM sp_tiered_prices
-                WHERE product_id = ANY(:p_ids) AND activo = true
-                ORDER BY product_id, min_qty ASC
-            """),
-            {"p_ids": p_ids}
-        )
-        tier_map = {r.product_id: (int(r.min_qty), float(r.precio_unitario)) for r in tier_res}
-        for p in products:
-            if p.id in tier_map:
-                p.__dict__["precio_mayorista"] = tier_map[p.id][1]
-                p.__dict__["precio_mayorista_min_qty"] = tier_map[p.id][0]
-            else:
-                p.__dict__["precio_mayorista"] = None
-                p.__dict__["precio_mayorista_min_qty"] = None
-
-        # 4. Asociar Precio de Venta Promedio Ponderado Real (PVPromedio efectivo de ventas)
-        sales_agg_res = await db.execute(
-            text("""
-                SELECT product_id,
-                       COALESCE(SUM(total), 0) as total_monto,
-                       COALESCE(SUM(cantidad), 0) as total_qty
-                FROM sale_items
-                WHERE product_id = ANY(:p_ids)
-                GROUP BY product_id
-            """),
-            {"p_ids": p_ids}
-        )
-        sales_agg_map = {
-            r.product_id: (float(r.total_monto) / float(r.total_qty)) if float(r.total_qty) > 0 else None
-            for r in sales_agg_res
-        }
-        for p in products:
-            pvp_real = sales_agg_map.get(p.id)
-            if pvp_real is not None:
-                p.__dict__["precio_promedio_real"] = Decimal(str(round(pvp_real, 0)))
-            else:
-                p.__dict__["precio_promedio_real"] = None
-
-    return products
 
 
 async def annotate_products_with_promos(db: AsyncSession, company_id: str, products: list) -> None:

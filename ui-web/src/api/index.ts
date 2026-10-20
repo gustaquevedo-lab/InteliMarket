@@ -710,6 +710,15 @@ export interface ProductsStatsResponse {
   total_bajos: number
 }
 
+export interface PaginatedProductsResponse {
+  items: Product[]
+  total: number
+  limit: number
+  offset: number
+  page: number
+  total_pages: number
+}
+
 export interface Product360Response {
   product: {
     id: string
@@ -2161,6 +2170,7 @@ export const api = {
   },
   products: {
     list: (params?: { search?: string; categoria_id?: string; supplier_id?: string; activo?: boolean; tipo_producto?: string; include_inactive?: boolean; updated_since?: string; limit?: number; offset?: number }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, categoria_id: params?.categoria_id, supplier_id: params?.supplier_id, activo: params?.activo !== undefined ? params?.activo.toString() : undefined, tipo_producto: params?.tipo_producto, include_inactive: params?.include_inactive ? "true" : undefined, updated_since: params?.updated_since, limit: params?.limit, offset: params?.offset }),
+    listPaginated: (params?: { search?: string; categoria_id?: string; supplier_id?: string; activo?: boolean; tipo_producto?: string; include_inactive?: boolean; updated_since?: string; limit?: number; offset?: number }) => client.get<PaginatedProductsResponse>(`/v1/companies/${COMPANY_ID}/products/paginated`, { search: params?.search, categoria_id: params?.categoria_id, supplier_id: params?.supplier_id, activo: params?.activo !== undefined ? params?.activo.toString() : undefined, tipo_producto: params?.tipo_producto, include_inactive: params?.include_inactive ? "true" : undefined, updated_since: params?.updated_since, limit: params?.limit, offset: params?.offset }),
     get: (id: string) => client.get<Product>(`/v1/products/${id}`),
     getStats: () => client.get<ProductsStatsResponse>(`/v1/companies/${COMPANY_ID}/products/stats`),
     get360: (id: string) => client.get<Product360Response>(`/v1/products/${id}/360`),

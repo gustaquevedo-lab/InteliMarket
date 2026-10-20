@@ -138,3 +138,12 @@ class ProductResponse(BaseModel):
     precio_promedio_real: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PaginatedProductResponse(BaseModel):
+    items: list[ProductResponse]
+    total: int
+    limit: int
+    offset: int
+    page: int
+    total_pages: int
