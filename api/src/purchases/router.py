@@ -40,7 +40,8 @@ from api.src.purchases.schemas import (
     ProductSupplierComparisonResponse, SupplierPriceComparisonItem,
     ConsignmentSettlementCreate, ConsignmentSettlementResponse, ConsignmentSettlementPreview,
 )
-from datetime import date
+from decimal import Decimal
+from datetime import date, datetime, timezone
 from api.src.purchases import service
 from api.src.purchases import imap_service
 from api.src.purchases import matching_service
@@ -1111,6 +1112,38 @@ async def resolve_supplier_nc_request(
     except Exception as e:
         logger.error(f"Error al registrar NC del proveedor: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/purchases/supplier-nc-requests/{request_id}/dismiss")
+async def dismiss_supplier_nc_request(
+    request_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Archiva o desvincula una SNC histórica cuando la factura ya fue pagada o el reclamo caducó."""
+    from api.src.purchases.models import SupplierNcRequest
+    from api.src.financial.models import SupplierInvoice
+    from sqlalchemy import select
+    
+    req_uuid = uuid.UUID(request_id)
+    snc = (await db.execute(select(SupplierNcRequest).where(SupplierNcRequest.id == req_uuid))).scalar_one_or_none()
+    if not snc:
+        raise HTTPException(status_code=404, detail="SNC no encontrada")
+    
+    snc.estado = "resuelta"
+    snc.resolved_at = datetime.now(timezone.utc)
+    snc.observaciones = f"{(snc.observaciones or '').strip()} [Archivada manualmente en histórico]".strip()
+    
+    # Si la factura asociada estaba bloqueada por esta SNC, liberarla
+    if snc.invoice_id:
+        inv = (await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == snc.invoice_id))).scalar_one_or_none()
+        if inv and inv.bloqueada_para_pago:
+            inv.bloqueada_para_pago = False
+            inv.motivo_bloqueo = None
+            inv.monto_retenido_nc = Decimal("0")
+            inv.requiere_nc = False
+            
+    await db.commit()
+    return {"success": True, "message": f"SNC {snc.numero_solicitud} archivada en histórico."}
 
 
 # ── Devoluciones a Proveedores en Compras ──────────────────────────────────────

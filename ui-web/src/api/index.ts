@@ -2271,7 +2271,7 @@ export const api = {
       close: (sessionId: string) =>
         client.post<{ ok: boolean; mensaje: string; adjustment_id?: string; items_con_diferencia: number; diferencia_total_gs: number }>(`/v1/inventory/physical-sessions/${sessionId}/close`),
     },
-    recordMerma: (data: { warehouse_id: string; product_id: string; cantidad: number; motivo: string; observaciones?: string }) =>
+    recordMerma: (data: { warehouse_id: string; product_id: string; cantidad: number; motivo: string; observaciones?: string; lot_id?: string }) =>
       client.post<any>(`/v1/inventory/mermas`, { ...data, company_id: COMPANY_ID }),
     approveAdjustment: (id: string) => client.post<any>(`/v1/inventory/adjustments/${id}/approve`),
     sessions: {
@@ -3057,6 +3057,8 @@ export const api = {
       client.get<any[]>(`/v1/companies/${companyId || COMPANY_ID}/supplier-nc-requests`, params),
     resolveSupplierNcRequest: (requestId: string, data: any) =>
       client.post<any>(`/v1/purchases/supplier-nc-requests/${requestId}/resolve`, data),
+    dismissSupplierNcRequest: (requestId: string) =>
+      client.post<any>(`/v1/purchases/supplier-nc-requests/${requestId}/dismiss`, {}),
     supplierProducts: (supplierId: string) =>
       client.get<{ id: string; nombre: string; sku?: string; codigo_barra?: string; costo_promedio: number; unidad_medida: string }[]>(
         `/v1/purchases/suppliers/${supplierId}/products`

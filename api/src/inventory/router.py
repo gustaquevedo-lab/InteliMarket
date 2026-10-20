@@ -425,6 +425,7 @@ async def record_quick_merma(
             cantidad=float(body["cantidad"]),
             motivo=body.get("motivo", "General"),
             observaciones=body.get("observaciones", ""),
+            lot_id=body.get("lot_id"),
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -607,8 +607,16 @@ export default function ProductsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
+      const isActivoOnly = filterEstado === "activos"
+      const isInactivoOnly = filterEstado === "inactivos"
       const [prodsRes, catsRes, suppsRes, promosRes] = await Promise.allSettled([
-        api.products.list({ search: debouncedSearch || undefined, categoria_id: selectedCategory || undefined, include_inactive: true }),
+        api.products.list({
+          search: debouncedSearch || undefined,
+          categoria_id: selectedCategory || undefined,
+          tipo_producto: filterTipoProducto !== "todos" ? filterTipoProducto : undefined,
+          activo: isActivoOnly ? true : isInactivoOnly ? false : undefined,
+          include_inactive: !isActivoOnly,
+        }),
         api.categories.list(),
         api.purchases.suppliers(),
         api.promotions.list({ estado: "activa" }).catch(() => []),
@@ -646,7 +654,7 @@ export default function ProductsPage() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, selectedCategory, selectedParentProductId])
+  }, [debouncedSearch, selectedCategory, filterTipoProducto, filterEstado, selectedParentProductId])
 
   const loadVariants = useCallback(async () => {
     setLoadingVariants(true)

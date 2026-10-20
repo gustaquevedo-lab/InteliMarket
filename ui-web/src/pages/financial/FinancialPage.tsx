@@ -15,7 +15,7 @@ import {
   Upload, Paperclip, ExternalLink, Wallet, ArrowLeft, CheckSquare, Square,
   PackageMinus, Truck, Printer, Users, CheckCheck, FileCheck, CalendarClock,
   LayoutGrid, ListFilter, CornerDownRight, Handshake, Banknote, X, RotateCcw,
-  Lock, ShieldAlert
+  Lock, ShieldAlert, Archive
 } from "lucide-react"
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -189,6 +189,19 @@ export default function FinancialPage() {
       observaciones: "",
     })
     setShowResolveNcModal(true)
+  }
+
+  const handleDismissSnc = async (snc: any) => {
+    if (!window.confirm(`¿Deseas archivar la solicitud ${snc.numero_solicitud || "SNC"} y pasarla al histórico? (Útil si la factura original ya fue pagada sin deducción).`)) {
+      return
+    }
+    try {
+      await api.purchases.dismissSupplierNcRequest(snc.id)
+      toast.success(`Solicitud ${snc.numero_solicitud || "SNC"} archivada en histórico`)
+      fetchAll()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || "Error al archivar SNC")
+    }
   }
 
   const handleSaveResolveNc = async (e: React.FormEvent) => {
@@ -2106,14 +2119,25 @@ export default function FinancialPage() {
                                           Estado: <span className="uppercase font-semibold">{snc.estado?.replace("_", " ")}</span>
                                         </div>
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenResolveNcModal(snc)}
-                                        className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition active:scale-[0.98]"
-                                      >
-                                        <FileCheck className="w-3.5 h-3.5" />
-                                        <span>Cargar NC Recibida</span>
-                                      </button>
+                                      <div className="flex items-center gap-1.5 mt-1">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleOpenResolveNcModal(snc)}
+                                          className="flex-1 py-1.5 px-2.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-sm transition active:scale-[0.98]"
+                                        >
+                                          <FileCheck className="w-3.5 h-3.5" />
+                                          <span>Cargar NC</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDismissSnc(snc)}
+                                          title="Archivar o desvincular del histórico (ej. si la factura ya fue pagada)"
+                                          className="py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white font-medium text-[11px] flex items-center justify-center gap-1 border border-slate-700 transition"
+                                        >
+                                          <Archive className="w-3.5 h-3.5" />
+                                          <span>Archivar</span>
+                                        </button>
+                                      </div>
                                     </div>
                                   )
                                 })}

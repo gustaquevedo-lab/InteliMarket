@@ -238,6 +238,28 @@ export default function Layout() {
   // ── Buscador global funcional ────────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("")
   const [searchOpen, setSearchOpen] = useState(false)
+  const [expiriesAlertCount, setExpiriesAlertCount] = useState<number>(0)
+
+  useEffect(() => {
+    let active = true
+    const checkExpiries = async () => {
+      try {
+        const res = await api.inventory.getLotsExpiries({ limit: 1 })
+        if (active && res?.kpis) {
+          const totalAlerts = Number(res.kpis.vencidos || 0) + Number(res.kpis.critico_7d || 0)
+          setExpiriesAlertCount(totalAlerts)
+        }
+      } catch {
+        // silent fallback
+      }
+    }
+    checkExpiries()
+    const timer = setInterval(checkExpiries, 180000)
+    return () => {
+      active = false
+      clearInterval(timer)
+    }
+  }, [])
 
   const allNavItems = navGroups.flatMap(g => g.items)
   const searchResults = searchQuery.trim().length > 0
@@ -314,6 +336,11 @@ export default function Layout() {
                     }`}
                   >
                     <span className="text-left flex-1 truncate">{group.title}</span>
+                    {group.title === "Inventario" && expiriesAlertCount > 0 && (
+                      <span className="mr-1.5 px-1.5 py-0.2 rounded-full text-[9px] font-black bg-rose-500 text-white shadow-xs">
+                        {expiriesAlertCount}
+                      </span>
+                    )}
                     <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-180 text-white" : "text-white/60"}`} />
                   </button>
                 )}
@@ -335,6 +362,11 @@ export default function Layout() {
                         >
                           <item.icon className={`w-4 h-4 flex-shrink-0 ${active ? "text-emerald-300" : "text-white/70"}`} />
                           <span className="text-left flex-1 truncate leading-tight">{item.label}</span>
+                          {item.path === "/inventory" && expiriesAlertCount > 0 && (
+                            <span className="ml-auto px-1.5 py-0.5 rounded-full text-[9px] font-black bg-rose-500 text-white shadow-xs animate-pulse" title={`${expiriesAlertCount} lotes vencidos o críticos (<7d)`}>
+                              {expiriesAlertCount}
+                            </span>
+                          )}
                         </button>
                       )
                     })}

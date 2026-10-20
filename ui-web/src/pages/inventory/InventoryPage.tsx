@@ -1345,38 +1345,51 @@ export default function InventoryPage() {
                             </span>
                           </td>
                           <td className="p-3.5 text-center">
-                            {lot.estado_vencimiento === "vencido" ? (
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
                               <button
                                 onClick={async () => {
                                   try {
                                     await api.inventory.recordMerma({
                                       warehouse_id: lot.warehouse_id,
                                       product_id: lot.product_id,
+                                      lot_id: lot.id,
+                                      cantidad: lot.cantidad_disponible,
+                                      motivo: `Devolución a Proveedor: Vencimiento Lote ${lot.referencia}`,
+                                      observaciones: `Canje acordado por fecha de caducidad.`,
+                                    })
+                                    toast.success("Devolución Registrada", `Se registró la salida por canje a proveedor del lote ${lot.referencia}`)
+                                    loadExpiriesData()
+                                  } catch (e: any) {
+                                    toast.error("Error al registrar devolución", e.message)
+                                  }
+                                }}
+                                className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/60 text-[10px] font-extrabold transition cursor-pointer"
+                                title="Registrar salida para canje o devolución con el proveedor"
+                              >
+                                Canje Proveedor
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    await api.inventory.recordMerma({
+                                      warehouse_id: lot.warehouse_id,
+                                      product_id: lot.product_id,
+                                      lot_id: lot.id,
                                       cantidad: lot.cantidad_disponible,
                                       motivo: `Merma por caducidad lote ${lot.referencia}`,
                                     })
-                                    toast.success("Merma Registrada", `Se dio de baja el lote ${lot.referencia}`)
+                                    toast.success("Merma Registrada", `Se dio de baja definitiva el lote ${lot.referencia}`)
                                     loadExpiriesData()
                                   } catch (e: any) {
                                     toast.error("Error al registrar merma", e.message)
                                   }
                                 }}
-                                className="px-2.5 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/60 text-[10px] font-extrabold transition"
+                                className="px-2 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/60 text-[10px] font-extrabold transition cursor-pointer"
+                                title="Dar de baja definitiva por merma / vencimiento"
                               >
-                                Registrar Merma
+                                Baja Merma
                               </button>
-                            ) : lot.dias_restantes <= 15 ? (
-                              <button
-                                onClick={() => {
-                                  toast.info("Rescate de Vencimiento Activado", `Sugerencia de Markdown del 30% para ${lot.product_nombre} (Lote: ${lot.referencia})`)
-                                }}
-                                className="px-2.5 py-1 rounded-lg bg-orange-50 text-orange-700 hover:bg-orange-100 dark:bg-orange-950/40 dark:text-orange-300 dark:hover:bg-orange-900/60 text-[10px] font-extrabold transition flex items-center gap-1 mx-auto"
-                              >
-                                <Sparkles className="w-3 h-3" /> Rescate -30%
-                              </button>
-                            ) : (
-                              <span className="text-[10px] text-gray-400 font-mono">OK FEFO</span>
-                            )}
+                            </div>
                           </td>
                         </tr>
                       )

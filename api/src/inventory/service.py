@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import uuid
 
 from api.src.inventory.models import (
-    Warehouse, Stock, InventoryMovement,
+    Warehouse, Stock, InventoryMovement, StockLot,
     StockTransfer, StockTransferItem,
     InventoryAdjustment, InventoryAdjustmentItem,
     StockAdjustmentAuditLog,
@@ -1021,6 +1021,7 @@ async def record_quick_merma(
     motivo: str,
     observaciones: str = "",
     user_id: uuid.UUID | None = None,
+    lot_id: str | None = None,
 ) -> dict:
     import uuid
     from datetime import datetime, timezone
@@ -1034,6 +1035,15 @@ async def record_quick_merma(
         raise ValueError("Producto no encontrado")
         
     costo = float(product.costo_promedio or product.ultimo_costo or 0)
+
+    # Si se especificó un lote puntual (ej. desde control de vencimientos), descontar del lote
+    lot_uuid = uuid.UUID(lot_id) if lot_id else None
+    if lot_uuid:
+        lot = await db.get(StockLot, lot_uuid)
+        if lot:
+            lot.cantidad_disponible = max(0, lot.cantidad_disponible - int(cantidad))
+            if lot.costo_unitario:
+                costo = float(lot.costo_unitario)
     
     # 1. Crear ajuste tipo merma
     adj_code = f"MRM-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
