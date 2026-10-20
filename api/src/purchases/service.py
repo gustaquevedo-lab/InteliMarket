@@ -66,8 +66,12 @@ def calculate_taxes(precio: Decimal, cantidad: Decimal, descuento_pct: Decimal, 
 
 async def generate_po_number(db: AsyncSession) -> str:
     date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
+    # Solo números propios "OC-...": el sync del legacy inserta compras con numero "C108858".
+    # El rango por prefijo usa el índice único de numero (shortcut: último+1 sin bloqueo, la UNIQUE evita duplicar).
     result = await db.execute(
-        select(PurchaseOrder).order_by(PurchaseOrder.created_at.desc()).limit(1)
+        select(PurchaseOrder)
+        .where(PurchaseOrder.numero >= "OC-", PurchaseOrder.numero < "OC.")
+        .order_by(PurchaseOrder.numero.desc()).limit(1)
     )
     last = result.scalar_one_or_none()
     seq = int(last.numero.split("-")[-1]) + 1 if last else 1
