@@ -215,6 +215,18 @@ async def export_kardex_pdf(
 # Transferencias
 # ---------------------------------------------------------------------------
 
+@router.get("/inventory/transfers")
+async def list_transfers(
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    warehouse_id: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    _=Depends(require_permission("inventory:transfer")),
+):
+    return await service.list_transfers(db, company_id, warehouse_id, limit, offset)
+
+
 @router.post("/inventory/transfers", response_model=TransferResponse, status_code=status.HTTP_201_CREATED)
 async def create_transfer(body: TransferCreate, db: AsyncSession = Depends(get_db), _=Depends(require_permission("inventory:transfer"))):
     return await service.create_transfer(db, body)
@@ -226,6 +238,28 @@ async def complete_transfer(transfer_id: str, db: AsyncSession = Depends(get_db)
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo completar la transferencia")
     return result
+
+
+@router.post("/inventory/transfers/quick-replenish")
+async def quick_replenish(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("inventory:transfer")),
+):
+    try:
+        user_id = UUID(user["id"]) if user.get("id") else None
+        return await service.execute_quick_replenish(
+            db,
+            company_id=body.get("company_id", "00000000-0000-0000-0000-000000000010"),
+            warehouse_origen_id=body["warehouse_origen_id"],
+            warehouse_destino_id=body["warehouse_destino_id"],
+            items=body["items"],
+            observaciones=body.get("observaciones", "Reposición de Góndola (Picking)"),
+            user_id=user_id,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ---------------------------------------------------------------------------

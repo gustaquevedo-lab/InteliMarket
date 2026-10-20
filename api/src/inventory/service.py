@@ -360,6 +360,7 @@ async def complete_transfer(db: AsyncSession, transfer_id: str, user_id: uuid.UU
 
     for item in items:
         src_stock = await get_stock(db, str(transfer_obj.warehouse_origen_id), str(item.product_id))
+        costo = src_stock.costo_unitario if src_stock else None
         if src_stock:
             src_stock.cantidad -= item.cantidad_enviada
 
@@ -370,12 +371,38 @@ async def complete_transfer(db: AsyncSession, transfer_id: str, user_id: uuid.UU
                 product_id=item.product_id,
                 variant_id=item.variant_id,
                 cantidad=0,
-                costo_unitario=src_stock.costo_unitario if src_stock else None,
+                costo_unitario=costo,
             )
             db.add(dest_stock)
             await db.flush()
         dest_stock.cantidad += item.cantidad_enviada
         item.cantidad_recibida = item.cantidad_enviada
+
+        # Kardex salida y entrada
+        db.add(InventoryMovement(
+            company_id=transfer_obj.company_id,
+            warehouse_id=transfer_obj.warehouse_origen_id,
+            product_id=item.product_id,
+            variant_id=item.variant_id,
+            tipo="transferencia_salida",
+            cantidad=-item.cantidad_enviada,
+            costo_unitario=costo,
+            referencia_type="stock_transfers",
+            referencia_id=transfer_obj.id,
+            motivo=f"Transferencia a {transfer_obj.warehouse_destino_id}",
+        ))
+        db.add(InventoryMovement(
+            company_id=transfer_obj.company_id,
+            warehouse_id=transfer_obj.warehouse_destino_id,
+            product_id=item.product_id,
+            variant_id=item.variant_id,
+            tipo="transferencia_entrada",
+            cantidad=item.cantidad_enviada,
+            costo_unitario=costo,
+            referencia_type="stock_transfers",
+            referencia_id=transfer_obj.id,
+            motivo=f"Transferencia desde {transfer_obj.warehouse_origen_id}",
+        ))
 
     transfer_obj.estado = "completada"
     transfer_obj.fecha_recepcion = datetime.now(timezone.utc)
@@ -384,6 +411,163 @@ async def complete_transfer(db: AsyncSession, transfer_id: str, user_id: uuid.UU
     await db.flush()
     await db.refresh(transfer_obj)
     return transfer_obj
+
+
+async def list_transfers(
+    db: AsyncSession,
+    company_id: str,
+    warehouse_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict]:
+    c_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    query = select(StockTransfer).where(StockTransfer.company_id == c_uuid)
+    if warehouse_id:
+        w_uuid = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
+        query = query.where(or_(StockTransfer.warehouse_origen_id == w_uuid, StockTransfer.warehouse_destino_id == w_uuid))
+    query = query.order_by(StockTransfer.created_at.desc()).limit(limit).offset(offset)
+    res = await db.execute(query)
+    transfers = res.scalars().all()
+    out = []
+    for t in transfers:
+        items_res = await db.execute(
+            select(StockTransferItem, Product.nombre, Product.sku, Product.codigo_barra)
+            .join(Product, Product.id == StockTransferItem.product_id, isouter=True)
+            .where(StockTransferItem.transfer_id == t.id)
+        )
+        items = []
+        for row in items_res.all():
+            it, p_nombre, p_sku, p_cb = row
+            items.append({
+                "id": str(it.id),
+                "product_id": str(it.product_id),
+                "product_nombre": p_nombre or "Producto",
+                "product_sku": p_sku or "",
+                "product_codigo_barra": p_cb or "",
+                "cantidad_enviada": it.cantidad_enviada,
+                "cantidad_recibida": it.cantidad_recibida,
+            })
+        out.append({
+            "id": str(t.id),
+            "codigo": t.codigo,
+            "warehouse_origen_id": str(t.warehouse_origen_id),
+            "warehouse_destino_id": str(t.warehouse_destino_id),
+            "estado": t.estado,
+            "observaciones": t.observaciones,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "items": items,
+            "total_unidades": sum(i["cantidad_enviada"] for i in items),
+        })
+    return out
+
+
+async def execute_quick_replenish(
+    db: AsyncSession,
+    company_id: str,
+    warehouse_origen_id: str,
+    warehouse_destino_id: str,
+    items: list[dict],
+    observaciones: str = "Reposición de Góndola (Picking)",
+    user_id: uuid.UUID | None = None,
+) -> dict:
+    c_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
+    orig_uuid = uuid.UUID(warehouse_origen_id) if isinstance(warehouse_origen_id, str) else warehouse_origen_id
+    dest_uuid = uuid.UUID(warehouse_destino_id) if isinstance(warehouse_destino_id, str) else warehouse_destino_id
+
+    if orig_uuid == dest_uuid:
+        raise ValueError("El depósito de origen y destino deben ser distintos")
+    if not items:
+        raise ValueError("Debe incluir al menos un producto a reponer")
+
+    transfer_code = f"REP-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
+    transfer = StockTransfer(
+        company_id=c_uuid,
+        codigo=transfer_code,
+        warehouse_origen_id=orig_uuid,
+        warehouse_destino_id=dest_uuid,
+        estado="completada",
+        fecha_envio=datetime.now(timezone.utc),
+        fecha_recepcion=datetime.now(timezone.utc),
+        observaciones=observaciones,
+        user_id_envio=user_id,
+        user_id_recepcion=user_id,
+    )
+    db.add(transfer)
+    await db.flush()
+
+    total_unidades = 0
+    updated_products = []
+    for it in items:
+        p_uuid = uuid.UUID(it["product_id"]) if isinstance(it["product_id"], str) else it["product_id"]
+        cant = int(it["cantidad"])
+        if cant <= 0:
+            continue
+        total_unidades += cant
+
+        # Stock origen
+        src_stock = await get_stock(db, str(orig_uuid), str(p_uuid))
+        costo = src_stock.costo_unitario if src_stock else None
+        if src_stock:
+            src_stock.cantidad -= cant
+        else:
+            src_stock = Stock(warehouse_id=orig_uuid, product_id=p_uuid, cantidad=-cant)
+            db.add(src_stock)
+
+        # Stock destino
+        dest_stock = await get_stock(db, str(dest_uuid), str(p_uuid))
+        if dest_stock:
+            dest_stock.cantidad += cant
+        else:
+            dest_stock = Stock(warehouse_id=dest_uuid, product_id=p_uuid, cantidad=cant, costo_unitario=costo)
+            db.add(dest_stock)
+
+        # Item de transferencia
+        transfer_item = StockTransferItem(
+            transfer_id=transfer.id,
+            product_id=p_uuid,
+            cantidad_enviada=cant,
+            cantidad_recibida=cant,
+        )
+        db.add(transfer_item)
+
+        # Kardex salida y entrada
+        db.add(InventoryMovement(
+            company_id=c_uuid,
+            warehouse_id=orig_uuid,
+            product_id=p_uuid,
+            tipo="transferencia_salida",
+            cantidad=-cant,
+            costo_unitario=costo,
+            referencia_type="stock_transfers",
+            referencia_id=transfer.id,
+            motivo=f"Reposición de Góndola -> {dest_uuid}",
+        ))
+        db.add(InventoryMovement(
+            company_id=c_uuid,
+            warehouse_id=dest_uuid,
+            product_id=p_uuid,
+            tipo="transferencia_entrada",
+            cantidad=cant,
+            costo_unitario=costo,
+            referencia_type="stock_transfers",
+            referencia_id=transfer.id,
+            motivo=f"Reposición de Góndola <- {orig_uuid}",
+        ))
+        updated_products.append({
+            "product_id": str(p_uuid),
+            "cantidad": cant,
+            "stock_origen_nuevo": src_stock.cantidad,
+            "stock_destino_nuevo": dest_stock.cantidad,
+        })
+
+    await db.flush()
+    return {
+        "ok": True,
+        "transfer_id": str(transfer.id),
+        "codigo": transfer.codigo,
+        "total_unidades": total_unidades,
+        "productos": updated_products,
+    }
 
 
 # ---------------------------------------------------------------------------

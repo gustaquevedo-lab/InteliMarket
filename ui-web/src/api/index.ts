@@ -2258,6 +2258,16 @@ export const api = {
       fd.append("file", file)
       return requestMultipart<{ url: string; filename: string }>("/v1/petty-cash/upload-comprobante", fd)
     },
+    transfers: {
+      list: (params?: { warehouse_id?: string; limit?: number; offset?: number }) =>
+        client.get<any[]>("/v1/inventory/transfers", { company_id: COMPANY_ID, ...params } as any),
+      create: (data: { warehouse_origen_id: string; warehouse_destino_id: string; items: { product_id: string; cantidad: number }[]; observaciones?: string }) =>
+        client.post<any>("/v1/inventory/transfers", { ...data, company_id: COMPANY_ID }),
+      complete: (transferId: string) =>
+        client.post<any>(`/v1/inventory/transfers/${transferId}/complete`),
+      quickReplenish: (data: { warehouse_origen_id: string; warehouse_destino_id: string; items: { product_id: string; cantidad: number }[]; observaciones?: string }) =>
+        client.post<{ ok: boolean; transfer_id: string; codigo: string; total_unidades: number; productos: any[] }>("/v1/inventory/transfers/quick-replenish", { ...data, company_id: COMPANY_ID }),
+    },
     physicalSessions: {
       list: (params?: { warehouse_id?: string; estado?: string; supplier_id?: string; categoria_id?: string; limit?: number; offset?: number }) =>
         client.get<PhysicalSession[]>(`/v1/companies/${COMPANY_ID}/inventory/physical-sessions`, params as any),
