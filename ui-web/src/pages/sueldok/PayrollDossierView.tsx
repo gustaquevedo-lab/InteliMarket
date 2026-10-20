@@ -580,8 +580,10 @@ export default function PayrollDossierView({
                       banco: isBank ? "Banco Continental" : "",
                       referencia: isBank ? `SIPAP-${selectedDossier.periodo}` : "Entrega en sobres piso"
                     }
-                    const isEjecutado = phase.estado === "ejecutado"
+                    const isPagadoEnTesoreria = phase.estado === "pagado" || phase.payment_order_estado === "pagado"
+                    const isEjecutado = phase.estado === "ejecutado" || isPagadoEnTesoreria
                     const meta = phase.metadata || {}
+                    const opNum = phase.payment_order_numero || meta.payment_order_numero
 
                     return (
                       <div
@@ -610,9 +612,13 @@ export default function PayrollDossierView({
                           </div>
 
                           <div>
-                            {isEjecutado ? (
-                              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 font-semibold">
-                                <CheckCircle className="w-3.5 h-3.5" /> Pagado
+                            {isPagadoEnTesoreria ? (
+                              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 font-bold border border-emerald-300 dark:border-emerald-800">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Liquidada {opNum ? `(${opNum})` : ""}
+                              </span>
+                            ) : isEjecutado ? (
+                              <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 font-semibold border border-blue-200 dark:border-blue-800">
+                                <Clock className="w-3.5 h-3.5 text-blue-600" /> OP Emitida {opNum ? `(${opNum})` : ""}
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 font-semibold">
@@ -704,15 +710,25 @@ export default function PayrollDossierView({
                               )}
                               {phase.executed_at && <span><b>Fecha:</b> {new Date(phase.executed_at).toLocaleDateString()}</span>}
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => handleRevertThirdParty(phase.id, phase.phase_label)}
-                              disabled={actionLoading === phase.id}
-                              className="py-1 px-2.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-medium text-xs flex items-center gap-1 transition border border-rose-200 dark:border-rose-900/40 disabled:opacity-50"
-                              title="Revertir el desembolso y devolver la fase a pendiente"
-                            >
-                              <RotateCcw className="w-3 h-3" /> Revertir
-                            </button>
+                            {isPagadoEnTesoreria ? (
+                              <a
+                                href="/payments?tab=pagadas"
+                                className="py-1 px-2.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-semibold text-xs flex items-center gap-1 transition border border-emerald-200 dark:border-emerald-800"
+                                title="Esta nómina ya fue liquidada con medios reales en Tesorería"
+                              >
+                                <CheckCircle className="w-3 h-3 text-emerald-600" /> Liquidada en Tesorería
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleRevertThirdParty(phase.id, phase.phase_label)}
+                                disabled={actionLoading === phase.id}
+                                className="py-1 px-2.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-medium text-xs flex items-center gap-1 transition border border-rose-200 dark:border-rose-900/40 disabled:opacity-50"
+                                title="Revertir el desembolso y devolver la fase a pendiente"
+                              >
+                                <RotateCcw className="w-3 h-3" /> Revertir
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -853,9 +869,13 @@ export default function PayrollDossierView({
                             )}
                           </div>
 
-                          {phase.estado === "ejecutado" ? (
-                            <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-semibold">
-                              <CheckCircle className="w-3.5 h-3.5" /> OP Emitida
+                          {phase.estado === "pagado" || phase.payment_order_estado === "pagado" ? (
+                            <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 font-bold border border-emerald-300 dark:border-emerald-800">
+                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600" /> Liquidada en Tesorería {phase.payment_order_numero ? `(${phase.payment_order_numero})` : ""}
+                            </span>
+                          ) : phase.estado === "ejecutado" ? (
+                            <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 font-semibold border border-blue-200 dark:border-blue-800">
+                              <Clock className="w-3.5 h-3.5 text-blue-600" /> OP Emitida {phase.payment_order_numero ? `(${phase.payment_order_numero})` : ""}
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-semibold">
@@ -938,8 +958,20 @@ export default function PayrollDossierView({
                             </button>
                           )}
 
-                          {/* Estado Ejecutado: Botones Asignar Medios y Revertir OP */}
-                          {phase.estado === "ejecutado" && (
+                          {/* Estado Liquidado en Tesorería */}
+                          {(phase.estado === "pagado" || phase.payment_order_estado === "pagado") && (
+                            <a
+                              href="/payments?tab=pagadas"
+                              className="py-1.5 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-semibold text-xs flex items-center gap-1.5 transition border border-emerald-200 dark:border-emerald-800"
+                              title="Esta orden ya fue liquidada en Tesorería con fondos bancarios/efectivo"
+                            >
+                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                              Ver en Historial Tesorería {phase.payment_order_numero ? `(${phase.payment_order_numero})` : ""}
+                            </a>
+                          )}
+
+                          {/* Estado Ejecutado: OP Emitida pendiente de desembolso */}
+                          {phase.estado === "ejecutado" && phase.payment_order_estado !== "pagado" && (
                             <>
                               <a
                                 href="/payments"
@@ -947,7 +979,7 @@ export default function PayrollDossierView({
                                 title="Abrir Tesorería para liquidar la Orden de Pago"
                               >
                                 <CreditCard className="w-3.5 h-3.5" />
-                                Asignar Medios en Tesorería
+                                Asignar Medios en Tesorería {phase.payment_order_numero ? `(${phase.payment_order_numero})` : ""}
                               </a>
                               <button
                                 type="button"

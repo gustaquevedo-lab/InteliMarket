@@ -945,6 +945,53 @@ async def create_payroll_dossier(
     return await get_payroll_dossier(db, company_id, str(dossier.id))
 
 
+async def enrich_dossier_with_payment_orders(db: AsyncSession, dossier) -> dict:
+    import uuid
+    from sqlalchemy import select
+    from api.src.financial.models import SupplierPaymentOrder
+
+    data = format_dossier(dossier)
+    po_ids = [uuid.UUID(p["payment_order_id"]) for p in data["phases"] if p.get("payment_order_id")]
+
+    po_map = {}
+    if po_ids:
+        q = select(SupplierPaymentOrder).where(SupplierPaymentOrder.id.in_(po_ids))
+        res = await db.execute(q)
+        for po in res.scalars().all():
+            po_map[str(po.id)] = po
+
+    auto_repaired = False
+    for p in data["phases"]:
+        p_po_id = p.get("payment_order_id")
+        if p_po_id:
+            po = po_map.get(p_po_id)
+            if po:
+                p["payment_order_numero"] = po.numero_orden
+                p["payment_order_estado"] = po.estado  # 'registrado', 'aguardando_pago', 'pagado', 'anulado'
+                p["payment_order_monto_neto"] = float(po.monto_neto or 0)
+                if po.estado in ("pagado", "conciliado"):
+                    p["estado"] = "pagado"
+            else:
+                # La OP fue borrada o no existe: sanear la fase para no dejarla trabada
+                p["payment_order_id"] = None
+                p["payment_order_numero"] = None
+                p["payment_order_estado"] = None
+                p["estado"] = "pendiente"
+                for phase_obj in (dossier.phases or []):
+                    if str(phase_obj.id) == p["id"]:
+                        phase_obj.payment_order_id = None
+                        phase_obj.estado = "pendiente"
+                        auto_repaired = True
+
+    if auto_repaired:
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+
+    return data
+
+
 async def get_payroll_dossier(db: AsyncSession, company_id: str, dossier_id: str) -> Optional[dict]:
     import uuid
     from sqlalchemy import select
@@ -963,7 +1010,7 @@ async def get_payroll_dossier(db: AsyncSession, company_id: str, dossier_id: str
     dossier = res.scalars().first()
     if not dossier:
         return None
-    return format_dossier(dossier)
+    return await enrich_dossier_with_payment_orders(db, dossier)
 
 
 async def list_payroll_dossiers(db: AsyncSession, company_id: str) -> list[dict]:
@@ -981,7 +1028,10 @@ async def list_payroll_dossiers(db: AsyncSession, company_id: str) -> list[dict]
     )
     res = await db.execute(query)
     dossiers = res.scalars().all()
-    return [format_dossier(d) for d in dossiers]
+    results = []
+    for d in dossiers:
+        results.append(await enrich_dossier_with_payment_orders(db, d))
+    return results
 
 
 async def sync_payroll_dossier_from_sueldok(
