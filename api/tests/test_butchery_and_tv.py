@@ -87,3 +87,35 @@ class TestButcheryAndTvSchemas:
         )
         assert len(upd.visible_product_ids) == 2
         assert upd.order_ids[0] == id2
+
+    def test_bakery_quick_batch_schemas(self):
+        from api.src.supermer.schemas import BakeryQuickBatchInput, BakeryQuickBatchResponse
+
+        pan_id = str(uuid4())
+        harina_id = str(uuid4())
+
+        inp = BakeryQuickBatchInput(
+            producto_pan_id=pan_id,
+            kilos_producidos=65.0,
+            insumo_harina_id=harina_id,
+            kilos_harina_usada=50.0,
+            notas="Horneada de la mañana",
+        )
+        assert inp.producto_pan_id == pan_id
+        assert inp.kilos_producidos == 65.0
+        assert inp.kilos_harina_usada == 50.0
+
+        resp = BakeryQuickBatchResponse(
+            success=True,
+            order_id=str(uuid4()),
+            producto_pan_nombre="PAN FRANCES KG",
+            kilos_producidos=65.0,
+            kilos_harina_descontada=50.0,
+            nuevo_stock_pan=42.0,
+            nuevo_stock_harina=350.0,
+            lote_codigo="PAN-20261020-0001",
+            detail="Horneada registrada",
+        )
+        assert resp.success is True
+        assert resp.kilos_producidos == 65.0
+        assert resp.nuevo_stock_pan == 42.0

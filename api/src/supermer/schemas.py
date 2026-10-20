@@ -571,6 +571,28 @@ class ExecutePlanResult(BaseModel):
     ordenes: list[ProductionOrderResponse]
 
 
+class BakeryQuickBatchInput(BaseModel):
+    producto_pan_id: str
+    kilos_producidos: float = Field(..., gt=0)
+    insumo_harina_id: Optional[str] = None
+    kilos_harina_usada: Optional[float] = Field(50.0, ge=0)
+    almacen_id: Optional[str] = None
+    notas: Optional[str] = None
+    responsable_id: Optional[str] = None
+
+
+class BakeryQuickBatchResponse(BaseModel):
+    success: bool
+    order_id: str
+    producto_pan_nombre: str
+    kilos_producidos: float
+    kilos_harina_descontada: float
+    nuevo_stock_pan: float
+    nuevo_stock_harina: float
+    lote_codigo: Optional[str] = None
+    detail: str
+
+
 # ============================================================
 # VERDULERÍA — RECEPCIÓN, AUDITORÍA, SCORECARD, FORECAST
 # ============================================================

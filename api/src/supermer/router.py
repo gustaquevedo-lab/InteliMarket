@@ -28,6 +28,7 @@ from api.src.supermer.schemas import (
     BakeryPlanCreate, BakeryPlanResponse,
     ScaleRecipeInput, ScaleRecipeResult,
     ExecutePlanInput, ExecutePlanResult,
+    BakeryQuickBatchInput, BakeryQuickBatchResponse,
     ReceiveBatchCreate, ReceiveBatchResponse,
     FreshnessAuditCreate, FreshnessAuditResponse,
     SupplierScorecardResponse,
@@ -710,6 +711,20 @@ async def execute_bakery_plan(
 ):
     try:
         return await service.execute_bakery_plan(db, user["company_id"], data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/bakery/quick-batch", response_model=BakeryQuickBatchResponse)
+async def execute_bakery_quick_batch(
+    data: BakeryQuickBatchInput,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        if not data.responsable_id and user.get("id"):
+            data.responsable_id = str(user["id"])
+        return await service.execute_bakery_quick_batch(db, user["company_id"], data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

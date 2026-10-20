@@ -694,6 +694,26 @@ export interface BakeryPlanItem { id?: string; receta_id?: string; receta_nombre
 export interface ScaleRecipeResult { receta_nombre?: string; producto_terminado?: string; cantidad_base?: number; cantidad_deseada?: number; factor_escala?: number; items?: any[]; insumos_totales?: any[] }
 export interface ScaleRecipeInput { receta_id: string; cantidad_deseada: number }
 export interface ExecutePlanResult { plan_nombre?: string; fecha?: string; ordenes_creadas?: number; ordenes?: SupermerOrder[] }
+export interface BakeryQuickBatchInput {
+  producto_pan_id: string
+  kilos_producidos: number
+  insumo_harina_id?: string
+  kilos_harina_usada?: number
+  almacen_id?: string
+  notas?: string
+  responsable_id?: string
+}
+export interface BakeryQuickBatchResponse {
+  success: boolean
+  order_id: string
+  producto_pan_nombre: string
+  kilos_producidos: number
+  kilos_harina_descontada: number
+  nuevo_stock_pan: number
+  nuevo_stock_harina: number
+  lote_codigo?: string
+  detail: string
+}
 export interface ProduceReceiveBatch { id: string; producto_id?: string; producto_nombre?: string; proveedor_id?: string; proveedor_nombre?: string; cantidad_recibida?: number; cantidad_aceptada?: number; calidad?: string; precio_unitario?: number; fecha_recepcion?: string; fecha_vencimiento_estimada?: string; lote_proveedor?: string; lote_codigo_interno?: string; nota_calidad?: string; rechazo_motivo?: string; registrado_por?: string; registrado_por_nombre?: string; created_at?: string }
 export interface ProduceFreshnessAudit { id: string; producto_id?: string; producto_nombre?: string; batch_id?: string; calidad_actual?: string; firmeza?: number; color?: number; aspecto_general?: number; notas?: string; audited_by?: string; audited_at?: string; triggered_markdown?: boolean }
 export interface ProduceSupplierScorecard { id: string; proveedor_id?: string; proveedor_nombre?: string; producto_id?: string; producto_nombre?: string; total_recibido?: number; calidad_promedio?: string; merma_porcentaje?: number; rechazos?: number; entregas_puntuales?: number; total_entregas?: number; precio_promedio?: number; puntaje_general?: number; recomendacion?: string; periodo_inicio?: string; periodo_fin?: string; updated_at?: string }
@@ -4379,6 +4399,7 @@ export const api = {
       deletePlan: (id: string) => client.delete(`/v1/supermer/bakery/plans/${id}`),
       scaleRecipe: (data: ScaleRecipeInput) => client.post<ScaleRecipeResult>("/v1/supermer/bakery/scale-recipe", data),
       executePlan: (data: any) => client.post<ExecutePlanResult>("/v1/supermer/bakery/execute-plan", data),
+      quickBatch: (data: BakeryQuickBatchInput) => client.post<BakeryQuickBatchResponse>("/v1/supermer/bakery/quick-batch", data),
     },
     produce: {
       receiveBatches: {

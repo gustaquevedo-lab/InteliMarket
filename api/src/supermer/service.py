@@ -27,7 +27,7 @@ from api.src.supermer.schemas import (
     ProductionBatchCreate, WasteLogCreate, PerishableConfigCreate,
     MarkdownLogCreate, PurchaseSuggestionCreate, PurchaseSuggestionUpdate,
     ReceiveBatchCreate, FreshnessAuditCreate, ForecastEnhanceInput,
-    ButcheryTemplateUpdate, ProduceDirectInput,
+    ButcheryTemplateUpdate, ProduceDirectInput, BakeryQuickBatchInput,
 )
 from api.src.products.models import Product
 from api.src.inventory.models import Warehouse, Stock, InventoryMovement
@@ -2214,6 +2214,195 @@ async def execute_bakery_plan(db: AsyncSession, company_id: str, data) -> dict:
         "fecha": today.isoformat(),
         "ordenes_creadas": len(ordenes),
         "ordenes": order_responses,
+    }
+
+
+async def execute_bakery_quick_batch(db: AsyncSession, company_id: str, data: BakeryQuickBatchInput) -> dict:
+    """Registra una horneada rápida en 1 tap:
+    - Descuenta insumos (harina) en inventario real.
+    - Incrementa el stock de pan terminado para la balanza (evitando saldos negativos).
+    - Genera orden de producción y lote completados con trazabilidad.
+    """
+    # 1. Obtener producto pan
+    try:
+        pan_uuid = UUID(str(data.producto_pan_id))
+    except Exception:
+        raise ValueError("ID de producto pan inválido")
+
+    r_pan = await db.execute(select(Product).where(Product.id == pan_uuid, Product.company_id == company_id))
+    pan = r_pan.scalar_one_or_none()
+    if not pan:
+        raise ValueError(f"Producto pan con ID {data.producto_pan_id} no encontrado")
+
+    # 2. Almacén destino/origen
+    wh_id = None
+    if data.almacen_id:
+        try:
+            wh_id = UUID(str(data.almacen_id))
+        except Exception:
+            pass
+    if not wh_id:
+        r_wh = await db.execute(
+            select(Warehouse.id)
+            .where(Warehouse.company_id == company_id, Warehouse.activo == True)
+            .order_by(Warehouse.es_principal.desc(), Warehouse.created_at.asc())
+            .limit(1)
+        )
+        wh_id = r_wh.scalar_one_or_none()
+
+    if not wh_id:
+        raise ValueError("No se encontró almacén activo en la empresa para registrar inventario")
+
+    # 3. Insumo harina
+    harina = None
+    if data.insumo_harina_id:
+        try:
+            harina_uuid = UUID(str(data.insumo_harina_id))
+            r_harina = await db.execute(select(Product).where(Product.id == harina_uuid, Product.company_id == company_id))
+            harina = r_harina.scalar_one_or_none()
+        except Exception:
+            pass
+
+    if not harina:
+        # Auto-búsqueda de harina de trigo en el catálogo
+        r_harina = await db.execute(
+            select(Product)
+            .where(
+                Product.company_id == company_id,
+                Product.activo == True,
+                Product.nombre.ilike("%HARINA%"),
+            )
+            .order_by(Product.created_at.asc())
+            .limit(1)
+        )
+        harina = r_harina.scalar_one_or_none()
+
+    kilos_pan = Decimal(str(data.kilos_producidos))
+    kilos_harina = Decimal(str(data.kilos_harina_usada or 0))
+    now = datetime.utcnow()
+    today = date.today()
+    lote_cod = f"PAN-{today.strftime('%Y%m%d')}-{int(now.timestamp()) % 10000:04d}"
+
+    # 4. Crear orden de producción completada
+    order = ProductionOrder(
+        company_id=company_id,
+        area="panaderia",
+        cantidad_objetivo=kilos_pan,
+        producto_obtenido=kilos_pan,
+        estado="completada",
+        deposito_origen_id=wh_id,
+        deposito_destino_id=wh_id,
+        lote_codigo=lote_cod,
+        fecha_inicio=now,
+        fecha_fin=now,
+        fecha_vencimiento=today + timedelta(days=2),
+        responsable_id=UUID(str(data.responsable_id)) if data.responsable_id else None,
+        notas=data.notas or f"Horneada Rápida: {pan.nombre} ({float(kilos_pan)} kg)",
+        insumos_usados={
+            "pan_id": str(pan.id),
+            "pan_nombre": pan.nombre,
+            "kilos_producidos": float(kilos_pan),
+            "harina_id": str(harina.id) if harina else None,
+            "harina_nombre": harina.nombre if harina else "Sin descuento harina",
+            "kilos_harina": float(kilos_harina),
+        },
+    )
+    db.add(order)
+    await db.flush()
+
+    # 5. Crear lote de producción
+    batch = ProductionBatch(
+        company_id=company_id,
+        orden_id=order.id,
+        producto_id=pan.id,
+        cantidad_obtenida=kilos_pan,
+        fecha_produccion=now,
+        fecha_vencimiento=today + timedelta(days=2),
+        lote_codigo=lote_cod,
+        costo_unitario=pan.costo_unitario or Decimal("0"),
+    )
+    db.add(batch)
+
+    # 6. Descontar harina de Stock si aplica
+    nuevo_stock_harina = 0.0
+    if harina and kilos_harina > 0:
+        cant_harina_int = int(round(float(kilos_harina)))
+        stk_harina_r = await db.execute(
+            select(Stock).where(Stock.warehouse_id == wh_id, Stock.product_id == harina.id)
+        )
+        stk_harina = stk_harina_r.scalar_one_or_none()
+        if stk_harina:
+            stk_harina.cantidad = stk_harina.cantidad - cant_harina_int
+            nuevo_stock_harina = float(stk_harina.cantidad)
+        else:
+            stk_harina = Stock(
+                warehouse_id=wh_id,
+                product_id=harina.id,
+                cantidad=-cant_harina_int,
+                costo_unitario=harina.costo_unitario or Decimal("0"),
+            )
+            db.add(stk_harina)
+            nuevo_stock_harina = float(-cant_harina_int)
+
+        mov_harina = InventoryMovement(
+            company_id=company_id,
+            warehouse_id=wh_id,
+            product_id=harina.id,
+            tipo="salida_produccion",
+            cantidad=cant_harina_int,
+            costo_unitario=harina.costo_unitario or Decimal("0"),
+            referencia_type="supermer_production_order",
+            referencia_id=order.id,
+            motivo=f"Horneada rápida: Insumo harina para {pan.nombre} ({float(kilos_harina)} kg)",
+            user_id=order.responsable_id,
+        )
+        db.add(mov_harina)
+
+    # 7. Incrementar stock de Pan
+    cant_pan_int = int(round(float(kilos_pan)))
+    stk_pan_r = await db.execute(
+        select(Stock).where(Stock.warehouse_id == wh_id, Stock.product_id == pan.id)
+    )
+    stk_pan = stk_pan_r.scalar_one_or_none()
+    if stk_pan:
+        stk_pan.cantidad = stk_pan.cantidad + cant_pan_int
+        nuevo_stock_pan = float(stk_pan.cantidad)
+    else:
+        stk_pan = Stock(
+            warehouse_id=wh_id,
+            product_id=pan.id,
+            cantidad=cant_pan_int,
+            costo_unitario=pan.costo_unitario or Decimal("0"),
+        )
+        db.add(stk_pan)
+        nuevo_stock_pan = float(cant_pan_int)
+
+    mov_pan = InventoryMovement(
+        company_id=company_id,
+        warehouse_id=wh_id,
+        product_id=pan.id,
+        tipo="entrada_produccion",
+        cantidad=cant_pan_int,
+        costo_unitario=pan.costo_unitario or Decimal("0"),
+        referencia_type="supermer_production_order",
+        referencia_id=order.id,
+        motivo=f"Horneada rápida terminada: {pan.nombre} ({float(kilos_pan)} kg)",
+        user_id=order.responsable_id,
+    )
+    db.add(mov_pan)
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "order_id": str(order.id),
+        "producto_pan_nombre": pan.nombre,
+        "kilos_producidos": float(kilos_pan),
+        "kilos_harina_descontada": float(kilos_harina),
+        "nuevo_stock_pan": nuevo_stock_pan,
+        "nuevo_stock_harina": nuevo_stock_harina,
+        "lote_codigo": lote_cod,
+        "detail": f"Horneada de {pan.nombre} registrada con éxito. Stock alimentado en balanza.",
     }
 
 
