@@ -188,7 +188,7 @@ class ProductionBatchResponse(BaseModel):
 
 class WasteLogCreate(BaseModel):
     area: str
-    warehouse_id: str
+    warehouse_id: Optional[str] = None
     producto_id: str
     cantidad: Decimal
     costo_unitario: Optional[Decimal] = None
@@ -433,6 +433,10 @@ class DesposteInput(BaseModel):
     fecha_vencimiento: Optional[date] = None
     responsable_id: Optional[str] = None
     notas: Optional[str] = None
+    insumo_producto_id: Optional[str] = None
+    deposito_origen_id: Optional[str] = None
+    deposito_destino_id: Optional[str] = None
+    ajustes_cortes: Optional[dict[str, Decimal]] = None
 
 
 class DesposteCorteResult(BaseModel):
@@ -465,6 +469,38 @@ class ButcheryYieldReport(BaseModel):
     merma_total: Decimal
     merma_porcentaje: Decimal
     cortes: list[dict]
+
+
+# ============================================================
+# TV DIGITAL CARNICERÍA — PIZARRA DE PRECIOS 1080p
+# ============================================================
+
+class TvCutItem(BaseModel):
+    producto_id: str
+    nombre: str
+    sku: Optional[str] = None
+    plu: Optional[int] = None
+    categoria: str = "Vacuno"
+    precio: Decimal
+    precio_anterior: Optional[Decimal] = None
+    en_promo: bool = False
+    badge_promo: Optional[str] = None
+    porcentaje_descuento: Optional[Decimal] = None
+    visible_en_tv: bool = True
+    orden: int = 0
+    stock_kg: Optional[Decimal] = None
+
+
+class TvCutsResponse(BaseModel):
+    titulo: str = "EXTRA SUPERMERCADO · CARNICERÍA"
+    subtitulo: str = "Precios de Salón y Ofertas en Vivo"
+    updated_at: datetime
+    cuts: list[TvCutItem]
+
+
+class TvCutsVisibilityUpdate(BaseModel):
+    visible_product_ids: list[str]
+    order_ids: Optional[list[str]] = None
 
 
 # ============================================================

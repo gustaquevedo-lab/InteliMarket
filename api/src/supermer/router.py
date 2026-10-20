@@ -24,6 +24,7 @@ from api.src.supermer.schemas import (
     DashboardStats, WasteByArea, ProductionByArea,
     ButcheryTemplateCreate, ButcheryTemplateUpdate, ButcheryTemplateResponse,
     DesposteInput, DesposteResponse, ButcheryYieldReport,
+    TvCutItem, TvCutsResponse, TvCutsVisibilityUpdate,
     BakeryPlanCreate, BakeryPlanResponse,
     ScaleRecipeInput, ScaleRecipeResult,
     ExecutePlanInput, ExecutePlanResult,
@@ -619,6 +620,29 @@ async def butchery_yield_report(
     user=Depends(require_auth),
 ):
     return await service.get_butchery_yield_report(db, user["company_id"], desde, hasta)
+
+
+@router.get("/butchery/tv-cuts", response_model=TvCutsResponse)
+async def get_tv_cuts(
+    company_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pizarra digital 1080p de cortes y ofertas de carnicería (pública para display en mostrador)."""
+    cid = company_id or "00000000-0000-0000-0000-000000000010"
+    return await service.get_tv_cuts(db, str(cid))
+
+
+@router.put("/butchery/tv-cuts/visibility", response_model=TvCutsResponse)
+async def update_tv_cuts_visibility(
+    data: TvCutsVisibilityUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("salon:manage")),
+):
+    """Actualizar cortes visibles en la TV Digital desde la tablet de piso."""
+    return await service.update_tv_cuts_visibility(
+        db, user["company_id"], data.visible_product_ids, data.order_ids
+    )
 
 
 # ============================================================

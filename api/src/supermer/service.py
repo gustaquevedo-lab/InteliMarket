@@ -4,10 +4,14 @@ from typing import Optional
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 from uuid import UUID
+import json
+import logging
 
-from sqlalchemy import select, delete, func as sa_func, and_, or_
+from sqlalchemy import select, delete, func as sa_func, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
+
+logger = logging.getLogger(__name__)
 
 from api.src.supermer.models import (
     ProductionRecipe, ProductionRecipeItem, ProductionOrder, ProductionBatch,
@@ -1479,7 +1483,7 @@ async def delete_butchery_template(db: AsyncSession, company_id: str, template_i
 
 
 async def execute_desposte(db: AsyncSession, company_id: str, data) -> dict:
-    """Execute a butchery desposte: 1 input → multi-output with weighted costing."""
+    """Execute a butchery desposte: 1 input → multi-output with weighted costing and real stock feed."""
     r = await db.execute(select(ButcheryTemplate).where(ButcheryTemplate.id == data.template_id))
     template = r.scalar_one_or_none()
     if not template:
@@ -1497,11 +1501,64 @@ async def execute_desposte(db: AsyncSession, company_id: str, data) -> dict:
     costo_total = data.costo_total_gs
     fecha_venc = data.fecha_vencimiento or date.today() + timedelta(days=14)
 
+    # 1. Determinar depósitos origen y destino
+    dep_origen = None
+    if getattr(data, "deposito_origen_id", None):
+        try:
+            dep_origen = UUID(str(data.deposito_origen_id))
+        except Exception:
+            pass
+    if not dep_origen:
+        wh_r = await db.execute(select(Warehouse.id).where(Warehouse.company_id == company_id).limit(1))
+        dep_origen = wh_r.scalar_one_or_none()
+
+    dep_destino = None
+    if getattr(data, "deposito_destino_id", None):
+        try:
+            dep_destino = UUID(str(data.deposito_destino_id))
+        except Exception:
+            pass
+    if not dep_destino:
+        dep_destino = dep_origen
+
+    # 2. Identificar el insumo cárnico (RES ENTERA BOVINA / CERDO ENTERO)
+    insumo_prod_id = None
+    if getattr(data, "insumo_producto_id", None):
+        try:
+            insumo_prod_id = UUID(str(data.insumo_producto_id))
+        except Exception:
+            pass
+    if not insumo_prod_id:
+        tmpl_esp = (template.especie or "").lower()
+        tmpl_nom = (template.nombre or "").lower()
+        if "porcino" in tmpl_esp or "cerdo" in tmpl_nom:
+            r_ins = await db.execute(
+                select(Product.id).where(
+                    Product.company_id == company_id,
+                    Product.nombre.ilike("%cerdo entero%"),
+                ).limit(1)
+            )
+            insumo_prod_id = r_ins.scalar_one_or_none()
+        else:
+            r_ins = await db.execute(
+                select(Product.id).where(
+                    Product.company_id == company_id,
+                    or_(
+                        Product.sku == "120206",
+                        Product.nombre.ilike("%res entera%"),
+                        Product.nombre.ilike("%media res%"),
+                    ),
+                ).limit(1)
+            )
+            insumo_prod_id = r_ins.scalar_one_or_none()
+
     order = ProductionOrder(
         company_id=company_id,
         area="carniceria",
         cantidad_objetivo=peso_entrada,
         estado="completada",
+        deposito_origen_id=dep_origen,
+        deposito_destino_id=dep_destino,
         fecha_inicio=datetime.utcnow(),
         fecha_fin=datetime.utcnow(),
         fecha_vencimiento=fecha_venc,
@@ -1511,15 +1568,52 @@ async def execute_desposte(db: AsyncSession, company_id: str, data) -> dict:
     db.add(order)
     await db.flush()
 
+    # 3. Deducción de Materia Prima en Stock (si existe insumo y depósito)
+    if insumo_prod_id and dep_origen:
+        raw_deduct = int(round(float(peso_entrada)))
+        costo_unit_raw = (costo_total / peso_entrada).quantize(Decimal("0.01")) if peso_entrada > 0 else Decimal("0")
+        stk_raw_r = await db.execute(
+            select(Stock).where(Stock.warehouse_id == dep_origen, Stock.product_id == insumo_prod_id)
+        )
+        stk_raw = stk_raw_r.scalar_one_or_none()
+        if stk_raw:
+            stk_raw.cantidad = stk_raw.cantidad - raw_deduct
+        else:
+            stk_raw = Stock(
+                warehouse_id=dep_origen,
+                product_id=insumo_prod_id,
+                cantidad=-raw_deduct,
+                costo_unitario=costo_unit_raw,
+            )
+            db.add(stk_raw)
+
+        mov_raw = InventoryMovement(
+            company_id=company_id,
+            warehouse_id=dep_origen,
+            product_id=insumo_prod_id,
+            tipo="salida_produccion",
+            cantidad=-raw_deduct,
+            costo_unitario=costo_unit_raw,
+            referencia_type="supermer_production_order",
+            referencia_id=order.id,
+            motivo=f"Consumo desposte: {template.nombre} ({float(peso_entrada)} kg)",
+            user_id=data.responsable_id,
+        )
+        db.add(mov_raw)
+
     total_ponderado = sum(float(c.precio_ponderado) for c in cuts)
     peso_total_obtenido = Decimal("0")
     batches = []
     corte_results = []
+    ajustes = getattr(data, "ajustes_cortes", None) or {}
 
     for cut in cuts:
         rend = float(cut.rendimiento_porcentual) / 100
-        peso_obtenido = peso_entrada * Decimal(str(rend))
-        peso_obtenido = peso_obtenido.quantize(Decimal("0.001"))
+        cut_id_str = str(cut.producto_id)
+        if cut_id_str in ajustes and float(ajustes[cut_id_str]) > 0:
+            peso_obtenido = Decimal(str(ajustes[cut_id_str])).quantize(Decimal("0.001"))
+        else:
+            peso_obtenido = (peso_entrada * Decimal(str(rend))).quantize(Decimal("0.001"))
 
         ponderado_ratio = float(cut.precio_ponderado) / total_ponderado if total_ponderado > 0 else 1 / len(cuts)
         costo_asignado = costo_total * Decimal(str(ponderado_ratio))
@@ -1547,6 +1641,39 @@ async def execute_desposte(db: AsyncSession, company_id: str, data) -> dict:
             "precio_ponderado": float(cut.precio_ponderado),
             "es_subproducto": cut.es_subproducto,
         })
+
+        # 4. Acreditación de stock vendible por cada corte
+        if dep_destino and peso_obtenido > 0:
+            cant_int = int(round(float(peso_obtenido)))
+            stk_corte_r = await db.execute(
+                select(Stock).where(Stock.warehouse_id == dep_destino, Stock.product_id == cut.producto_id)
+            )
+            stk_corte = stk_corte_r.scalar_one_or_none()
+            if stk_corte:
+                stk_corte.cantidad = stk_corte.cantidad + cant_int
+                stk_corte.costo_unitario = costo_unitario
+            else:
+                stk_corte = Stock(
+                    warehouse_id=dep_destino,
+                    product_id=cut.producto_id,
+                    cantidad=cant_int,
+                    costo_unitario=costo_unitario,
+                )
+                db.add(stk_corte)
+
+            mov_corte = InventoryMovement(
+                company_id=company_id,
+                warehouse_id=dep_destino,
+                product_id=cut.producto_id,
+                tipo="entrada_produccion",
+                cantidad=cant_int,
+                costo_unitario=costo_unitario,
+                referencia_type="supermer_production_order",
+                referencia_id=order.id,
+                motivo=f"Entrada corte: {prod_nombre or 'Corte'} ({float(peso_obtenido)} kg)",
+                user_id=data.responsable_id,
+            )
+            db.add(mov_corte)
 
     await db.flush()
 
@@ -1595,6 +1722,209 @@ async def execute_desposte(db: AsyncSession, company_id: str, data) -> dict:
         "cortes": corte_results,
         "batches": batch_responses,
     }
+
+
+# ============================================================
+# TV DIGITAL CARNICERÍA — GESTIÓN DE PIZARRA Y ENDPOINTS
+# ============================================================
+
+_TV_CONFIG_KEY = "tv_carniceria_config"
+
+async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
+    """Get active cuts for TV digital price board with real prices, promotions, and visibility config."""
+    config_data = {}
+    try:
+        r_conf = await db.execute(
+            text("SELECT value FROM settings_company WHERE company_id = :cid AND key = :k"),
+            {"cid": company_id, "k": _TV_CONFIG_KEY},
+        )
+        row_conf = r_conf.fetchone()
+        if row_conf and row_conf[0]:
+            config_data = json.loads(row_conf[0])
+    except Exception as e:
+        logger.warning("Error reading tv_carniceria_config from settings_company: %s", e)
+
+    visible_set = set(config_data.get("visible_product_ids", []))
+    order_map = {pid: idx for idx, pid in enumerate(config_data.get("order_ids", []))}
+
+    # Cortes de carnicería vinculados a plantillas o con PLU
+    cuts_query = (
+        select(
+            Product.id,
+            Product.nombre,
+            Product.sku,
+            Product.plu_balanza,
+            Product.precio_venta,
+            Product.precio_regular,
+            ButcheryTemplateCut.es_subproducto,
+            ButcheryTemplate.especie,
+        )
+        .join(ButcheryTemplateCut, ButcheryTemplateCut.producto_id == Product.id)
+        .join(ButcheryTemplate, ButcheryTemplate.id == ButcheryTemplateCut.template_id)
+        .where(
+            Product.company_id == company_id,
+            Product.activo == True,
+            ButcheryTemplate.activa == True,
+        )
+        .distinct()
+    )
+    r_cuts = await db.execute(cuts_query)
+    rows = r_cuts.all()
+
+    # Si hay productos adicionales en visible_set que no estén en las plantillas
+    existing_ids = {str(row[0]) for row in rows}
+    extra_ids = []
+    for pid in visible_set:
+        if pid not in existing_ids:
+            try:
+                extra_ids.append(UUID(pid))
+            except Exception:
+                pass
+
+    extra_rows = []
+    if extra_ids:
+        r_extra = await db.execute(
+            select(
+                Product.id,
+                Product.nombre,
+                Product.sku,
+                Product.plu_balanza,
+                Product.precio_venta,
+                Product.precio_regular,
+            ).where(Product.id.in_(extra_ids), Product.company_id == company_id)
+        )
+        for p in r_extra.all():
+            extra_rows.append((p.id, p.nombre, p.sku, p.plu_balanza, p.precio_venta, p.precio_regular, False, "Bovino"))
+
+    all_rows = list(rows) + extra_rows
+
+    # Fallback si no hay plantillas asociadas
+    if not all_rows:
+        r_fallback = await db.execute(
+            select(
+                Product.id,
+                Product.nombre,
+                Product.sku,
+                Product.plu_balanza,
+                Product.precio_venta,
+                Product.precio_regular,
+            )
+            .where(
+                Product.company_id == company_id,
+                Product.activo == True,
+                Product.plu_balanza.isnot(None),
+                Product.plu_balanza <= 400,
+            )
+            .limit(30)
+        )
+        for p in r_fallback.all():
+            all_rows.append((p.id, p.nombre, p.sku, p.plu_balanza, p.precio_venta, p.precio_regular, False, "Bovino"))
+
+    items = []
+    has_custom_visibility = len(visible_set) > 0
+
+    for row in all_rows:
+        pid = str(row[0])
+        nombre = row[1] or ""
+        sku = row[2]
+        plu = row[3]
+        pv = Decimal(str(row[4] or 0))
+        pr = Decimal(str(row[5] or 0))
+        es_subprod = row[6] if len(row) > 6 else False
+        especie = row[7] if len(row) > 7 else "Bovino"
+
+        # Clasificación
+        cat = "Vacuno"
+        nom_l = nombre.lower()
+        esp_l = (especie or "").lower()
+        if "porcino" in esp_l or "cerdo" in nom_l:
+            cat = "Cerdo"
+        elif "pollo" in nom_l or "ave" in nom_l:
+            cat = "Pollo / Aves"
+        elif "embutido" in nom_l or "chorizo" in nom_l or "morcilla" in nom_l:
+            cat = "Embutidos"
+
+        # Detección de oferta / promoción
+        en_promo = False
+        precio_anterior = None
+        porcentaje_desc = None
+        badge_promo = None
+
+        if pr > pv and pv > 0:
+            en_promo = True
+            precio_anterior = pr
+            porcentaje_desc = ((pr - pv) / pr * 100).quantize(Decimal("0.1"))
+            badge_promo = "OFERTA"
+
+        # Visibilidad
+        if has_custom_visibility:
+            is_visible = pid in visible_set
+        else:
+            is_visible = not es_subprod
+
+        # Stock en almacenes
+        stk_r = await db.execute(
+            select(sa_func.coalesce(sa_func.sum(Stock.cantidad), 0)).where(
+                Stock.product_id == UUID(pid)
+            )
+        )
+        total_stk = stk_r.scalar_one_or_none() or Decimal("0")
+
+        # Limpieza de nombre para pizarra de TV
+        display_name = nombre
+        if display_name.upper().startswith("ML "):
+            display_name = display_name[3:].strip()
+        if display_name.upper().endswith(" KG"):
+            display_name = display_name[:-3].strip()
+
+        orden = order_map.get(pid, plu if plu else 999)
+
+        items.append({
+            "producto_id": pid,
+            "nombre": display_name,
+            "sku": sku,
+            "plu": plu,
+            "categoria": cat,
+            "precio": pv,
+            "precio_anterior": precio_anterior,
+            "en_promo": en_promo,
+            "badge_promo": badge_promo,
+            "porcentaje_descuento": porcentaje_desc,
+            "visible_en_tv": is_visible,
+            "orden": orden,
+            "stock_kg": Decimal(str(total_stk)),
+        })
+
+    # Ordenar: visibles primero, luego por orden asignado, luego alfabéticamente
+    items.sort(key=lambda x: (not x["visible_en_tv"], x["orden"], x["nombre"]))
+
+    return {
+        "titulo": "EXTRA SUPERMERCADO · CARNICERÍA",
+        "subtitulo": "Precios de Salón y Ofertas en Vivo",
+        "updated_at": datetime.utcnow(),
+        "cuts": items,
+    }
+
+
+async def update_tv_cuts_visibility(
+    db: AsyncSession, company_id: str, visible_product_ids: list[str], order_ids: Optional[list[str]] = None
+) -> dict:
+    """Save TV digital cuts visibility and order to settings_company."""
+    val = json.dumps({
+        "visible_product_ids": visible_product_ids,
+        "order_ids": order_ids or visible_product_ids,
+        "updated_at": datetime.utcnow().isoformat(),
+    })
+    await db.execute(
+        text("""
+            INSERT INTO settings_company (id, company_id, key, value, created_at, updated_at)
+            VALUES (gen_random_uuid(), :cid, :k, :v, now(), now())
+            ON CONFLICT (company_id, key) DO UPDATE SET value = :v, updated_at = now()
+        """),
+        {"cid": company_id, "k": _TV_CONFIG_KEY, "v": val},
+    )
+    await db.commit()
+    return await get_tv_cuts(db, company_id)
 
 
 async def get_butchery_orders(db: AsyncSession, company_id: str, limit: int = 50, offset: int = 0) -> list[dict]:
