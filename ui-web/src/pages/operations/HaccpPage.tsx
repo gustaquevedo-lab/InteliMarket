@@ -26,7 +26,6 @@ export default function HaccpPage() {
   const [planForm, setPlanForm] = useState({ nombre: "", area: "Carnicería", descripcion: "" })
 
   // Formulario monitoreo
-  const [showMonitoreoForm, setShowMonitoreoForm] = useState(false)
   const [savingMonitoreo, setSavingMonitoreo] = useState(false)
   const [selectedPlanId, setSelectedPlanId] = useState("")
   const [selectedCpId, setSelectedCpId] = useState("")
