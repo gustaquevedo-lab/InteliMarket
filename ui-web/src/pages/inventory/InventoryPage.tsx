@@ -154,7 +154,7 @@ export default function InventoryPage() {
   const [kardexOffset, setKardexOffset] = useState(0)
   const [kardexHasMore, setKardexHasMore] = useState(true)
   const [loadingMoreMovements, setLoadingMoreMovements] = useState(false)
-  const [kardexProductoDetalle, setKardexProductoDetalle] = useState<{ id: string; nombre: string; sku?: string } | null>(null)
+  const [kardexProductoDetalle, setKardexProductoDetalle] = useState<KardexProductoInfo | null>(null)
   const [kardexDetalleMovs, setKardexDetalleMovs] = useState<any[]>([])
   const [loadingKardexDetalle, setLoadingKardexDetalle] = useState(false)
   const [kardexSummary, setKardexSummary] = useState<any>(null)
