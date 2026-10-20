@@ -1731,7 +1731,7 @@ async def execute_desposte(db: AsyncSession, company_id: str, data) -> dict:
 _TV_CONFIG_KEY = "tv_carniceria_config"
 
 async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
-    """Get active cuts for TV digital price board with real prices, promotions, and visibility config."""
+    """Get active cuts for TV digital price board with real prices, promotions, BRL conversion, and visibility config."""
     config_data = {}
     try:
         r_conf = await db.execute(
@@ -1743,6 +1743,21 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
             config_data = json.loads(row_conf[0])
     except Exception as e:
         logger.warning("Error reading tv_carniceria_config from settings_company: %s", e)
+
+    # Cotización BRL para conversión en tiempo real
+    cot_brl = Decimal("1100.00")
+    try:
+        r_comp = await db.execute(text("SELECT config FROM companies WHERE id = :cid"), {"cid": company_id})
+        row_comp = r_comp.fetchone()
+        if row_comp and row_comp[0]:
+            cfg = row_comp[0] if isinstance(row_comp[0], dict) else json.loads(row_comp[0])
+            currencies = cfg.get("currencies", {})
+            brl_cfg = currencies.get("BRL", {})
+            venta = brl_cfg.get("venta")
+            if venta and float(venta) > 0:
+                cot_brl = Decimal(str(venta))
+    except Exception as e:
+        logger.warning("Error reading BRL currency in get_tv_cuts: %s", e)
 
     visible_set = set(config_data.get("visible_product_ids", []))
     order_map = {pid: idx for idx, pid in enumerate(config_data.get("order_ids", []))}
@@ -1756,6 +1771,7 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
             Product.plu_balanza,
             Product.precio_venta,
             Product.precio_regular,
+            Product.imagen_url,
             ButcheryTemplateCut.es_subproducto,
             ButcheryTemplate.especie,
         )
@@ -1791,10 +1807,11 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
                 Product.plu_balanza,
                 Product.precio_venta,
                 Product.precio_regular,
+                Product.imagen_url,
             ).where(Product.id.in_(extra_ids), Product.company_id == company_id)
         )
         for p in r_extra.all():
-            extra_rows.append((p.id, p.nombre, p.sku, p.plu_balanza, p.precio_venta, p.precio_regular, False, "Bovino"))
+            extra_rows.append((p.id, p.nombre, p.sku, p.plu_balanza, p.precio_venta, p.precio_regular, p.imagen_url, False, "Bovino"))
 
     all_rows = list(rows) + extra_rows
 
@@ -1808,6 +1825,7 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
                 Product.plu_balanza,
                 Product.precio_venta,
                 Product.precio_regular,
+                Product.imagen_url,
             )
             .where(
                 Product.company_id == company_id,
@@ -1818,7 +1836,7 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
             .limit(30)
         )
         for p in r_fallback.all():
-            all_rows.append((p.id, p.nombre, p.sku, p.plu_balanza, p.precio_venta, p.precio_regular, False, "Bovino"))
+            all_rows.append((p.id, p.nombre, p.sku, p.plu_balanza, p.precio_venta, p.precio_regular, p.imagen_url, False, "Bovino"))
 
     items = []
     has_custom_visibility = len(visible_set) > 0
@@ -1830,8 +1848,9 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
         plu = row[3]
         pv = Decimal(str(row[4] or 0))
         pr = Decimal(str(row[5] or 0))
-        es_subprod = row[6] if len(row) > 6 else False
-        especie = row[7] if len(row) > 7 else "Bovino"
+        img_url = row[6] if len(row) > 6 else None
+        es_subprod = row[7] if len(row) > 7 else False
+        especie = row[8] if len(row) > 8 else "Bovino"
 
         # Clasificación
         cat = "Vacuno"
@@ -1849,12 +1868,17 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
         precio_anterior = None
         porcentaje_desc = None
         badge_promo = None
+        ahorro_gs = None
 
         if pr > pv and pv > 0:
             en_promo = True
             precio_anterior = pr
             porcentaje_desc = ((pr - pv) / pr * 100).quantize(Decimal("0.1"))
             badge_promo = "OFERTA"
+            ahorro_gs = (pr - pv)
+
+        # Precio en Reales (BRL)
+        precio_brl = ((pv / cot_brl).quantize(Decimal("0.01"))) if cot_brl > 0 and pv > 0 else None
 
         # Visibilidad
         if has_custom_visibility:
@@ -1887,9 +1911,12 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
             "categoria": cat,
             "precio": pv,
             "precio_anterior": precio_anterior,
+            "precio_brl": precio_brl,
+            "ahorro_gs": ahorro_gs,
             "en_promo": en_promo,
             "badge_promo": badge_promo,
             "porcentaje_descuento": porcentaje_desc,
+            "imagen_url": img_url,
             "visible_en_tv": is_visible,
             "orden": orden,
             "stock_kg": Decimal(str(total_stk)),
@@ -1901,6 +1928,7 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
     return {
         "titulo": "EXTRA SUPERMERCADO · CARNICERÍA",
         "subtitulo": "Precios de Salón y Ofertas en Vivo",
+        "cotizacion_brl": cot_brl,
         "updated_at": datetime.utcnow(),
         "cuts": items,
     }

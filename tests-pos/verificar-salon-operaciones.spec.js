@@ -8,9 +8,17 @@ test.describe('Operaciones de Salón y Kioscos', () => {
     // Esperar carga de cortes
     await page.waitForTimeout(2000);
     
-    // Validar título y cortes
+    // Validar título y presencia de cortes
     await expect(page.locator('text=CARNICERÍA')).toBeVisible();
-    await page.screenshot({ path: 'tests-pos/screenshots/carniceria-tv-1080p.png', fullPage: true });
+    await page.screenshot({ path: 'tests-pos/screenshots/carniceria-tv-page1.png', fullPage: true });
+
+    // Navegar a la página 2
+    const nextBtn = page.locator('button[title="Siguiente"]');
+    if (await nextBtn.isVisible()) {
+      await nextBtn.click();
+      await page.waitForTimeout(1000);
+      await page.screenshot({ path: 'tests-pos/screenshots/carniceria-tv-page2.png', fullPage: true });
+    }
   });
 
   test('Verificador de Precios con balanza Balmak Edge prefijo 20', async ({ page }) => {

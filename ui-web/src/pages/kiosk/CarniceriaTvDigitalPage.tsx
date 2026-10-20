@@ -3,12 +3,56 @@ import { useSearchParams } from "react-router-dom"
 import {
   Flame, Beef, Sparkles, Maximize2,
   ShieldCheck, Tag, RefreshCw, AlertCircle,
-  ChevronLeft, ChevronRight, Pause, Play
+  ChevronLeft, ChevronRight, Pause, Play,
+  TrendingDown, DollarSign
 } from "lucide-react"
 import { api, type TvCutItem, type TvCutsResponse } from "../../api"
 
-const ITEMS_PER_PAGE = 9 // 3 columnas x 3 filas = 9 tarjetas grandes que rellenan 100% de la pantalla 1080p
+const ITEMS_PER_PAGE = 9 // 3 columnas x 3 filas = 9 tarjetas grandes
 const SLIDE_DURATION_SEC = 9 // 9 segundos por diapositiva
+
+// Componente para renderizar el Thumbnail del corte
+function CutThumbnail({ corte }: { corte: TvCutItem }) {
+  const [imgError, setImgError] = useState(false)
+  const cat = (corte.categoria || "").toLowerCase()
+  const isCerdo = cat.includes("cerdo") || cat.includes("porcino")
+  const isAve = cat.includes("ave") || cat.includes("pollo")
+  const isEmbutido = cat.includes("embutido") || cat.includes("chorizo")
+
+  if (corte.imagen_url && !imgError) {
+    return (
+      <div className="w-20 h-20 lg:w-24 lg:h-24 rounded-2xl overflow-hidden border border-slate-700/80 shadow-md shrink-0 bg-slate-950">
+        <img
+          src={corte.imagen_url}
+          alt={corte.nombre}
+          onError={() => setImgError(true)}
+          className="w-full h-full object-cover"
+        />
+      </div>
+    )
+  }
+
+  // Fallback gourmet con siluetas temáticas según especie
+  return (
+    <div
+      className={`w-20 h-20 lg:w-24 lg:h-24 rounded-2xl flex flex-col items-center justify-center shrink-0 border shadow-md relative overflow-hidden ${
+        isCerdo
+          ? "bg-gradient-to-br from-amber-950/80 via-orange-950/50 to-slate-900 border-amber-800/60 text-amber-400"
+          : isAve
+          ? "bg-gradient-to-br from-yellow-950/80 via-amber-950/50 to-slate-900 border-yellow-800/60 text-yellow-400"
+          : isEmbutido
+          ? "bg-gradient-to-br from-rose-950/80 via-red-950/50 to-slate-900 border-rose-800/60 text-rose-400"
+          : "bg-gradient-to-br from-red-950/90 via-rose-950/50 to-slate-900 border-red-800/60 text-red-400"
+      }`}
+    >
+      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+      <Beef className="w-10 h-10 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)] relative z-10" />
+      <span className="text-[10px] font-black uppercase tracking-wider text-slate-300 relative z-10 mt-1">
+        {isCerdo ? "CERDO" : isAve ? "POLLO" : isEmbutido ? "EMBUTIDO" : "BOVINO"}
+      </span>
+    </div>
+  )
+}
 
 export default function CarniceriaTvDigitalPage() {
   const [searchParams] = useSearchParams()
@@ -65,7 +109,7 @@ export default function CarniceriaTvDigitalPage() {
     return tvData.cuts.filter((c) => c.visible_en_tv)
   }, [tvData])
 
-  // Dividir los cortes en páginas balanceadas de 9 cortes para llenar al 100% la pantalla
+  // Dividir los cortes en páginas de 9 cortes
   const pages = useMemo(() => {
     if (!visibleCortes.length) return []
     const chunks: TvCutItem[][] = []
@@ -85,7 +129,7 @@ export default function CarniceriaTvDigitalPage() {
     }
   }, [currentPage, totalPages])
 
-  // Timer de rotación fluida con barra de progreso (interval de 100ms)
+  // Timer de rotación fluida con barra de progreso
   useEffect(() => {
     if (totalPages <= 1) return
 
@@ -134,9 +178,15 @@ export default function CarniceriaTvDigitalPage() {
     }
   }
 
-  // Formato paraguayo
+  // Formato paraguayo (PYG)
   const formatPYG = (amount: number) => {
     return Math.round(amount || 0).toLocaleString("es-PY")
+  }
+
+  // Formato brasileño (BRL) con centavos y coma
+  const formatBRL = (amount?: number) => {
+    if (!amount || amount <= 0) return null
+    return Number(amount).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 
   // Hora y fecha formateada local
@@ -165,6 +215,8 @@ export default function CarniceriaTvDigitalPage() {
     return currentCortes.filter((c) => c.en_promo).length
   }, [currentCortes])
 
+  const cotizacionBrl = tvData?.cotizacion_brl || 1100
+
   return (
     <div
       className="h-screen w-screen bg-[#070A0F] text-slate-100 flex flex-col justify-between select-none overflow-hidden font-sans p-6"
@@ -172,14 +224,14 @@ export default function CarniceriaTvDigitalPage() {
       onMouseLeave={() => setIsPaused(false)}
     >
       {/* ── CABECERA INSTITUCIONAL ULTRA 1080P ── */}
-      <header className="shrink-0 flex items-center justify-between border-b border-slate-800/90 pb-4 mb-4">
+      <header className="shrink-0 flex items-center justify-between border-b border-slate-800/90 pb-4 mb-3">
         {/* Lado izquierdo: Branding & Título */}
         <div className="flex items-center gap-5">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-red-600 via-rose-600 to-amber-600 flex items-center justify-center shadow-xl shadow-red-600/30 border border-red-500/40 shrink-0">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-red-600 via-rose-600 to-amber-600 flex items-center justify-center shadow-2xl shadow-red-600/40 border border-red-500/40 shrink-0">
             <Flame className="w-9 h-9 text-white animate-pulse" />
           </div>
           <div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <span className="text-xs font-black tracking-widest uppercase bg-red-600 text-white px-3 py-1 rounded-md shadow-md">
                 EXTRA SUPERMERCADO
               </span>
@@ -187,10 +239,14 @@ export default function CarniceriaTvDigitalPage() {
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                 PRECIOS EN VIVO
               </span>
+              {/* Badge de Cotización Oficial BRL */}
+              <span className="flex items-center gap-1.5 text-xs font-black text-emerald-300 bg-emerald-950/80 border border-emerald-500/50 px-3 py-1 rounded-md shadow-sm">
+                <span className="text-sm">🇧🇷</span> R$ 1 = ₲ {formatPYG(cotizacionBrl)}
+              </span>
               {currentOffersCount > 0 && (
-                <span className="flex items-center gap-1.5 text-xs font-black text-amber-300 bg-amber-950/70 border border-amber-600/60 px-3 py-1 rounded-md animate-pulse">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  {currentOffersCount} {currentOffersCount === 1 ? "OFERTA DESTACADA" : "OFERTAS DESTACADAS"}
+                <span className="flex items-center gap-1.5 text-xs font-black text-amber-200 bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 text-white border border-amber-400/80 px-3 py-1 rounded-md animate-bounce shadow-lg shadow-red-600/30">
+                  <Sparkles className="w-3.5 h-3.5 text-yellow-300 animate-spin" />
+                  {currentOffersCount} {currentOffersCount === 1 ? "OFERTA IMPERDIBLE" : "OFERTAS IMPERDIBLES"}
                 </span>
               )}
             </div>
@@ -233,7 +289,7 @@ export default function CarniceriaTvDigitalPage() {
                 </button>
               </div>
 
-              {/* Barra de progreso de cambio de diapositiva */}
+              {/* Barra de progreso */}
               <div className="w-36 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-amber-500 via-rose-500 to-red-500 rounded-full transition-all duration-100 ease-linear"
@@ -241,7 +297,7 @@ export default function CarniceriaTvDigitalPage() {
                 />
               </div>
 
-              {/* Dots interactivos */}
+              {/* Dots */}
               <div className="flex items-center gap-1.5 mt-0.5">
                 {pages.map((_, idx) => (
                   <button
@@ -278,7 +334,7 @@ export default function CarniceriaTvDigitalPage() {
         </div>
       </header>
 
-      {/* ── CONTENIDO PRINCIPAL: GRID RELLENO AL 100% CON PRECIOS GIGANTES ── */}
+      {/* ── CONTENIDO PRINCIPAL: GRID 3x3 RELLENO CON THUMBNAILS, ANIMACIONES Y PRECIOS EN R$ ── */}
       <main className="flex-1 min-h-0 flex flex-col justify-center">
         {loading && !tvData ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-4 py-20 text-slate-400">
@@ -298,25 +354,27 @@ export default function CarniceriaTvDigitalPage() {
             <p className="text-base text-slate-500">Seleccioná los cortes a exhibir desde la tablet en el Hub de Carnicería.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 grid-rows-3 gap-5 h-full w-full">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 grid-rows-3 gap-4 lg:gap-5 h-full w-full">
             {currentCortes.map((corte) => {
               const isPromo = corte.en_promo
+              const precioBrlFormatted = formatBRL(Number(corte.precio_brl || (Number(corte.precio) / cotizacionBrl)))
+
               return (
                 <div
                   key={corte.producto_id}
-                  className={`rounded-3xl p-5 flex flex-col justify-between transition-all duration-300 border shadow-2xl relative overflow-hidden ${
+                  className={`rounded-3xl p-4 lg:p-5 flex flex-col justify-between transition-all duration-300 border relative overflow-hidden ${
                     isPromo
-                      ? "bg-gradient-to-br from-red-950/50 via-slate-900/90 to-amber-950/40 border-amber-500/60 shadow-amber-950/40 ring-1 ring-amber-500/30"
-                      : "bg-slate-900/80 border-slate-800/90 hover:border-slate-700 shadow-slate-950/60"
+                      ? "bg-gradient-to-br from-red-950/70 via-slate-900/95 to-amber-950/60 border-amber-500/80 shadow-[0_0_35px_rgba(245,158,11,0.35)] ring-2 ring-amber-500/60 animate-[pulse_3s_ease-in-out_infinite]"
+                      : "bg-slate-900/80 border-slate-800/90 hover:border-slate-700 shadow-xl shadow-slate-950/60"
                   }`}
                 >
-                  {/* Glow decorativo de oferta */}
+                  {/* Animación de halo de luz para ofertas */}
                   {isPromo && (
-                    <div className="absolute -top-12 -right-12 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+                    <div className="absolute -top-16 -right-16 w-40 h-40 bg-gradient-to-br from-amber-500/25 via-red-500/20 to-transparent rounded-full blur-3xl pointer-events-none animate-pulse" />
                   )}
 
-                  {/* Fila Superior: Badges PLU, Categoría y Oferta */}
-                  <div className="flex items-center justify-between gap-3">
+                  {/* Fila Superior: Badges, PLU y Ribbon de Oferta */}
+                  <div className="flex items-center justify-between gap-2 z-10">
                     <div className="flex items-center gap-2 flex-wrap">
                       {corte.plu ? (
                         <span className="font-mono text-xs font-black px-2.5 py-1 rounded-lg bg-slate-800 text-amber-300 border border-slate-700 shadow-inner">
@@ -324,53 +382,77 @@ export default function CarniceriaTvDigitalPage() {
                         </span>
                       ) : null}
                       {corte.categoria && (
-                        <span className="text-[11px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-800/70 text-slate-400 border border-slate-700/60">
+                        <span className="text-[11px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-800/80 text-slate-300 border border-slate-700/60">
                           {corte.categoria}
                         </span>
                       )}
                     </div>
 
                     {isPromo && (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 text-white font-black text-xs tracking-wider uppercase shadow-md shadow-red-600/30 animate-pulse">
-                        <Sparkles className="w-3.5 h-3.5" />
-                        {corte.badge_promo || "OFERTA"}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        {corte.porcentaje_descuento && Number(corte.porcentaje_descuento) > 0 ? (
+                          <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-lg bg-amber-500 text-slate-950 font-black text-xs uppercase shadow-sm">
+                            <TrendingDown className="w-3 h-3" />
+                            -{Math.round(Number(corte.porcentaje_descuento))}%
+                          </span>
+                        ) : null}
+                        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 text-white font-black text-xs tracking-wider uppercase shadow-lg shadow-red-600/40 animate-pulse border border-amber-300/40">
+                          <Flame className="w-3.5 h-3.5 text-yellow-300 animate-bounce" />
+                          {corte.badge_promo || "OFERTA"}
+                        </span>
+                      </div>
                     )}
                   </div>
 
-                  {/* Fila Central: Nombre del Corte */}
-                  <div className="my-auto py-2">
-                    <h2
-                      className={`font-black text-2xl lg:text-3xl uppercase tracking-tight line-clamp-2 leading-tight ${
-                        isPromo ? "text-amber-100" : "text-white"
-                      }`}
-                    >
-                      {corte.nombre}
-                    </h2>
+                  {/* Fila Central: Thumbnail + Nombre del Corte */}
+                  <div className="my-auto py-2 flex items-center gap-4 z-10">
+                    {/* Thumbnail del corte */}
+                    <CutThumbnail corte={corte} />
+
+                    {/* Nombre y datos */}
+                    <div className="flex-1 min-w-0">
+                      <h2
+                        className={`font-black text-2xl lg:text-3xl uppercase tracking-tight line-clamp-2 leading-tight ${
+                          isPromo
+                            ? "text-amber-100 drop-shadow-[0_2px_8px_rgba(251,191,36,0.3)]"
+                            : "text-white"
+                        }`}
+                      >
+                        {corte.nombre}
+                      </h2>
+                      {isPromo && corte.ahorro_gs && Number(corte.ahorro_gs) > 0 ? (
+                        <p className="text-xs font-black text-amber-300 mt-1 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-amber-400 inline" />
+                          Ahorrás ₲ {formatPYG(Number(corte.ahorro_gs))} por kilo
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
 
-                  {/* Fila Inferior: Precios GIGANTES */}
-                  <div className="pt-2 border-t border-slate-800/80 flex items-end justify-between">
-                    {/* Precio anterior si está en oferta */}
+                  {/* Fila Inferior: Precios (Gs. Gigante + R$ Secundario) */}
+                  <div className="pt-2 border-t border-slate-800/80 flex items-end justify-between z-10">
+                    {/* Lado izquierdo: Precio anterior tachado (si oferta) o Pesaje balanza */}
                     <div>
                       {isPromo && corte.precio_anterior ? (
                         <div>
-                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                            Normal
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            Precio Normal
                           </p>
-                          <p className="text-lg lg:text-xl font-mono font-bold line-through text-slate-400">
+                          <p className="text-base lg:text-lg font-mono font-bold line-through text-rose-300/80">
                             ₲ {formatPYG(Number(corte.precio_anterior))}
                           </p>
                         </div>
                       ) : (
-                        <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+                        <div className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                          <Tag className="w-3.5 h-3.5 text-slate-500" />
                           Pesaje Balanza
                         </div>
                       )}
                     </div>
 
-                    {/* Precio Actual Gigante */}
+                    {/* Lado derecho: Precios en Gs. (Gigante) y en R$ (Secundario) */}
                     <div className="text-right">
+                      {/* Precio en Guaraníes (GIGANTE) */}
                       <div className="flex items-baseline justify-end gap-1.5">
                         <span className={`text-xl lg:text-2xl font-black ${isPromo ? "text-amber-400" : "text-slate-300"}`}>
                           ₲
@@ -378,7 +460,7 @@ export default function CarniceriaTvDigitalPage() {
                         <span
                           className={`font-mono font-black text-4xl lg:text-5xl xl:text-6xl tracking-tight leading-none ${
                             isPromo
-                              ? "text-amber-400 drop-shadow-[0_4px_20px_rgba(251,191,36,0.45)]"
+                              ? "text-amber-400 drop-shadow-[0_4px_25px_rgba(251,191,36,0.5)]"
                               : "text-white"
                           }`}
                         >
@@ -388,6 +470,17 @@ export default function CarniceriaTvDigitalPage() {
                           /kg
                         </span>
                       </div>
+
+                      {/* Precio en Reales (R$ un poco más pequeño para frontera brasileña) */}
+                      {precioBrlFormatted && (
+                        <div className="flex items-center justify-end gap-1 mt-1">
+                          <span className="text-[11px] font-bold text-emerald-400/80">🇧🇷</span>
+                          <span className="text-base lg:text-lg font-black font-mono text-emerald-300 tracking-tight bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded-md shadow-inner">
+                            R$ {precioBrlFormatted}
+                          </span>
+                          <span className="text-[11px] font-semibold text-emerald-400/80">/kg</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -398,7 +491,7 @@ export default function CarniceriaTvDigitalPage() {
       </main>
 
       {/* ── PIE INSTITUCIONAL / TICKER ── */}
-      <footer className="shrink-0 border-t border-slate-800/90 pt-3 mt-4 flex items-center justify-between text-xs lg:text-sm text-slate-400 font-semibold">
+      <footer className="shrink-0 border-t border-slate-800/90 pt-3 mt-3 flex items-center justify-between text-xs lg:text-sm text-slate-400 font-semibold">
         <div className="flex items-center gap-8">
           <span className="flex items-center gap-2 text-slate-200">
             <ShieldCheck className="w-5 h-5 text-emerald-400" />
@@ -412,7 +505,7 @@ export default function CarniceriaTvDigitalPage() {
 
         <div className="flex items-center gap-4 text-slate-500 font-mono text-xs">
           {totalPages > 1 && (
-            <span className="text-slate-400 bg-slate-900 border border-slate-800 px-3 py-1 rounded-xl">
+            <span className="text-slate-300 bg-slate-900 border border-slate-800 px-3 py-1 rounded-xl">
               Cortes {currentPage * ITEMS_PER_PAGE + 1}–{Math.min((currentPage + 1) * ITEMS_PER_PAGE, visibleCortes.length)} de {visibleCortes.length}
             </span>
           )}

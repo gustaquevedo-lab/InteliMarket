@@ -483,9 +483,12 @@ class TvCutItem(BaseModel):
     categoria: str = "Vacuno"
     precio: Decimal
     precio_anterior: Optional[Decimal] = None
+    precio_brl: Optional[Decimal] = None
+    ahorro_gs: Optional[Decimal] = None
     en_promo: bool = False
     badge_promo: Optional[str] = None
     porcentaje_descuento: Optional[Decimal] = None
+    imagen_url: Optional[str] = None
     visible_en_tv: bool = True
     orden: int = 0
     stock_kg: Optional[Decimal] = None
@@ -494,6 +497,7 @@ class TvCutItem(BaseModel):
 class TvCutsResponse(BaseModel):
     titulo: str = "EXTRA SUPERMERCADO · CARNICERÍA"
     subtitulo: str = "Precios de Salón y Ofertas en Vivo"
+    cotizacion_brl: Optional[Decimal] = None
     updated_at: datetime
     cuts: list[TvCutItem]
 
