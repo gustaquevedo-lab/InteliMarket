@@ -1886,14 +1886,6 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
         else:
             is_visible = not es_subprod
 
-        # Stock en almacenes
-        stk_r = await db.execute(
-            select(sa_func.coalesce(sa_func.sum(Stock.cantidad), 0)).where(
-                Stock.product_id == UUID(pid)
-            )
-        )
-        total_stk = stk_r.scalar_one_or_none() or Decimal("0")
-
         # Limpieza de nombre para pizarra de TV
         display_name = nombre
         if display_name.upper().startswith("ML "):
@@ -1919,7 +1911,7 @@ async def get_tv_cuts(db: AsyncSession, company_id: str) -> dict:
             "imagen_url": img_url,
             "visible_en_tv": is_visible,
             "orden": orden,
-            "stock_kg": Decimal(str(total_stk)),
+            "stock_kg": None,
         })
 
     # Ordenar: visibles primero, luego por orden asignado, luego alfabéticamente
