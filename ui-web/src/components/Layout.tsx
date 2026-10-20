@@ -507,6 +507,20 @@ export default function Layout() {
 
             {/* Quick Actions & Notifications */}
             <div className="flex items-center gap-1 sm:gap-2">
+              {expiriesAlertCount > 0 && (
+                <button
+                  onClick={() => navigate("/inventory?tab=vencimientos&filter=criticos")}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 transition-all text-xs font-bold animate-pulse cursor-pointer shadow-xs"
+                  title={`${expiriesAlertCount} lotes vencidos o críticos (<7d). Clic para auditar.`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  <span className="hidden sm:inline font-semibold">Vencimientos</span>
+                  <span className="px-1.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black leading-none">
+                    {expiriesAlertCount}
+                  </span>
+                </button>
+              )}
+
               <button 
                 onClick={() => navigate("/pos")}
                 className="hidden sm:flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 text-primary px-3 py-2 rounded-lg text-sm font-medium transition-colors"

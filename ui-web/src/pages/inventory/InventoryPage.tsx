@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import { useSearchParams } from "react-router-dom"
 import { createPortal } from "react-dom"
 import {
   Warehouse, ArrowLeftRight, AlertTriangle, Package, Search, Plus, Loader2, X,
@@ -6,7 +7,7 @@ import {
   CalendarRange, DollarSign, TrendingDown, Layers, Barcode, CheckCircle2,
   RefreshCw, Filter, Sparkles, Box, ShieldAlert, ArrowUpDown, ChevronDown,
   Building2, Eye, Clock, FileText, Check, AlertCircle, ShoppingCart, Info, HelpCircle, FileSpreadsheet,
-  Edit2, CornerDownRight, FolderTree
+  Edit2, CornerDownRight, FolderTree, Truck, RotateCcw
 } from "lucide-react"
 import {
   api,
@@ -23,6 +24,7 @@ import TomaFisicaTab from "./TomaFisicaTab"
 
 export default function InventoryPage() {
   const toast = useToast()
+  const [searchParams] = useSearchParams()
 
   // Estado Principal
   const [activeTab, setActiveTab] = useState<"stock" | "stock_valorizado" | "vencimientos" | "kardex" | "ajustes" | "toma_fisica" | "warehouses">("stock")
@@ -44,11 +46,87 @@ export default function InventoryPage() {
   const [downloadingValuationXlsx, setDownloadingValuationXlsx] = useState(false)
   const [suppliersList, setSuppliersList] = useState<any[]>([])
 
-  // Control de Lotes & Vencimientos
   const [expiriesData, setExpiriesData] = useState<any>(null)
   const [loadingExpiries, setLoadingExpiries] = useState(false)
   const [expiryFilter, setExpiryFilter] = useState<"todos" | "vencido" | "critico_7d" | "alerta_30d" | "vigente">("todos")
   const [searchExpiry, setSearchExpiry] = useState("")
+
+  // Sincronizar pestaña y filtros desde URL params (ej. badges del layout o encabezado)
+  useEffect(() => {
+    const tab = searchParams.get("tab")
+    if (tab && ["stock", "stock_valorizado", "vencimientos", "kardex", "ajustes", "toma_fisica", "warehouses"].includes(tab)) {
+      setActiveTab(tab as any)
+    }
+    const filter = searchParams.get("filter")
+    if (filter === "criticos" || filter === "critico_7d") {
+      setExpiryFilter("critico_7d")
+    } else if (filter === "vencidos" || filter === "vencido") {
+      setExpiryFilter("vencido")
+    }
+  }, [searchParams])
+
+  // Modal de Acción para Lote (Merma / Devolución a Proveedor)
+  const [lotActionModal, setLotActionModal] = useState<{
+    open: boolean
+    lot: any | null
+    tipo: "merma" | "devolucion"
+    cantidad: number
+    motivo: string
+    observaciones: string
+    submitting: boolean
+  }>({
+    open: false,
+    lot: null,
+    tipo: "merma",
+    cantidad: 1,
+    motivo: "Caducidad / Fecha Vencida",
+    observaciones: "",
+    submitting: false,
+  })
+
+  const handleOpenLotAction = (lot: any, tipo: "merma" | "devolucion") => {
+    setLotActionModal({
+      open: true,
+      lot,
+      tipo,
+      cantidad: lot.cantidad_disponible || 1,
+      motivo: tipo === "merma" ? "Caducidad / Fecha Vencida" : "Canje acordado por vencimiento con proveedor",
+      observaciones: tipo === "merma" ? `Baja por caducidad lote ${lot.referencia}` : `Devolución para canje lote ${lot.referencia}`,
+      submitting: false,
+    })
+  }
+
+  const handleConfirmLotAction = async () => {
+    if (!lotActionModal.lot) return
+    const cant = Number(lotActionModal.cantidad)
+    if (isNaN(cant) || cant <= 0 || cant > lotActionModal.lot.cantidad_disponible) {
+      toast.error("Cantidad Inválida", `Debe ser entre 1 y ${lotActionModal.lot.cantidad_disponible}`)
+      return
+    }
+    setLotActionModal(prev => ({ ...prev, submitting: true }))
+    try {
+      const isDev = lotActionModal.tipo === "devolucion"
+      await api.inventory.recordMerma({
+        warehouse_id: lotActionModal.lot.warehouse_id,
+        product_id: lotActionModal.lot.product_id,
+        lot_id: lotActionModal.lot.id,
+        cantidad: cant,
+        motivo: isDev
+          ? `Devolución a Proveedor: ${lotActionModal.motivo}`
+          : `Merma: ${lotActionModal.motivo}`,
+        observaciones: lotActionModal.observaciones,
+      })
+      toast.success(
+        isDev ? "Devolución a Proveedor Registrada" : "Merma Registrada",
+        `Se procesaron ${cant} uds del lote ${lotActionModal.lot.referencia}`
+      )
+      setLotActionModal(prev => ({ ...prev, open: false, submitting: false }))
+      loadExpiriesData()
+    } catch (e: any) {
+      toast.error("Error al procesar acción de lote", e.message)
+      setLotActionModal(prev => ({ ...prev, submitting: false }))
+    }
+  }
 
   // Loadings
   const [loadingStock, setLoadingStock] = useState(true)
@@ -1347,47 +1425,20 @@ export default function InventoryPage() {
                           <td className="p-3.5 text-center">
                             <div className="flex items-center justify-center gap-1.5 flex-wrap">
                               <button
-                                onClick={async () => {
-                                  try {
-                                    await api.inventory.recordMerma({
-                                      warehouse_id: lot.warehouse_id,
-                                      product_id: lot.product_id,
-                                      lot_id: lot.id,
-                                      cantidad: lot.cantidad_disponible,
-                                      motivo: `Devolución a Proveedor: Vencimiento Lote ${lot.referencia}`,
-                                      observaciones: `Canje acordado por fecha de caducidad.`,
-                                    })
-                                    toast.success("Devolución Registrada", `Se registró la salida por canje a proveedor del lote ${lot.referencia}`)
-                                    loadExpiriesData()
-                                  } catch (e: any) {
-                                    toast.error("Error al registrar devolución", e.message)
-                                  }
-                                }}
-                                className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/60 text-[10px] font-extrabold transition cursor-pointer"
-                                title="Registrar salida para canje o devolución con el proveedor"
+                                onClick={() => handleOpenLotAction(lot, "devolucion")}
+                                className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/60 text-[10px] font-extrabold transition cursor-pointer flex items-center gap-1"
+                                title="Generar devolución o canje con el proveedor"
                               >
-                                Canje Proveedor
+                                <Truck className="w-3 h-3" />
+                                <span>Devolver Proveedor</span>
                               </button>
                               <button
-                                onClick={async () => {
-                                  try {
-                                    await api.inventory.recordMerma({
-                                      warehouse_id: lot.warehouse_id,
-                                      product_id: lot.product_id,
-                                      lot_id: lot.id,
-                                      cantidad: lot.cantidad_disponible,
-                                      motivo: `Merma por caducidad lote ${lot.referencia}`,
-                                    })
-                                    toast.success("Merma Registrada", `Se dio de baja definitiva el lote ${lot.referencia}`)
-                                    loadExpiriesData()
-                                  } catch (e: any) {
-                                    toast.error("Error al registrar merma", e.message)
-                                  }
-                                }}
-                                className="px-2 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/60 text-[10px] font-extrabold transition cursor-pointer"
-                                title="Dar de baja definitiva por merma / vencimiento"
+                                onClick={() => handleOpenLotAction(lot, "merma")}
+                                className="px-2.5 py-1 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/60 text-[10px] font-extrabold transition cursor-pointer flex items-center gap-1"
+                                title="Dar de baja definitiva por merma / caducidad"
                               >
-                                Baja Merma
+                                <Trash2 className="w-3 h-3" />
+                                <span>Generar Merma</span>
                               </button>
                             </div>
                           </td>
@@ -2338,6 +2389,250 @@ export default function InventoryPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: ACCIÓN DE LOTE (MERMA / DEVOLUCIÓN A PROVEEDOR) ── */}
+      {lotActionModal.open && lotActionModal.lot && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Cabecera (shrink-0) */}
+            <div className={`p-4 border-b flex items-center justify-between shrink-0 ${
+              lotActionModal.tipo === "devolucion"
+                ? "bg-blue-50/50 dark:bg-blue-950/20 border-blue-100 dark:border-blue-900/40"
+                : "bg-red-50/50 dark:bg-red-950/20 border-red-100 dark:border-red-900/40"
+            }`}>
+              <div className="flex items-center gap-2.5">
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                  lotActionModal.tipo === "devolucion"
+                    ? "bg-blue-500 text-white"
+                    : "bg-red-500 text-white"
+                }`}>
+                  {lotActionModal.tipo === "devolucion" ? <Truck className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-gray-900 dark:text-white leading-tight">
+                    {lotActionModal.tipo === "devolucion" ? "Generar Devolución / Canje a Proveedor" : "Generar Baja por Merma"}
+                  </h3>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                    Lote <span className="font-mono font-bold">{lotActionModal.lot.referencia}</span> · {lotActionModal.lot.product_nombre}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLotActionModal(prev => ({ ...prev, open: false }))}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Cuerpo central (flex-1 overflow-y-auto) */}
+            <div className="p-5 flex-1 overflow-y-auto space-y-4">
+              {/* Tarjeta Resumen Lote */}
+              <div className="bg-gray-50 dark:bg-slate-800/60 rounded-xl p-3 border border-gray-100 dark:border-slate-800 text-xs grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-gray-500 text-[10px] uppercase font-bold block">Depósito</span>
+                  <span className="font-semibold text-gray-900 dark:text-white">
+                    {warehouses.find(w => w.id === lotActionModal.lot.warehouse_id)?.nombre || "Depósito Principal"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500 text-[10px] uppercase font-bold block">Caducidad</span>
+                  <span className="font-semibold text-gray-900 dark:text-white font-mono">
+                    {lotActionModal.lot.fecha_vencimiento ? new Date(lotActionModal.lot.fecha_vencimiento).toLocaleDateString("es-PY") : "Sin fecha"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500 text-[10px] uppercase font-bold block">Disponible en Lote</span>
+                  <span className="font-bold text-gray-900 dark:text-white font-mono">
+                    {lotActionModal.lot.cantidad_disponible.toLocaleString("es-PY")} unidades
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-500 text-[10px] uppercase font-bold block">Costo Unitario</span>
+                  <span className="font-semibold text-gray-900 dark:text-white font-mono">
+                    {formatPYG(lotActionModal.lot.costo_unitario || 0)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Selector de Tipo (Toggle) */}
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wide block mb-1.5">
+                  Tipo de Operación
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setLotActionModal(prev => ({
+                      ...prev,
+                      tipo: "devolucion",
+                      motivo: "Canje acordado por vencimiento con proveedor",
+                    }))}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      lotActionModal.tipo === "devolucion"
+                        ? "bg-blue-500 text-white border-blue-600 shadow-xs"
+                        : "bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-300 border-gray-200 dark:border-slate-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>Devolución a Proveedor</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLotActionModal(prev => ({
+                      ...prev,
+                      tipo: "merma",
+                      motivo: "Caducidad / Fecha Vencida",
+                    }))}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      lotActionModal.tipo === "merma"
+                        ? "bg-red-500 text-white border-red-600 shadow-xs"
+                        : "bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-300 border-gray-200 dark:border-slate-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Baja por Merma</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Cantidad a Procesar */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wide">
+                    Cantidad a Procesar (Uds)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setLotActionModal(prev => ({ ...prev, cantidad: lotActionModal.lot.cantidad_disponible }))}
+                    className="text-[10px] font-extrabold text-purple-600 dark:text-purple-400 hover:underline cursor-pointer"
+                  >
+                    Descargar todo ({lotActionModal.lot.cantidad_disponible} uds)
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setLotActionModal(prev => ({ ...prev, cantidad: Math.max(1, prev.cantidad - 1) }))}
+                    className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 font-bold hover:bg-gray-200 dark:hover:bg-slate-700 transition flex items-center justify-center cursor-pointer"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={lotActionModal.lot.cantidad_disponible}
+                    value={lotActionModal.cantidad}
+                    onChange={(e) => {
+                      const val = Math.min(lotActionModal.lot.cantidad_disponible, Math.max(1, parseInt(e.target.value) || 1))
+                      setLotActionModal(prev => ({ ...prev, cantidad: val }))
+                    }}
+                    className="flex-1 py-2 text-center text-sm font-mono font-bold rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setLotActionModal(prev => ({ ...prev, cantidad: Math.min(lotActionModal.lot.cantidad_disponible, prev.cantidad + 1) }))}
+                    className="w-9 h-9 rounded-xl bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 font-bold hover:bg-gray-200 dark:hover:bg-slate-700 transition flex items-center justify-center cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Motivo */}
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wide block mb-1.5">
+                  Motivo de la Operación
+                </label>
+                <select
+                  value={lotActionModal.motivo}
+                  onChange={(e) => setLotActionModal(prev => ({ ...prev, motivo: e.target.value }))}
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  {lotActionModal.tipo === "devolucion" ? (
+                    <>
+                      <option value="Canje acordado por vencimiento con proveedor">Canje acordado por vencimiento con proveedor</option>
+                      <option value="Devolución por rotura o empaque defectuoso de fábrica">Devolución por rotura o empaque defectuoso de fábrica</option>
+                      <option value="Producto próximo a vencer rechazado en salón">Producto próximo a vencer rechazado en salón</option>
+                      <option value="Reclamo de calidad o corte de cadena de frío en origen">Reclamo de calidad o corte de cadena de frío en origen</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="Caducidad / Fecha Vencida">Caducidad / Fecha Vencida</option>
+                      <option value="Deterioro / Avería en Góndola">Deterioro / Avería en Góndola</option>
+                      <option value="Pérdida de Vacío / Rotura Accidental">Pérdida de Vacío / Rotura Accidental</option>
+                      <option value="Corte de Cadena de Frío en Heladera">Corte de Cadena de Frío en Heladera</option>
+                    </>
+                  )}
+                </select>
+              </div>
+
+              {/* Observaciones */}
+              <div>
+                <label className="text-[11px] font-bold text-gray-700 dark:text-slate-300 uppercase tracking-wide block mb-1.5">
+                  Observaciones / Nro Comprobante o Acta
+                </label>
+                <textarea
+                  rows={2}
+                  value={lotActionModal.observaciones}
+                  onChange={(e) => setLotActionModal(prev => ({ ...prev, observaciones: e.target.value }))}
+                  placeholder="Detalles sobre el retiro, nombre del repositor o número de nota..."
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              {/* Impacto Valorizado */}
+              <div className="p-3 rounded-xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/40 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-purple-700 dark:text-purple-300 block">
+                    Impacto Económico Total
+                  </span>
+                  <span className="text-xs text-gray-600 dark:text-gray-400">
+                    {lotActionModal.cantidad} uds × {formatPYG(lotActionModal.lot.costo_unitario || 0)}
+                  </span>
+                </div>
+                <span className="text-base font-black font-mono text-purple-700 dark:text-purple-300">
+                  {formatPYG(lotActionModal.cantidad * (lotActionModal.lot.costo_unitario || 0))}
+                </span>
+              </div>
+            </div>
+
+            {/* Pie de Acciones (shrink-0) */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-900 border-t border-gray-100 dark:border-slate-800 flex gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setLotActionModal(prev => ({ ...prev, open: false }))}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-slate-300 font-bold hover:bg-gray-100 dark:hover:bg-slate-800 transition text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={lotActionModal.submitting}
+                onClick={handleConfirmLotAction}
+                className={`flex-1 py-2.5 rounded-xl text-white font-bold transition shadow-md flex items-center justify-center gap-1.5 text-xs cursor-pointer ${
+                  lotActionModal.tipo === "devolucion"
+                    ? "bg-blue-600 hover:bg-blue-700 shadow-blue-600/30"
+                    : "bg-red-600 hover:bg-red-700 shadow-red-600/30"
+                }`}
+              >
+                {lotActionModal.submitting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Procesando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{lotActionModal.tipo === "devolucion" ? "Confirmar Devolución" : "Confirmar Baja por Merma"}</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
