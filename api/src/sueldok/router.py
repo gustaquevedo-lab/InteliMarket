@@ -388,26 +388,139 @@ async def get_third_party_annex_pdf(
 ):
     """
     Descarga la Planilla Anexa de Rendición de Descuentos en PDF.
+    Genera el documento en tiempo real si aún no existe en disco, permitiendo
+    verificación y punteo antes o después de la liquidación del salario.
     """
     import os
     import uuid
     from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
     from api.src.sueldok.models import PayrollDossierPhase
+    from api.src.sueldok.third_party_reports import generate_third_party_annex_pdf
 
     pid = uuid.UUID(phase_id)
-    res = await db.execute(select(PayrollDossierPhase).where(PayrollDossierPhase.id == pid))
+    res = await db.execute(
+        select(PayrollDossierPhase)
+        .options(selectinload(PayrollDossierPhase.dossier))
+        .where(PayrollDossierPhase.id == pid)
+    )
     phase = res.scalars().first()
     if not phase:
         raise HTTPException(status_code=404, detail="Fase no encontrada")
 
-    if not phase.pdf_storage_key or not os.path.exists(phase.pdf_storage_key):
-        raise HTTPException(status_code=404, detail="PDF de la fase no ha sido generado aún")
+    # Si ya existe el archivo físico en disco, devolverlo directamente
+    if phase.pdf_storage_key and os.path.exists(phase.pdf_storage_key):
+        return FileResponse(
+            phase.pdf_storage_key,
+            media_type="application/pdf",
+            filename=os.path.basename(phase.pdf_storage_key)
+        )
 
-    return FileResponse(
-        phase.pdf_storage_key,
-        media_type="application/pdf",
-        filename=os.path.basename(phase.pdf_storage_key)
+    # Si no existe en disco o está en estado pendiente, generarlo dinámicamente en memoria
+    metadata = phase.phase_metadata or {}
+    third_party_name = metadata.get("third_party_name") or phase.phase_label or "Acreedor Tercero"
+    third_party_ruc = metadata.get("third_party_ruc")
+    employees = metadata.get("employees", [])
+    total_monto = float(phase.monto or 0)
+    periodo = phase.dossier.periodo if phase.dossier else "2026-09"
+
+    pdf_bytes = generate_third_party_annex_pdf(
+        company_name="GRUPO SANTA TERESA E.A.S. - Extra Supermercado Mayorista",
+        company_ruc="80150377-9",
+        third_party_name=third_party_name,
+        third_party_ruc=third_party_ruc,
+        periodo=periodo,
+        cheque_numero=metadata.get("cheque_numero"),
+        banco_nombre=metadata.get("banco_nombre"),
+        employees=employees,
+        total_monto=total_monto
     )
+
+    clean_party = third_party_name.lower().replace(" ", "_").replace(".", "")
+    filename = f"planilla_anexa_{clean_party}_{periodo}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "no-cache"
+        }
+    )
+
+
+@router.get("/dossiers/{dossier_id}/phases/{phase_id}/punteo")
+async def get_third_party_punteo(
+    dossier_id: str,
+    phase_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Retorna la lista detallada de funcionarios y montos descontados para punteo
+    contra la planilla de la firma conveniada (antes o después de liquidar).
+    """
+    import uuid
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    from api.src.sueldok.models import PayrollDossierPhase
+
+    pid = uuid.UUID(phase_id)
+    res = await db.execute(
+        select(PayrollDossierPhase)
+        .options(selectinload(PayrollDossierPhase.dossier))
+        .where(PayrollDossierPhase.id == pid)
+    )
+    phase = res.scalars().first()
+    if not phase:
+        raise HTTPException(status_code=404, detail="Fase no encontrada")
+
+    metadata = phase.phase_metadata or {}
+    third_party_name = metadata.get("third_party_name") or phase.phase_label or "Acreedor Tercero"
+    third_party_ruc = metadata.get("third_party_ruc")
+    employees = metadata.get("employees", [])
+    total_monto = float(phase.monto or 0)
+    periodo = phase.dossier.periodo if phase.dossier else "2026-09"
+
+    return {
+        "phase_id": str(phase.id),
+        "phase_type": phase.phase_type,
+        "phase_label": phase.phase_label,
+        "third_party_name": third_party_name,
+        "third_party_ruc": third_party_ruc,
+        "periodo": periodo,
+        "total_monto": total_monto,
+        "estado": phase.estado,
+        "payment_order_id": str(phase.payment_order_id) if phase.payment_order_id else None,
+        "count_employees": len(employees),
+        "employees": employees,
+        "nota_conciliacion": metadata.get("nota_conciliacion"),
+        "factura_numero": metadata.get("factura_numero"),
+        "total_transferencia_banco": metadata.get("total_transferencia_banco"),
+        "gasto_institucional_factura": metadata.get("gasto_institucional_factura"),
+    }
+
+
+@router.post("/dossiers/{dossier_id}/phases/{phase_id}/revert")
+async def revert_dossier_phase_endpoint(
+    dossier_id: str,
+    phase_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Revierte la ejecución de una fase del expediente:
+    anula la Orden de Pago y restablece la fase a pendiente.
+    """
+    from api.src.sueldok.third_party_reports import revert_dossier_phase
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    try:
+        return await revert_dossier_phase(db, company_id, phase_id, user_id=user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 
 @router.post("/dossiers/{dossier_id}/phases/{phase_id}/execute-ips")

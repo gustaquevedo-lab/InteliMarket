@@ -24,6 +24,11 @@ import {
   Save,
   Edit3,
   X,
+  RotateCcw,
+  Eye,
+  CheckSquare,
+  Square,
+  Search,
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -89,6 +94,24 @@ export default function PayrollDossierView({
 
   // Third party cheque inputs
   const [chequeInputs, setChequeInputs] = useState<Record<string, { num: string; banco: string }>>({})
+
+  // Third party punteo modal state
+  const [punteoModal, setPunteoModal] = useState<{
+    isOpen: boolean
+    loading: boolean
+    phaseId: string | null
+    phaseTitle: string
+    data: any | null
+  }>({
+    isOpen: false,
+    loading: false,
+    phaseId: null,
+    phaseTitle: "",
+    data: null,
+  })
+  const [checkedPunteo, setCheckedPunteo] = useState<Record<string, boolean>>({})
+  const [punteoSearch, setPunteoSearch] = useState<string>("")
+  const [downloadingAnnex, setDownloadingAnnex] = useState<string | null>(null)
 
   // IPS Adjustment states
   const [ipsAdjustmentOpen, setIpsAdjustmentOpen] = useState<Record<string, boolean>>({})
@@ -234,6 +257,70 @@ export default function PayrollDossierView({
       await reloadSelected(selectedDossier.id)
     } catch (err: any) {
       toast.error("Error procesando convenio", err.response?.data?.detail)
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  // Handle Download Annex PDF
+  const handleDownloadAnnex = async (phaseId: string, phaseTitle: string) => {
+    if (!selectedDossier) return
+    try {
+      setDownloadingAnnex(phaseId)
+      const safeTitle = phaseTitle.replace(/[^a-zA-Z0-9_\-]/g, "_")
+      const filename = `Planilla_Anexa_${safeTitle}_${selectedDossier.periodo}.pdf`
+      await api.sueldok.downloadAnnexPdf(selectedDossier.id, phaseId, filename)
+      toast.success("Planilla Anexa Generada", "El documento PDF consolidado se descargó correctamente.")
+    } catch (err: any) {
+      toast.error("Error descargando planilla anexa", err.response?.data?.detail || err.message)
+    } finally {
+      setDownloadingAnnex(null)
+    }
+  }
+
+  // Handle Open Punteo Modal
+  const handleOpenPunteo = async (phaseId: string, phaseTitle: string) => {
+    if (!selectedDossier) return
+    try {
+      setPunteoModal({
+        isOpen: true,
+        loading: true,
+        phaseId,
+        phaseTitle,
+        data: null,
+      })
+      setPunteoSearch("")
+      const data = await api.sueldok.getThirdPartyPunteo(selectedDossier.id, phaseId)
+      setPunteoModal(prev => ({
+        ...prev,
+        loading: false,
+        data,
+      }))
+    } catch (err: any) {
+      toast.error("Error cargando punteo de convenio", err.response?.data?.detail || err.message)
+      setPunteoModal(prev => ({ ...prev, isOpen: false, loading: false }))
+    }
+  }
+
+  // Handle Revert Third Party Phase
+  const handleRevertThirdParty = async (phaseId: string, phaseTitle: string) => {
+    if (!selectedDossier) return
+    const confirmed = window.confirm(
+      `¿Está seguro de revertir la Orden de Pago para "${phaseTitle}"?\n\n` +
+      `La OP emitida se anulará/eliminará y la fase volverá al estado PENDIENTE, permitiendo volver a puntear y reemitir la orden.`
+    )
+    if (!confirmed) return
+
+    try {
+      setActionLoading(phaseId)
+      const res = await api.sueldok.revertPhase(selectedDossier.id, phaseId)
+      toast.success(
+        "Fase Revertida",
+        res.message || "La Orden de Pago ha sido revertida y la fase vuelve a estado pendiente."
+      )
+      await reloadSelected(selectedDossier.id)
+    } catch (err: any) {
+      toast.error("Error al revertir fase", err.response?.data?.detail || err.message)
     } finally {
       setActionLoading(null)
     }
@@ -764,28 +851,66 @@ export default function PayrollDossierView({
                           </div>
                         )}
 
-                        <div className="flex items-center gap-2 pt-1">
-                          {phase.estado === "ejecutado" ? (
-                            <a
-                              href={`/api/v1/sueldok/dossiers/${selectedDossier.id}/phases/${phase.id}/annex-pdf`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="py-1.5 px-3 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-medium text-xs flex items-center gap-1.5 hover:bg-indigo-100 transition"
-                            >
-                              <Download className="w-3.5 h-3.5" /> Descargar Planilla Anexa PDF
-                            </a>
-                          ) : (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          {/* Botón Punteo de Convenio (Siempre Disponible) */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPunteo(phase.id, phase.phase_label)}
+                            className="py-1.5 px-3 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium text-xs flex items-center gap-1.5 transition border border-gray-300 dark:border-gray-600"
+                            title="Ver planilla consolidada de funcionarios y montos para cotejo"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-indigo-500" />
+                            Punteo de Convenio
+                          </button>
+
+                          {/* Botón Planilla Anexa PDF (Siempre Disponible vía API en memoria) */}
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadAnnex(phase.id, phase.phase_label)}
+                            disabled={downloadingAnnex === phase.id}
+                            className="py-1.5 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 font-medium text-xs flex items-center gap-1.5 transition border border-indigo-200 dark:border-indigo-800 disabled:opacity-50"
+                            title="Descargar Planilla Anexa oficial en formato PDF"
+                          >
+                            {downloadingAnnex === phase.id ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Download className="w-3.5 h-3.5" />
+                            )}
+                            Planilla Anexa (PDF)
+                          </button>
+
+                          {/* Estado Pendiente: Emitir OP */}
+                          {phase.estado !== "ejecutado" && (
                             <button
+                              type="button"
                               onClick={() => handleExecuteThirdParty(phase.id)}
                               disabled={actionLoading === phase.id}
-                              className="py-1.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs flex items-center gap-1.5 transition disabled:opacity-50"
+                              className="py-1.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs flex items-center gap-1.5 transition shadow-sm disabled:opacity-50"
                             >
                               {actionLoading === phase.id ? (
                                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                               ) : (
                                 <FileText className="w-3.5 h-3.5" />
                               )}
-                              Emitir OP Consolidada + Planilla Anexa
+                              Emitir OP Consolidada
+                            </button>
+                          )}
+
+                          {/* Estado Ejecutado: Botón Revertir OP */}
+                          {phase.estado === "ejecutado" && (
+                            <button
+                              type="button"
+                              onClick={() => handleRevertThirdParty(phase.id, phase.phase_label)}
+                              disabled={actionLoading === phase.id}
+                              className="py-1.5 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 font-medium text-xs flex items-center gap-1.5 transition border border-rose-200 dark:border-rose-900/40 disabled:opacity-50"
+                              title="Revertir la Orden de Pago y volver a estado pendiente"
+                            >
+                              {actionLoading === phase.id ? (
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <RotateCcw className="w-3.5 h-3.5" />
+                              )}
+                              Revertir OP
                             </button>
                           )}
                         </div>
@@ -1008,6 +1133,212 @@ export default function PayrollDossierView({
 
           </div>
         </>
+      )}
+
+      {/* ══ MODAL DE PUNTEO DE CONVENIOS (REGLA CANÓNICA MODALES) ══ */}
+      {punteoModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="max-h-[90vh] w-full max-w-4xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-200 dark:border-gray-700">
+            {/* Cabecera (shrink-0) */}
+            <div className="shrink-0 p-4 sm:p-5 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                  <Eye className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <span>Punteo de Convenio: {punteoModal.phaseTitle}</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 font-semibold">
+                      Período {selectedDossier?.periodo}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Coteje renglón por renglón los descuentos cargados en SueldOK contra la planilla enviada por la conveniada.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {punteoModal.phaseId && (
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadAnnex(punteoModal.phaseId!, punteoModal.phaseTitle)}
+                    disabled={downloadingAnnex === punteoModal.phaseId}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-medium text-xs flex items-center gap-1.5 transition border border-indigo-200 dark:border-indigo-800"
+                    title="Descargar Planilla Anexa PDF"
+                  >
+                    {downloadingAnnex === punteoModal.phaseId ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" />
+                    )}
+                    <span>Descargar PDF</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPunteoModal(prev => ({ ...prev, isOpen: false }))}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Barra de Búsqueda y Punteo Rápido (shrink-0) */}
+            <div className="shrink-0 px-5 py-3 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
+              <div className="relative flex-1 min-w-[200px] max-w-sm">
+                <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar funcionario o C.I..."
+                  value={punteoSearch}
+                  onChange={(e) => setPunteoSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              {punteoModal.data && (
+                <div className="flex items-center gap-4 text-xs">
+                  <div className="text-gray-600 dark:text-gray-300">
+                    Punteados: <b className="text-emerald-600 dark:text-emerald-400">
+                      {punteoModal.data.items?.filter((it: any) => checkedPunteo[`${punteoModal.phaseId}_${it.nro || it.ci}`]).length || 0}
+                    </b> de <b>{punteoModal.data.total_empleados || punteoModal.data.items?.length || 0}</b>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allKeys: Record<string, boolean> = { ...checkedPunteo }
+                      const shouldCheck = punteoModal.data.items?.some((it: any) => !checkedPunteo[`${punteoModal.phaseId}_${it.nro || it.ci}`])
+                      punteoModal.data.items?.forEach((it: any) => {
+                        allKeys[`${punteoModal.phaseId}_${it.nro || it.ci}`] = shouldCheck
+                      })
+                      setCheckedPunteo(allKeys)
+                    }}
+                    className="text-amber-600 dark:text-amber-400 font-semibold hover:underline"
+                  >
+                    Marcar/Desmarcar todos
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Cuerpo Central Scrolleable (flex-1 overflow-y-auto) */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5">
+              {punteoModal.loading ? (
+                <div className="py-16 text-center">
+                  <RefreshCw className="w-8 h-8 animate-spin text-amber-500 mx-auto mb-2" />
+                  <p className="text-xs text-gray-500">Cargando nómina de colaboradores y descuentos...</p>
+                </div>
+              ) : !punteoModal.data || !punteoModal.data.items || punteoModal.data.items.length === 0 ? (
+                <div className="py-12 text-center text-xs text-gray-500 italic">
+                  No se encontraron descuentos registrados para este convenio en el período seleccionado.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-gray-50 dark:bg-gray-900/80 text-gray-600 dark:text-gray-400 font-semibold uppercase text-[10px] tracking-wider border-b border-gray-200 dark:border-gray-700">
+                      <tr>
+                        <th className="px-3 py-2.5 w-10 text-center">Punteo</th>
+                        <th className="px-3 py-2.5 w-12 text-center">N°</th>
+                        <th className="px-3 py-2.5">Documento</th>
+                        <th className="px-3 py-2.5">Colaborador / Funcionario</th>
+                        <th className="px-3 py-2.5">Concepto / Referencia</th>
+                        <th className="px-3 py-2.5 text-right">Monto Retenido</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {punteoModal.data.items
+                        .filter((it: any) => {
+                          if (!punteoSearch) return true
+                          const term = punteoSearch.toLowerCase()
+                          return (
+                            (it.nombre || "").toLowerCase().includes(term) ||
+                            (it.ci || "").toLowerCase().includes(term) ||
+                            (it.concepto || "").toLowerCase().includes(term)
+                          )
+                        })
+                        .map((item: any, idx: number) => {
+                          const itemKey = `${punteoModal.phaseId}_${item.nro || item.ci || idx}`
+                          const isChecked = !!checkedPunteo[itemKey]
+
+                          return (
+                            <tr
+                              key={itemKey}
+                              onClick={() => setCheckedPunteo(prev => ({ ...prev, [itemKey]: !prev[itemKey] }))}
+                              className={`cursor-pointer transition hover:bg-amber-50/50 dark:hover:bg-amber-950/20 ${
+                                isChecked ? "bg-emerald-50/40 dark:bg-emerald-950/10" : ""
+                              }`}
+                            >
+                              <td className="px-3 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => setCheckedPunteo(prev => ({ ...prev, [itemKey]: !prev[itemKey] }))}
+                                  className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer"
+                                />
+                              </td>
+                              <td className="px-3 py-2.5 text-center text-gray-400 font-mono">
+                                {item.nro || idx + 1}
+                              </td>
+                              <td className="px-3 py-2.5 font-mono font-medium text-gray-700 dark:text-gray-300">
+                                {item.ci}
+                              </td>
+                              <td className="px-3 py-2.5 font-semibold text-gray-900 dark:text-white">
+                                {item.nombre}
+                              </td>
+                              <td className="px-3 py-2.5 text-gray-500 dark:text-gray-400">
+                                {item.concepto || punteoModal.phaseTitle}
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-bold font-mono text-gray-900 dark:text-white whitespace-nowrap">
+                                {formatPYG(item.monto)}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Pie de Acciones y Totales (shrink-0) */}
+            <div className="shrink-0 p-4 sm:p-5 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-4 text-xs">
+                <div>
+                  <span className="text-gray-500 block text-[10px] uppercase font-bold">Total Retenciones</span>
+                  <span className="font-bold font-mono text-base text-gray-900 dark:text-white">
+                    {formatPYG(punteoModal.data?.monto_total || 0)}
+                  </span>
+                </div>
+                {punteoModal.data?.deducciones_extra > 0 && (
+                  <div>
+                    <span className="text-rose-500 block text-[10px] uppercase font-bold">Menos Factura Gasto</span>
+                    <span className="font-bold font-mono text-base text-rose-600 dark:text-rose-400">
+                      - {formatPYG(punteoModal.data.deducciones_extra)}
+                    </span>
+                  </div>
+                )}
+                <div>
+                  <span className="text-indigo-600 dark:text-indigo-400 block text-[10px] uppercase font-bold">
+                    Neto a Pagar en OP
+                  </span>
+                  <span className="font-black font-mono text-base text-indigo-700 dark:text-indigo-300">
+                    {formatPYG(punteoModal.data?.monto_neto_op || punteoModal.data?.monto_total || 0)}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setPunteoModal(prev => ({ ...prev, isOpen: false }))}
+                className="px-5 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 font-bold text-xs transition"
+              >
+                Cerrar Punteo
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

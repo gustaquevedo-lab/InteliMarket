@@ -4131,6 +4131,31 @@ export const api = {
       client.post<any>(`/v1/sueldok/dossiers/${dossierId}/phases/${phaseId}/adjust-ips?company_id=${COMPANY_ID}`, data),
     executeIpsPhase: (dossierId: string, phaseId: string, data?: { monto_ajustado?: number; motivo_ajuste?: string }) =>
       client.post<any>(`/v1/sueldok/dossiers/${dossierId}/phases/${phaseId}/execute-ips?company_id=${COMPANY_ID}`, data || {}),
+    revertPhase: (dossierId: string, phaseId: string) =>
+      client.post<any>(`/v1/sueldok/dossiers/${dossierId}/phases/${phaseId}/revert?company_id=${COMPANY_ID}`),
+    getThirdPartyPunteo: (dossierId: string, phaseId: string) =>
+      client.get<any>(`/v1/sueldok/dossiers/${dossierId}/phases/${phaseId}/punteo?company_id=${COMPANY_ID}`),
+    downloadAnnexPdf: async (dossierId: string, phaseId: string, filename?: string) => {
+      const token = localStorage.getItem("access_token") || localStorage.getItem("token") || ""
+      const res = await fetch(`${API_BASE}/v1/sueldok/dossiers/${dossierId}/phases/${phaseId}/annex-pdf?company_id=${COMPANY_ID}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}))
+        throw new Error(errJson.detail || "Error al descargar la Planilla Anexa PDF")
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename || `Planilla_Anexa_${phaseId}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    },
   },
   security: {
     apiKeys: () => client.get<SecurityApiKey[]>("/v1/security/api-keys"),

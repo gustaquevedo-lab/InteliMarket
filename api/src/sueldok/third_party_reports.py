@@ -479,3 +479,62 @@ async def adjust_ips_phase(
         "metadata": meta,
     }
 
+
+async def revert_dossier_phase(
+    db: AsyncSession,
+    company_id: str,
+    phase_id: str,
+    user_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Revierte la ejecución de una fase del expediente de nómina (ej. Cafetería Malou, Credi Pora, etc.):
+    1. Si tiene Orden de Pago asociada (SupplierPaymentOrder), la elimina si está en estado 'registrado'/'pendiente'.
+    2. Restablece la fase a estado 'pendiente' y limpia referencias de ejecución.
+    """
+    cid = uuid.UUID(company_id)
+    pid = uuid.UUID(phase_id)
+
+    query = select(PayrollDossierPhase).where(
+        PayrollDossierPhase.id == pid
+    ).options(selectinload(PayrollDossierPhase.dossier))
+    res = await db.execute(query)
+    phase = res.scalars().first()
+    if not phase:
+        raise ValueError(f"Fase {phase_id} no encontrada")
+
+    if phase.estado != "ejecutado":
+        return {
+            "status": "info",
+            "message": "La fase ya se encuentra en estado pendiente",
+            "phase_id": str(phase.id)
+        }
+
+    op_id = phase.payment_order_id
+    if op_id:
+        op_res = await db.execute(
+            select(SupplierPaymentOrder).where(SupplierPaymentOrder.id == op_id)
+        )
+        op = op_res.scalars().first()
+        if op:
+            if op.estado in ("pagado", "conciliado"):
+                raise ValueError("No se puede revertir la fase porque la Orden de Pago ya fue pagada/desembolsada en Tesorería.")
+            await db.delete(op)
+
+    # Limpiar fase
+    phase.estado = "pendiente"
+    phase.payment_order_id = None
+    phase.executed_at = None
+    phase.executed_by = None
+
+    if phase.dossier and phase.dossier.estado == "completado":
+        phase.dossier.estado = "en_proceso"
+
+    await db.commit()
+
+    return {
+        "status": "success",
+        "message": f"Fase '{phase.phase_label or phase.phase_type}' revertida a estado pendiente exitosamente.",
+        "phase_id": str(phase.id)
+    }
+
+
