@@ -279,6 +279,16 @@ async def execute_third_party_phase(
     if not phase:
         raise ValueError(f"Phase {phase_id} not found")
 
+    if phase.estado == "ejecutado" and phase.payment_order_id:
+        return {
+            "status": "already_executed",
+            "message": "La fase ya cuenta con una Orden de Pago emitida previamente.",
+            "phase_id": str(phase.id),
+            "payment_order_id": str(phase.payment_order_id),
+            "monto": float(phase.monto or 0),
+            "beneficiario": (phase.phase_metadata or {}).get("third_party_name") or phase.phase_label
+        }
+
     metadata = phase.phase_metadata or {}
     third_party_name = metadata.get("third_party_name") or phase.phase_label or "Acreedor Tercero"
     third_party_ruc = metadata.get("third_party_ruc")
@@ -309,8 +319,8 @@ async def execute_third_party_phase(
 
     # 2. Generate Annex PDF
     pdf_bytes = generate_third_party_annex_pdf(
-        company_name="Extra Supermercado S.A.",
-        company_ruc="80012345-6",
+        company_name="GRUPO SANTA TERESA E.A.S. - Extra Supermercado Mayorista",
+        company_ruc="80150377-9",
         third_party_name=third_party_name,
         third_party_ruc=third_party_ruc,
         periodo=periodo,
@@ -373,6 +383,16 @@ async def execute_ips_phase(
     phase = res.scalars().first()
     if not phase:
         raise ValueError(f"Phase {phase_id} not found")
+
+    if phase.estado == "ejecutado" and phase.payment_order_id:
+        return {
+            "status": "already_executed",
+            "message": "La fase de IPS ya cuenta con una Orden de Pago emitida previamente.",
+            "phase_id": str(phase.id),
+            "payment_order_id": str(phase.payment_order_id),
+            "monto": float(phase.monto or 0),
+            "beneficiario": "Instituto de Previsión Social (IPS)"
+        }
 
     metadata = dict(phase.phase_metadata or {})
     total_monto = float(phase.monto or 0)

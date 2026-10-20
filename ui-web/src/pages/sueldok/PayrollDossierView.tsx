@@ -186,6 +186,12 @@ export default function PayrollDossierView({
   // Handle Net Phase Execution (Fase 1)
   const handleExecuteNetPhase = async (phaseId: string) => {
     if (!selectedDossier) return
+    const phase = selectedDossier.phases.find(p => p.id === phaseId)
+    const label = phase?.phase_label || "este lote de salarios"
+    const monto = phase?.monto ? formatPYG(Number(phase.monto)) : ""
+    const confirmMsg = `¿Desea confirmar el desembolso y emitir OP para ${label}${monto ? ` por valor de ${monto}` : ""}?\n\nEsta orden se remitirá a Tesorería.`
+    if (!window.confirm(confirmMsg)) return
+
     const input = netInputs[phaseId] || { banco: "", referencia: "" }
     try {
       setActionLoading(phaseId)
@@ -210,6 +216,10 @@ export default function PayrollDossierView({
   // Handle Compensations Execution (Fase 2)
   const handleExecuteCompensations = async () => {
     if (!selectedDossier) return
+    const totComp = (selectedDossier.total_extra_club || 0) + (selectedDossier.total_uniformes || 0)
+    const confirmMsg = `¿Desea ejecutar las compensaciones de nómina (Extra Club + Uniformes) por valor de ${formatPYG(totComp)}?\n\nSe generarán los recibos RC-NOMINA y se saldarán las cuentas por cobrar del personal.`
+    if (!window.confirm(confirmMsg)) return
+
     try {
       setActionLoading("compensations")
       const res = await api.sueldok.executeCompensations(selectedDossier.id)
@@ -253,9 +263,12 @@ export default function PayrollDossierView({
   }
 
   // Handle Third Party Execution
-  const handleExecuteThirdParty = async (phaseId: string) => {
+  const handleExecuteThirdParty = async (phaseId: string, phaseLabel: string, monto: number) => {
     if (!selectedDossier) return
     const input = chequeInputs[phaseId] || { num: "", banco: "" }
+    const confirmMsg = `¿Desea emitir la Orden de Pago (OP) para "${phaseLabel}" por valor de ${formatPYG(monto)}?\n\nEsta orden se remitirá de forma individual a Tesorería.`
+    if (!window.confirm(confirmMsg)) return
+
     try {
       setActionLoading(phaseId)
       const res = await api.sueldok.executeThirdPartyPhase(
@@ -370,9 +383,14 @@ export default function PayrollDossierView({
   // Handle IPS Execution
   const handleExecuteIps = async (phaseId: string) => {
     if (!selectedDossier) return
+    const phase = selectedDossier.phases.find(p => p.id === phaseId)
+    const customAmount = ipsCustomAmounts[phaseId]
+    const effectiveMonto = (customAmount && customAmount > 0) ? customAmount : Number(phase?.monto || 0)
+    const confirmMsg = `¿Desea emitir la Orden de Pago (OP) para Previsión Previsional IPS por valor de ${formatPYG(effectiveMonto)}?\n\nEsta orden se remitirá a Tesorería para su programación.`
+    if (!window.confirm(confirmMsg)) return
+
     try {
       setActionLoading("ips")
-      const customAmount = ipsCustomAmounts[phaseId]
       const motivo = ipsMotivos[phaseId]
       const payload = (customAmount && customAmount > 0)
         ? { monto_ajustado: customAmount, motivo_ajuste: motivo }
@@ -690,7 +708,7 @@ export default function PayrollDossierView({
                             <div className="flex flex-wrap items-center gap-2 pt-1">
                               <button
                                 onClick={() => handleExecuteNetPhase(phase.id)}
-                                disabled={actionLoading === phase.id}
+                                disabled={actionLoading !== null}
                                 className="flex-1 py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
                               >
                                 {actionLoading === phase.id ? (
@@ -735,7 +753,7 @@ export default function PayrollDossierView({
                               <button
                                 type="button"
                                 onClick={() => handleRevertThirdParty(phase.id, phase.phase_label)}
-                                disabled={actionLoading === phase.id}
+                                disabled={actionLoading !== null}
                                 className="py-1 px-2.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-medium text-xs flex items-center gap-1 transition border border-rose-200 dark:border-rose-900/40 disabled:opacity-50"
                                 title="Revertir el desembolso y devolver la fase a pendiente"
                               >
@@ -858,7 +876,7 @@ export default function PayrollDossierView({
                       ) : (
                         <button
                           onClick={handleExecuteCompensations}
-                          disabled={actionLoading === "compensations"}
+                          disabled={actionLoading !== null}
                           className="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
                         >
                           {actionLoading === "compensations" ? (
@@ -1008,8 +1026,12 @@ export default function PayrollDossierView({
                           {isPendiente && (
                             <button
                               type="button"
-                              onClick={() => handleExecuteThirdParty(phase.id)}
-                              disabled={actionLoading === phase.id}
+                              onClick={() => handleExecuteThirdParty(
+                                phase.id,
+                                phase.phase_label,
+                                Number(phase.metadata?.total_transferencia_banco || phase.monto)
+                              )}
+                              disabled={actionLoading !== null}
                               className="py-1.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs flex items-center gap-1.5 transition shadow-sm disabled:opacity-50"
                             >
                               {actionLoading === phase.id ? (
@@ -1047,7 +1069,7 @@ export default function PayrollDossierView({
                               <button
                                 type="button"
                                 onClick={() => handleRevertThirdParty(phase.id, phase.phase_label)}
-                                disabled={actionLoading === phase.id}
+                                disabled={actionLoading !== null}
                                 className="py-1.5 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 font-medium text-xs flex items-center gap-1.5 transition border border-rose-200 dark:border-rose-900/40 disabled:opacity-50"
                                 title="Revertir la Orden de Pago y volver a estado pendiente"
                               >
@@ -1269,7 +1291,7 @@ export default function PayrollDossierView({
                     {isIpsPendiente && (
                       <button
                         onClick={() => handleExecuteIps(phase.id)}
-                        disabled={actionLoading === "ips"}
+                        disabled={actionLoading !== null}
                         className="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50"
                       >
                         {actionLoading === "ips" ? (

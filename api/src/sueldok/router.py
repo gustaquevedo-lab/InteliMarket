@@ -150,20 +150,6 @@ async def available_events():
     return service.get_available_events()
 
 
-@router.post("/payroll-payment-order")
-async def create_payroll_payment_order(
-    payload: schemas.PayrollPaymentOrderCreate,
-    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
-    db: AsyncSession = Depends(get_db),
-    user: Any = Depends(require_auth)
-):
-    """
-    Emite una Orden de Pago (SupplierPaymentOrder) con subtipo 'nomina_salarios'
-    para la masa salarial neta liquidada en SueldOK.
-    """
-    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
-    return await service.generate_payroll_payment_order(db, company_id, payload, user_id)
-
 
 @router.post("/settlements")
 async def create_settlement(

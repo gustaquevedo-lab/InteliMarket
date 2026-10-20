@@ -61,23 +61,15 @@ const SUELDOK_BASE_URL = "https://sueldok.intellihouse.lat"
 const SUELDOK_OVERVIEW_URL = `${SUELDOK_BASE_URL}/http/api/intelimarket/overview`
 const SUELDOK_SSO_URL = `${SUELDOK_BASE_URL}/http/api/intelimarket/sso-token`
 
-// Llaves de integración por empresa
-const EMPRESAS_DISPONIBLES = [
-  {
-    id: "k177xrnra3m1na7sg640rrm85x8aj62k",
-    nombre: "Grupo Santa Teresa E.A.S.",
-    ruc: "80150377-9",
-    apiKey: "ifk_santateresa_live_api_key_2026",
-    relojInfo: "Dahua Facial (192.168.0.122)",
-  },
-  {
-    id: "k17fz2ntbvprjrngkyysgrmb7589m4w7",
-    nombre: "Casa Gonzalito S.R.L.",
-    ruc: "80005427-0",
-    apiKey: "ifk_m953H3eJeBUZj3ITBHtNlLQPbGg-AO8FLberndVxEdE",
-    relojInfo: "SueldOK App Mobile",
-  },
-]
+// Empresa exclusiva de Extra Supermercado (Regla 2: Prohibido Casa Gonzalito)
+const EMPRESA_GRUPO_SANTA_TERESA = {
+  id: "k177xrnra3m1na7sg640rrm85x8aj62k",
+  nombre: "Grupo Santa Teresa E.A.S.",
+  ruc: "80150377-9",
+  apiKey: "ifk_santateresa_live_api_key_2026",
+  relojInfo: "Dahua Facial (192.168.0.122)",
+}
+const EMPRESAS_DISPONIBLES = [EMPRESA_GRUPO_SANTA_TERESA]
 
 const COLORES_AVATAR = [
   "#6366f1",
@@ -164,7 +156,7 @@ function AvatarCircle({ initials, idx, size = 40 }: { initials: string; idx: num
 export default function SueldokPage() {
   const navigate = useNavigate()
   const [selectedCompany, setSelectedCompany] = useState(EMPRESAS_DISPONIBLES[0])
-  const [tab, setTab] = useState<TabType>("payroll")
+  const [tab, setTab] = useState<TabType>("expediente")
   const [subtabNovedades, setSubtabNovedades] = useState<"anticipos" | "descuentos">("anticipos")
   const [subtabPersonal, setSubtabPersonal] = useState<"funcionarios" | "asistencia">("funcionarios")
   const [search, setSearch] = useState("")
@@ -206,15 +198,6 @@ export default function SueldokPage() {
   const [finiquitoPettyCashFundId, setFiniquitoPettyCashFundId] = useState("")
   const [finiquitoReferencia, setFiniquitoReferencia] = useState("")
 
-  // Modal Emitir OP de Nómina
-  const [modalNominaOPOpen, setModalNominaOPOpen] = useState(false)
-  const [savingNominaOP, setSavingNominaOP] = useState(false)
-  const [nominaOPDesembolsoInmediato, setNominaOPDesembolsoInmediato] = useState(false)
-  const [nominaOPMetodoPago, setNominaOPMetodoPago] = useState("transferencia_sipap")
-  const [nominaOPBankAccountId, setNominaOPBankAccountId] = useState("")
-  const [nominaOPPettyCashFundId, setNominaOPPettyCashFundId] = useState("")
-  const [nominaOPReferencia, setNominaOPReferencia] = useState("")
-  const [nominaOPObservaciones, setNominaOPObservaciones] = useState("")
 
   // Modal Emitir OP / Confirmar Compensación de Finiquito individual
   const [selectedSettlementForOP, setSelectedSettlementForOP] = useState<any | null>(null)
@@ -733,59 +716,6 @@ export default function SueldokPage() {
     }, 1800)
   }
 
-  // Manejo de Orden de Pago para Nómina
-  const handleOpenNominaOPModal = () => {
-    setNominaOPObservaciones(`Liquidación y pago de nómina de salarios período ${periodoNomina} (${payrollItems.length} funcionarios)`)
-    setNominaOPDesembolsoInmediato(false)
-    setNominaOPMetodoPago("transferencia_sipap")
-    setNominaOPBankAccountId(bankAccounts[0]?.id || "")
-    setNominaOPReferencia("")
-    setModalNominaOPOpen(true)
-  }
-
-  const handleConfirmarNominaOP = async () => {
-    if (payrollItems.length === 0 || totalPayrollNet <= 0) {
-      toast.error("Nómina Vacía", "No hay funcionarios o el monto neto es cero.")
-      return
-    }
-    if (nominaOPDesembolsoInmediato) {
-      if ((nominaOPMetodoPago === "transferencia_sipap" || nominaOPMetodoPago === "cheque") && !nominaOPBankAccountId) {
-        toast.error("Seleccione Cuenta", "Debe seleccionar la cuenta bancaria de origen para el desembolso.")
-        return
-      }
-      if (nominaOPMetodoPago === "fondo_fijo" && !nominaOPPettyCashFundId) {
-        toast.error("Seleccione Fondo Fijo", "Debe seleccionar el fondo fijo para el desembolso.")
-        return
-      }
-    }
-
-    setSavingNominaOP(true)
-    try {
-      const res = await api.sueldok.generatePayrollPaymentOrder({
-        periodo: periodoNomina,
-        monto_neto: totalPayrollNet,
-        cantidad_funcionarios: payrollItems.length,
-        desembolso_inmediato: nominaOPDesembolsoInmediato,
-        metodo_pago: nominaOPDesembolsoInmediato ? nominaOPMetodoPago : undefined,
-        bank_account_id: nominaOPDesembolsoInmediato && nominaOPBankAccountId ? nominaOPBankAccountId : undefined,
-        petty_cash_fund_id: nominaOPDesembolsoInmediato && nominaOPPettyCashFundId ? nominaOPPettyCashFundId : undefined,
-        referencia: nominaOPReferencia || undefined,
-        observaciones: nominaOPObservaciones || undefined,
-        sueldok_run_id: data?.approvedPayroll?.id || undefined,
-      })
-
-
-      toast.success(
-        "Orden de Pago Generada",
-        `Se creó la OP N° ${res.numero_orden} por ₲ ${formatPYG(res.monto_neto).replace('₲ ', '')} (${res.estado === 'pagado' ? 'Liquidada' : 'Aguardando Desembolso'}).`
-      )
-      setModalNominaOPOpen(false)
-    } catch (err: any) {
-      toast.error("Error al emitir OP", err.message || String(err))
-    } finally {
-      setSavingNominaOP(false)
-    }
-  }
 
   // Abrir modal de OP / Compensación para un Finiquito específico
   const handleOpenFiniquitoOPModal = (settlement: any) => {
@@ -1162,20 +1092,10 @@ export default function SueldokPage() {
 
           {/* Acciones de cabecera */}
           <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
-            <select
-              value={selectedCompany.id}
-              onChange={(e) => {
-                const emp = EMPRESAS_DISPONIBLES.find((item) => item.id === e.target.value)
-                if (emp) setSelectedCompany(emp)
-              }}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700/80 text-xs font-bold transition shadow-sm outline-none cursor-pointer"
-            >
-              {EMPRESAS_DISPONIBLES.map((emp) => (
-                <option key={emp.id} value={emp.id} className="bg-slate-900 text-white">
-                  {emp.nombre}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800/80 text-slate-200 border border-slate-700/80 text-xs font-bold shadow-sm">
+              <Building className="w-4 h-4 text-emerald-400" />
+              <span>{selectedCompany.nombre}</span>
+            </div>
 
             <button
               onClick={() => fetchData(true)}
@@ -1314,17 +1234,11 @@ export default function SueldokPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-2">
         <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
           {[
-            { id: "payroll" as TabType, label: `Nómina & Haberes (${payrollItems.length})`, icon: Receipt },
-            { id: "settlements" as TabType, label: `Finiquitos Laborales (${allSettlements.length})`, icon: Briefcase },
-            { id: "novedades" as TabType, label: `Novedades & Descuentos (${advances.length + deductions.length})`, icon: PiggyBank },
-            { id: "personal" as TabType, label: `Personal & Asistencia (${employees.length})`, icon: Users },
-            { id: "dashboard" as TabType, label: "Analítica Estratégica", icon: Activity },
+            { id: "expediente" as TabType, label: "Expediente de Desembolso Multi-Fase", icon: Briefcase },
+            { id: "payroll" as TabType, label: `Planilla de Haberes (${payrollItems.length})`, icon: Receipt },
+            { id: "settlements" as TabType, label: `Finiquitos Laborales (${allSettlements.length})`, icon: Users },
           ].map(({ id, label, icon: Icon }) => {
-            const active =
-              tab === id ||
-              (id === "payroll" && tab === "expediente") ||
-              (id === "novedades" && (tab === "advances" || tab === "deductions")) ||
-              (id === "personal" && (tab === "asistencia" || tab === "funcionarios"))
+            const active = tab === id
             return (
               <button
                 key={id}
@@ -1971,15 +1885,7 @@ export default function SueldokPage() {
                 className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-purple-600/30"
               >
                 <Briefcase className="w-3.5 h-3.5" />
-                <span>Expediente de Desembolso Multi-Fase</span>
-              </button>
-              <button
-                onClick={handleOpenNominaOPModal}
-                disabled={payrollItems.length === 0}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-emerald-600/30 disabled:opacity-50"
-              >
-                <DollarSign className="w-3.5 h-3.5" />
-                <span>Emitir Orden de Pago (OP)</span>
+                <span>Gestionar Desembolsos en Expediente</span>
               </button>
             </div>
           </div>
@@ -2975,181 +2881,7 @@ export default function SueldokPage() {
         </div>
       )}
 
-      {/* ── MODAL: EMITIR ORDEN DE PAGO (OP) DE NÓMINA ── */}
-      {modalNominaOPOpen && (
-        <div
-          onClick={() => setModalNominaOPOpen(false)}
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto"
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <DollarSign className="w-5 h-5 text-emerald-500" /> Emitir Orden de Pago (OP) — Nómina de Salarios
-              </h3>
-              <button
-                onClick={() => setModalNominaOPOpen(false)}
-                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <div className="space-y-4 text-xs">
-              {/* Resumen Informativo */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-2">
-                <div className="font-bold text-slate-400 text-[10px] uppercase">Resumen de la Planilla a Afectar</div>
-                <div className="flex justify-between font-bold text-slate-700 dark:text-slate-300">
-                  <span>Período de Nómina:</span>
-                  <span className="font-mono text-indigo-500">{periodoNomina}</span>
-                </div>
-                <div className="flex justify-between text-slate-700 dark:text-slate-300">
-                  <span>Cantidad de Colaboradores:</span>
-                  <span className="font-mono font-bold">{payrollItems.length} funcionarios</span>
-                </div>
-                <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex justify-between font-black text-sm text-emerald-600 dark:text-emerald-400">
-                  <span>Monto Total Neto a Pagar:</span>
-                  <span className="font-mono text-base">{formatPYG(totalPayrollNet)}</span>
-                </div>
-              </div>
-
-              {/* Opciones de Desembolso */}
-              <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/80 dark:border-indigo-900/40 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-black text-slate-800 dark:text-slate-200 text-xs">Modo de Afectación en Tesorería</div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      ¿La nómina ya fue pagada o queda pendiente de liquidación para el tesorero?
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setNominaOPDesembolsoInmediato(false)}
-                    className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-                      !nominaOPDesembolsoInmediato
-                        ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
-                        : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
-                    }`}
-                  >
-                    <div className="font-bold text-xs">🟡 Aguardar Desembolso</div>
-                    <div className="text-[10px] opacity-80 mt-0.5">Queda en estado "Aguardando Pago" para tesorería.</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNominaOPDesembolsoInmediato(true)}
-                    className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-                      nominaOPDesembolsoInmediato
-                        ? "bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                        : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
-                    }`}
-                  >
-                    <div className="font-bold text-xs">🟢 Liquidar Inmediato</div>
-                    <div className="text-[10px] opacity-80 mt-0.5">Debita banco o caja y marca OP como Pagada.</div>
-                  </button>
-                </div>
-
-                {nominaOPDesembolsoInmediato && (
-                  <div className="space-y-3 pt-2 border-t border-indigo-100 dark:border-indigo-900/40">
-                    <div>
-                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Medio de Pago</label>
-                      <select
-                        value={nominaOPMetodoPago}
-                        onChange={(e) => setNominaOPMetodoPago(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
-                      >
-                        <option value="transferencia_sipap">Transferencia Bancaria (SIPAP / Lote Salarios)</option>
-                        <option value="boveda">Bóveda Central (Efectivo Tesorería)</option>
-                        <option value="cheque">Cheque Bancario</option>
-                        <option value="fondo_fijo">Fondo Fijo (Caja Chica)</option>
-                      </select>
-                    </div>
-
-                    {(nominaOPMetodoPago === "transferencia_sipap" || nominaOPMetodoPago === "cheque") && (
-                      <div>
-                        <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Cuenta Bancaria de Origen *</label>
-                        <select
-                          value={nominaOPBankAccountId}
-                          onChange={(e) => setNominaOPBankAccountId(e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
-                        >
-                          <option value="">Seleccione cuenta bancaria…</option>
-                          {bankAccounts.map((b) => (
-                            <option key={b.id} value={b.id}>
-                              {b.banco} — {b.numero_cuenta} ({b.moneda || "PYG"}) · Saldo: {formatPYG(b.saldo_actual || 0)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {nominaOPMetodoPago === "fondo_fijo" && (
-                      <div>
-                        <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Fondo Fijo (Caja Chica) *</label>
-                        <select
-                          value={nominaOPPettyCashFundId}
-                          onChange={(e) => setNominaOPPettyCashFundId(e.target.value)}
-                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
-                        >
-                          <option value="">Seleccione fondo fijo…</option>
-                          {pettyCashFunds.map((f) => (
-                            <option key={f.id} value={f.id}>
-                              {f.nombre} · Saldo Disponible: {formatPYG(f.saldo_actual || 0)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-
-                    <div>
-                      <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">N° Referencia / Lote SIPAP</label>
-                      <input
-                        type="text"
-                        value={nominaOPReferencia}
-                        onChange={(e) => setNominaOPReferencia(e.target.value)}
-                        placeholder="Ej: LOTE-SIPAP-SEP26"
-                        className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-900 dark:text-white"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Observaciones / Concepto de Tesorería</label>
-                <textarea
-                  rows={2}
-                  value={nominaOPObservaciones}
-                  onChange={(e) => setNominaOPObservaciones(e.target.value)}
-                  className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                onClick={() => setModalNominaOPOpen(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleConfirmarNominaOP}
-                disabled={savingNominaOP || totalPayrollNet <= 0}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition-all shadow-md cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {savingNominaOP ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <DollarSign className="w-3.5 h-3.5" />}
-                <span>Emitir Orden de Pago</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── MODAL: EMITIR ORDEN DE PAGO (OP) DE FINIQUITO ── */}
       {modalFiniquitoOPOpen && selectedSettlementForOP && (

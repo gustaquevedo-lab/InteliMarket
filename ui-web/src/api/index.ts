@@ -4084,34 +4084,6 @@ export const api = {
     syncPayroll: (data: unknown) => client.post<any>("/v1/sueldok/sync/payroll", data),
     syncCommissions: (companyId: string, periodo: string) => client.post<any>("/v1/sueldok/sync/sales-commissions", { company_id: companyId, periodo }),
     events: () => client.get<string[]>("/v1/sueldok/events"),
-    generatePayrollPaymentOrder: (data: {
-      periodo: string
-      total_neto?: number
-      monto_neto?: number
-      colaboradores_count?: number
-      cantidad_funcionarios?: number
-      observaciones?: string
-      liquidar_inmediato?: boolean
-      desembolso_inmediato?: boolean
-      forma_pago?: string
-      metodo_pago?: string
-      bank_account_id?: string
-      referencia?: string
-      referencia_transferencia?: string
-      numero_cheque?: string
-      banco_cheque?: string
-      petty_cash_fund_id?: string
-      fecha_pago?: string
-      sueldok_run_id?: string
-    }) => client.post<SupplierPaymentOrder>(`/v1/sueldok/payroll-payment-order?company_id=${COMPANY_ID}`, {
-
-      ...data,
-      total_neto: data.total_neto ?? data.monto_neto,
-      colaboradores_count: data.colaboradores_count ?? data.cantidad_funcionarios,
-      liquidar_inmediato: data.liquidar_inmediato ?? data.desembolso_inmediato,
-      forma_pago: data.forma_pago ?? data.metodo_pago,
-      referencia_transferencia: data.referencia_transferencia ?? data.referencia,
-    }),
     createSettlement: (data: any) => {
       const salario = Number(data.salario_base ?? data.salario_mes_monto ?? 0)
       const vacaciones = Number(data.vacaciones_monto ?? data.vacaciones_causadas_monto ?? 0)
