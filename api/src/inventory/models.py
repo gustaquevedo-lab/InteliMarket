@@ -40,7 +40,7 @@ class Warehouse(Base):
     __tablename__ = "warehouses"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    company_id = Column(UUID(as_uuid=True), nullable=False)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     branch_id = Column(UUID(as_uuid=True))
     parent_id = Column(UUID(as_uuid=True), ForeignKey("warehouses.id"), nullable=True)
     codigo = Column(String(20), nullable=False)
@@ -98,9 +98,9 @@ class InventoryMovement(Base):
     __tablename__ = "inventory_movements"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    company_id = Column(UUID(as_uuid=True), nullable=False)
-    warehouse_id = Column(UUID(as_uuid=True), nullable=False)
-    product_id = Column(UUID(as_uuid=True), nullable=False)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    warehouse_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    product_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     variant_id = Column(UUID(as_uuid=True))
     tipo = Column(String(30), nullable=False)
     cantidad = Column(Integer, nullable=False)
@@ -109,7 +109,7 @@ class InventoryMovement(Base):
     referencia_id = Column(UUID(as_uuid=True))
     motivo = Column(Text)
     user_id = Column(UUID(as_uuid=True))
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ class StockTransfer(Base):
     __tablename__ = "stock_transfers"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    company_id = Column(UUID(as_uuid=True), nullable=False)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     codigo = Column(String(20), nullable=False, unique=True)
     warehouse_origen_id = Column(UUID(as_uuid=True), nullable=False)
     warehouse_destino_id = Column(UUID(as_uuid=True), nullable=False)
@@ -137,8 +137,8 @@ class StockTransferItem(Base):
     __tablename__ = "stock_transfer_items"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    transfer_id = Column(UUID(as_uuid=True), ForeignKey("stock_transfers.id"), nullable=False)
-    product_id = Column(UUID(as_uuid=True), nullable=False)
+    transfer_id = Column(UUID(as_uuid=True), ForeignKey("stock_transfers.id"), nullable=False, index=True)
+    product_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     variant_id = Column(UUID(as_uuid=True))
     cantidad_enviada = Column(Integer, nullable=False)
     cantidad_recibida = Column(Integer)
@@ -232,8 +232,8 @@ class InventoryAdjustmentItem(Base):
     __tablename__ = "inventory_adjustment_items"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    adjustment_id = Column(UUID(as_uuid=True), ForeignKey("inventory_adjustments.id"), nullable=False)
-    product_id = Column(UUID(as_uuid=True), nullable=False)
+    adjustment_id = Column(UUID(as_uuid=True), ForeignKey("inventory_adjustments.id"), nullable=False, index=True)
+    product_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     variant_id = Column(UUID(as_uuid=True))
     product_nombre = Column(String(200))  # desnormalizado
     product_sku = Column(String(60))      # desnormalizado

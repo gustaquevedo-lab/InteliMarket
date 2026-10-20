@@ -821,38 +821,75 @@ async def list_movements(
     from datetime import date as date_type
 
     comp_uuid = uuid.UUID(company_id) if isinstance(company_id, str) else company_id
-    # product_id/warehouse_id SI van en el filtro interno -- solo acotan que
-    # particion calcular, no alteran el saldo en si. tipo y el rango de
-    # fecha van SOLO en el filtro externo: si fueran internos, dejar afuera
-    # una ENTRADA o los movimientos previos a fecha_desde arruinaria el
-    # saldo acumulado (mostraria un "saldo" que arranca de cero en la
-    # fecha filtrada, no el stock real que habia en ese momento).
-    inner_where = "im.company_id = :comp_id"
     params: dict = {"comp_id": comp_uuid, "limit": limit, "offset": offset}
 
     if product_id:
-        inner_where += " AND im.product_id = :prod_id"
+        # Modo Kardex de Producto: calculo de saldo acumulado particionado para ese SKU
+        inner_where = "im.company_id = :comp_id AND im.product_id = :prod_id"
         params["prod_id"] = uuid.UUID(product_id) if isinstance(product_id, str) else product_id
-    if warehouse_id:
-        inner_where += " AND im.warehouse_id = :wh_id"
-        params["wh_id"] = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
+        if warehouse_id:
+            inner_where += " AND im.warehouse_id = :wh_id"
+            params["wh_id"] = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
 
-    outer_where = "1=1"
-    if tipo:
-        outer_where += " AND sub.tipo = :tipo"
-        params["tipo"] = tipo
-    if search and search.strip():
-        outer_where += " AND (sub.product_nombre ILIKE :search OR sub.product_sku ILIKE :search OR sub.motivo ILIKE :search)"
-        params["search"] = f"%{search.strip()}%"
-    if fecha_desde:
-        outer_where += " AND sub.created_at >= CAST(:fecha_desde AS date)"
-        params["fecha_desde"] = date_type.fromisoformat(fecha_desde)
-    if fecha_hasta:
-        outer_where += " AND sub.created_at < (CAST(:fecha_hasta AS date) + interval '1 day')"
-        params["fecha_hasta"] = date_type.fromisoformat(fecha_hasta)
+        outer_where = "1=1"
+        if tipo:
+            outer_where += " AND sub.tipo = :tipo"
+            params["tipo"] = tipo
+        if search and search.strip():
+            outer_where += " AND (sub.product_nombre ILIKE :search OR sub.product_sku ILIKE :search OR sub.motivo ILIKE :search)"
+            params["search"] = f"%{search.strip()}%"
+        if fecha_desde:
+            outer_where += " AND sub.created_at >= CAST(:fecha_desde AS date)"
+            params["fecha_desde"] = date_type.fromisoformat(fecha_desde)
+        if fecha_hasta:
+            outer_where += " AND sub.created_at < (CAST(:fecha_hasta AS date) + interval '1 day')"
+            params["fecha_hasta"] = date_type.fromisoformat(fecha_hasta)
 
-    query = f"""
-        SELECT * FROM (
+        query = f"""
+            SELECT * FROM (
+                SELECT
+                    im.id, im.company_id, im.warehouse_id, im.product_id, im.variant_id,
+                    im.tipo, im.cantidad, im.costo_unitario, im.referencia_type, im.referencia_id,
+                    im.motivo, im.user_id, im.created_at,
+                    p.nombre as product_nombre, p.sku as product_sku,
+                    w.nombre as warehouse_nombre, w.codigo as warehouse_codigo,
+                    u.nombre as user_nombre,
+                    SUM(im.cantidad) OVER (
+                        PARTITION BY im.product_id, im.warehouse_id
+                        ORDER BY im.created_at, im.id
+                    ) AS saldo_acumulado
+                FROM inventory_movements im
+                LEFT JOIN products p ON p.id = im.product_id
+                LEFT JOIN warehouses w ON w.id = im.warehouse_id
+                LEFT JOIN users u ON u.id = im.user_id
+                WHERE {inner_where}
+            ) sub
+            WHERE {outer_where}
+            ORDER BY sub.created_at DESC
+            LIMIT :limit OFFSET :offset
+        """
+    else:
+        # Modo Historial General: directo sobre indices (ix_inventory_movements_comp_created / comp_tipo_created)
+        # sin costo de window function global sobre ~1M de filas
+        direct_where = ["im.company_id = :comp_id"]
+        if warehouse_id:
+            direct_where.append("im.warehouse_id = :wh_id")
+            params["wh_id"] = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
+        if tipo:
+            direct_where.append("im.tipo = :tipo")
+            params["tipo"] = tipo
+        if fecha_desde:
+            direct_where.append("im.created_at >= CAST(:fecha_desde AS date)")
+            params["fecha_desde"] = date_type.fromisoformat(fecha_desde)
+        if fecha_hasta:
+            direct_where.append("im.created_at < (CAST(:fecha_hasta AS date) + interval '1 day')")
+            params["fecha_hasta"] = date_type.fromisoformat(fecha_hasta)
+        if search and search.strip():
+            direct_where.append("(p.nombre ILIKE :search OR p.sku ILIKE :search OR im.motivo ILIKE :search)")
+            params["search"] = f"%{search.strip()}%"
+
+        where_clause = " AND ".join(direct_where)
+        query = f"""
             SELECT
                 im.id, im.company_id, im.warehouse_id, im.product_id, im.variant_id,
                 im.tipo, im.cantidad, im.costo_unitario, im.referencia_type, im.referencia_id,
@@ -860,20 +897,15 @@ async def list_movements(
                 p.nombre as product_nombre, p.sku as product_sku,
                 w.nombre as warehouse_nombre, w.codigo as warehouse_codigo,
                 u.nombre as user_nombre,
-                SUM(im.cantidad) OVER (
-                    PARTITION BY im.product_id, im.warehouse_id
-                    ORDER BY im.created_at, im.id
-                ) AS saldo_acumulado
+                NULL::numeric AS saldo_acumulado
             FROM inventory_movements im
             LEFT JOIN products p ON p.id = im.product_id
             LEFT JOIN warehouses w ON w.id = im.warehouse_id
             LEFT JOIN users u ON u.id = im.user_id
-            WHERE {inner_where}
-        ) sub
-        WHERE {outer_where}
-        ORDER BY sub.created_at DESC
-        LIMIT :limit OFFSET :offset
-    """
+            WHERE {where_clause}
+            ORDER BY im.created_at DESC
+            LIMIT :limit OFFSET :offset
+        """
     result = await db.execute(text(query), params)
     return [dict(r._mapping) for r in result]
 

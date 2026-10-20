@@ -14,7 +14,7 @@ class ProductCategory(Base):
     __tablename__ = "product_categories"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    company_id = Column(UUID(as_uuid=True), nullable=False)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     parent_id = Column(UUID(as_uuid=True), ForeignKey("product_categories.id"))
     nombre = Column(String(100), nullable=False)
     codigo = Column(String(20), unique=True)
