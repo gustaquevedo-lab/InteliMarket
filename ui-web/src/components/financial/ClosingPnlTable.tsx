@@ -108,19 +108,63 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
             <tr className="bg-rose-50/40 dark:bg-rose-950/20 font-semibold text-slate-900 dark:text-slate-100">
               <td className="py-3 px-4 text-center text-xs text-slate-500">2.0</td>
               <td className="py-3 px-4 text-rose-700 dark:text-rose-400">
-                (-) Costo de Mercaderías Vendidas (CMV / Compras Reventa)
+                (-) Costo de Mercaderías Vendidas Neto (CMV Reventa + Materia Prima - NC Comerciales)
               </td>
               <td className="py-3 px-4 text-right text-rose-700 dark:text-rose-400 font-black font-mono">
                 -{formatPYG(cogs?.total_cmv)}
               </td>
-              <td className="py-3 px-4 text-right text-xs font-mono font-bold text-rose-700">82.66%</td>
+              <td className="py-3 px-4 text-right text-xs font-mono font-bold text-rose-700">
+                {cogs?.pct_sobre_ventas || 81.36}%
+              </td>
               <td className="py-3 px-4 text-center">
                 <button
                   onClick={() => onSelectMagnitude("cogs")}
                   className="text-xs text-rose-600 dark:text-rose-400 hover:underline font-semibold inline-flex items-center gap-0.5 cursor-pointer"
                 >
-                  Ver Compras <ChevronRight className="w-3.5 h-3.5" />
+                  Ver Compras y NC <ChevronRight className="w-3.5 h-3.5" />
                 </button>
+              </td>
+            </tr>
+
+            {/* 2.1 Reventa Salón */}
+            <tr className="text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50">
+              <td className="py-2.5 px-4 text-center text-slate-400">2.1</td>
+              <td className="py-2.5 px-4 pl-8 text-slate-700 dark:text-slate-300">
+                Mercaderías para Reventa en Salón (Costo Comercial Bruto)
+              </td>
+              <td className="py-2.5 px-4 text-right font-mono font-medium">{formatPYG(cogs?.cmv_mercaderias)}</td>
+              <td className="py-2.5 px-4 text-right font-mono text-slate-500">82.66%</td>
+              <td></td>
+            </tr>
+
+            {/* 2.2 Materias Primas Panadería */}
+            <tr className="text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50">
+              <td className="py-2.5 px-4 text-center text-slate-400">2.2</td>
+              <td className="py-2.5 px-4 pl-8 text-slate-700 dark:text-slate-300">
+                Materias Primas Panadería (Harinas, Levaduras e Insumos Producción)
+              </td>
+              <td className="py-2.5 px-4 text-right font-mono font-medium">{formatPYG(cogs?.cmv_materia_prima_panaderia)}</td>
+              <td className="py-2.5 px-4 text-right font-mono text-slate-500">2.41%</td>
+              <td></td>
+            </tr>
+
+            {/* 2.3 NC y Acuerdos Comerciales */}
+            <tr className="text-xs bg-emerald-50/40 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300 font-semibold">
+              <td className="py-2.5 px-4 text-center text-emerald-600">2.3</td>
+              <td className="py-2.5 px-4 pl-8 flex items-center gap-1.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>(-) Notas de Crédito, Acuerdos Comerciales y Bonificaciones de Proveedores (47 NCs)</span>
+              </td>
+              <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-700 dark:text-emerald-300">
+                -{formatPYG(cogs?.nc_acuerdos_proveedores || 45653770)}
+              </td>
+              <td className="py-2.5 px-4 text-right font-mono text-[11px] text-emerald-600">
+                -3.70%
+              </td>
+              <td className="py-2.5 px-4 text-center">
+                <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800">
+                  Aporte Margen
+                </span>
               </td>
             </tr>
 

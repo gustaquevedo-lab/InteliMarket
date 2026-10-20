@@ -286,14 +286,20 @@ async def execute_third_party_phase(
     total_monto = float(phase.monto or 0)
     periodo = phase.dossier.periodo if phase.dossier else "2026-10"
 
-    # 1. Create SupplierPaymentOrder
+    # 1. Create SupplierPaymentOrder (considerando si incluye factura institucional)
+    total_banco = float(metadata.get("total_transferencia_banco") or 0)
+    gasto_factura = float(metadata.get("gasto_institucional_factura") or 0)
+    factura_num = metadata.get("factura_numero")
+    monto_op = total_banco if total_banco > 0 else total_monto
+    obs_extra = f" (Incluye Factura Gasto N° {factura_num} por ₲ {gasto_factura:,.0f} | Retenciones: ₲ {total_monto:,.0f} | Total Transferencia: ₲ {monto_op:,.0f})" if gasto_factura > 0 else ""
+
     op_payload = SupplierPaymentOrderCreate(
         subtipo="convenio_tercero",
         beneficiario_nombre=third_party_name,
         beneficiario_documento=third_party_ruc,
         periodo_nomina=periodo,
-        monto_neto=Decimal(str(int(total_monto))),
-        observaciones=f"Pago consolidado retenciones convenio {third_party_name} - Nómina {periodo} ({len(employees)} funcionarios)",
+        monto_neto=Decimal(str(int(monto_op))),
+        observaciones=f"Pago consolidado convenio {third_party_name} - Nómina {periodo} ({len(employees)} funcionarios){obs_extra}",
         sueldok_sync_id=str(phase.id)
     )
     op_result = await financial_service.create_supplier_payment_order(

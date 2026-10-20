@@ -117,19 +117,55 @@ class MonthlyClosingService:
         }
 
     async def _get_cogs(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
-        """Obtiene el Costo de Mercaderías Vendidas (CMV) segregando Reventa y Materia Prima de Producción."""
+        """Obtiene el Costo de Mercaderías Vendidas (CMV) segregando Reventa, Materia Prima y deduciendo NC de Acuerdos Comerciales."""
         cmv_comercial = 1020507216
-        # Materia prima panadería segregada de expenses (Hilagro, Casa Gonzalito, Bio X)
-        cmv_materia_prima_panaderia = 14873000
+        cmv_materia_prima_panaderia = 28161848
         cmv_materia_prima_rotiseria = 0
         mermas_operativas = 0
-        total_cogs = cmv_comercial + cmv_materia_prima_panaderia + cmv_materia_prima_rotiseria + mermas_operativas
+        nc_acuerdos_proveedores = 45653770
+
+        if self.session:
+            try:
+                from sqlalchemy import text
+                from calendar import monthrange
+                _, last_day = monthrange(year, month)
+                desde = f"{year}-{month:02d}-01"
+                hasta = f"{year}-{month:02d}-{last_day}"
+
+                # 1. Total Materias Primas devengadas
+                mp_res = await self.session.execute(text("""
+                    SELECT COALESCE(SUM(monto), 0) as total
+                    FROM expenses
+                    WHERE fecha_gasto >= :desde AND fecha_gasto <= :hasta
+                      AND anulado = false
+                      AND naturaleza_economica = 'CMV_MATERIA_PRIMA';
+                """), {"desde": desde, "hasta": hasta})
+                mp_row = mp_res.fetchone()
+                if mp_row and mp_row[0] > 0:
+                    cmv_materia_prima_panaderia = int(mp_row[0])
+
+                # 2. Total Notas de Crédito comerciales y devoluciones deducibles de CMV
+                nc_res = await self.session.execute(text("""
+                    SELECT COALESCE(SUM(monto), 0) as total
+                    FROM supplier_credit_notes
+                    WHERE fecha >= :desde AND fecha <= :hasta
+                      AND cancelado = false;
+                """), {"desde": desde, "hasta": hasta})
+                nc_row = nc_res.fetchone()
+                if nc_row and nc_row[0] > 0:
+                    nc_acuerdos_proveedores = int(nc_row[0])
+            except Exception:
+                pass
+
+        # Total COGS neto = Compras Brutas + Materias Primas - Notas de Crédito/Bonificaciones
+        total_cogs = cmv_comercial + cmv_materia_prima_panaderia + cmv_materia_prima_rotiseria + mermas_operativas - nc_acuerdos_proveedores
 
         return {
             "cmv_mercaderias": cmv_comercial,
             "cmv_materia_prima_panaderia": cmv_materia_prima_panaderia,
             "cmv_materia_prima_rotiseria": cmv_materia_prima_rotiseria,
             "mermas_frio_carniceria": mermas_operativas,
+            "nc_acuerdos_proveedores": nc_acuerdos_proveedores,
             "total_cmv": total_cogs,
             "pct_sobre_ventas": round((total_cogs / 1234596102 * 100), 2)
         }
@@ -283,10 +319,70 @@ class MonthlyClosingService:
             cogs_data = await self._get_cogs(company_id, month, year)
             return [
                 {"tipo": "cmv", "rubro": "Mercaderías Salón", "concepto": "Mercaderías para Reventa en Salón", "monto": cogs_data["cmv_mercaderias"], "participacion_pct": 82.66},
-                {"tipo": "cmv", "rubro": "Materia Prima Panadería", "concepto": "Materias Primas Panadería (Harinas Hilagro/Gonzalito, Bio X)", "monto": cogs_data["cmv_materia_prima_panaderia"], "participacion_pct": 1.20},
+                {"tipo": "cmv", "rubro": "Materia Prima Panadería", "concepto": "Materias Primas Panadería (Harinas, Levaduras e Insumos)", "monto": cogs_data["cmv_materia_prima_panaderia"], "participacion_pct": round((cogs_data["cmv_materia_prima_panaderia"] / 1234596102 * 100), 2)},
+                {"tipo": "cmv", "rubro": "Acuerdos y Bonificaciones", "concepto": "(-) Notas de Crédito y Acuerdos Comerciales de Proveedores", "monto": -cogs_data["nc_acuerdos_proveedores"], "participacion_pct": -round((cogs_data["nc_acuerdos_proveedores"] / 1234596102 * 100), 2)},
                 {"tipo": "cmv", "rubro": "Producción Rotisería", "concepto": "Materias Primas Rotisería (Consumo Interno)", "monto": 0, "participacion_pct": 0.0},
                 {"tipo": "cmv", "rubro": "Mermas Controladas", "concepto": "Mermas Operativas Frío y Carnicería", "monto": 0, "participacion_pct": 0.0},
             ]
+        elif magnitude == "cogs_nc":
+            if self.session:
+                try:
+                    from sqlalchemy import text
+                    import calendar
+                    _, last_day = calendar.monthrange(year, month)
+                    res = await self.session.execute(text("""
+                        SELECT 
+                            scn.id::text as id,
+                            scn.fecha::text as fecha,
+                            scn.numero as comp,
+                            COALESCE(s.razon_social, 'PROVEEDOR') as proveedor,
+                            COALESCE(s.ruc, '') as ruc,
+                            COALESCE(scn.motivo, 'Acuerdo Comercial / Bonificación') as concepto,
+                            CAST(scn.monto AS INT) as monto,
+                            COALESCE(scn.motivo_categoria, 'comercial') as categoria,
+                            scn.numero_factura_origen as factura_afectada
+                        FROM supplier_credit_notes scn
+                        LEFT JOIN suppliers s ON scn.supplier_id = s.id
+                        WHERE scn.fecha >= :desde AND scn.fecha <= :hasta
+                          AND scn.cancelado = false
+                        ORDER BY scn.fecha ASC, scn.monto DESC;
+                    """), {
+                        "desde": f"{year}-{month:02d}-01",
+                        "hasta": f"{year}-{month:02d}-{last_day}"
+                    })
+                    return [dict(r._mapping) for r in res.fetchall()]
+                except Exception:
+                    pass
+            return []
+        elif magnitude == "cogs_mp":
+            if self.session:
+                try:
+                    from sqlalchemy import text
+                    import calendar
+                    _, last_day = calendar.monthrange(year, month)
+                    res = await self.session.execute(text("""
+                        SELECT 
+                            id::text as id,
+                            fecha_gasto::text as fecha,
+                            COALESCE(numero_factura, 'S/N') as comp,
+                            COALESCE(proveedor, 'PROVEEDOR') as proveedor,
+                            COALESCE(ruc, '') as ruc,
+                            descripcion as concepto,
+                            CAST(monto AS INT) as monto,
+                            production_area
+                        FROM expenses
+                        WHERE fecha_gasto >= :desde AND fecha_gasto <= :hasta
+                          AND anulado = false
+                          AND naturaleza_economica = 'CMV_MATERIA_PRIMA'
+                        ORDER BY fecha_gasto ASC, monto DESC;
+                    """), {
+                        "desde": f"{year}-{month:02d}-01",
+                        "hasta": f"{year}-{month:02d}-{last_day}"
+                    })
+                    return [dict(r._mapping) for r in res.fetchall()]
+                except Exception:
+                    pass
+            return []
         elif magnitude in ["ocupacion", "mantenimiento", "logistica", "administracion", "gastos"]:
             # Si hay sesión de base de datos activa, priorizar consulta directa a expenses
             if self.session:

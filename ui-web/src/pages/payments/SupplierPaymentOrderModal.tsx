@@ -134,10 +134,11 @@ export default function SupplierPaymentOrderModal({
 
   // Inicializar facturas
   useEffect(() => {
-    if (existingOrder && existingOrder.allocations) {
+    if (existingOrder) {
       // Si estamos liquidando una orden existente registrada
       const map: Record<string, any> = {}
-      existingOrder.allocations.forEach((a: any) => {
+      if (existingOrder.allocations && Array.isArray(existingOrder.allocations)) {
+        existingOrder.allocations.forEach((a: any) => {
         const numAplicado = Number(a.monto_aplicado) || 0
         const saldoAnt = Number(a.saldo_anterior) || 0
         const sumNc = (a.notas_credito && Array.isArray(a.notas_credito))
@@ -165,6 +166,7 @@ export default function SupplierPaymentOrderModal({
           monto_retencion: Number(a.monto_retencion) || 0,
         }
       })
+      }
       if (existingOrder.diferencia_cambio) {
         const diff = Number(existingOrder.diferencia_cambio) || 0
         setAjusteSigno(diff < 0 ? "-" : "+")
@@ -345,17 +347,30 @@ export default function SupplierPaymentOrderModal({
     }
   }, [supplierInvoices, availableInvoices])
 
-  // Totales calculados de facturas
+  // Totales calculados de facturas o de la orden existente (RH / Nómina / Convenios)
   const summaryFacturas = useMemo(() => {
     let subtotal = 0
     let retenciones = 0
-    Object.values(selectedInvoicesMap).forEach(item => {
-      subtotal += Number(item.monto_aplicado || 0)
-      retenciones += Number(item.monto_retencion || 0)
-    })
-    const neto = Math.max(0, subtotal - retenciones + ajusteRedondeo)
-    return { subtotal, retenciones, neto, ajusteRedondeo }
-  }, [selectedInvoicesMap, ajusteRedondeo])
+    const hasAllocations = Object.keys(selectedInvoicesMap).length > 0
+    if (hasAllocations) {
+      Object.values(selectedInvoicesMap).forEach(item => {
+        subtotal += Number(item.monto_aplicado || 0)
+        retenciones += Number(item.monto_retencion || 0)
+      })
+      const neto = Math.max(0, subtotal - retenciones + ajusteRedondeo)
+      return { subtotal, retenciones, neto, ajusteRedondeo }
+    }
+
+    if (existingOrder) {
+      const orderNeto = Number(existingOrder.monto_neto !== undefined && existingOrder.monto_neto !== null ? existingOrder.monto_neto : (existingOrder.monto_total || 0))
+      const orderRetenciones = Number(existingOrder.monto_retenido || 0)
+      const orderTotal = Number(existingOrder.monto_total || orderNeto)
+      const neto = Math.max(0, orderNeto + ajusteRedondeo)
+      return { subtotal: orderTotal, retenciones: orderRetenciones, neto, ajusteRedondeo }
+    }
+
+    return { subtotal: 0, retenciones: 0, neto: 0, ajusteRedondeo }
+  }, [selectedInvoicesMap, ajusteRedondeo, existingOrder])
 
   const allocatedInvoicesList = useMemo(() => {
     return Object.values(selectedInvoicesMap)
@@ -499,7 +514,7 @@ export default function SupplierPaymentOrderModal({
 
   // Inicializar un renglón de desembolso por defecto si pasa a step 2
   const handleGoToStep2 = () => {
-    if (Object.keys(selectedInvoicesMap).length === 0) {
+    if (Object.keys(selectedInvoicesMap).length === 0 && !existingOrder) {
       toast.error("Seleccione al menos una factura", "Debe amortizar al menos una factura.")
       return
     }
@@ -829,9 +844,9 @@ export default function SupplierPaymentOrderModal({
           fecha_pago: fechaPago,
           recibo_proveedor: reciboProveedor || undefined,
           observaciones: observaciones || undefined,
-          allocations,
+          allocations: allocations.length > 0 ? allocations : undefined,
           disbursements: sanitizedDisbursements,
-          legal_invoices: validLegalInvoices.length > 0 ? validLegalInvoices : undefined,
+          legal_invoices: validLegalInvoices && validLegalInvoices.length > 0 ? validLegalInvoices : undefined,
           diferencia_redondeo: ajusteRedondeo || 0,
         })
         toast.success("Orden de Pago Liquidada", `Se desembolsó exitosamente la orden ${res.numero_orden}. Fondos y saldos actualizados.`)

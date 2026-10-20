@@ -181,66 +181,82 @@ export default function SupplierPaymentOrderDetailModal({
         {/* DETALLE SCROLLABLE */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5">
           
-          {/* 1. FACTURAS AMORTIZADAS */}
+          {/* 1. FACTURAS AMORTIZADAS O CONCEPTO DE NÓMINA / CONVENIOS */}
           <div className="space-y-2">
             <h3 className="text-xs font-extrabold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
-              <FileText className="w-4 h-4 text-rose-500" /> Facturas Amortizadas
+              <FileText className="w-4 h-4 text-rose-500" />
+              {order.allocations && order.allocations.length > 0 ? "Facturas Amortizadas" : "Concepto de la Orden"}
             </h3>
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 dark:bg-slate-850 text-slate-500 uppercase text-[10px] font-extrabold border-b border-slate-200 dark:border-slate-800">
-                  <tr>
-                    <th className="p-2.5">Factura / Timbrado</th>
-                    <th className="p-2.5 text-right">Monto Original</th>
-                    <th className="p-2.5 text-right">NCs Deducidas</th>
-                    <th className="p-2.5 text-right">Saldo Anterior</th>
-                    <th className="p-2.5 text-right">Retención</th>
-                    <th className="p-2.5 text-right">Amortizado</th>
-                    <th className="p-2.5 text-right">Saldo Restante</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
-                  {order.allocations?.map((a: any) => {
-                    const mOrig = Number(a.monto_factura_original || (Number(a.saldo_anterior || 0) + Number(a.monto_aplicado || 0)))
-                    const ncsList = Array.isArray(a.notas_credito) ? a.notas_credito : []
-                    const sumNc = ncsList.reduce((acc: number, nc: any) => acc + (Number(nc.monto_aplicado) || 0), 0) || Number(a.total_nc_aplicadas || 0)
-                    const sAnt = Number(a.saldo_anterior || 0)
-                    const ncFinal = sumNc > 0 ? sumNc : (mOrig > sAnt && (mOrig - sAnt) > 10 ? (mOrig - sAnt) : 0)
 
-                    return (
-                      <tr key={a.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
-                        <td className="p-2.5 font-bold text-slate-900 dark:text-white">
-                          <div>{a.numero_factura || "-"}</div>
-                          <div className="text-[10px] text-slate-400 font-normal">Timb: {a.timbrado || "-"}</div>
-                        </td>
-                        <td className="p-2.5 text-right text-slate-700 dark:text-slate-300 font-bold">{formatPYG(mOrig)}</td>
-                        <td className="p-2.5 text-right">
-                          {ncsList.length > 0 ? (
-                            <div className="space-y-0.5">
-                              {ncsList.map((nc: any, idx: number) => (
-                                <span key={idx} className="inline-block text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900/60">
-                                  NC {nc.numero}: -{formatPYG(nc.monto_aplicado)}
-                                </span>
-                              ))}
-                            </div>
-                          ) : ncFinal > 0 ? (
-                            <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900/60">
-                              -{formatPYG(ncFinal)}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 font-sans">—</span>
-                          )}
-                        </td>
-                        <td className="p-2.5 text-right text-slate-600 dark:text-slate-400">{formatPYG(a.saldo_anterior)}</td>
-                        <td className="p-2.5 text-right text-slate-600 dark:text-slate-400">{formatPYG(a.monto_retencion)}</td>
-                        <td className="p-2.5 text-right font-black text-rose-600 dark:text-rose-400">{formatPYG(a.monto_aplicado)}</td>
-                        <td className="p-2.5 text-right text-slate-500">{formatPYG(a.saldo_restante)}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+            {(!order.allocations || order.allocations.length === 0) ? (
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-900 dark:text-white uppercase">
+                    {order.subtipo ? `Orden de Pago por ${order.subtipo.replace(/_/g, " ")}` : "Orden de Pago Recursos Humanos"}
+                  </span>
+                  <span className="font-mono font-black text-rose-600 dark:text-rose-400 text-sm">
+                    {formatPYG(order.monto_neto)}
+                  </span>
+                </div>
+                <p className="text-slate-500">{order.observaciones || `Beneficiario: ${order.beneficiario_nombre || order.supplier_nombre}`}</p>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-850 text-slate-500 uppercase text-[10px] font-extrabold border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="p-2.5">Factura / Timbrado</th>
+                      <th className="p-2.5 text-right">Monto Original</th>
+                      <th className="p-2.5 text-right">NCs Deducidas</th>
+                      <th className="p-2.5 text-right">Saldo Anterior</th>
+                      <th className="p-2.5 text-right">Retención</th>
+                      <th className="p-2.5 text-right">Amortizado</th>
+                      <th className="p-2.5 text-right">Saldo Restante</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-mono">
+                    {order.allocations?.map((a: any) => {
+                      const mOrig = Number(a.monto_factura_original || (Number(a.saldo_anterior || 0) + Number(a.monto_aplicado || 0)))
+                      const ncsList = Array.isArray(a.notas_credito) ? a.notas_credito : []
+                      const sumNc = ncsList.reduce((acc: number, nc: any) => acc + (Number(nc.monto_aplicado) || 0), 0) || Number(a.total_nc_aplicadas || 0)
+                      const sAnt = Number(a.saldo_anterior || 0)
+                      const ncFinal = sumNc > 0 ? sumNc : (mOrig > sAnt && (mOrig - sAnt) > 10 ? (mOrig - sAnt) : 0)
+
+                      return (
+                        <tr key={a.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40">
+                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">
+                            <div>{a.numero_factura || "-"}</div>
+                            <div className="text-[10px] text-slate-400 font-normal">Timb: {a.timbrado || "-"}</div>
+                          </td>
+                          <td className="p-2.5 text-right text-slate-700 dark:text-slate-300 font-bold">{formatPYG(mOrig)}</td>
+                          <td className="p-2.5 text-right">
+                            {ncsList.length > 0 ? (
+                              <div className="space-y-0.5">
+                                {ncsList.map((nc: any, idx: number) => (
+                                  <span key={idx} className="inline-block text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900/60">
+                                    NC {nc.numero}: -{formatPYG(nc.monto_aplicado)}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : ncFinal > 0 ? (
+                              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900/60">
+                                -{formatPYG(ncFinal)}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 font-sans">—</span>
+                            )}
+                          </td>
+                          <td className="p-2.5 text-right text-slate-600 dark:text-slate-400">{formatPYG(a.saldo_anterior)}</td>
+                          <td className="p-2.5 text-right text-slate-600 dark:text-slate-400">{formatPYG(a.monto_retencion)}</td>
+                          <td className="p-2.5 text-right font-black text-rose-600 dark:text-rose-400">{formatPYG(a.monto_aplicado)}</td>
+                          <td className="p-2.5 text-right text-slate-500">{formatPYG(a.saldo_restante)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* 2. MEDIOS DE PAGO Y DESEMBOLSOS */}

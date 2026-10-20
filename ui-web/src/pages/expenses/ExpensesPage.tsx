@@ -951,6 +951,12 @@ export default function ExpensesPage() {
       periodo_nomina: getTodayAsuncion().slice(0, 7),
       cuotas_anticipo: "1",
       sueldok_sync_id: "",
+      naturaleza_economica: "OPEX_GASTO_OPERATIVO",
+      production_area: "panaderia",
+      periodo_devengado: "",
+      cuota_actual: 1,
+      total_cuotas: 10,
+      requisicion_id: "",
     })
     setComprobanteFile(null)
     setLinkedInvoicesDetails([])
@@ -1020,9 +1026,7 @@ export default function ExpensesPage() {
       "OPEX_GASTO_OPERATIVO"
     )
 
-    const isPagoProv = resolvedNaturaleza === "CMV_REVENTA" || Boolean(
-      (e as any).es_pago_proveedor && resolvedNaturaleza !== "OPEX_GASTO_OPERATIVO" && !(e as any).es_anticipo_sueldo
-    )
+    const isPagoProv = resolvedNaturaleza === "CMV_REVENTA"
 
     setForm({
       monto: String(e.monto || ""),
@@ -1351,12 +1355,12 @@ export default function ExpensesPage() {
           es_inversion: form.es_inversion || false,
           categoria_activo: form.es_inversion ? form.asset_categoria : undefined,
           vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
-          es_pago_proveedor: form.es_anticipo_sueldo ? false : (form.es_pago_proveedor || Boolean(form.linked_invoice_ids?.length > 0) || Boolean(form.supplier_invoice_id) || false),
-          supplier_id: form.es_anticipo_sueldo ? undefined : (form.supplier_id || undefined),
-          supplier_invoice_id: form.es_anticipo_sueldo ? undefined : (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids[0] : (form.supplier_invoice_id ? form.supplier_invoice_id : null)),
-          linked_invoice_ids: form.es_anticipo_sueldo ? undefined : (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids : (form.supplier_invoice_id ? [form.supplier_invoice_id] : undefined)),
-          linked_invoice_montos: form.es_anticipo_sueldo ? undefined : (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids.map((id: string) => Number(form.linked_invoice_montos?.[id] ?? 0)) : undefined),
-          grouped_expense_ids: form.es_pago_proveedor && form.supplier_invoice_id && groupedExpenseIds.length > 0 ? groupedExpenseIds : undefined,
+          es_pago_proveedor: form.naturaleza_economica === "CMV_REVENTA",
+          supplier_id: form.naturaleza_economica === "CMV_REVENTA" ? (form.supplier_id || undefined) : undefined,
+          supplier_invoice_id: form.naturaleza_economica === "CMV_REVENTA" ? (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids[0] : (form.supplier_invoice_id ? form.supplier_invoice_id : null)) : undefined,
+          linked_invoice_ids: form.naturaleza_economica === "CMV_REVENTA" ? (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids : (form.supplier_invoice_id ? [form.supplier_invoice_id] : undefined)) : undefined,
+          linked_invoice_montos: form.naturaleza_economica === "CMV_REVENTA" ? (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids.map((id: string) => Number(form.linked_invoice_montos?.[id] ?? 0)) : undefined) : undefined,
+          grouped_expense_ids: form.naturaleza_economica === "CMV_REVENTA" && form.supplier_invoice_id && groupedExpenseIds.length > 0 ? groupedExpenseIds : undefined,
           monto_brl: form.moneda === "BRL" && form.monto_brl ? Number(form.monto_brl) : undefined,
           es_anticipo_sueldo: form.es_anticipo_sueldo || false,
           employee_id: form.es_anticipo_sueldo ? (form.employee_id || undefined) : undefined,
@@ -1391,11 +1395,11 @@ export default function ExpensesPage() {
           asset_codigo_interno: form.es_inversion ? form.asset_codigo_interno : undefined,
           asset_categoria: form.es_inversion ? form.asset_categoria : undefined,
           asset_vida_util_meses: form.es_inversion && form.asset_vida_util_meses ? Number(form.asset_vida_util_meses) : undefined,
-          es_pago_proveedor: form.es_anticipo_sueldo ? false : (form.es_pago_proveedor || Boolean(form.linked_invoice_ids?.length > 0) || Boolean(form.supplier_invoice_id) || false),
-          supplier_id: form.es_anticipo_sueldo ? undefined : (form.supplier_id || undefined),
-          supplier_invoice_id: form.es_anticipo_sueldo ? undefined : (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids[0] : (form.supplier_invoice_id || undefined)),
-          linked_invoice_ids: form.es_anticipo_sueldo ? undefined : (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids : (form.supplier_invoice_id ? [form.supplier_invoice_id] : undefined)),
-          linked_invoice_montos: form.es_anticipo_sueldo ? undefined : (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids.map((id: string) => Number(form.linked_invoice_montos?.[id] ?? 0)) : undefined),
+          es_pago_proveedor: form.naturaleza_economica === "CMV_REVENTA",
+          supplier_id: form.naturaleza_economica === "CMV_REVENTA" ? (form.supplier_id || undefined) : undefined,
+          supplier_invoice_id: form.naturaleza_economica === "CMV_REVENTA" ? (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids[0] : (form.supplier_invoice_id || undefined)) : undefined,
+          linked_invoice_ids: form.naturaleza_economica === "CMV_REVENTA" ? (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids : (form.supplier_invoice_id ? [form.supplier_invoice_id] : undefined)) : undefined,
+          linked_invoice_montos: form.naturaleza_economica === "CMV_REVENTA" ? (form.linked_invoice_ids?.length > 0 ? form.linked_invoice_ids.map((id: string) => Number(form.linked_invoice_montos?.[id] ?? 0)) : undefined) : undefined,
           es_anticipo_sueldo: form.es_anticipo_sueldo || false,
           employee_id: form.es_anticipo_sueldo ? (form.employee_id || undefined) : undefined,
           employee_nombre: form.es_anticipo_sueldo ? (form.employee_nombre || undefined) : undefined,
@@ -3081,7 +3085,7 @@ export default function ExpensesPage() {
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border border-amber-300 dark:border-amber-700/60">
                                     <ChefHat className="w-2.5 h-2.5 text-amber-600" /> Materia Prima ({e.production_area || "Panadería"})
                                   </span>
-                                ) : e.naturaleza_economica === "CMV_REVENTA" || e.es_pago_proveedor ? (
+                                ) : e.naturaleza_economica === "CMV_REVENTA" || (!e.naturaleza_economica && e.es_pago_proveedor) ? (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
                                     <Package className="w-2.5 h-2.5" /> Mercaderías Reventa
                                   </span>

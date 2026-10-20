@@ -29,6 +29,7 @@ import {
   CheckSquare,
   Square,
   Search,
+  Wallet,
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -667,24 +668,51 @@ export default function PayrollDossierView({
                                 />
                               )}
                             </div>
-                            <button
-                              onClick={() => handleExecuteNetPhase(phase.id)}
-                              disabled={actionLoading === phase.id}
-                              className="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
-                            >
-                              {actionLoading === phase.id ? (
-                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <CheckCircle className="w-3.5 h-3.5" />
-                              )}
-                              Confirmar Desembolso ({isBank ? "Transferencia Bancaria" : "Entrega en Efectivo"})
-                            </button>
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              <button
+                                onClick={() => handleExecuteNetPhase(phase.id)}
+                                disabled={actionLoading === phase.id}
+                                className="flex-1 py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
+                              >
+                                {actionLoading === phase.id ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                )}
+                                Confirmar y Emitir OP ({isBank ? "SIPAP Bancario" : "Efectivo / Sobres"})
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => navigate("/payments")}
+                                className="py-2 px-3 rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-semibold flex items-center gap-1.5 transition"
+                                title="Ir a Tesorería / Pagos para asignar cuentas bancarias o retiros de bóveda"
+                              >
+                                <Wallet className="w-3.5 h-3.5 text-emerald-500" />
+                                Asignar Medios en Tesorería
+                              </button>
+                            </div>
                           </div>
                         ) : (
-                          <div className="pt-1 text-[11px] text-gray-500 flex flex-wrap items-center gap-3">
-                            {meta.banco && <span><b>Banco:</b> {meta.banco}</span>}
-                            {meta.referencia_comprobante && <span><b>Ref:</b> {meta.referencia_comprobante}</span>}
-                            {phase.executed_at && <span><b>Fecha:</b> {new Date(phase.executed_at).toLocaleDateString()}</span>}
+                          <div className="pt-2 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
+                            <div className="text-[11px] text-gray-500 flex flex-wrap items-center gap-3">
+                              {meta.banco && <span><b>Banco:</b> {meta.banco}</span>}
+                              {meta.referencia_comprobante && <span><b>Ref:</b> {meta.referencia_comprobante}</span>}
+                              {meta.payment_order_numero && (
+                                <span className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800 font-bold">
+                                  OP {meta.payment_order_numero}
+                                </span>
+                              )}
+                              {phase.executed_at && <span><b>Fecha:</b> {new Date(phase.executed_at).toLocaleDateString()}</span>}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRevertThirdParty(phase.id, phase.phase_label)}
+                              disabled={actionLoading === phase.id}
+                              className="py-1 px-2.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-medium text-xs flex items-center gap-1 transition border border-rose-200 dark:border-rose-900/40 disabled:opacity-50"
+                              title="Revertir el desembolso y devolver la fase a pendiente"
+                            >
+                              <RotateCcw className="w-3 h-3" /> Revertir
+                            </button>
                           </div>
                         )}
                       </div>

@@ -1253,6 +1253,33 @@ async def execute_net_phase(
     if not phase:
         raise ValueError(f"Fase {phase_id} no encontrada en expediente {dossier_id}")
 
+    # 1. Crear Orden de Pago en Tesorería si la fase no cuenta con una emitida
+    op_numero = None
+    if not phase.payment_order_id:
+        from decimal import Decimal
+        from api.src.financial.schemas import SupplierPaymentOrderCreate
+        from api.src.financial import service as financial_service
+
+        is_bank = phase.phase_type == "salario_neto_sipap"
+        doss_res = await db.execute(select(PayrollDossier).where(PayrollDossier.id == did))
+        curr_dossier = doss_res.scalars().first()
+        periodo = curr_dossier.periodo if curr_dossier else "2026-09"
+        beneficiario = f"Nómina {periodo} - {'SIPAP Bancario' if is_bank else 'Salarios Efectivo'}"
+
+        op_payload = SupplierPaymentOrderCreate(
+            subtipo="nomina_salarios",
+            beneficiario_nombre=beneficiario,
+            periodo_nomina=periodo,
+            monto_neto=Decimal(str(int(phase.monto))),
+            observaciones=f"Desembolso {'Bancario SIPAP' if is_bank else 'Efectivo en Bóveda/Sobres'} - Nómina Salarial {periodo}. Ref: {referencia or banco or 'General'}",
+            sueldok_sync_id=str(phase.id)
+        )
+        op_res = await financial_service.create_supplier_payment_order(
+            db, str(cid), op_payload, user_id=str(user_id) if user_id else None
+        )
+        phase.payment_order_id = uuid.UUID(op_res["id"])
+        op_numero = op_res.get("numero_orden")
+
     phase.estado = "ejecutado"
     phase.executed_at = datetime.now(timezone.utc)
     phase.executed_by = uuid.UUID(str(user_id)) if user_id else None
@@ -1262,6 +1289,8 @@ async def execute_net_phase(
         meta["banco"] = banco
     if referencia:
         meta["referencia_comprobante"] = referencia
+    if op_numero:
+        meta["payment_order_numero"] = op_numero
     phase.phase_metadata = meta
 
     # Verificar si el expediente puede pasar a 'en_proceso' o 'cerrado'

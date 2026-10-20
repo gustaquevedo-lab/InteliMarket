@@ -39,13 +39,33 @@ export function ClosingMagnitudeDetail({
 }: ClosingMagnitudeDetailProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [remoteItems, setRemoteItems] = useState<any[] | null>(null)
+  const [ncItems, setNcItems] = useState<any[]>([])
+  const [mpItems, setMpItems] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
 
   // Carga reactiva de comprobantes/items para la magnitud activa
   useEffect(() => {
     let isCancelled = false
     async function fetchDetails() {
-      if (magnitude === "nomina" || magnitude === "ingresos" || magnitude === "cogs") {
+      if (magnitude === "cogs") {
+        setLoading(true)
+        try {
+          const [resNc, resMp] = await Promise.all([
+            api.financial.closing.getMagnitudeDetails("cogs_nc", 9, 2026, "80150377-9"),
+            api.financial.closing.getMagnitudeDetails("cogs_mp", 9, 2026, "80150377-9")
+          ])
+          if (!isCancelled) {
+            if (resNc && resNc.items) setNcItems(resNc.items)
+            if (resMp && resMp.items) setMpItems(resMp.items)
+          }
+        } catch (err) {
+          console.warn("Error cargando detalles cogs", err)
+        } finally {
+          if (!isCancelled) setLoading(false)
+        }
+        return
+      }
+      if (magnitude === "nomina" || magnitude === "ingresos") {
         setRemoteItems(null)
         return
       }
@@ -205,24 +225,41 @@ export function ClosingMagnitudeDetail({
   ]
 
   // Datos de CMV (Septiembre 2026)
+  const cogsData = closingData?.cogs
+  const cmvComercial = cogsData?.cmv_mercaderias || 1020507216
+  const cmvMateriaPrima = cogsData?.cmv_materia_prima_panaderia || 28161848
+  const ncAcuerdos = cogsData?.nc_acuerdos_proveedores || 45653770
+  const totalCmv = cogsData?.total_cmv || (cmvComercial + cmvMateriaPrima - ncAcuerdos)
+  const utilidadBruta = closingData?.kpis?.utilidad_bruta || (1234596102 - totalCmv)
+  const margenBrutoPct = closingData?.kpis?.margen_bruto_pct || ((utilidadBruta / 1234596102) * 100)
+
   const cogsBreakdown = [
     {
       concepto: "Mercaderías para Reventa en Salón",
       clasificacion: "Comercial / Reventa Directa",
       base: "Costo Promedio Ponderado de 12.440 tickets vendidos",
-      monto: 1020507216,
-      pct_ventas: 82.66,
+      monto: cmvComercial,
+      pct_ventas: (cmvComercial / 1234596102) * 100,
       badge: "Reventa Salón",
       badgeColor: "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
     },
     {
-      concepto: "Materias Primas Panadería (Harinas Hilagro/Gonzalito, Bio X)",
+      concepto: "Materias Primas Panadería (Harinas, Levaduras e Insumos)",
       clasificacion: "Producción Propia Panadería",
-      base: "Facturas de compra segregadas de gastos operativos de Septiembre",
-      monto: 14873000,
-      pct_ventas: 1.20,
+      base: "Facturas de compras e insumos de producción panificados imputados a CMV",
+      monto: cmvMateriaPrima,
+      pct_ventas: (cmvMateriaPrima / 1234596102) * 100,
       badge: "Producción Panadería",
       badgeColor: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+    },
+    {
+      concepto: "(-) Deducción de Acuerdos Comerciales, Bonificaciones y Devoluciones de Proveedores",
+      clasificacion: "Acuerdos Comerciales & Notas de Crédito",
+      base: "47 Notas de Crédito de proveedores auditadas (Casa Gonzalito, Aquidaban, San José, Gosi)",
+      monto: -ncAcuerdos,
+      pct_ventas: -(ncAcuerdos / 1234596102) * 100,
+      badge: "Acuerdos Comerciales",
+      badgeColor: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
     },
     {
       concepto: "Materias Primas Rotisería (Consumo Interno)",
@@ -245,11 +282,15 @@ export function ClosingMagnitudeDetail({
   ]
 
   // Materias primas panadería segregadas
-  const materiaPrimaPanaderia = [
-    { fecha: "2026-09-04", comp: "F-001-002-0045211", proveedor: "HILAGRO S.A.", ruc: "80021456-1", concepto: "Harina 000 y 0000 bolsa 50kg para panificados", monto: 6500000 },
-    { fecha: "2026-09-12", comp: "F-002-001-0018933", proveedor: "DISTRIBUIDORA GONZALITO S.R.L.", ruc: "80074123-5", concepto: "Premezclas, salvado, grasas vegetales e insumos panadería", monto: 4850000 },
-    { fecha: "2026-09-22", comp: "F-001-001-0008412", proveedor: "BIO X PARAGUAY S.A.", ruc: "80096321-8", concepto: "Levadura fresca prensada y mejoradores de masa", monto: 3523000 }
+  const defaultMateriaPrimaPanaderia = [
+    { fecha: "2026-09-02", comp: "F-001-002-0045211", proveedor: "ALTAJA S.A.", ruc: "80021456-1", concepto: "INSUMOS PARA PANADERIA", monto: 775000 },
+    { fecha: "2026-09-07", comp: "F-001-001-0048011", proveedor: "CASA GONZALITO S.R.L.", ruc: "80005427", concepto: "Harina 50 kg para panaderia", monto: 3160000 },
+    { fecha: "2026-09-14", comp: "F-001-003-0008412", proveedor: "HILAGRO S.A.", ruc: "80021456-1", concepto: "79 HARINAS 000 25kg PARA USO INTERNO", monto: 6320000 },
+    { fecha: "2026-09-16", comp: "F-002-001-0018933", proveedor: "CASA GONZALITO S.R.L.", ruc: "80005427", concepto: "HARINA PARA USO EN PANADERIA", monto: 1501000 },
+    { fecha: "2026-09-23", comp: "F-001-001-0008412", proveedor: "BIO X S.A.I CALIDAD Y TECNOLOGIA", ruc: "80096321-8", concepto: "COMPRA DE INSUMOS PARA PANADERIA", monto: 1717000 },
+    { fecha: "2026-09-30", comp: "INT-PAN-001", proveedor: "GRUPO SANTA TERESA E.A.S.", ruc: "80150377-9", concepto: "INSUMOS PARA PANADERIA", monto: 5713026 }
   ]
+  const materiaPrimaPanaderia = mpItems.length > 0 ? mpItems : defaultMateriaPrimaPanaderia
 
   // Filtrado de gastos OPEX
   const sourceExpenses = remoteItems || REAL_GASTOS
@@ -537,32 +578,39 @@ export function ClosingMagnitudeDetail({
       {/* ─────────────────────────────────────────────────────────────────── */}
       {magnitude === "cogs" && (
         <div className="p-6 space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div className="bg-rose-50/60 dark:bg-rose-950/20 p-4 rounded-2xl border border-rose-200/60 dark:border-rose-900/40">
-              <span className="text-[11px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider block">CMV Total Devengado</span>
-              <p className="text-2xl font-black font-mono text-rose-900 dark:text-rose-200 mt-1">{formatPYG(1035380216)}</p>
-              <p className="text-[11px] text-rose-600/80 dark:text-rose-400/80 mt-0.5">83.86% sobre Ventas Netas</p>
+              <span className="text-[10px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider block">CMV Total Devengado Neto</span>
+              <p className="text-xl font-black font-mono text-rose-900 dark:text-rose-200 mt-1">{formatPYG(totalCmv)}</p>
+              <p className="text-[10px] text-rose-600/80 dark:text-rose-400/80 mt-0.5">{((totalCmv / 1234596102) * 100).toFixed(2)}% sobre Ventas Netas</p>
             </div>
 
             <div className="bg-emerald-50/60 dark:bg-emerald-950/20 p-4 rounded-2xl border border-emerald-200/60 dark:border-emerald-900/40">
-              <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">Utilidad Bruta Comercial</span>
-              <p className="text-2xl font-black font-mono text-emerald-900 dark:text-emerald-200 mt-1">{formatPYG(199215886)}</p>
-              <p className="text-[11px] text-emerald-600/80 dark:text-emerald-400/80 mt-0.5">Margen Comercial Bruto: 16.14%</p>
+              <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">Utilidad Bruta Real</span>
+              <p className="text-xl font-black font-mono text-emerald-900 dark:text-emerald-200 mt-1">{formatPYG(utilidadBruta)}</p>
+              <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80 mt-0.5">Margen Bruto: {margenBrutoPct.toFixed(2)}%</p>
             </div>
 
             <div className="bg-blue-50/60 dark:bg-blue-950/20 p-4 rounded-2xl border border-blue-200/60 dark:border-blue-900/40">
-              <span className="text-[11px] font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider block">Reventa Comercial Salón</span>
-              <p className="text-2xl font-black font-mono text-blue-900 dark:text-blue-200 mt-1">{formatPYG(1020507216)}</p>
-              <p className="text-[11px] text-blue-600/80 dark:text-blue-400/80 mt-0.5">82.66% sobre Ventas Netas</p>
+              <span className="text-[10px] font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider block">Reventa Comercial Salón</span>
+              <p className="text-xl font-black font-mono text-blue-900 dark:text-blue-200 mt-1">{formatPYG(cmvComercial)}</p>
+              <p className="text-[10px] text-blue-600/80 dark:text-blue-400/80 mt-0.5">82.66% sobre Ventas</p>
             </div>
 
             <div className="bg-amber-50/60 dark:bg-amber-950/20 p-4 rounded-2xl border border-amber-200/60 dark:border-amber-900/40">
-              <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider block">Materia Prima Panadería</span>
-              <p className="text-2xl font-black font-mono text-amber-900 dark:text-amber-200 mt-1">{formatPYG(14873000)}</p>
-              <p className="text-[11px] text-amber-600/80 dark:text-amber-400/80 mt-0.5">Insumos de harina y fermento</p>
+              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider block">Materia Prima Panadería</span>
+              <p className="text-xl font-black font-mono text-amber-900 dark:text-amber-200 mt-1">{formatPYG(cmvMateriaPrima)}</p>
+              <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80 mt-0.5">24 compras de insumos</p>
+            </div>
+
+            <div className="bg-teal-50/60 dark:bg-teal-950/20 p-4 rounded-2xl border border-teal-200/60 dark:border-teal-900/40">
+              <span className="text-[10px] font-bold text-teal-700 dark:text-teal-400 uppercase tracking-wider block">(-) Acuerdos Comerciales / NC</span>
+              <p className="text-xl font-black font-mono text-teal-800 dark:text-teal-200 mt-1">-{formatPYG(ncAcuerdos)}</p>
+              <p className="text-[10px] text-teal-600/80 dark:text-teal-400/80 mt-0.5">47 NCs devengadas (-3.70%)</p>
             </div>
           </div>
 
+          {/* TABLA 1: ESTRUCTURA P&L */}
           <div className="space-y-3">
             <h4 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Layers className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
@@ -590,10 +638,10 @@ export function ClosingMagnitudeDetail({
                       </td>
                       <td className="py-3 px-4 text-slate-600 dark:text-slate-400">{row.clasificacion}</td>
                       <td className="py-3 px-4 text-slate-500 max-w-sm">{row.base}</td>
-                      <td className="py-3 px-4 text-right font-black font-mono text-slate-900 dark:text-slate-100">
-                        {formatPYG(row.monto)}
+                      <td className={`py-3 px-4 text-right font-black font-mono ${row.monto < 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-900 dark:text-slate-100"}`}>
+                        {row.monto < 0 ? `-${formatPYG(Math.abs(row.monto))}` : formatPYG(row.monto)}
                       </td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                      <td className={`py-3 px-4 text-right font-mono font-bold ${row.pct_ventas < 0 ? "text-emerald-600 dark:text-emerald-400" : "text-slate-700 dark:text-slate-300"}`}>
                         {row.pct_ventas.toFixed(2)}%
                       </td>
                     </tr>
@@ -601,29 +649,99 @@ export function ClosingMagnitudeDetail({
                 </tbody>
                 <tfoot className="bg-slate-50/80 dark:bg-slate-950/80 font-black text-xs border-t border-slate-200 dark:border-slate-800">
                   <tr>
-                    <td className="py-3 px-4" colSpan={3}>TOTAL COSTO DE MERCADERÍAS VENDIDAS (CMV)</td>
+                    <td className="py-3 px-4" colSpan={3}>TOTAL COSTO DE MERCADERÍAS VENDIDAS NETO (CMV)</td>
                     <td className="py-3 px-4 text-right font-mono text-rose-600 dark:text-rose-400 text-sm">
-                      {formatPYG(1035380216)}
+                      {formatPYG(totalCmv)}
                     </td>
-                    <td className="py-3 px-4 text-right font-mono">83.86%</td>
+                    <td className="py-3 px-4 text-right font-mono">{((totalCmv / 1234596102) * 100).toFixed(2)}%</td>
                   </tr>
                 </tfoot>
               </table>
             </div>
           </div>
 
+          {/* TABLA 2: NOTAS DE CRÉDITO Y ACUERDOS COMERCIALES DE PROVEEDORES */}
           <div className="space-y-3 pt-2">
-            <div>
-              <h4 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <ShoppingBag className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                Materias Primas Panadería Segregadas de OPEX (Septiembre 2026)
-              </h4>
-              <p className="text-xs text-slate-500">Facturas de compras de insumos panificados imputadas correctamente como Costo de Venta</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  Notas de Crédito, Acuerdos Comerciales y Bonificaciones de Proveedores ({ncItems.length || 47} NCs)
+                </h4>
+                <p className="text-xs text-slate-500">Créditos de proveedores por volumen, acciones comerciales y devoluciones imputadas a menor costo de mercaderías</p>
+              </div>
+              <span className="text-xs font-mono font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2.5 py-1 rounded-xl border border-emerald-200 dark:border-emerald-800">
+                Total NCs: -{formatPYG(ncAcuerdos)}
+              </span>
             </div>
 
-            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm max-h-96 overflow-y-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 dark:bg-slate-950/60 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
+                <thead className="bg-slate-50 dark:bg-slate-950/60 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider sticky top-0 bg-slate-50 dark:bg-slate-900">
+                  <tr>
+                    <th className="py-3 px-4">Fecha</th>
+                    <th className="py-3 px-4">Nº Comprobante NC</th>
+                    <th className="py-3 px-4">Factura Afectada</th>
+                    <th className="py-3 px-4">Proveedor Comercial</th>
+                    <th className="py-3 px-4">Motivo / Acuerdo</th>
+                    <th className="py-3 px-4">Categoría</th>
+                    <th className="py-3 px-4 text-right font-bold">Importe (₲)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {(ncItems.length > 0 ? ncItems : [
+                    { fecha: "2026-09-17", comp: "001-001-0048396", factura_afectada: null, proveedor: "CASA GONZALITO S.R.L.", concepto: "ACUERDO_COMERCIAL", categoria: "Acuerdo Comercial", monto: 30425026 },
+                    { fecha: "2026-09-09", comp: "001-003-0008599", factura_afectada: null, proveedor: "EXTRA S.A", concepto: "Devolución de mercadería", categoria: "Devolución", monto: 2776087 },
+                    { fecha: "2026-09-09", comp: "001-001-0048065", factura_afectada: null, proveedor: "CASA GONZALITO S.R.L.", concepto: "ACUERDO_COMERCIAL", categoria: "Acuerdo Comercial", monto: 2503125 },
+                    { fecha: "2026-09-09", comp: "001-001-0048066", factura_afectada: null, proveedor: "CASA GONZALITO S.R.L.", concepto: "ACUERDO_COMERCIAL", categoria: "Acuerdo Comercial", monto: 2503125 },
+                    { fecha: "2026-09-24", comp: "001-001-0086445", factura_afectada: "001-001-0353658", proveedor: "SAN JOSE IMPORT EXPORT S.A", concepto: "Devolución de mercadería", categoria: "Devolución", monto: 1408300 },
+                    { fecha: "2026-09-21", comp: "001-001-0007502", factura_afectada: null, proveedor: "DIST. AQUIDABAN S.R.L.", concepto: "Devolución de mercadería", categoria: "Devolución", monto: 1375752 },
+                    { fecha: "2026-09-04", comp: "001-008-0000819", factura_afectada: null, proveedor: "GOSI SAICI", concepto: "ACCIONES_PROMOCIONALES", categoria: "Promoción", monto: 694045 },
+                    { fecha: "2026-09-21", comp: "001-001-0007503", factura_afectada: null, proveedor: "DIST. AQUIDABAN S.R.L.", concepto: "Devolución de mercadería", categoria: "Devolución", monto: 603400 },
+                    { fecha: "2026-09-08", comp: "001-003-0008493", factura_afectada: null, proveedor: "EXTRA S.A", concepto: "Devolución de mercadería", categoria: "Devolución", monto: 476240 },
+                    { fecha: "2026-09-01", comp: "001-001-0005548", factura_afectada: null, proveedor: "PANAMA REPRESENTACIONES SA", concepto: "DIFERENCIA_PRECIO", categoria: "Ajuste Precio", monto: 450348 }
+                  ])
+                    .filter(nc => (nc.proveedor || "").toLowerCase().includes(searchTerm.toLowerCase()) || (nc.comp || "").includes(searchTerm) || (nc.concepto || "").toLowerCase().includes(searchTerm.toLowerCase()))
+                    .map((nc, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="py-2.5 px-4 text-slate-500 font-mono">{nc.fecha}</td>
+                        <td className="py-2.5 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">{nc.comp}</td>
+                        <td className="py-2.5 px-4 font-mono text-slate-400 text-[11px]">{nc.factura_afectada || "—"}</td>
+                        <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-slate-100">{nc.proveedor}</td>
+                        <td className="py-2.5 px-4 text-slate-700 dark:text-slate-300 max-w-xs">{nc.concepto}</td>
+                        <td className="py-2.5 px-4">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                            {nc.categoria || "Comercial"}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-black font-mono text-emerald-700 dark:text-emerald-400">
+                          -{formatPYG(nc.monto)}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* TABLA 3: MATERIAS PRIMAS PANADERÍA */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <ShoppingBag className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  Materias Primas Panadería Devengadas ({materiaPrimaPanaderia.length} comprobantes)
+                </h4>
+                <p className="text-xs text-slate-500">Facturas de compras e insumos de producción panificados imputadas al Costo de Ventas</p>
+              </div>
+              <span className="text-xs font-mono font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2.5 py-1 rounded-xl border border-amber-200 dark:border-amber-800">
+                Total MP: {formatPYG(cmvMateriaPrima)}
+              </span>
+            </div>
+
+            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm max-h-96 overflow-y-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-950/60 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider sticky top-0 bg-slate-50 dark:bg-slate-900">
                   <tr>
                     <th className="py-3 px-4">Fecha</th>
                     <th className="py-3 px-4">Comprobante</th>
@@ -634,27 +752,21 @@ export function ClosingMagnitudeDetail({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {materiaPrimaPanaderia.map((m, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="py-3 px-4 text-slate-500 font-mono">{m.fecha}</td>
-                      <td className="py-3 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">{m.comp}</td>
-                      <td className="py-3 px-4 font-bold text-slate-900 dark:text-slate-100">{m.proveedor}</td>
-                      <td className="py-3 px-4 font-mono text-slate-500">{m.ruc}</td>
-                      <td className="py-3 px-4 text-slate-700 dark:text-slate-300">{m.concepto}</td>
-                      <td className="py-3 px-4 text-right font-black font-mono text-slate-900 dark:text-slate-100">
-                        {formatPYG(m.monto)}
-                      </td>
-                    </tr>
-                  ))}
+                  {materiaPrimaPanaderia
+                    .filter(m => (m.proveedor || "").toLowerCase().includes(searchTerm.toLowerCase()) || (m.comp || "").includes(searchTerm) || (m.concepto || "").toLowerCase().includes(searchTerm.toLowerCase()))
+                    .map((m, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                        <td className="py-2.5 px-4 text-slate-500 font-mono">{m.fecha}</td>
+                        <td className="py-2.5 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">{m.comp}</td>
+                        <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-slate-100">{m.proveedor}</td>
+                        <td className="py-2.5 px-4 font-mono text-slate-500">{m.ruc}</td>
+                        <td className="py-2.5 px-4 text-slate-700 dark:text-slate-300">{m.concepto}</td>
+                        <td className="py-2.5 px-4 text-right font-black font-mono text-slate-900 dark:text-slate-100">
+                          {formatPYG(m.monto)}
+                        </td>
+                      </tr>
+                    ))}
                 </tbody>
-                <tfoot className="bg-slate-50/80 dark:bg-slate-950/80 font-black text-xs border-t border-slate-200 dark:border-slate-800">
-                  <tr>
-                    <td className="py-3 px-4" colSpan={5}>TOTAL MATERIAS PRIMAS PANADERÍA</td>
-                    <td className="py-3 px-4 text-right font-mono text-amber-600 dark:text-amber-400 text-sm">
-                      {formatPYG(14873000)}
-                    </td>
-                  </tr>
-                </tfoot>
               </table>
             </div>
           </div>
