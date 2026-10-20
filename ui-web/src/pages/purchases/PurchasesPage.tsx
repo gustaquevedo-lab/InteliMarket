@@ -1491,7 +1491,7 @@ export default function PurchasesPage() {
       if (field === "cantidad" || field === "precio_unitario") {
         const c = Number(field === "cantidad" ? (value === "" ? 0 : value) : (copy[idx].cantidad || 0))
         const p = Number(field === "precio_unitario" ? (value === "" ? 0 : value) : (copy[idx].precio_unitario || 0))
-        copy[idx].subtotal = Math.round(c * p)
+        copy[idx].subtotal = Math.ceil(p) * c
       }
       return copy
     })
@@ -6394,7 +6394,7 @@ export default function PurchasesPage() {
                         Equivalente Estimado (₲)
                       </label>
                       <div className="input-field w-full text-xs font-mono font-black text-right bg-white dark:bg-slate-800 flex items-center justify-end px-3">
-                        {formatPYG(Math.round((Number(receiptForm.total_brl) || 0) * (Number(receiptForm.tipo_cambio) || 1)))}
+                        {formatPYG(Math.ceil((Number(receiptForm.total_brl) || 0) * (Number(receiptForm.tipo_cambio) || 1)))}
                       </div>
                     </div>
                   </div>
@@ -6834,7 +6834,7 @@ export default function PurchasesPage() {
                           value={manualInvoiceForm.tipo_cambio}
                           onChangeValue={(tc) => {
                             const validTc = tc || 1
-                            const pyg = Math.round(Number(manualInvoiceForm.total_brl || 0) * validTc)
+                            const pyg = Math.ceil(Number(manualInvoiceForm.total_brl || 0) * validTc)
                             setManualInvoiceForm(prev => ({ ...prev, tipo_cambio: String(validTc), total_pyg: String(pyg) }))
                           }}
                           className="input-field w-full text-xs font-mono font-bold text-right"
@@ -6846,7 +6846,7 @@ export default function PurchasesPage() {
                           Eq. Fiscal en Guaraníes (₲)
                         </label>
                         <div className="input-field w-full text-xs font-mono font-black text-right bg-white dark:bg-slate-800 flex items-center justify-end px-3">
-                          {formatPYG(Math.round((Number(manualInvoiceForm.total_brl) || 0) * (Number(manualInvoiceForm.tipo_cambio) || 1)))}
+                          {formatPYG(Math.ceil((Number(manualInvoiceForm.total_brl) || 0) * (Number(manualInvoiceForm.tipo_cambio) || 1)))}
                         </div>
                       </div>
                     </div>

@@ -3940,7 +3940,7 @@ export default function ExpensesPage() {
                         value={form.tipo_cambio || "1350"}
                         onChangeValue={(tc) => {
                           const validTc = tc || 1
-                          const pyg = Math.round(Number(form.monto_brl || 0) * validTc)
+                          const pyg = Math.ceil(Number(form.monto_brl || 0) * validTc)
                           setForm((prev: any) => ({ ...prev, tipo_cambio: String(validTc), monto: String(pyg) }))
                         }}
                         className="input-field w-full text-xs font-mono font-bold text-right"

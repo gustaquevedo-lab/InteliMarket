@@ -3789,7 +3789,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-700/80 text-[11px] text-slate-300 flex items-center justify-between">
                       <span className="text-slate-400">Monto a descontar por cuota:</span>
                       <span className="font-mono font-bold text-emerald-400">
-                        ₲ {formatPYG(Math.round(resolvingShortageModal.monto_faltante_gs / shortageCuotas))} / mes
+                        ₲ {formatPYG(Math.ceil(resolvingShortageModal.monto_faltante_gs / shortageCuotas))} / mes
                       </span>
                     </div>
                   </div>

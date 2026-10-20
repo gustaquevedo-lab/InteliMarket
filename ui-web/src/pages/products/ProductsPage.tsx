@@ -3687,7 +3687,7 @@ export default function ProductsPage() {
                             {
                               min_qty: nextMin,
                               max_qty: null,
-                              precio_unitario: form.precio_venta > 0 ? Math.round(form.precio_venta * 0.95) : 0,
+                              precio_unitario: form.precio_venta > 0 ? Math.ceil(form.precio_venta * 0.95) : 0,
                               isNew: true,
                               isDeleted: false,
                             }

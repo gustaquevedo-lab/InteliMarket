@@ -176,7 +176,7 @@ export default function MultiSupplierPaymentModal({
           tipo_cambio: newTc,
           invoices: g.invoices.map(inv => ({
             ...inv,
-            monto_pyg: Math.round(inv.monto_moneda * newTc),
+            monto_pyg: Math.ceil(inv.monto_moneda * newTc),
           }))
         }
       }
@@ -196,7 +196,7 @@ export default function MultiSupplierPaymentModal({
         invoices: g.invoices.map(inv => {
           // Si pasa a BRL, el saldo original en facturas está en PYG, calcular equivalente en R$
           const montoMoneda = moneda === "BRL" ? Math.round((inv.saldo_pendiente / tc) * 100) / 100 : inv.saldo_pendiente
-          const montoPyg = Math.round(montoMoneda * tc)
+          const montoPyg = Math.ceil(montoMoneda * tc)
           return {
             ...inv,
             monto_moneda: montoMoneda,
@@ -215,7 +215,7 @@ export default function MultiSupplierPaymentModal({
         ...g,
         invoices: g.invoices.map(inv => {
           if (inv.invoice_id !== invId) return inv
-          const montoPyg = Math.round(montoMoneda * g.tipo_cambio)
+          const montoPyg = Math.ceil(montoMoneda * g.tipo_cambio)
           return {
             ...inv,
             monto_moneda: montoMoneda,

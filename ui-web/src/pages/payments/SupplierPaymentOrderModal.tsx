@@ -285,7 +285,7 @@ export default function SupplierPaymentOrderModal({
     disbursements.forEach(d => {
       if (d.forma_pago === "boveda" && d.moneda === "BRL") {
         const tc = Number(d.tipo_cambio || defaultExchangeRateBRL || 1450)
-        total += Math.round(Number(d.monto || 0) * tc)
+        total += Math.ceil(Number(d.monto || 0) * tc)
       } else {
         total += Number(d.monto || 0)
       }
@@ -1036,7 +1036,7 @@ export default function SupplierPaymentOrderModal({
                                   Disponible R$: {vaultBalanceBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
                                 <div className="text-[10px] font-mono text-slate-500 px-1">
-                                  Amortiza a la Factura: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(Math.round(Number(d.monto || 0) * (d.tipo_cambio || defaultExchangeRateBRL)))}</strong>
+                                  Amortiza a la Factura: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(Math.ceil(Number(d.monto || 0) * (d.tipo_cambio || defaultExchangeRateBRL)))}</strong>
                                 </div>
                               </div>
                             ) : (

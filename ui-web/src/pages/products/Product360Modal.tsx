@@ -227,7 +227,7 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
     setTierMaxQty("")
     setTierTargetMargin("15")
     if (costoBaseSim > 0) {
-      const pCalc = Math.round(costoBaseSim / (1 - 0.15))
+      const pCalc = Math.ceil(costoBaseSim / (1 - 0.15))
       const p77 = Math.floor(pCalc / 100) * 100 + 77
       setTierPrice(String(p77))
     } else {
@@ -253,7 +253,7 @@ export default function Product360Modal({ data, onClose, onPriceUpdated }: Props
     setTierTargetMargin(valStr)
     const mNum = parseFloat(valStr)
     if (!isNaN(mNum) && mNum < 100 && costoBaseSim > 0) {
-      const rawPrice = Math.round(costoBaseSim / (1 - (mNum / 100)))
+      const rawPrice = Math.ceil(costoBaseSim / (1 - (mNum / 100)))
       setTierPrice(String(rawPrice))
     }
   }, [costoBaseSim])
@@ -986,7 +986,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                         <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
                           <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Lote Mínimo</span>
                           <span className="font-mono font-black text-sm text-slate-800 dark:text-white">
-                            {formatPYG(Math.round((parseFloat(tierPrice) || 0) * tierMinQty))}
+                            {formatPYG(Math.ceil(parseFloat(tierPrice) || 0) * tierMinQty)}
                           </span>
                           <p className="text-[9px] text-slate-400">{tierMinQty} {p.unidad_medida || "un."}</p>
                         </div>
