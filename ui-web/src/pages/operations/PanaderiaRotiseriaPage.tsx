@@ -62,6 +62,14 @@ export default function PanaderiaRotiseriaPage() {
     descripcion: ""
   })
 
+  // Horneada Rápida en 1 Tap (Balanza Balmak Edge)
+  const [breadProducts, setBreadProducts] = useState<any[]>([])
+  const [executingBatch, setExecutingBatch] = useState(false)
+  const [customPanId, setCustomPanId] = useState<string>("")
+  const [customPanKg, setCustomPanKg] = useState<number>(65)
+  const [customHarinaKg, setCustomHarinaKg] = useState<number>(50)
+  const [showCustomBatchModal, setShowCustomBatchModal] = useState(false)
+
   // Calculadora de % panadero
   const [harinaKg, setHarinaKg] = useState(25)
   const [hidratPct, setHidratPct] = useState(60)
@@ -81,12 +89,13 @@ export default function PanaderiaRotiseriaPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [recipesRes, ordersRes, bkPl, rtPl, rtDash] = await Promise.allSettled([
+      const [recipesRes, ordersRes, bkPl, rtPl, rtDash, breadsRes] = await Promise.allSettled([
         api.supermer.recipes.list(),
         api.supermer.orders.list(),
         api.supermer.bakery.plans(),
         api.rotiseria.plans.list(),
         api.rotiseria.dashboard(),
+        api.products.list({ search: "PAN", limit: 30 } as any),
       ])
 
       if (recipesRes.status === "fulfilled" && Array.isArray(recipesRes.value)) {
@@ -104,12 +113,45 @@ export default function PanaderiaRotiseriaPage() {
       if (rtDash.status === "fulfilled") {
         setRotiseriaDash(rtDash.value)
       }
+      if (breadsRes.status === "fulfilled" && Array.isArray(breadsRes.value)) {
+        setBreadProducts(breadsRes.value)
+      }
     } catch (e: any) {
       toast.error("Error al cargar producción", e.message)
     } finally {
       setLoading(false)
     }
   }, [toast])
+
+  const handleQuickBatch = async (productoPanId: string, kilosProducidos: number, kilosHarina: number = 50) => {
+    if (!productoPanId) {
+      toast.error("Producto no seleccionado", "Seleccioná un producto de panadería.")
+      return
+    }
+    setExecutingBatch(true)
+    try {
+      const res = await api.supermer.bakery.quickBatch({
+        producto_pan_id: productoPanId,
+        kilos_producidos: kilosProducidos,
+        kilos_harina_usada: kilosHarina,
+      })
+      toast.success("🥖 Horneada Registrada", `${res.producto_pan_nombre}: +${res.kilos_producidos} kg en stock balanza. Harina descontada: -${res.kilos_harina_descontada} kg.`)
+      loadData()
+      setShowCustomBatchModal(false)
+    } catch (err: any) {
+      toast.error("Error al registrar horneada", err.message)
+    } finally {
+      setExecutingBatch(false)
+    }
+  }
+
+  const panFrances = useMemo(() => {
+    return breadProducts.find(p => p.plu_balanza === 98 || p.nombre?.toLowerCase().includes("frances")) || breadProducts[0]
+  }, [breadProducts])
+
+  const panFelipe = useMemo(() => {
+    return breadProducts.find(p => p.plu_balanza === 100 || p.nombre?.toLowerCase().includes("felipe")) || breadProducts[1]
+  }, [breadProducts])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -378,19 +420,149 @@ export default function PanaderiaRotiseriaPage() {
 
       {/* ══════════════════════ TAB 1: DASHBOARD RESUMEN ══════════════════════ */}
       {tab === "dashboard" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
-                <ChefHat className="w-4 h-4 text-amber-500" /> Fórmulas de Producción Activas
-              </h3>
+        <div className="space-y-6">
+          {/* 🥖 DECK DE HORNEADAS RÁPIDAS EN 1 TAP */}
+          <div className="bg-gradient-to-br from-amber-950/80 via-slate-900 to-slate-950 border border-amber-500/30 rounded-3xl p-6 text-white shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    BALANZA BALMAK EDGE · 192.168.0.73
+                  </span>
+                  <span className="text-[11px] text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                    Alimentación Inmediata de Stock
+                  </span>
+                </div>
+                <h3 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-amber-400" />
+                  Horneadas Rápidas en 1 Tap
+                </h3>
+                <p className="text-xs text-slate-300">
+                  Tocá al sacar del horno. Descuenta la harina de depósito y alimenta el inventario pesable en balanza evitando saldos negativos.
+                </p>
+              </div>
+
               <button
-                onClick={() => setTab("recetas")}
-                className="text-xs text-amber-600 dark:text-amber-400 font-bold hover:underline flex items-center gap-1"
+                onClick={() => {
+                  setCustomPanId(panFrances?.id || breadProducts[0]?.id || "")
+                  setShowCustomBatchModal(true)
+                }}
+                className="px-4 py-2.5 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-white border border-amber-500/40 text-xs font-bold transition flex items-center gap-2 self-start sm:self-auto"
               >
-                Ver todas <ArrowRight className="w-3.5 h-3.5" />
+                <Plus className="w-4 h-4" />
+                Horneada con Kilos a Medida
               </button>
             </div>
+
+            {/* Botones Táctiles de Acción Inmediata */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2">
+              <button
+                disabled={executingBatch || !panFrances}
+                onClick={() => handleQuickBatch(panFrances?.id, 65, 50)}
+                className="p-4 rounded-2xl bg-slate-900/90 hover:bg-amber-950/60 border border-amber-500/30 hover:border-amber-400 text-left transition group shadow-lg flex flex-col justify-between gap-2 disabled:opacity-50"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] font-black bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">
+                    PLU 98
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">1 Bolsa Harina (50kg)</span>
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-white group-hover:text-amber-300 transition">
+                    Pan Francés · 65 kg
+                  </h4>
+                  <p className="text-[11px] text-slate-400">1 bolsa harina ➔ +65 kg balanza</p>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 pt-1 border-t border-slate-800">
+                  {executingBatch ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{executingBatch ? "Registrando..." : "Registrar (+65 kg)"}</span>
+                </div>
+              </button>
+
+              <button
+                disabled={executingBatch || !panFrances}
+                onClick={() => handleQuickBatch(panFrances?.id, 130, 100)}
+                className="p-4 rounded-2xl bg-slate-900/90 hover:bg-amber-950/60 border border-amber-500/30 hover:border-amber-400 text-left transition group shadow-lg flex flex-col justify-between gap-2 disabled:opacity-50"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] font-black bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded">
+                    PLU 98
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">2 Bolsas Harina (100kg)</span>
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-white group-hover:text-amber-300 transition">
+                    Pan Francés · 130 kg
+                  </h4>
+                  <p className="text-[11px] text-slate-400">2 bolsas harina ➔ +130 kg balanza</p>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400 pt-1 border-t border-slate-800">
+                  {executingBatch ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{executingBatch ? "Registrando..." : "Registrar (+130 kg)"}</span>
+                </div>
+              </button>
+
+              <button
+                disabled={executingBatch || !panFelipe}
+                onClick={() => handleQuickBatch(panFelipe?.id, 65, 50)}
+                className="p-4 rounded-2xl bg-slate-900/90 hover:bg-amber-950/60 border border-orange-500/30 hover:border-orange-400 text-left transition group shadow-lg flex flex-col justify-between gap-2 disabled:opacity-50"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] font-black bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded">
+                    PLU 100
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">1 Bolsa Harina (50kg)</span>
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-white group-hover:text-orange-300 transition">
+                    Pan Felipe · 65 kg
+                  </h4>
+                  <p className="text-[11px] text-slate-400">1 bolsa harina ➔ +65 kg balanza</p>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs font-bold text-orange-400 pt-1 border-t border-slate-800">
+                  {executingBatch ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{executingBatch ? "Registrando..." : "Registrar (+65 kg)"}</span>
+                </div>
+              </button>
+
+              <button
+                disabled={executingBatch || !panFelipe}
+                onClick={() => handleQuickBatch(panFelipe?.id, 130, 100)}
+                className="p-4 rounded-2xl bg-slate-900/90 hover:bg-amber-950/60 border border-orange-500/30 hover:border-orange-400 text-left transition group shadow-lg flex flex-col justify-between gap-2 disabled:opacity-50"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] font-black bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded">
+                    PLU 100
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">2 Bolsas Harina (100kg)</span>
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-white group-hover:text-orange-300 transition">
+                    Pan Felipe · 130 kg
+                  </h4>
+                  <p className="text-[11px] text-slate-400">2 bolsas harina ➔ +130 kg balanza</p>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs font-bold text-orange-400 pt-1 border-t border-slate-800">
+                  {executingBatch ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  <span>{executingBatch ? "Registrando..." : "Registrar (+130 kg)"}</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-extrabold text-sm text-slate-900 dark:text-white uppercase flex items-center gap-2">
+                  <ChefHat className="w-4 h-4 text-amber-500" /> Fórmulas de Producción Activas
+                </h3>
+                <button
+                  onClick={() => setTab("recetas")}
+                  className="text-xs text-amber-600 dark:text-amber-400 font-bold hover:underline flex items-center gap-1"
+                >
+                  Ver todas <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
 
             {allRecipes.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-xs">
@@ -449,7 +621,8 @@ export default function PanaderiaRotiseriaPage() {
             )}
           </div>
         </div>
-      )}
+      </div>
+    )}
 
       {/* ══════════════════════ TAB 2: FÓRMULAS & RECETAS (BOM INDUSTRIAL) ══════════════════════ */}
       {tab === "recetas" && (
@@ -1039,6 +1212,118 @@ export default function PanaderiaRotiseriaPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL HORNEADA CON KILOS A MEDIDA ── */}
+      {showCustomBatchModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col overflow-hidden animate-fade-in">
+            {/* Header shrink-0 */}
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-950/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20 flex items-center justify-center">
+                  <Flame className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white">
+                    Horneada de Pan a Medida
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Registrá el pan elaborado, descontando automáticamente la harina consumida.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCustomBatchModal(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body flex-1 overflow-y-auto */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1.5">
+                  Producto de Panadería a Producir *
+                </label>
+                <select
+                  className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-white font-bold outline-none focus:ring-2 focus:ring-amber-500"
+                  value={customPanId}
+                  onChange={e => setCustomPanId(e.target.value)}
+                >
+                  <option value="">Seleccionar pan...</option>
+                  {breadProducts.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.plu_balanza ? `[PLU ${p.plu_balanza}] ` : ""}{p.nombre} (PVP: {formatPYG(p.precio_venta)}/kg)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1.5">
+                    Kilos Obtenidos del Horno (kg) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono font-black text-amber-600 dark:text-amber-400 text-sm outline-none focus:ring-2 focus:ring-amber-500"
+                    value={customPanKg}
+                    onChange={e => setCustomPanKg(parseFloat(e.target.value) || 0)}
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Suma al stock de balanza</p>
+                </div>
+
+                <div>
+                  <label className="block text-slate-500 dark:text-slate-400 font-bold mb-1.5">
+                    Harina Consumida (kg) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white text-sm outline-none focus:ring-2 focus:ring-amber-500"
+                    value={customHarinaKg}
+                    onChange={e => setCustomHarinaKg(parseFloat(e.target.value) || 0)}
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Descuenta del depósito</p>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 rounded-2xl border border-amber-500/20 text-slate-600 dark:text-slate-300 space-y-1">
+                <span className="font-extrabold text-[11px] text-amber-700 dark:text-amber-300 block">
+                  ⚖️ Rendimiento Técnico Estimado:
+                </span>
+                <p className="text-[11px]">
+                  Con {customHarinaKg} kg de harina se obtienen {customPanKg} kg de producto terminado (
+                  {customHarinaKg > 0 ? ((customPanKg / customHarinaKg) * 100).toFixed(1) : 0}% de aprovechamiento con agua, levadura y sal).
+                </p>
+              </div>
+            </div>
+
+            {/* Footer shrink-0 */}
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50 dark:bg-slate-950">
+              <button
+                type="button"
+                onClick={() => setShowCustomBatchModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={executingBatch || !customPanId || customPanKg <= 0}
+                onClick={() => handleQuickBatch(customPanId, customPanKg, customHarinaKg)}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 text-white font-extrabold text-xs shadow-lg shadow-amber-500/25 flex items-center gap-2 transition disabled:opacity-50"
+              >
+                {executingBatch ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                Registrar Horneada (+{customPanKg} kg)
+              </button>
+            </div>
           </div>
         </div>
       )}
