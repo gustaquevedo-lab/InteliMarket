@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from "react"
 import {
   Barcode, Sparkles, ShoppingBag, ArrowDown, Clock, CheckCircle2, DollarSign,
-  Star, Layers, Maximize2, Sun, Moon, WifiOff, XCircle, Package,
+  Star, Layers, Maximize2, Sun, Moon, WifiOff, XCircle, Package, Scale,
 } from "lucide-react"
 import { api, type KioskProductLookup, type KioskBanner, type Company } from "../../api"
 import { useTheme } from "../../context/ThemeContext"
@@ -61,7 +61,7 @@ function playBeepSound(ok: boolean) {
   } catch { /* audio bloqueado antes de interactuar -- ignorar */ }
 }
 
-const SEGUNDOS_ESPERA = 8
+const SEGUNDOS_ESPERA = 7
 const BANNER_ROTATE_MS = 7000
 
 const monoFont = { fontFamily: "'IBM Plex Mono', monospace" }
@@ -468,10 +468,15 @@ export default function PriceCheckerKioskPage() {
             
             {/* Header Tarjeta */}
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-1.5">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <span className="px-3 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/40 text-xs font-black flex items-center gap-1.5 uppercase tracking-wider">
                   <CheckCircle2 className="w-4 h-4" /> PRECIO VERIFICADO
                 </span>
+                {scannedProduct.es_pesable && (
+                  <span className="px-2.5 py-1 rounded-xl bg-indigo-50 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-400 border border-indigo-300 dark:border-indigo-500/40 text-xs font-black flex items-center gap-1 uppercase tracking-wider">
+                    <Scale className="w-3.5 h-3.5" /> PESABLE {scannedProduct.plu_balanza ? `· PLU ${scannedProduct.plu_balanza}` : ""}
+                  </span>
+                )}
                 <span className="text-xs font-mono text-slate-500 dark:text-slate-400 font-bold hidden sm:inline">
                   SKU: {scannedProduct.sku || scannedProduct.codigo_barra}
                 </span>
@@ -522,7 +527,37 @@ export default function PriceCheckerKioskPage() {
                 </div>
 
                 <div className={`grid gap-2 ${scannedProduct.pack_escaneado ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
-                {scannedProduct.en_promocion ? (
+                {scannedProduct.peso_leido_kg ? (
+                  <div className="p-2.5 sm:p-3 rounded-2xl bg-gradient-to-br from-indigo-500/15 via-blue-500/10 to-indigo-500/5 border-2 border-indigo-400 dark:border-indigo-500/40 shadow-xl space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="px-2.5 py-0.5 rounded-lg bg-indigo-600 text-white font-black text-xs uppercase tracking-wider shadow-sm flex items-center gap-1">
+                        <Scale className="w-3.5 h-3.5" /> ETIQUETA BALANZA PESADA
+                      </span>
+                      <span className="text-xs font-mono font-black px-2.5 py-0.5 rounded-lg bg-slate-900 text-amber-300 dark:bg-white/10 dark:text-amber-300">
+                        ⚖️ {scannedProduct.peso_leido_kg.toFixed(3)} Kg ({Math.round(scannedProduct.peso_leido_kg * 1000)} g)
+                      </span>
+                    </div>
+
+                    <div className="flex items-baseline justify-between flex-wrap gap-2">
+                      <div>
+                        <span className="text-[10px] text-indigo-800 dark:text-indigo-300 font-extrabold uppercase block">
+                          Total a Pagar en Caja:
+                        </span>
+                        <div className="text-3xl sm:text-5xl font-black font-mono tracking-tight text-indigo-600 dark:text-indigo-400">
+                          Gs. {Math.round(scannedProduct.importe_etiqueta_gs || (scannedProduct.peso_leido_kg * precioUnitarioGs)).toLocaleString("es-PY")}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase block">
+                          Precio por Kilo:
+                        </span>
+                        <span className="text-sm sm:text-base font-mono font-black text-slate-700 dark:text-slate-200">
+                          Gs. {Math.round(precioUnitarioGs).toLocaleString("es-PY")} / Kg
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ) : scannedProduct.en_promocion ? (
                   <div className="p-2.5 sm:p-3 rounded-2xl bg-gradient-to-br from-emerald-500/15 via-teal-500/10 to-emerald-500/5 border-2 border-emerald-500 dark:border-emerald-400 shadow-xl space-y-2">
                     
                     {/* Header Promocional & Precios */}
@@ -539,7 +574,7 @@ export default function PriceCheckerKioskPage() {
 
                     <div className="flex items-baseline gap-3 flex-wrap">
                       <div className="text-3xl sm:text-4xl md:text-5xl font-black font-mono tracking-tight text-emerald-600 dark:text-emerald-400 drop-shadow-sm">
-                        Gs. {Math.round(scannedProduct.precio_venta).toLocaleString("es-PY")}
+                        Gs. {Math.round(scannedProduct.precio_venta).toLocaleString("es-PY")} {scannedProduct.es_pesable ? "/ Kg" : ""}
                       </div>
                       {scannedProduct.precio_regular && (
                         <div className="text-sm sm:text-lg font-mono line-through text-slate-400 dark:text-slate-500 font-bold">
@@ -578,7 +613,7 @@ export default function PriceCheckerKioskPage() {
                   <div className="p-2.5 sm:p-3 rounded-2xl bg-orange-50 dark:bg-orange-500/10 border-2 border-orange-300 dark:border-orange-500/40 shadow-md">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-orange-600 dark:text-orange-400 block mb-0.5">
-                        PRECIO UNITARIO AL CONTADO:
+                        {scannedProduct.es_pesable ? "PRECIO POR KILO (KG):" : "PRECIO UNITARIO AL CONTADO:"}
                       </span>
                       {scannedProduct.mensaje_dias && (
                         <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded-md">
@@ -587,8 +622,14 @@ export default function PriceCheckerKioskPage() {
                       )}
                     </div>
                     <div className="text-3xl sm:text-5xl font-black font-mono tracking-tight text-slate-900 dark:text-white">
-                      Gs. {Math.round(precioUnitarioGs).toLocaleString("es-PY")}
+                      Gs. {Math.round(precioUnitarioGs).toLocaleString("es-PY")} {scannedProduct.es_pesable ? "/ Kg" : ""}
                     </div>
+                    {scannedProduct.es_pesable && (
+                      <div className="mt-1 text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                        <Scale className="w-3.5 h-3.5 text-indigo-500" />
+                        Pesar en balanza Balmak Edge de la sección correspondiente
+                      </div>
+                    )}
                   </div>
                 )}
 

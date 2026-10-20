@@ -119,3 +119,39 @@ class TestButcheryAndTvSchemas:
         assert resp.success is True
         assert resp.kilos_producidos == 65.0
         assert resp.nuevo_stock_pan == 42.0
+
+    def test_kiosk_scale_barcode_and_lookup_schema(self):
+        from api.src.products.scale_parser import parse_scale_barcode
+        from api.src.kiosk.schemas import ProductLookupResponse
+
+        # Balmak Edge / Toledo prefijo 2000 (PLU 98 pan francés, peso 0.540 kg)
+        match1 = parse_scale_barcode("2000098005408")
+        assert match1 is not None
+        assert match1.plu == 98
+        assert match1.valor_extraido == 540.0
+        peso_kg = round(match1.valor_extraido / 1000.0, 3)
+        assert peso_kg == 0.540
+
+        # Balmak Edge formato 20 (PLU 4 dígitos 0100 pan felipe, peso 1.250 kg)
+        match2 = parse_scale_barcode("200100012501")
+        assert match2 is not None
+        assert match2.plu == 100
+        assert match2.valor_extraido == 1250.0
+
+        # Validar ProductLookupResponse con campos pesables
+        prod_id = uuid4()
+        lookup_resp = ProductLookupResponse(
+            id=prod_id,
+            nombre="PAN FRANCES KG",
+            sku="PAN-098",
+            codigo_barra="2000098000000",
+            precio_venta=10500.0,
+            es_pesable=True,
+            peso_leido_kg=peso_kg,
+            importe_etiqueta_gs=round(peso_kg * 10500.0, 0),
+            plu_balanza=98,
+        )
+        assert lookup_resp.es_pesable is True
+        assert lookup_resp.peso_leido_kg == 0.540
+        assert lookup_resp.importe_etiqueta_gs == 5670.0
+        assert lookup_resp.plu_balanza == 98

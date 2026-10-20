@@ -57,30 +57,30 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
                 escaneado_como_pack = pack_match.etiqueta
                 pack_escaneado_match = pack_match
 
-    if not product:
-        # Fallback 2: Resolución de etiquetas de balanza de panadería / carnicería (EAN-13 balanza)
-        from api.src.products.scale_parser import parse_scale_barcode
-        scale_match = parse_scale_barcode(code)
-        if scale_match:
-            scale_conds = []
-            if scale_match.base_barcode:
-                scale_conds.append(Product.codigo_barra == scale_match.base_barcode)
-            if scale_match.plu is not None:
-                scale_conds.append(Product.plu_balanza == scale_match.plu)
-                scale_conds.append(Product.codigo_barra == f"2000{scale_match.plu:03d}")
+    from api.src.products.scale_parser import parse_scale_barcode
+    scale_match = parse_scale_barcode(code)
 
-            if scale_conds:
-                scale_res = await db.execute(
-                    select(Product)
-                    .options(selectinload(Product.categoria))
-                    .where(
-                        Product.company_id == cid,
-                        Product.activo == True,
-                        or_(*scale_conds),
-                    )
-                    .limit(1)
+    if not product and scale_match:
+        # Fallback 2: Resolución de etiquetas de balanza de panadería / carnicería (EAN-13 balanza)
+        scale_conds = []
+        if scale_match.base_barcode:
+            scale_conds.append(Product.codigo_barra == scale_match.base_barcode)
+        if scale_match.plu is not None:
+            scale_conds.append(Product.plu_balanza == scale_match.plu)
+            scale_conds.append(Product.codigo_barra == f"2000{scale_match.plu:03d}")
+
+        if scale_conds:
+            scale_res = await db.execute(
+                select(Product)
+                .options(selectinload(Product.categoria))
+                .where(
+                    Product.company_id == cid,
+                    Product.activo == True,
+                    or_(*scale_conds),
                 )
-                product = scale_res.scalar_one_or_none()
+                .limit(1)
+            )
+            product = scale_res.scalar_one_or_none()
 
     if not product:
         return None
@@ -141,6 +141,22 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
             precio_pack=round(_precio_para_cantidad(float(pack_escaneado_match.unidades_por_paquete)) * float(pack_escaneado_match.unidades_por_paquete), 0),
         )
 
+    # Detección de balanza / pesable
+    es_pesable = (
+        product.tipo_venta == "peso"
+        or product.unidad_medida == "KG"
+        or (product.plu_balanza is not None and product.plu_balanza > 0)
+        or (scale_match is not None)
+    )
+    peso_leido_kg: float | None = None
+    importe_etiqueta_gs: float | None = None
+    if scale_match and scale_match.valor_extraido is not None and scale_match.valor_extraido > 0:
+        # En Balmak Edge / Toledo el valor_extraido viene en gramos (ej. 540 -> 0.540 kg)
+        peso_leido_kg = round(scale_match.valor_extraido / 1000.0, 3)
+        importe_etiqueta_gs = round(peso_leido_kg * effective_price, 0)
+
+    plu_balanza = product.plu_balanza or (scale_match.plu if scale_match else None)
+
     return {
         "id": product.id,
         "nombre": product.nombre,
@@ -165,6 +181,10 @@ async def lookup_product(db: AsyncSession, company_id: str, code: str) -> dict |
         "valido_hasta": promo_info.valido_hasta,
         "mensaje_dias": promo_info.mensaje_dias,
         "es_activo_hoy": promo_info.es_activo_hoy,
+        "es_pesable": es_pesable,
+        "peso_leido_kg": peso_leido_kg,
+        "importe_etiqueta_gs": importe_etiqueta_gs,
+        "plu_balanza": plu_balanza,
     }
 
 

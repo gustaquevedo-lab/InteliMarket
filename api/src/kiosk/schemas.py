@@ -88,6 +88,12 @@ class ProductLookupResponse(BaseModel):
     mensaje_dias: Optional[str] = None
     es_activo_hoy: Optional[bool] = True
 
+    # Pesable / Balanza
+    es_pesable: Optional[bool] = False
+    peso_leido_kg: Optional[float] = None
+    importe_etiqueta_gs: Optional[float] = None
+    plu_balanza: Optional[int] = None
+
 
 
 class KioskBrandingResponse(BaseModel):
