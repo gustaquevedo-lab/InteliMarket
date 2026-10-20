@@ -271,7 +271,7 @@ async def create_purchase_order(db: AsyncSession, data: POCreate) -> PurchaseOrd
         if abs(ajuste) > tope:
             raise ValueError(
                 f"La factura del proveedor difiere en {ajuste:,.0f} Gs. de la suma de líneas: es demasiado para "
-                f"ser redondeo (máx. {tope:,.0f} Gs.). Revisá precios y cantidades."
+                f"ser redondeo (máx. {tope:,.0f} Gs.). Revisá precios y cantidades.".replace(",", ".")
             )
         order.ajuste_redondeo = ajuste
         order.total = landed + ajuste
