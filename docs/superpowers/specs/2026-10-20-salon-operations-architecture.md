@@ -92,13 +92,24 @@ Al inspeccionar la base de datos PostgreSQL en `100.83.91.76`:
   - Producción rápida de tandas: `Pollo al Spiedo` (unidades), `Milanesas de Carne/Pollo` (kg), `Tartas y Empanadas`.
 
 ### 3.3 TV Digital Carnicería (`/kiosk/carniceria-tv`)
-- **Diseño**: Interfaz de pizarra digital full-screen (1080p / 4K) en tema oscuro de alto contraste, tipografía robusta visible a distancia.
-- **Contenido Dinámico**:
-  - Grid de cortes principales agrupados: Cortes Parrilleros, Carnazas / Cocina, Cortes de Cerdo, Ofertas Especiales.
-  - Formato de precio paraguayo estricto: `34.777` sin decimales y con badge `OFERTA` dorado para productos con descuento o precio fijo activo.
+- **Diseño 1080p / Pizarra Digital en Tema Oscuro**:
+  - Interfaz full-screen optimizada para 1920x1080 (Smart TV / TV Box HDMI en mostrador) en fondo negro profundo (`bg-slate-950` / `bg-black`) con tipografía de alto contraste legible a 8-10 metros.
+  - **Formato Lista de Precios de Carnicería (Digital Price Board)**:
+    * Presentación en columnas limpias y equilibradas (evita scroll vertical; todo visible de un solo vistazo).
+    * Columnas: Nombre del Corte, Categoría, Precio por Kg (`₲ 34.777`).
+  - **Destaque Automático de Promociones**:
+    * Si el corte tiene una oferta activa (`precio_fijo_oferta`, porcentaje de descuento o promo de catálogo), el sistema le aplica automáticamente:
+      - Badge brillante de oferta (`OFERTA`, `PROMO`).
+      - Precio anterior tachado (ej: `~~39.777~~`).
+      - Precio promocional en tipografía resaltada dorada / amarillo vibrante.
+  - **Control Centralizado desde la Tablet (Hub Operaciones / Carnicería)**:
+    * En la tablet, el encargado tiene un panel dedicado: *"Gestor de Pizarra TV"*.
+    * Permite marcar con switches/checkboxes qué cortes están activos para mostrarse en la TV (ej. ocultar cortes sin stock o priorizar los 12 cortes clave del día).
+    * La configuración de cortes visibles se almacena en PostgreSQL (`settings_company`, clave `tv_carniceria_config`).
+    * Al modificar la selección en la tablet, la TV Digital detecta el cambio en su polling de 20-30 segundos y actualiza su lista de inmediato sin parpadeo ni intervención física en el televisor.
 - **Sincronización en Vivo**:
-  - Polling liviano cada 60 segundos a `/api/v1/supermer/butchery/tv-cuts`.
-  - Detección de cambios sin parpadeo de pantalla (DOM diffing suave).
+  - Endpoint dedicado `GET /api/v1/supermer/butchery/tv-cuts` (público para display sin sesión).
+  - Endpoint de gestión `PUT /api/v1/supermer/butchery/tv-cuts/visibility` (usado por la tablet con autenticación).
 
 ### 3.4 Verificador de Precios Kiosco (`/kiosk/verificador-precios`)
 - **Diseño**: Pantalla táctil de pasillo para tótem con lector de código de barras.
