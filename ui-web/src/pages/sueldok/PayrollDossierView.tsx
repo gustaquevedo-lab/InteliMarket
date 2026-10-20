@@ -43,6 +43,9 @@ interface Phase {
   monto: number
   estado: string
   payment_order_id?: string
+  payment_order_numero?: string
+  payment_order_estado?: string
+  payment_order_monto_neto?: number
   collection_receipt_id?: string
   fecha_vencimiento?: string
   pdf_storage_key?: string
