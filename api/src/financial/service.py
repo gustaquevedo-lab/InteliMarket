@@ -4547,15 +4547,30 @@ async def _execute_disbursements_internal(
             ))
             disb_record.petty_cash_fund_id = fund.id
 
-            from api.src.petty_cash.models import Expense
+            from api.src.petty_cash.models import Expense, CostCenter
             fecha_op = payload.fecha_pago or _today()
+            op_num = order.numero_orden or ""
+            factura_num = op_num if op_num.startswith("OP-") else (f"OP-{op_num}" if op_num else "OP-S/N")
+
+            # Si es orden de RH o nómina, imputar al centro de costos Recursos Humanos
+            cc_id = None
+            if order.subtipo in ("finiquito", "nomina_salarios", "convenio_cafeteria", "convenio_credipora", "adelanto_sueldo"):
+                cc_res = await db.execute(
+                    select(CostCenter.id).where(
+                        CostCenter.company_id == cid,
+                        CostCenter.nombre.ilike("%recursos humanos%")
+                    )
+                )
+                cc_id = cc_res.scalars().first()
+
             exp = Expense(
                 company_id=cid,
                 fund_id=fund.id,
+                cost_center_id=cc_id,
                 monto=m_pyg,
                 descripcion=f"Pago OP {order.numero_orden} - {contraparte_str}",
                 proveedor=contraparte_str,
-                numero_factura=f"OP-{order.numero_orden}",
+                numero_factura=factura_num,
                 fecha_gasto=fecha_op,
                 fecha_pago=fecha_op,
                 tipo_pago="efectivo",
