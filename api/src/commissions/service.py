@@ -229,7 +229,7 @@ async def calculate_batch_commissions(db: AsyncSession, company_id: str) -> dict
 
         rule = rules[0]
         porc = Decimal(str(rule.porcentaje or "1.5"))
-        monto_com = (base * porc / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        monto_com = (base * porc / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_CEILING")
 
         comm = SalesCommission(
             company_id=company_id,

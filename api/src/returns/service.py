@@ -124,12 +124,12 @@ async def create_return(db: AsyncSession, data: ReturnCreate) -> Return:
 
     for item_data in data.items:
         iva_tasa = Decimal(str(item_data.iva_tasa if item_data.iva_tasa is not None else 10))
-        item_total = (Decimal(str(item_data.precio_unitario)) * Decimal(str(item_data.cantidad))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        item_total = (Decimal(str(item_data.precio_unitario)).quantize(Decimal("1"), rounding="ROUND_CEILING") * Decimal(str(item_data.cantidad))).quantize(Decimal("1"), rounding="ROUND_CEILING")
         if iva_tasa == Decimal("0"):
             item_base = item_total
             iva_monto = Decimal("0")
         else:
-            item_base = (item_total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+            item_base = (item_total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_CEILING")
             iva_monto = item_total - item_base
 
         # Si no viene descripción, buscamos el producto

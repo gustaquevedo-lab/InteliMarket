@@ -73,7 +73,7 @@ async def list_payments(db: AsyncSession, company_id: str, tipo: str | None = No
 async def create_payment(db: AsyncSession, data: PaymentCreate) -> Payment:
     monto_pyg = None
     if data.moneda != "PYG":
-        monto_pyg = (data.monto * data.tipo_cambio).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        monto_pyg = (data.monto * data.tipo_cambio).quantize(Decimal("1"), rounding="ROUND_CEILING")
 
     payment = Payment(
         company_id=data.company_id,
@@ -215,7 +215,8 @@ async def create_financing(
         r = tasa_interes_mensual / Decimal("100")
         if r > 0:
             monto_cuota = monto_financiado * (r * (1 + r) ** cantidad_cuotas) / ((1 + r) ** cantidad_cuotas - 1)
-        monto_cuota = monto_cuota.quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+
+    monto_cuota = monto_cuota.quantize(Decimal("1"), rounding="ROUND_CEILING")  # con o sin interés: entero hacia arriba
 
     if not fecha_primera_cuota:
         now = datetime.now(timezone.utc)

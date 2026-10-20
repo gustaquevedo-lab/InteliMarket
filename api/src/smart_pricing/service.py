@@ -232,22 +232,22 @@ async def get_applicable_tier_price(
                 if pr.tipo == "dos_por_uno":
                     min_req = 2
                     if quantity >= 2:
-                        calc_unit_price = (calc_base / Decimal("2")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                        calc_unit_price = (calc_base / Decimal("2")).quantize(Decimal("1"), rounding="ROUND_CEILING")
                 elif pr.tipo == "tres_por_dos":
                     min_req = 3
                     if quantity >= 3:
-                        calc_unit_price = ((calc_base * Decimal("2")) / Decimal("3")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                        calc_unit_price = ((calc_base * Decimal("2")) / Decimal("3")).quantize(Decimal("1"), rounding="ROUND_CEILING")
                 elif pr.tipo in ("nxm", "cantidad_lleva"):
                     n = pr.cantidad_minima or 2
                     m = int(pr.valor) if pr.valor and pr.valor > 0 else 1
                     min_req = n
                     if n > m and quantity >= n:
-                        calc_unit_price = ((calc_base * Decimal(str(m))) / Decimal(str(n))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                        calc_unit_price = ((calc_base * Decimal(str(m))) / Decimal(str(n))).quantize(Decimal("1"), rounding="ROUND_CEILING")
                 elif pr.tipo == "segunda_unidad_pct":
                     min_req = 2
                     if quantity >= 2:
                         pct = (pr.valor or Decimal("50")) / Decimal("100")
-                        calc_unit_price = (calc_base * (Decimal("1") - (pct / Decimal("2")))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+                        calc_unit_price = (calc_base * (Decimal("1") - (pct / Decimal("2")))).quantize(Decimal("1"), rounding="ROUND_CEILING")
                 elif pr.tipo == "precio_fijo_oferta" and pr.precio_fijo_promocional:
                     if quantity >= min_req:
                         calc_unit_price = Decimal(str(pr.precio_fijo_promocional))

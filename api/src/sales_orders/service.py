@@ -26,31 +26,9 @@ async def _attach_customers(db: AsyncSession, orders: list[SalesOrder]) -> list[
 
 
 def _calculate_taxes(item: dict) -> dict:
-    precio = Decimal(str(item["precio_unitario"]))
-    cantidad = Decimal(str(item["cantidad"]))
-    descuento_pct = Decimal(str(item.get("descuento_pct", 0)))
-    iva_tasa = Decimal(str(item.get("iva_tasa", 10)))
-
-    subtotal_bruto = precio * cantidad
-    descuento_monto = subtotal_bruto * (descuento_pct / Decimal("100"))
-    # Mismo fix que sales/service.py::calculate_taxes -- el precio ya
-    # incluye el IVA, no hay que sumarlo de nuevo encima.
-    total = (subtotal_bruto - descuento_monto).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-
-    if iva_tasa == Decimal("0"):
-        iva_monto = Decimal("0")
-        base = total
-    else:
-        base = (total / (Decimal("1") + iva_tasa / Decimal("100"))).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
-        iva_monto = total - base
-
-    return {
-        "subtotal_bruto": subtotal_bruto.quantize(Decimal("1")),
-        "descuento_monto": descuento_monto.quantize(Decimal("1")),
-        "iva_monto": iva_monto,
-        "total": total,
-        "base": base,
-    }
+    # Mismo cálculo que ventas: guaraníes enteros hacia arriba en cada paso, precio con IVA incluido.
+    from api.src.sales.service import calculate_taxes
+    return calculate_taxes(item)
 
 
 async def generate_order_number(db: AsyncSession, company_id: str) -> str:
@@ -103,7 +81,7 @@ async def create_order(db: AsyncSession, data: SalesOrderCreate) -> SalesOrder:
             descripcion=item_data.descripcion,
             cantidad=item_data.cantidad,
             cantidad_pendiente=item_data.cantidad,
-            precio_unitario=item_data.precio_unitario,
+            precio_unitario=taxes["precio_unitario"],
             descuento_pct=item_data.descuento_pct,
             iva_tasa=item_data.iva_tasa,
             iva_monto=taxes["iva_monto"],
@@ -217,7 +195,7 @@ async def update_order(db: AsyncSession, order_id: str, data: SalesOrderUpdate) 
             item = SalesOrderItem(
                 order_id=order.id, product_id=item_data.product_id, variant_id=item_data.variant_id,
                 descripcion=item_data.descripcion, cantidad=item_data.cantidad, cantidad_pendiente=item_data.cantidad,
-                precio_unitario=item_data.precio_unitario, descuento_pct=item_data.descuento_pct,
+                precio_unitario=taxes["precio_unitario"], descuento_pct=item_data.descuento_pct,
                 iva_tasa=item_data.iva_tasa, iva_monto=taxes["iva_monto"], total=taxes["total"],
             )
             db.add(item)

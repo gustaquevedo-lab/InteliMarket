@@ -62,7 +62,7 @@ async def create_return(db: AsyncSession, data: SupplierReturnCreate) -> Purchas
             iva_monto = Decimal("0")
             item_total = base
         else:
-            iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+            iva_monto = (base * iva_tasa / Decimal("100")).quantize(Decimal("1"), rounding="ROUND_CEILING")
             item_total = base + iva_monto
 
         item = PurchaseReturnItem(

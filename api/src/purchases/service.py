@@ -850,7 +850,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         old_qty = stock_obj.cantidad
         stock_obj.cantidad += qty
         if old_qty + qty > 0:
-            stock_obj.costo_unitario = ((old_cost * old_qty + cost * qty) / (old_qty + qty)).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+            stock_obj.costo_unitario = ((old_cost * old_qty + cost * qty) / (old_qty + qty)).quantize(Decimal("1"), rounding="ROUND_CEILING")
         stock_obj.updated_at = datetime.now(timezone.utc)
 
         stock_lot = StockLot(
@@ -934,7 +934,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         fecha_vencimiento = fecha_emision + timedelta(days=plazo_dias)
 
         invoice_num = (data.proveedor_ref or receipt.numero).strip()
-        iva_10 = (receipt.total / Decimal("11")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        iva_10 = receipt.total - (receipt.total * Decimal("10") / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_CEILING")
 
         is_br_sup = bool(sup and (sup.tipo_proveedor in ("brasilero", "br") or (getattr(sup, "moneda_default", "") == "BRL"))) or (data.total_brl is not None)
         inv_moneda = "BRL" if is_br_sup else "PYG"

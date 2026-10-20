@@ -265,10 +265,10 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
 
         if tasa == 10:
             subtotal_10 += sub
-            iva_10 += (sub / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+            iva_10 += sub - (sub * Decimal("10") / Decimal("11")).quantize(Decimal("1"), rounding="ROUND_CEILING")
         elif tasa == 5:
             subtotal_5 += sub
-            iva_5 += (sub / Decimal("21")).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+            iva_5 += sub - (sub * Decimal("20") / Decimal("21")).quantize(Decimal("1"), rounding="ROUND_CEILING")
         else:
             subtotal_exenta += sub
 
