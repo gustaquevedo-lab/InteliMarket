@@ -522,6 +522,65 @@ export default function FinancialPage() {
     }
   }
 
+  const [archivingReturn, setArchivingReturn] = useState(false)
+
+  const handleArchiveReturn = async (ret: any) => {
+    if (!ret) return
+    const codigo = ret.codigo || ret.numero_solicitud || "DEV"
+    const isSnc = ret.tipo_origen === "solicitud_nc"
+    const confirmMsg = isSnc
+      ? `¿Deseas archivar la solicitud de NC ${codigo} y pasarla al histórico?\n\nDejará de descontar del saldo del proveedor.`
+      : `¿Deseas anular / archivar la devolución ${codigo}?\n\nPasará a estado anulado y dejará de afectar el saldo del proveedor.`
+    if (!window.confirm(confirmMsg)) return
+
+    setArchivingReturn(true)
+    try {
+      if (isSnc) {
+        await api.purchases.dismissSupplierNcRequest(ret.id)
+      } else {
+        await api.supplierReturns.cancel(ret.id)
+      }
+      toast.success("Devolución / Reclamo Anulado", `${codigo} fue anulado/archivado exitosamente.`)
+      setSelectedOpReturnIds(prev => {
+        const next = new Set(prev)
+        next.delete(ret.id)
+        return next
+      })
+      await fetchAll()
+    } catch (err: any) {
+      toast.error("Error al anular devolución", err?.response?.data?.detail || err?.message || "No se pudo anular el registro.")
+    } finally {
+      setArchivingReturn(false)
+    }
+  }
+
+  const handleArchiveReturnsBatch = async (returnIds: string[]) => {
+    if (!returnIds || returnIds.length === 0 || !currentSelectedSupplier) return
+    const msg = `¿Desea anular / archivar estas ${returnIds.length} devoluciones / reclamos seleccionados?\n\nDejarán de afectar el saldo deudor del proveedor.`
+    if (!window.confirm(msg)) return
+
+    setArchivingReturn(true)
+    try {
+      let count = 0
+      for (const id of returnIds) {
+        const retObj = currentSelectedSupplier.devolucionesPendientes.find((r: any) => String(r.id) === String(id))
+        if (retObj?.tipo_origen === "solicitud_nc") {
+          await api.purchases.dismissSupplierNcRequest(id)
+        } else {
+          await api.supplierReturns.cancel(id)
+        }
+        count++
+      }
+      toast.success("Devoluciones Archivadas", `Se anularon/archivaron ${count} registros exitosamente.`)
+      setSelectedOpReturnIds(new Set())
+      await fetchAll()
+    } catch (err: any) {
+      toast.error("Error en lote", err?.response?.data?.detail || err?.message || "Ocurrió un error al procesar las devoluciones.")
+    } finally {
+      setArchivingReturn(false)
+    }
+  }
+
   const handleViewApplications = async (nc: any) => {
     setShowApplicationsModal(nc)
     setLoadingApplications(true)
@@ -1012,7 +1071,7 @@ export default function FinancialPage() {
       if (!supId) return
 
       const est = String(snc.estado || "").toLowerCase()
-      if (est === "resuelta" || est === "rechazada" || est === "cancelada" || est === "anulada" || snc.nc_recibida_numero) return
+      if (est === "resuelta" || est === "rechazada" || est === "cancelada" || est === "anulada" || est === "archivada" || snc.nc_recibida_numero) return
 
       let item = map.get(supId)
       if (!item) {
@@ -1054,8 +1113,8 @@ export default function FinancialPage() {
         ret.nota_credito_numero ||
         (Array.isArray(ret.notas_credito) && ret.notas_credito.length > 0)
       )
-      const isCompletado = (ret.estado || "").toLowerCase() === "completado"
-      if (hasNC || isCompletado) return
+      const isExcluded = ["completado", "anulado", "cancelado", "archivado", "rechazado"].includes((ret.estado || "").toLowerCase())
+      if (hasNC || isExcluded) return
 
       if (ret.observaciones && /DEV-\d|NCs:/i.test(ret.observaciones)) return
 
@@ -2585,6 +2644,24 @@ export default function FinancialPage() {
                               <span>Desvincular / Archivar NCs ({selectedOpCreditNoteIds.size})</span>
                             </button>
                           )}
+
+                          {/* Botón Anular / Archivar Devoluciones y Reclamos Seleccionados */}
+                          {selectedOpReturnIds.size > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleArchiveReturnsBatch(Array.from(selectedOpReturnIds))}
+                              disabled={archivingReturn}
+                              className="btn-ghost text-xs py-1.5 px-3.5 flex items-center gap-1.5 border border-rose-300 dark:border-rose-700/60 bg-rose-500/15 text-rose-800 dark:text-rose-300 hover:bg-rose-500/25 rounded-lg transition font-bold cursor-pointer disabled:opacity-50 shadow-sm"
+                              title="Anular o archivar las devoluciones / reclamos seleccionados para que dejen de afectar el saldo"
+                            >
+                              {archivingReturn ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                              ) : (
+                                <Ban className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                              )}
+                              <span>Anular / Archivar Devoluciones ({selectedOpReturnIds.size})</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -2903,9 +2980,18 @@ export default function FinancialPage() {
                                       </div>
                                     )}
                                     {isDev && (
-                                      <span className="text-[11px] text-amber-600 dark:text-amber-400 font-semibold">
-                                        Descontar
-                                      </span>
+                                      <div className="flex items-center justify-end gap-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleArchiveReturn(doc.raw)}
+                                          disabled={archivingReturn}
+                                          className="btn-ghost text-xs py-1 px-2.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded inline-flex items-center gap-1 font-semibold"
+                                          title="Anular o archivar este reclamo / devolución física para que deje de afectar el saldo"
+                                        >
+                                          <Ban className="w-3.5 h-3.5 text-rose-600" />
+                                          <span>Anular</span>
+                                        </button>
+                                      </div>
                                     )}
                                   </td>
                                 </tr>

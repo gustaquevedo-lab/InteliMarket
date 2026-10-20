@@ -155,6 +155,8 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
 
     sncs_by_invoice: Dict[uuid.UUID, List[Dict[str, Any]]] = {}
     for n in nc_requests:
+        if (n.estado or "").lower() in ("anulada", "cancelada", "archivada", "rechazada"):
+            continue
         if n.invoice_id:
             sncs_by_invoice.setdefault(n.invoice_id, []).append({
                 "id": str(n.id),
@@ -429,6 +431,8 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         for r in sm_ret_res.scalars().all():
             val = _dec_to_float(r.valor_total_estimado or r.nota_credito_monto)
             tiene_nc = bool(r.nota_credito_numero)
+            estado_ret = (r.estado or "pendiente").lower()
+            es_anulada = estado_ret in ("anulado", "cancelado", "archivado", "rechazado")
             devoluciones_fisicas.append({
                 "id": str(r.id),
                 "codigo": r.codigo or "DEV-S/N",
@@ -439,8 +443,8 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
                 "nota_credito_numero": r.nota_credito_numero or "",
                 "nota_credito_monto": _dec_to_float(r.nota_credito_monto),
                 "estado": r.estado or "pendiente",
-                "etapa_codigo": "2_emitida_monedero" if tiene_nc else "1_requerimiento",
-                "etapa_label": "NC Formal Emitida (Impacto Contable en Monedero)" if tiene_nc else "Etapa 1: Mercadería Entregada - Obligación de NC Pendiente",
+                "etapa_codigo": "anulada" if es_anulada else ("2_emitida_monedero" if tiene_nc else "1_requerimiento"),
+                "etapa_label": "Devolución Anulada / Archivada" if es_anulada else ("NC Formal Emitida (Impacto Contable en Monedero)" if tiene_nc else "Etapa 1: Mercadería Entregada - Obligación de NC Pendiente"),
                 "formalizada_en_finanzas": tiene_nc,
                 "origen_clave": "devolucion_merma",
                 "origen_label": "Devolución Física de Mercadería (Salón / Depósito)",
@@ -480,12 +484,13 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             orig_lbl = "Reclamo Comercial / Administrativo"
             orig_ico = "file-text"
 
-        if n.estado == "resuelta" or nc_emitida_num:
+        estado_snc = (n.estado or "").lower()
+        if estado_snc == "resuelta" or nc_emitida_num:
             etapa_k = "2_emitida_monedero"
             etapa_lbl = f"Etapa 2: NC Formal Emitida ({nc_emitida_num or 'Registrada'})"
-        elif n.estado == "rechazada":
+        elif estado_snc in ("rechazada", "anulada", "archivada", "cancelada"):
             etapa_k = "rechazada"
-            etapa_lbl = "Reclamo Rechazado por Proveedor"
+            etapa_lbl = "Reclamo Anulado / Archivado / Rechazado"
         else:
             etapa_k = "1_requerimiento"
             etapa_lbl = "Etapa 1: Obligación Pendiente de Emisión por Proveedor"

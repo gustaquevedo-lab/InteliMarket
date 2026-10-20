@@ -88,6 +88,17 @@ async def complete_return(return_id: UUID, user_id: UUID, db: AsyncSession):
     return await get_return(return_id, db)
 
 
+async def cancel_return(return_id: UUID, user_id: Optional[UUID], db: AsyncSession, motivo: Optional[str] = None):
+    r = await get_return(return_id, db)
+    r.estado = "anulado"
+    r.rechazado_por = user_id
+    r.rechazado_at = datetime.utcnow()
+    r.motivo_rechazo = motivo or "Anulado/Archivado manualmente desde Gestión Financiera"
+    r.observaciones = f"{(r.observaciones or '').strip()} [Archivado/Anulado manualmente]".strip()
+    await db.commit()
+    return await get_return(return_id, db)
+
+
 # ---------------------------------------------------------------------------
 # RETURN ITEMS
 # ---------------------------------------------------------------------------

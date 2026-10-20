@@ -5338,6 +5338,8 @@ export const api = {
     update: (id: string, data: any) => client.put<any>(`/v1/supermer/returns/${id}`, data),
     authorize: (id: string) => client.post<any>(`/v1/supermer/returns/${id}/authorize`),
     complete: (id: string) => client.post<any>(`/v1/supermer/returns/${id}/complete`),
+    cancel: (id: string) => client.post<any>(`/v1/supermer/returns/${id}/cancel`),
+    archive: (id: string) => client.post<any>(`/v1/supermer/returns/${id}/archive`),
     items: {
       create: (returnId: string, data: any) => client.post<any>(`/v1/supermer/returns/${returnId}/items`, data),
     },

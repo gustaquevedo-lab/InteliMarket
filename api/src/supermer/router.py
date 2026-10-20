@@ -1942,6 +1942,26 @@ async def returns_complete(
     return await service_returns.complete_return(return_id, user["id"], db)
 
 
+@router.post("/returns/{return_id}/cancel", response_model=SupplierReturnResponse)
+async def returns_cancel(
+    return_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    return await service_returns.cancel_return(return_id, user_id, db)
+
+
+@router.post("/returns/{return_id}/archive", response_model=SupplierReturnResponse)
+async def returns_archive(
+    return_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+    return await service_returns.cancel_return(return_id, user_id, db, motivo="Archivado desde Gestión Financiera")
+
+
 @router.post("/returns/{return_id}/items", response_model=ReturnItemResponse, status_code=201)
 async def returns_create_item(
     return_id: UUID,
