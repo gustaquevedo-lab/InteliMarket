@@ -684,9 +684,11 @@ export interface SupermerWasteByArea { area?: string; total_cantidad?: number; t
 export interface SupermerProductionByArea { area?: string; total_producido?: number; ordenes_completadas?: number; rendimiento_promedio?: number; merma_cantidad?: number; merma_costo?: number }
 export interface ButcheryTemplate { id: string; nombre?: string; especie?: string; peso_promedio_kg?: number; descripcion?: string; activa?: boolean; cuts?: ButcheryTemplateCut[]; created_at?: string }
 export interface ButcheryTemplateCut { id?: string; producto_id?: string; producto_nombre?: string; producto_sku?: string; producto_codigo_barra?: string; plu_balanza?: number; precio_venta?: number; rendimiento_porcentual?: number; precio_ponderado?: number; orden?: number; es_subproducto?: boolean }
-export interface DesposteInput { template_id: string; peso_entrada_kg: number; costo_total_gs: number; fecha_vencimiento?: string; responsable_id?: string; notas?: string }
+export interface DesposteInput { template_id: string; peso_entrada_kg: number; costo_total_gs: number; fecha_vencimiento?: string; responsable_id?: string; notas?: string; insumo_producto_id?: string; deposito_origen_id?: string; deposito_destino_id?: string; ajustes_cortes?: Record<string, number> }
 export interface DesposteCorteResult { producto_id?: string; producto_nombre?: string; rendimiento_esperado?: number; peso_obtenido_kg?: number; costo_unitario_gs?: number; precio_ponderado?: number; es_subproducto?: boolean }
 export interface DesposteResponse { orden_id: string; template_nombre?: string; peso_entrada_kg?: number; costo_total_gs?: number; peso_total_obtenido?: number; merma_kg?: number; merma_porcentaje?: number; cortes?: DesposteCorteResult[]; batches?: SupermerBatch[] }
+export interface TvCutItem { producto_id: string; nombre: string; sku?: string; plu?: number; categoria: string; precio: number; precio_anterior?: number; en_promo: boolean; badge_promo?: string; porcentaje_descuento?: number; visible_en_tv: boolean; orden: number; stock_kg?: number }
+export interface TvCutsResponse { titulo: string; subtitulo: string; updated_at: string; cuts: TvCutItem[] }
 export interface BakeryPlan { id: string; nombre?: string; dia_semana?: number; activo?: boolean; items?: BakeryPlanItem[]; created_at?: string }
 export interface BakeryPlanItem { id?: string; receta_id?: string; receta_nombre?: string; cantidad_objetivo?: number; prioridad?: number }
 export interface ScaleRecipeResult { receta_nombre?: string; producto_terminado?: string; cantidad_base?: number; cantidad_deseada?: number; factor_escala?: number; items?: any[]; insumos_totales?: any[] }
@@ -4357,6 +4359,8 @@ export const api = {
       desposte: (data: DesposteInput) => client.post<DesposteResponse>("/v1/supermer/butchery/desposte", data),
       orders: (params?: { limit?: number; offset?: number }) => client.get<SupermerOrder[]>("/v1/supermer/butchery/orders", params as any),
       yieldReport: (params?: { desde?: string; hasta?: string }) => client.get<any[]>("/v1/supermer/butchery/yield-report", params as any),
+      tvCuts: (company_id?: string) => client.get<TvCutsResponse>("/v1/supermer/butchery/tv-cuts", { company_id } as any),
+      updateTvVisibility: (data: { visible_product_ids: string[]; order_ids?: string[] }) => client.put<TvCutsResponse>("/v1/supermer/butchery/tv-cuts/visibility", data),
     },
     bakery: {
       plans: (params?: { dia_semana?: number }) => client.get<BakeryPlan[]>("/v1/supermer/bakery/plans", params as any),
