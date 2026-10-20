@@ -12,12 +12,31 @@ test.describe('Operaciones de Salón y Kioscos', () => {
     await expect(page.locator('text=CARNICERÍA')).toBeVisible();
     await page.screenshot({ path: 'tests-pos/screenshots/carniceria-tv-page1.png', fullPage: true });
 
-    // Navegar a la página 2
+    // Navegar a la página 2 en Dark Mode
     const nextBtn = page.locator('button[title="Siguiente"]');
     if (await nextBtn.isVisible()) {
       await nextBtn.click();
       await page.waitForTimeout(1000);
       await page.screenshot({ path: 'tests-pos/screenshots/carniceria-tv-page2.png', fullPage: true });
+    }
+  });
+
+  test('Pizarra TV Digital Carnicería 1080p Modo Claro (Light Mode)', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto('http://100.83.91.76:5173/kiosk/carniceria-tv?theme=light', { waitUntil: 'domcontentloaded' });
+    
+    // Esperar carga
+    await page.waitForTimeout(2000);
+    
+    // Captura Página 1 en Modo Claro
+    await page.screenshot({ path: 'tests-pos/screenshots/carniceria-tv-light-page1.png', fullPage: true });
+
+    // Navegar a Página 2 en Modo Claro
+    const nextBtn = page.locator('button[title="Siguiente"]');
+    if (await nextBtn.isVisible()) {
+      await nextBtn.click();
+      await page.waitForTimeout(1000);
+      await page.screenshot({ path: 'tests-pos/screenshots/carniceria-tv-light-page2.png', fullPage: true });
     }
   });
 
