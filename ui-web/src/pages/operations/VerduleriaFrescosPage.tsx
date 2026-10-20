@@ -8,6 +8,7 @@ import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate } from "../../utils/format"
 import WasteControlPanel from "../../components/operations/WasteControlPanel"
+import CurrencyInput from "../../components/CurrencyInput"
 
 type Tab = "dashboard" | "recepciones" | "frescura" | "markdown" | "mermas"
 
@@ -527,8 +528,13 @@ export default function VerduleriaFrescosPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-400 font-bold mb-1">Precio/kg (₲)</label>
-                  <input type="number" className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none" value={recepForm.precio_unitario} onChange={e => setRecepForm(f => ({ ...f, precio_unitario: e.target.value }))} />
+                  <label className="block text-slate-400 font-bold mb-1">Precio/kg (PYG)</label>
+                  <CurrencyInput
+                    value={recepForm.precio_unitario ? Number(recepForm.precio_unitario) : 0}
+                    onChangeValue={(val) => setRecepForm(f => ({ ...f, precio_unitario: String(val) }))}
+                    className="w-full p-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-mono font-bold text-slate-900 dark:text-white outline-none"
+                    placeholder="0"
+                  />
                 </div>
                 <div className="col-span-2">
                   <label className="block text-slate-400 font-bold mb-1">Vencimiento Estimado</label>

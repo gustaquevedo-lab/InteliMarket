@@ -1163,6 +1163,12 @@ async def disburse_expense(
     else:
         exp.forma_pago_resumen = nuevo_resumen
 
+    # Si ningún desembolso fue por fondo fijo (ej. se pagó por Bóveda o Banco),
+    # desvincular el gasto del fondo fijo para que no aparezca indebidamente en su arqueo.
+    has_fund_disb = any(d.medio_pago in ("fondo_fijo", "caja_chica") for d in data.disbursements)
+    if not has_fund_disb and exp.fund_id:
+        exp.fund_id = None
+
     if data.notas:
         exp.notas = (exp.notas or "") + ("\n" if exp.notas else "") + data.notas
 

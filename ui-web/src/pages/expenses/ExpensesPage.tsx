@@ -51,6 +51,10 @@ export default function ExpensesPage() {
   const [filterCategory, setFilterCategory] = useState("")
   const [filterSector, setFilterSector] = useState("")
 
+  const PAGE_SIZE = 50
+  const [page, setPage] = useState(0)
+  const catalogsLoadedRef = useRef(false)
+
   // Modales
   const [showForm, setShowForm] = useState(false)
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null)
@@ -700,56 +704,59 @@ export default function ExpensesPage() {
     }
   }
 
-  const fetchAll = async () => {
+  const fetchAll = async (forceCatalogs = false) => {
     setLoading(true)
     try {
-      const [c, cc, f, ac, pc, bAccs, cRegs, rends, invs, sups, staff, sAdv, uList] = await Promise.all([
-        api.expenses.categories.list().catch(() => []),
-        api.expenses.costCenters.list().catch(() => []),
-        api.expenses.funds.list().catch(() => []),
-        api.expenses.approvalConfig.get().catch(() => null),
-        api.expenses.funds.counts.pendingAll().catch(() => []),
-        api.financial.banks.list().catch(() => []),
-        api.caja.registers.list().catch(() => []),
-        api.expenses.rendiciones.list().catch(() => []),
-        api.financial.invoices.list({ estado: "pendiente,parcial,aprobada" }).catch(() => []),
-        api.purchases.listSuppliers().catch(() => []),
-        api.expenses.staffCandidates().catch(() => []),
-        api.expenses.sueldokAdvances().catch(() => []),
-        api.auth.users.list().catch(() => []),
-      ])
-      setCategories(c)
-      setCostCenters(cc)
-      setFunds(f)
-      if (Array.isArray(f) && f.length > 0 && !userFundInitialized && user?.id) {
-        const myCustodyFund = f.find((fund: any) => fund.custodio_id === user.id && fund.activo)
-        if (myCustodyFund) {
-          setFilterFund(myCustodyFund.id)
-          setFilterRendicionFund(myCustodyFund.id)
+      if (!catalogsLoadedRef.current || forceCatalogs) {
+        const [c, cc, f, ac, pc, bAccs, cRegs, rends, invs, sups, staff, sAdv, uList] = await Promise.all([
+          api.expenses.categories.list().catch(() => []),
+          api.expenses.costCenters.list().catch(() => []),
+          api.expenses.funds.list().catch(() => []),
+          api.expenses.approvalConfig.get().catch(() => null),
+          api.expenses.funds.counts.pendingAll().catch(() => []),
+          api.financial.banks.list().catch(() => []),
+          api.caja.registers.list().catch(() => []),
+          api.expenses.rendiciones.list().catch(() => []),
+          api.financial.invoices.list({ estado: "pendiente,parcial,aprobada" }).catch(() => []),
+          api.purchases.listSuppliers().catch(() => []),
+          api.expenses.staffCandidates().catch(() => []),
+          api.expenses.sueldokAdvances().catch(() => []),
+          api.auth.users.list().catch(() => []),
+        ])
+        catalogsLoadedRef.current = true
+        setCategories(c)
+        setCostCenters(cc)
+        setFunds(f)
+        if (Array.isArray(f) && f.length > 0 && !userFundInitialized && user?.id) {
+          const myCustodyFund = f.find((fund: any) => fund.custodio_id === user.id && fund.activo)
+          if (myCustodyFund) {
+            setFilterFund(myCustodyFund.id)
+            setFilterRendicionFund(myCustodyFund.id)
+          }
+          setUserFundInitialized(true)
         }
-        setUserFundInitialized(true)
-      }
-      if (Array.isArray(uList)) {
-        setSystemUsers(uList.filter((u: any) => u.activo !== false))
-      }
-      setPendingCounts(Array.isArray(pc) ? [...pc].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()) : [])
-      setBankAccounts(bAccs.filter((b: any) => b.activo))
-      setCashRegisters(cRegs)
-      setRendiciones(Array.isArray(rends) ? [...rends].sort((a: any, b: any) => new Date(b.fecha_presentacion || b.created_at || 0).getTime() - new Date(a.fecha_presentacion || a.created_at || 0).getTime()) : [])
-      setPendingInvoices(Array.isArray(invs) ? invs.filter((i: any) => i.estado === "pendiente" || i.estado === "parcial" || i.estado === "aprobada") : [])
-      if (Array.isArray(sups)) {
-        setSuppliersList(sups)
-      }
-      if (Array.isArray(staff)) {
-        setStaffList(staff)
-      }
-      if (Array.isArray(sAdv)) {
-        setSueldokAdvances(sAdv)
-      }
-      if (ac) {
-        setApprovalThreshold(ac.umbral_aprobacion)
-        setApprovalThresholdForm(String(ac.umbral_aprobacion))
-        setToleranciaArqueoForm(String(ac.tolerancia_arqueo))
+        if (Array.isArray(uList)) {
+          setSystemUsers(uList.filter((u: any) => u.activo !== false))
+        }
+        setPendingCounts(Array.isArray(pc) ? [...pc].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()) : [])
+        setBankAccounts(bAccs.filter((b: any) => b.activo))
+        setCashRegisters(cRegs)
+        setRendiciones(Array.isArray(rends) ? [...rends].sort((a: any, b: any) => new Date(b.fecha_presentacion || b.created_at || 0).getTime() - new Date(a.fecha_presentacion || a.created_at || 0).getTime()) : [])
+        setPendingInvoices(Array.isArray(invs) ? invs.filter((i: any) => i.estado === "pendiente" || i.estado === "parcial" || i.estado === "aprobada") : [])
+        if (Array.isArray(sups)) {
+          setSuppliersList(sups)
+        }
+        if (Array.isArray(staff)) {
+          setStaffList(staff)
+        }
+        if (Array.isArray(sAdv)) {
+          setSueldokAdvances(sAdv)
+        }
+        if (ac) {
+          setApprovalThreshold(ac.umbral_aprobacion)
+          setApprovalThresholdForm(String(ac.umbral_aprobacion))
+          setToleranciaArqueoForm(String(ac.tolerancia_arqueo))
+        }
       }
 
       if (tab === "dashboard") {
@@ -1930,6 +1937,18 @@ export default function ExpensesPage() {
     return true
   }).sort((a, b) => new Date(b.fecha_gasto || b.created_at || 0).getTime() - new Date(a.fecha_gasto || a.created_at || 0).getTime())
 
+  // Reset de página al cambiar filtros
+  useEffect(() => {
+    setPage(0)
+  }, [search, filterMonto, filterRendicion, filterEstado, filterNaturaleza, filterFund, filterSector, filterCategory])
+
+  const paginatedExpenses = useMemo(() => {
+    const start = page * PAGE_SIZE
+    return filteredExpenses.slice(start, start + PAGE_SIZE)
+  }, [filteredExpenses, page, PAGE_SIZE])
+
+  const totalPages = Math.ceil(filteredExpenses.length / PAGE_SIZE) || 1
+
   const maxTendencia = dashboard ? Math.max(...dashboard.tendencia_mensual.map(t => t.total), 1) : 1
   const maxSector = dashboard ? Math.max(...dashboard.por_sector.map(s => s.total), 1) : 1
 
@@ -1986,6 +2005,15 @@ export default function ExpensesPage() {
           </div>
 
           <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
+            <button
+              onClick={() => fetchAll(true)}
+              disabled={loading}
+              title="Refrescar catálogo y comprobantes"
+              className="px-3.5 py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 text-slate-300 text-xs font-bold transition flex items-center gap-2"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-rose-400" : ""}`} />
+              <span className="hidden sm:inline">Refrescar</span>
+            </button>
             <button
               onClick={handleOpenCreate}
               className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-rose-500/25"
@@ -3050,7 +3078,7 @@ export default function ExpensesPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60 text-xs">
-                      {filteredExpenses.map(e => {
+                      {paginatedExpenses.map(e => {
                         const rend = getExpenseRendicion(e)
                         const rendNumero = e.rendicion_numero || rend?.numero_rendicion
                         const rendEstado = e.rendicion_estado || rend?.estado
@@ -3343,6 +3371,36 @@ export default function ExpensesPage() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* Paginación */}
+                {filteredExpenses.length > PAGE_SIZE && (
+                  <div className="p-4 border-t border-slate-100 dark:border-slate-700/60 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+                    <span>
+                      Mostrando página <strong className="text-slate-800 dark:text-slate-200">{page + 1}</strong> de <strong className="text-slate-800 dark:text-slate-200">{totalPages}</strong> ({filteredExpenses.length} comprobantes filtrados de {expenses.length} totales)
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPage(p => Math.max(0, p - 1))}
+                        disabled={page === 0}
+                        className="btn-outline py-1 px-3 disabled:opacity-40 text-xs font-semibold"
+                      >
+                        Anterior
+                      </button>
+                      <span className="font-mono font-bold text-slate-700 dark:text-slate-300 px-1">
+                        {page + 1} / {totalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                        disabled={page + 1 >= totalPages}
+                        className="btn-outline py-1 px-3 disabled:opacity-40 text-xs font-semibold"
+                      >
+                        Siguiente
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
