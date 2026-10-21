@@ -365,6 +365,7 @@ async def create_cost_center(
 # ── Expenses ────────────────────────────────────────────────
 
 @router.get("", response_model=list[ExpenseResponse])
+@router.get("/", response_model=list[ExpenseResponse], include_in_schema=False)
 async def list_expenses(
     branch_id: Optional[str] = Query(None),
     fund_id: Optional[str] = Query(None),
