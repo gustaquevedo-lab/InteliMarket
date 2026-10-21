@@ -955,7 +955,14 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                 <React.Fragment key={f.id}>
                                   <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
                                     <td className="p-3 font-mono font-bold">
-                                      {f.numero_factura}
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span>{f.numero_factura}</span>
+                                        {((f as any).purchase_order_numero || (f as any).oc_numero) && (
+                                          <span className="text-[9px] font-black bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 px-1.5 py-0.2 rounded border border-indigo-200 dark:border-indigo-800">
+                                            OC: {((f as any).purchase_order_numero || (f as any).oc_numero)?.replace(/^OC-/, "")}
+                                          </span>
+                                        )}
+                                      </div>
                                       {f.timbrado && <span className="block text-[10px] text-slate-400 font-normal">Timb: {f.timbrado}</span>}
                                     </td>
                                     <td className="p-3 font-mono text-slate-600 dark:text-slate-400">{f.fecha_emision}</td>

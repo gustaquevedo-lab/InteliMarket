@@ -920,11 +920,31 @@ export default function PaymentsPage() {
                             </td>
                             <td className="p-3.5">
                               <div className="flex items-center gap-1.5 flex-wrap">
-                                <p className="font-extrabold text-slate-900 dark:text-white font-mono">{inv.numero_factura || "Factura S/N"}</p>
-                                {inv.purchase_order_numero && (
-                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200">
-                                    OC: {inv.purchase_order_numero.replace("OC-", "")}
-                                  </span>
+                                {(inv.numero_factura || "").startsWith("AUTO-REC-") ? (
+                                  <div className="flex flex-col gap-0.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono font-bold text-xs bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-200 border border-amber-300 dark:border-amber-800">
+                                        📦 {inv.numero_factura}
+                                      </span>
+                                      {(inv.purchase_order_numero || inv.oc_numero) && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-800 shadow-sm">
+                                          📋 OC: {(inv.purchase_order_numero || inv.oc_numero)?.replace(/^OC-/, "")}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-[10px] text-amber-700 dark:text-amber-400 font-medium">
+                                      Recepción sin factura fiscal {(inv.purchase_order_numero || inv.oc_numero) ? `• Pedido OC ${inv.purchase_order_numero || inv.oc_numero}` : ""}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <p className="font-extrabold text-slate-900 dark:text-white font-mono">{inv.numero_factura || "Factura S/N"}</p>
+                                    {(inv.purchase_order_numero || inv.oc_numero) && (
+                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200">
+                                        📋 OC: {(inv.purchase_order_numero || inv.oc_numero)?.replace(/^OC-/, "")}
+                                      </span>
+                                    )}
+                                  </>
                                 )}
                                 {inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto" ? (
                                   <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300/80">

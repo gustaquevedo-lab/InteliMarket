@@ -70,6 +70,8 @@ class SupplierInvoiceResponse(BaseModel):
     total_brl: Optional[Decimal] = None
     saldo_pendiente_brl: Optional[Decimal] = None
     purchase_order_id: Optional[UUID] = None
+    purchase_order_numero: Optional[str] = None
+    oc_numero: Optional[str] = None
     receipt_id: Optional[UUID] = None
     condicion: Optional[str] = None
     tipo_comprobante: Optional[str] = None
@@ -110,6 +112,10 @@ class PaidInvoiceItem(BaseModel):
     moneda: str
     estado: str
     condicion: Optional[str] = None
+    purchase_order_id: Optional[UUID] = None
+    purchase_order_numero: Optional[str] = None
+    oc_numero: Optional[str] = None
+    receipt_id: Optional[UUID] = None
     supplier_id: UUID
     supplier_nombre: Optional[str] = None
     supplier_ruc: Optional[str] = None

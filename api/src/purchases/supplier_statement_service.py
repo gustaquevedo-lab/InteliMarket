@@ -97,6 +97,26 @@ async def get_supplier_account_statement(
     invoices = inv_res.scalars().all()
     invoice_map = {inv.id: inv for inv in invoices}
 
+    # Mapear Órdenes de Compra (OC) vinculadas
+    po_ids = {inv.purchase_order_id for inv in invoices if inv.purchase_order_id}
+    rec_ids = {inv.receipt_id for inv in invoices if inv.receipt_id and not inv.purchase_order_id}
+    rec_to_po: dict[uuid.UUID, uuid.UUID] = {}
+    if rec_ids:
+        r_res = await db.execute(
+            select(PurchaseReceipt.id, PurchaseReceipt.purchase_order_id).where(PurchaseReceipt.id.in_(rec_ids))
+        )
+        for r_id, r_poid in r_res.all():
+            if r_poid:
+                rec_to_po[r_id] = r_poid
+                po_ids.add(r_poid)
+
+    po_map: dict[uuid.UUID, str] = {}
+    if po_ids:
+        po_res = await db.execute(
+            select(PurchaseOrder.id, PurchaseOrder.numero).where(PurchaseOrder.id.in_(po_ids))
+        )
+        po_map = {row.id: row.numero for row in po_res.all()}
+
     # 3. Notas de Crédito (SupplierCreditNote)
     q_nc = select(SupplierCreditNote).where(
         SupplierCreditNote.company_id == company_id,
@@ -280,6 +300,12 @@ async def get_supplier_account_statement(
         if inv.concepto:
             concepto_str += f" - {inv.concepto}"
 
+        target_po = inv.purchase_order_id or rec_to_po.get(inv.receipt_id)
+        po_num = po_map.get(target_po) if target_po else None
+        comp_text = f"FAC {inv.numero_factura or 'S/N'}"
+        if po_num:
+            comp_text += f" [OC: {po_num}]"
+
         raw_movements.append({
             "id": f"fac_{inv.id}",
             "entidad_id": str(inv.id),
@@ -289,7 +315,8 @@ async def get_supplier_account_statement(
             "tipo": "FACTURA",
             "tipo_badge": "FAC",
             "tipo_label": "Factura Compra",
-            "comprobante": f"FAC {inv.numero_factura or 'S/N'}",
+            "comprobante": comp_text,
+            "purchase_order_numero": po_num,
             "timbrado": inv.timbrado or "",
             "concepto": concepto_str,
             "debito": monto_total,

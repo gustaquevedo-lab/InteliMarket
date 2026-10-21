@@ -190,6 +190,50 @@ async def list_invoices(
                 inv.supplier_nombre = sup_map[inv.supplier_id][0]
                 inv.supplier_ruc = sup_map[inv.supplier_id][1]
 
+    # Enriquecer con número de Orden de Compra (OC) vinculada
+    po_ids = {i.purchase_order_id for i in invoices if i.purchase_order_id}
+    rec_ids = {i.receipt_id for i in invoices if i.receipt_id and not i.purchase_order_id}
+    rec_to_po: dict[uuid.UUID, uuid.UUID] = {}
+
+    if rec_ids:
+        r_res = await db.execute(
+            select(PurchaseReceipt.id, PurchaseReceipt.purchase_order_id).where(PurchaseReceipt.id.in_(rec_ids))
+        )
+        for r_id, r_poid in r_res.all():
+            if r_poid:
+                rec_to_po[r_id] = r_poid
+                po_ids.add(r_poid)
+
+    auto_rec_nums = [
+        i.numero_factura.replace("AUTO-", "")
+        for i in invoices
+        if i.numero_factura and i.numero_factura.startswith("AUTO-REC-") and not i.purchase_order_id and not i.receipt_id
+    ]
+    auto_num_to_po: dict[str, uuid.UUID] = {}
+    if auto_rec_nums:
+        rec_num_res = await db.execute(
+            select(PurchaseReceipt.numero, PurchaseReceipt.purchase_order_id).where(PurchaseReceipt.numero.in_(auto_rec_nums))
+        )
+        for r_num, r_poid in rec_num_res.all():
+            if r_poid:
+                auto_num_to_po[f"AUTO-{r_num}"] = r_poid
+                po_ids.add(r_poid)
+
+    if po_ids:
+        po_res = await db.execute(
+            select(PurchaseOrder.id, PurchaseOrder.numero).where(PurchaseOrder.id.in_(po_ids))
+        )
+        po_map = {row.id: row.numero for row in po_res.all()}
+        for inv in invoices:
+            target_po = (
+                inv.purchase_order_id
+                or rec_to_po.get(inv.receipt_id)
+                or auto_num_to_po.get(inv.numero_factura)
+            )
+            if target_po and target_po in po_map:
+                inv.purchase_order_numero = po_map[target_po]
+                inv.oc_numero = po_map[target_po]
+
     # Enriquecer con Notas de Crédito y Solicitudes de NC (SNC) vinculadas
     await enrich_invoices_with_nc_and_snc(db, cid, invoices)
     return invoices
@@ -584,10 +628,34 @@ async def list_paid_invoices(
                 }
             payments_map[p_iid]["count"] += 1
 
+    # Mapear Órdenes de Compra (OC) vinculadas
+    po_ids = {inv.purchase_order_id for inv in invoices if inv.purchase_order_id}
+    rec_ids = {inv.receipt_id for inv in invoices if inv.receipt_id and not inv.purchase_order_id}
+    rec_to_po: dict[uuid.UUID, uuid.UUID] = {}
+
+    if rec_ids:
+        r_res = await db.execute(
+            select(PurchaseReceipt.id, PurchaseReceipt.purchase_order_id).where(PurchaseReceipt.id.in_(rec_ids))
+        )
+        for r_id, r_poid in r_res.all():
+            if r_poid:
+                rec_to_po[r_id] = r_poid
+                po_ids.add(r_poid)
+
+    po_map: dict[uuid.UUID, str] = {}
+    if po_ids:
+        po_res = await db.execute(
+            select(PurchaseOrder.id, PurchaseOrder.numero).where(PurchaseOrder.id.in_(po_ids))
+        )
+        po_map = {row.id: row.numero for row in po_res.all()}
+
     items = []
     for inv in invoices:
         s_info = suppliers_map.get(inv.supplier_id, {})
         p_info = payments_map.get(inv.id, {})
+        target_po = inv.purchase_order_id or rec_to_po.get(inv.receipt_id)
+        po_num = po_map.get(target_po) if target_po else None
+
         items.append({
             "id": inv.id,
             "numero_factura": inv.numero_factura,
@@ -602,6 +670,10 @@ async def list_paid_invoices(
             "moneda": inv.moneda or "PYG",
             "estado": inv.estado or "pagada",
             "condicion": inv.condicion or "credito",
+            "purchase_order_id": inv.purchase_order_id or target_po,
+            "purchase_order_numero": po_num,
+            "oc_numero": po_num,
+            "receipt_id": inv.receipt_id,
             "supplier_id": inv.supplier_id,
             "supplier_nombre": s_info.get("nombre") or "Proveedor Desconocido",
             "supplier_ruc": s_info.get("ruc") or "",

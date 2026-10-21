@@ -22,6 +22,9 @@ interface InvoiceToPay {
   saldo_pendiente: number
   supplier_id: string
   supplier_nombre?: string
+  purchase_order_id?: string
+  purchase_order_numero?: string
+  oc_numero?: string
   tipo_comprobante?: string
   notas_credito?: any[]
   total_nc_aplicadas?: number
@@ -293,6 +296,9 @@ export default function SupplierPaymentOrderModal({
               total_nc_aplicadas: inv.total_nc_aplicadas || 0,
               supplier_id: inv.supplier_id || supplier.id,
               supplier_nombre: inv.supplier_nombre || supplier.razon_social,
+              purchase_order_id: inv.purchase_order_id,
+              purchase_order_numero: inv.purchase_order_numero,
+              oc_numero: inv.oc_numero,
               tipo_comprobante: inv.tipo_comprobante || "factura",
             }))
           setSupplierInvoices(mappedInvs)
@@ -1382,6 +1388,11 @@ export default function SupplierPaymentOrderModal({
                           >
                             <Plus className="w-3.5 h-3.5 text-rose-500" />
                             <span className="font-bold">{inv.numero_factura}</span>
+                            {(inv.purchase_order_numero || inv.oc_numero) && (
+                              <span className="text-[9px] font-black bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 px-1 rounded">
+                                OC: {(inv.purchase_order_numero || inv.oc_numero)?.replace(/^OC-/, "")}
+                              </span>
+                            )}
                             <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">({formatPYG(inv.saldo_pendiente)})</span>
                             <span className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded ${
                               isGasto
@@ -1675,6 +1686,11 @@ export default function SupplierPaymentOrderModal({
                                   <td className="p-3">
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="font-bold text-slate-900 dark:text-white font-mono">{inv.numero_factura}</span>
+                                      {(inv.purchase_order_numero || inv.oc_numero) && (
+                                        <span className="text-[9px] font-black bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800">
+                                          📋 OC: {(inv.purchase_order_numero || inv.oc_numero)?.replace(/^OC-/, "")}
+                                        </span>
+                                      )}
                                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
                                         inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto"
                                           ? "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800"

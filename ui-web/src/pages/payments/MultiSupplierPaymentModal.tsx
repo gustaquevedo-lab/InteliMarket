@@ -21,6 +21,9 @@ interface InvoiceItem {
   saldo_pendiente: number
   supplier_id: string
   supplier_nombre?: string
+  purchase_order_id?: string
+  purchase_order_numero?: string
+  oc_numero?: string
 }
 
 interface SupplierGroup {
@@ -31,6 +34,8 @@ interface SupplierGroup {
   invoices: {
     invoice_id: string
     numero_factura: string
+    purchase_order_numero?: string
+    oc_numero?: string
     saldo_pendiente: number
     monto_moneda: number
     monto_pyg: number
@@ -132,6 +137,8 @@ export default function MultiSupplierPaymentModal({
       map[sId].invoices.push({
         invoice_id: inv.id,
         numero_factura: inv.numero_factura,
+        purchase_order_numero: inv.purchase_order_numero,
+        oc_numero: inv.oc_numero,
         saldo_pendiente: Number(inv.saldo_pendiente || inv.total || 0),
         monto_moneda: Number(inv.saldo_pendiente || inv.total || 0),
         monto_pyg: Number(inv.saldo_pendiente || inv.total || 0),
@@ -279,6 +286,8 @@ export default function MultiSupplierPaymentModal({
           invoices: pendingInvs.map(inv => ({
             invoice_id: inv.id,
             numero_factura: inv.numero_factura,
+            purchase_order_numero: (inv as any).purchase_order_numero,
+            oc_numero: (inv as any).oc_numero,
             saldo_pendiente: Number(inv.saldo_pendiente || inv.total || 0),
             monto_moneda: Number(inv.saldo_pendiente || inv.total || 0),
             monto_pyg: Number(inv.saldo_pendiente || inv.total || 0),
@@ -827,7 +836,14 @@ export default function MultiSupplierPaymentModal({
                           {group.invoices.map((inv) => (
                             <tr key={inv.invoice_id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
                               <td className="p-2 font-mono font-bold text-slate-700 dark:text-slate-200">
-                                {inv.numero_factura}
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span>{inv.numero_factura}</span>
+                                  {(inv.purchase_order_numero || inv.oc_numero) && (
+                                    <span className="text-[9px] font-black bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 px-1.5 py-0.2 rounded border border-indigo-200 dark:border-indigo-800">
+                                      OC: {(inv.purchase_order_numero || inv.oc_numero)?.replace(/^OC-/, "")}
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                               <td className="p-2 text-right font-mono text-slate-500">
                                 {formatPYG(inv.saldo_pendiente)}

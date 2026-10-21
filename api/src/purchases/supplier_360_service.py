@@ -90,6 +90,26 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
     inv_ids = [inv.id for inv in invoices]
     invoice_map_by_id = {inv.id: (inv.numero_factura or "S/N") for inv in invoices}
 
+    # Mapear Órdenes de Compra (OC) vinculadas
+    po_ids = {inv.purchase_order_id for inv in invoices if inv.purchase_order_id}
+    rec_ids = {inv.receipt_id for inv in invoices if inv.receipt_id and not inv.purchase_order_id}
+    rec_to_po: dict[uuid.UUID, uuid.UUID] = {}
+    if rec_ids:
+        r_res = await db.execute(
+            select(PurchaseReceipt.id, PurchaseReceipt.purchase_order_id).where(PurchaseReceipt.id.in_(rec_ids))
+        )
+        for r_id, r_poid in r_res.all():
+            if r_poid:
+                rec_to_po[r_id] = r_poid
+                po_ids.add(r_poid)
+
+    po_map: dict[uuid.UUID, str] = {}
+    if po_ids:
+        po_res = await db.execute(
+            select(PurchaseOrder.id, PurchaseOrder.numero).where(PurchaseOrder.id.in_(po_ids))
+        )
+        po_map = {row.id: row.numero for row in po_res.all()}
+
     # 2.1 Notas de Crédito emitidas por el proveedor (SupplierCreditNote)
     q_scns = select(SupplierCreditNote).where(
         SupplierCreditNote.company_id == company_id,
@@ -327,9 +347,16 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
                 deuda_al_dia += saldo
                 aging_al_dia += saldo
 
+        target_po = inv.purchase_order_id or rec_to_po.get(inv.receipt_id)
+        po_num = po_map.get(target_po) if target_po else None
+
         invoices_list.append({
             "id": str(inv.id),
             "numero_factura": inv.numero_factura or "S/N",
+            "purchase_order_id": str(target_po) if target_po else None,
+            "purchase_order_numero": po_num,
+            "oc_numero": po_num,
+            "receipt_id": str(inv.receipt_id) if inv.receipt_id else None,
             "timbrado": inv.timbrado or "",
             "fecha_emision": _date_str(inv.fecha_emision),
             "fecha_vencimiento": _date_str(inv.fecha_vencimiento),
