@@ -404,12 +404,38 @@ async def revert_supplier_invoice_payment(
         nota_pmt = f" [Pago revertido/anulado: {motivo or 'Reversión'}]"
         pmt.referencia = ((pmt.referencia or "") + nota_pmt).strip()
 
-    # Desvincular asignaciones de órdenes de pago si existieran
+    # Desvincular asignaciones de órdenes de pago si existieran y anular OPs/gastos asociados
     allocs_res = await db.execute(
         select(SupplierPaymentOrderAllocation).where(SupplierPaymentOrderAllocation.invoice_id == iid)
     )
-    for alloc in allocs_res.scalars().all():
+    allocs = allocs_res.scalars().all()
+    po_ids_to_check = {alloc.payment_order_id for alloc in allocs}
+    for alloc in allocs:
         await db.delete(alloc)
+    await db.flush()
+
+    # Si la OP asociada ya no tiene más facturas asignadas, anular la OP y sus egresos generados
+    for po_id in po_ids_to_check:
+        rem_allocs = await db.execute(
+            select(func.count(SupplierPaymentOrderAllocation.id))
+            .where(SupplierPaymentOrderAllocation.payment_order_id == po_id)
+        )
+        if (rem_allocs.scalar() or 0) == 0:
+            po_obj = await db.get(SupplierPaymentOrder, po_id)
+            if po_obj and po_obj.estado != "anulado":
+                po_obj.estado = "anulado"
+                po_obj.observaciones = (po_obj.observaciones or "") + f"\n[ANULADA por reversión de factura {inv.numero_factura}]"
+                # Anular cualquier Expense generado por esta OP
+                from api.src.petty_cash.models import Expense
+                exps_res = await db.execute(
+                    select(Expense).where(
+                        (Expense.numero_factura == po_obj.numero_orden) |
+                        (Expense.descripcion.ilike(f"%{po_obj.numero_orden}%"))
+                    )
+                )
+                for exp_item in exps_res.scalars().all():
+                    exp_item.anulado = True
+                    exp_item.descripcion = (exp_item.descripcion or "") + " [ANULADO: Reversión de Factura]"
 
     inv.estado = "pendiente"
     inv.saldo_pendiente = inv.total or Decimal("0")

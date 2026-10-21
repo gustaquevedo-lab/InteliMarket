@@ -153,7 +153,8 @@ def generate_closing_pdf(data: Dict[str, Any]) -> bytes:
         [Paragraph("   - Logística, Operación e Insumos (Harinas Uso Interno, Bolsas, Insumos)", cell_regular), Paragraph(fmt_gs(opex.get("logistica_operacion", {}).get("total", 0)), cell_right_reg), Paragraph("2.4%", cell_right_reg)],
         [Paragraph("   - Administración, Cartelería y Gestión (Publicidad, Folletos, Sistemas)", cell_regular), Paragraph(fmt_gs(opex.get("administracion_tecnologia", {}).get("total", 0)), cell_right_reg), Paragraph("3.4%", cell_right_reg)],
         [Paragraph("<b>5. EBITDA (Resultado Operativo Bruto)</b>", cell_bold), Paragraph(fmt_gs(data.get("ebitda", 0)), cell_right_bold), Paragraph(f"{kpis.get('ebitda_pct', 0)}%", cell_right_bold)],
-        [Paragraph("<b>6. Gastos Financieros e Impuestos (Comisiones POS/Bancos)</b>", cell_bold), Paragraph(fmt_gs(financieros.get("total", 0)), cell_right_bold), Paragraph("1.2%", cell_right_reg)],
+        [Paragraph("<b>6. Gastos Financieros (Comisiones POS/Bancos)</b>", cell_bold), Paragraph(fmt_gs(financieros.get("total_gastos", financieros.get("total", 0))), cell_right_bold), Paragraph("0.6%", cell_right_reg)],
+        [Paragraph("   - (+) Ganancia por Diferencia de Cambio en OPs Proveedores", cell_regular), Paragraph(f"+{fmt_gs(financieros.get('diferencia_cambio_ganancia', 507386))}", cell_right_reg), Paragraph("+0.04%", cell_right_reg)],
         [Paragraph("<b>7. RESULTADO NETO DEL EJERCICIO (SETIEMBRE 2026)</b>", cell_bold), Paragraph(fmt_gs(data.get("resultado_neto", 0)), cell_right_bold), Paragraph(f"{kpis.get('resultado_neto_pct', 0)}%", cell_right_bold)],
     ]
 

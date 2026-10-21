@@ -59,8 +59,8 @@ export default function MonthlyClosingPage() {
             costo_laboral_pct: 12.69,
             ebitda: -52297947,
             ebitda_pct: -4.24,
-            resultado_neto: -60051943,
-            resultado_neto_pct: -4.86,
+            resultado_neto: -59544557,
+            resultado_neto_pct: -4.82,
           },
           ingresos: {
             ventas_netas: 1234596102,
@@ -133,8 +133,11 @@ export default function MonthlyClosingPage() {
           },
           financieros: {
             total: 7753996,
+            total_gastos: 7753996,
             comisiones_procesadoras_tarjetas: 6553996,
-            gastos_comisiones_bancarias: 1200000
+            gastos_comisiones_bancarias: 1200000,
+            diferencia_cambio_ganancia: 507386,
+            diferencia_cambio_neta: 507386
           },
           conciliacion_bancaria: {
             saldo_calibrado_oficial: 73874004,

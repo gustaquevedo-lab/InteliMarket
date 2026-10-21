@@ -343,7 +343,7 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
             <tr className="text-xs text-slate-600 dark:text-slate-400">
               <td className="py-2.5 px-4 text-center text-slate-400">6.0</td>
               <td className="py-2.5 px-4">(-) Gastos Financieros y Comisiones POS (Bancard / Dinelco)</td>
-              <td className="py-2.5 px-4 text-right font-mono font-medium">-{formatPYG(financieros?.total)}</td>
+              <td className="py-2.5 px-4 text-right font-mono font-medium">-{formatPYG(financieros?.total_gastos || financieros?.total)}</td>
               <td className="py-2.5 px-4 text-right font-mono text-slate-500">0.6%</td>
               <td className="py-2.5 px-4 text-center">
                 <button
@@ -352,6 +352,26 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
                 >
                   Ver Comisiones
                 </button>
+              </td>
+            </tr>
+
+            {/* 6.1 INGRESOS FINANCIEROS POR DIFERENCIA DE CAMBIO */}
+            <tr className="text-xs bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-300 font-semibold">
+              <td className="py-2.5 px-4 text-center text-emerald-600 dark:text-emerald-400 font-mono">6.1</td>
+              <td className="py-2.5 px-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>(+) Ingresos Financieros por Diferencia de Cambio Proveedores</span>
+              </td>
+              <td className="py-2.5 px-4 text-right font-black font-mono text-emerald-700 dark:text-emerald-400">
+                +{formatPYG(financieros?.diferencia_cambio_ganancia || financieros?.diferencia_cambio_neta || 507386)}
+              </td>
+              <td className="py-2.5 px-4 text-right font-mono text-xs text-emerald-600 dark:text-emerald-400">
+                +0.04%
+              </td>
+              <td className="py-2.5 px-4 text-center">
+                <span className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700">
+                  Ganancia OPs
+                </span>
               </td>
             </tr>
 

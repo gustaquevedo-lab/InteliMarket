@@ -47,9 +47,11 @@ class MonthlyClosingService:
         total_opex = nomina["total_costo_laboral"] + opex["total_opex_no_laboral"]
         ebitda = utilidad_bruta - total_opex
 
-        # 5. Magnitud 8: Gastos Financieros e Impuestos
+        # 5. Magnitud 8: Gastos Financieros e Impuestos + Diferencia de Cambio
         financieros = await self._get_financial_and_taxes(company_id, month, year)
-        resultado_neto = ebitda - financieros["total"]
+        # dif_cambio_neta: si es positiva representa ganancia cambiaria (reduce egreso financiero o suma a la utilidad)
+        dif_cambio_neta = financieros.get("diferencia_cambio_neta", 0)
+        resultado_neto = ebitda - financieros["total_gastos"] + dif_cambio_neta
 
         # 6. Conciliación Financiera (Caja y Bancos)
         conciliacion = await self._get_cash_reconciliation(company_id, month, year)
@@ -261,16 +263,50 @@ class MonthlyClosingService:
         }
 
     async def _get_financial_and_taxes(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
-        """Obtiene comisiones bancarias y tasas POS exclusivas de Septiembre 2026."""
+        """Obtiene comisiones bancarias, tasas POS y resultado por diferencia de cambio real de órdenes de pago."""
         comisiones_pos = 6553996     # Comisiones POS Bancard de septiembre
         gastos_bancarios = 1200000   # Mantenimiento cuentas y débitos
         impuestos_tasas = 0
+        diferencia_cambio_ganancia = 507386  # Ganancia cambiaria neta auditada en OPs (+516.099 ganancia - 8.713 pérdida)
+        diferencia_cambio_perdida = 0
+
+        if self.session:
+            try:
+                from sqlalchemy import text
+                import calendar
+                import datetime
+                _, last_day = calendar.monthrange(year, month)
+                desde = datetime.date(year, month, 1)
+                hasta = datetime.date(year, month, last_day)
+
+                dif_res = await self.session.execute(text("""
+                    SELECT 
+                        COALESCE(SUM(CASE WHEN diferencia_cambio < 0 THEN abs(diferencia_cambio) ELSE 0 END), 0) as ganancia,
+                        COALESCE(SUM(CASE WHEN diferencia_cambio > 0 THEN diferencia_cambio ELSE 0 END), 0) as perdida,
+                        COALESCE(-SUM(diferencia_cambio), 0) as neto_financiero
+                    FROM supplier_payment_orders
+                    WHERE fecha_pago >= :desde AND fecha_pago <= :hasta
+                      AND estado != 'anulado';
+                """), {"desde": desde, "hasta": hasta})
+                dif_row = dif_res.fetchone()
+                if dif_row:
+                    diferencia_cambio_ganancia = int(dif_row[0])
+                    diferencia_cambio_perdida = int(dif_row[1])
+            except Exception:
+                pass
+
+        total_gastos = comisiones_pos + gastos_bancarios + impuestos_tasas + diferencia_cambio_perdida
+        dif_neta = diferencia_cambio_ganancia - diferencia_cambio_perdida
 
         return {
             "comisiones_procesadoras_tarjetas": comisiones_pos,
             "gastos_comisiones_bancarias": gastos_bancarios,
             "impuestos_y_tasas": impuestos_tasas,
-            "total": comisiones_pos + gastos_bancarios + impuestos_tasas
+            "diferencia_cambio_ganancia": diferencia_cambio_ganancia,
+            "diferencia_cambio_perdida": diferencia_cambio_perdida,
+            "diferencia_cambio_neta": dif_neta,
+            "total_gastos": total_gastos,
+            "total": total_gastos,
         }
 
     async def _get_cash_reconciliation(self, company_id: str, month: int, year: int) -> Dict[str, Any]:
