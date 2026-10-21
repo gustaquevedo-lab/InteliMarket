@@ -598,13 +598,20 @@ export default function MultiSupplierPaymentModal({
                 </div>
                 <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800">
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Diferencia de Cambio Imputada</span>
-                  <span className={`font-mono font-bold ${
-                    Number(batchSuccessResult.diferencia_cambio_total || 0) > 0
-                      ? "text-amber-600 dark:text-amber-400"
-                      : "text-emerald-600 dark:text-emerald-400"
-                  }`}>
-                    ₲ {formatPYG(batchSuccessResult.diferencia_cambio_total)}
-                  </span>
+                  {(() => {
+                    const diff = Number(batchSuccessResult.diferencia_cambio_total || 0)
+                    if (diff === 0) {
+                      return <span className="font-mono font-bold text-slate-500">₲ 0 (Exacto)</span>
+                    }
+                    const isGanancia = diff < 0
+                    return (
+                      <span className={`font-mono font-bold text-xs ${
+                        isGanancia ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+                      }`}>
+                        ₲ {formatPYG(Math.abs(diff))} {isGanancia ? "(A favor / Ganancia)" : "(En contra / Sobrecosto)"}
+                      </span>
+                    )
+                  })()}
                 </div>
                 <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200/80 dark:border-slate-800">
                   <span className="text-[10px] uppercase font-bold text-slate-400 block">Proveedores Pagados</span>

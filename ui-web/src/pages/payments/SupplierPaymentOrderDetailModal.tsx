@@ -151,11 +151,17 @@ export default function SupplierPaymentOrderDetailModal({
           {Number(order.diferencia_cambio || 0) !== 0 && (
             <div>
               <span className="text-[10px] uppercase font-bold text-slate-400 block">Dif. de Cambio</span>
-              <span className={`font-mono font-bold ${
-                Number(order.diferencia_cambio) > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
-              }`}>
-                {Number(order.diferencia_cambio) > 0 ? `+${formatPYG(order.diferencia_cambio)}` : formatPYG(order.diferencia_cambio)}
-              </span>
+              {(() => {
+                const diff = Number(order.diferencia_cambio)
+                const isGanancia = diff < 0
+                return (
+                  <span className={`font-mono font-bold text-xs ${
+                    isGanancia ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+                  }`}>
+                    ₲ {formatPYG(Math.abs(diff))} {isGanancia ? "(A favor)" : "(En contra)"}
+                  </span>
+                )
+              })()}
             </div>
           )}
           {hasForeign && (
