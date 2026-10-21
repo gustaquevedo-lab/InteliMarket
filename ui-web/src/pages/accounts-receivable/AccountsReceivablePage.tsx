@@ -376,6 +376,52 @@ export default function AccountsReceivablePage() {
   const [editSelectedDocIds, setEditSelectedDocIds] = useState<Set<string>>(new Set())
   const [editAvailablePendingDocs, setEditAvailablePendingDocs] = useState<any[]>([])
   const [editShowAddPending, setEditShowAddPending] = useState(false)
+  const [editSearchQuery, setEditSearchQuery] = useState("")
+  const [expandedEditFuncIds, setExpandedEditFuncIds] = useState<Set<string>>(new Set())
+
+  const toggleExpandEditFunc = (funcId: string) => {
+    setExpandedEditFuncIds(prev => {
+      const next = new Set(prev)
+      if (next.has(funcId)) next.delete(funcId)
+      else next.add(funcId)
+      return next
+    })
+  }
+
+  const expandAllEditFuncs = () => {
+    if (!editRemDetail?.funcionarios) return
+    setExpandedEditFuncIds(new Set(editRemDetail.funcionarios.map((f: any) => f.customer_id)))
+  }
+
+  const collapseAllEditFuncs = () => {
+    setExpandedEditFuncIds(new Set())
+  }
+
+  const filteredEditFuncionarios = useMemo(() => {
+    if (!editRemDetail?.funcionarios) return []
+    const q = editSearchQuery.toLowerCase().trim()
+    if (!q) return editRemDetail.funcionarios
+
+    return editRemDetail.funcionarios.filter((f: any) => {
+      const matchName = (f.customer_name || "").toLowerCase().includes(q)
+      const matchCi = (f.ci_numero || f.customer_ruc || "").toLowerCase().includes(q)
+      const matchDoc = f.documentos?.some((d: any) => (d.numero_documento || "").toLowerCase().includes(q))
+      return matchName || matchCi || matchDoc
+    })
+  }, [editRemDetail, editSearchQuery])
+
+  const filteredAvailablePendingDocs = useMemo(() => {
+    if (!editAvailablePendingDocs.length) return []
+    const q = editSearchQuery.toLowerCase().trim()
+    if (!q) return editAvailablePendingDocs
+
+    return editAvailablePendingDocs.filter((d: any) => {
+      const matchName = (d.funcionario_nombre || "").toLowerCase().includes(q)
+      const matchCi = (d.funcionario_ci || "").toLowerCase().includes(q)
+      const matchDoc = (d.numero_documento || "").toLowerCase().includes(q)
+      return matchName || matchCi || matchDoc
+    })
+  }, [editAvailablePendingDocs, editSearchQuery])
 
   const editComputedTotals = useMemo(() => {
     if (!showEditRemissionModal) return { total: 0, cantDocs: 0, cantFuncs: 0 }
@@ -869,6 +915,8 @@ export default function AccountsReceivablePage() {
     setEditNotas(rem.notas || "")
     setEditRemLoading(true)
     setEditShowAddPending(false)
+    setEditSearchQuery("")
+    setExpandedEditFuncIds(new Set())
     try {
       const detail = await api.accountsReceivable.getCorporateRemissionDetail(rem.id)
       setEditRemDetail(detail)
@@ -5785,98 +5833,244 @@ export default function AccountsReceivablePage() {
                     </div>
                   </div>
 
-                  {/* Listado de Funcionarios y Comprobantes Asignados */}
+                  {/* Listado de Funcionarios y Comprobantes con Buscador y Acordeón */}
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h4 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
-                        <Users className="w-4 h-4 text-blue-600" />
-                        Comprobantes en el Remito ({editRemDetail?.funcionarios?.length || 0} funcionarios)
-                      </h4>
-                      <span className="text-[11px] text-gray-500">
-                        Desmarcá comprobantes para excluirlos del remito
-                      </span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <h4 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                          <Users className="w-4 h-4 text-blue-600" />
+                          Comprobantes en el Remito ({editRemDetail?.funcionarios?.length || 0} funcionarios)
+                        </h4>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          Buscá al funcionario por nombre o CI para seleccionar o excluir sus facturas.
+                        </p>
+                      </div>
+
+                      {/* Botones de acción rápida */}
+                      <div className="flex items-center gap-2 self-end sm:self-auto text-xs">
+                        <button
+                          type="button"
+                          onClick={expandAllEditFuncs}
+                          className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-semibold"
+                        >
+                          Expandir todos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={collapseAllEditFuncs}
+                          className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-gray-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-semibold"
+                        >
+                          Colapsar todos
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="space-y-2 max-h-72 overflow-y-auto border border-gray-200 dark:border-gray-800 rounded-xl p-2 bg-gray-50/50 dark:bg-slate-900/50">
-                      {editRemDetail?.funcionarios?.map((f: any) => {
-                        const totalFunc = f.documentos?.reduce((acc: number, d: any) => editSelectedDocIds.has(d.id) ? acc + Number(d.saldo_pendiente || d.monto_original || 0) : acc, 0) || 0
-                        const allSelected = f.documentos?.every((d: any) => editSelectedDocIds.has(d.id))
-                        const someSelected = f.documentos?.some((d: any) => editSelectedDocIds.has(d.id))
+                    {/* Buscador inteligente */}
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        className="input-field pl-9 pr-9 text-xs py-2 w-full font-medium"
+                        placeholder="Buscar funcionario por nombre, número de CI o N° de factura (ej: Maria, 4589..., 001-014)..."
+                        value={editSearchQuery}
+                        onChange={e => setEditSearchQuery(e.target.value)}
+                      />
+                      {editSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setEditSearchQuery("")}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                          title="Limpiar búsqueda"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
 
-                        return (
-                          <div key={f.customer_id} className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-gray-200 dark:border-gray-700/80 shadow-xs space-y-2">
-                            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700/50 pb-2">
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={allSelected}
-                                  ref={el => { if (el) el.indeterminate = !allSelected && someSelected }}
-                                  onChange={e => {
-                                    const next = new Set(editSelectedDocIds)
-                                    f.documentos?.forEach((d: any) => {
-                                      if (e.target.checked) next.add(d.id)
-                                      else next.delete(d.id)
-                                    })
-                                    setEditSelectedDocIds(next)
-                                  }}
-                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
-                                />
-                                <div>
-                                  <div className="font-bold text-gray-900 dark:text-white">{f.customer_name}</div>
-                                  <div className="text-[10px] text-gray-500 font-mono">CI: {f.ci_numero || "—"}</div>
-                                </div>
-                              </div>
-                              <div className="text-right">
-                                <div className="text-xs font-mono font-black text-gray-900 dark:text-white">
-                                  {formatPYG(totalFunc)}
-                                </div>
-                                <div className="text-[10px] text-gray-500">
-                                  {f.documentos?.filter((d: any) => editSelectedDocIds.has(d.id)).length} / {f.documentos?.length} docs
-                                </div>
-                              </div>
-                            </div>
+                    {/* Contador de resultados */}
+                    <div className="flex items-center justify-between text-[11px] text-gray-500 px-1">
+                      <span>
+                        Mostrando <strong>{filteredEditFuncionarios.length}</strong> de <strong>{editRemDetail?.funcionarios?.length || 0}</strong> funcionarios
+                        {editSearchQuery && ` (filtrado por "${editSearchQuery}")`}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = new Set(editSelectedDocIds)
+                            filteredEditFuncionarios.forEach((f: any) => {
+                              f.documentos?.forEach((d: any) => next.add(d.id))
+                            })
+                            setEditSelectedDocIds(next)
+                          }}
+                          className="text-blue-600 dark:text-blue-400 hover:underline font-semibold"
+                        >
+                          Marcar visibles
+                        </button>
+                        <span>·</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = new Set(editSelectedDocIds)
+                            filteredEditFuncionarios.forEach((f: any) => {
+                              f.documentos?.forEach((d: any) => next.delete(d.id))
+                            })
+                            setEditSelectedDocIds(next)
+                          }}
+                          className="text-red-600 dark:text-red-400 hover:underline font-semibold"
+                        >
+                          Desmarcar visibles
+                        </button>
+                      </div>
+                    </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 pl-6">
-                              {f.documentos?.map((d: any) => {
-                                const isChecked = editSelectedDocIds.has(d.id)
-                                return (
-                                  <label
-                                    key={d.id}
-                                    className={`flex items-center justify-between p-2 rounded-lg border text-[11px] cursor-pointer transition ${
-                                      isChecked
-                                        ? "bg-blue-50/60 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900/60 text-blue-950 dark:text-blue-100"
-                                        : "bg-gray-50/60 dark:bg-slate-800/40 border-gray-200 dark:border-gray-700 text-gray-400 line-through"
-                                    }`}
+                    {/* Acordeón de Funcionarios */}
+                    <div className="space-y-2 max-h-96 overflow-y-auto border border-gray-200 dark:border-gray-800 rounded-xl p-2.5 bg-gray-50/50 dark:bg-slate-900/50">
+                      {filteredEditFuncionarios.length === 0 ? (
+                        <div className="py-8 text-center text-gray-500 text-xs">
+                          No se encontraron funcionarios que coincidan con la búsqueda.
+                        </div>
+                      ) : (
+                        filteredEditFuncionarios.map((f: any) => {
+                          const totalFunc = f.documentos?.reduce((acc: number, d: any) => editSelectedDocIds.has(d.id) ? acc + Number(d.saldo_pendiente || d.monto_original || 0) : acc, 0) || 0
+                          const totalOriginalFunc = f.documentos?.reduce((acc: number, d: any) => acc + Number(d.saldo_pendiente || d.monto_original || 0), 0) || 0
+                          const selectedCount = f.documentos?.filter((d: any) => editSelectedDocIds.has(d.id)).length || 0
+                          const totalCount = f.documentos?.length || 0
+                          const allSelected = totalCount > 0 && selectedCount === totalCount
+                          const someSelected = selectedCount > 0 && selectedCount < totalCount
+                          const isExpanded = Boolean(editSearchQuery) || expandedEditFuncIds.has(f.customer_id)
+
+                          return (
+                            <div
+                              key={f.customer_id}
+                              className={`bg-white dark:bg-slate-800/90 rounded-xl border transition shadow-xs ${
+                                selectedCount > 0
+                                  ? "border-slate-200 dark:border-slate-700/80"
+                                  : "border-dashed border-gray-200 dark:border-gray-800 opacity-60"
+                              }`}
+                            >
+                              {/* Header Funcionario Clickable */}
+                              <div className="flex items-center justify-between p-3 gap-3">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  {/* Checkbox Funcionario Completo */}
+                                  <input
+                                    type="checkbox"
+                                    checked={allSelected}
+                                    ref={el => { if (el) el.indeterminate = someSelected }}
+                                    onChange={e => {
+                                      const next = new Set(editSelectedDocIds)
+                                      f.documentos?.forEach((d: any) => {
+                                        if (e.target.checked) next.add(d.id)
+                                        else next.delete(d.id)
+                                      })
+                                      setEditSelectedDocIds(next)
+                                    }}
+                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer shrink-0"
+                                    title="Marcar/Desmarcar todas las facturas de este funcionario"
+                                  />
+
+                                  {/* Info Funcionario (al clickear expande/colapsa) */}
+                                  <div
+                                    className="cursor-pointer min-w-0 select-none"
+                                    onClick={() => toggleExpandEditFunc(f.customer_id)}
                                   >
-                                    <div className="flex items-center gap-2">
-                                      <input
-                                        type="checkbox"
-                                        checked={isChecked}
-                                        onChange={() => {
-                                          const next = new Set(editSelectedDocIds)
-                                          if (isChecked) next.delete(d.id)
-                                          else next.add(d.id)
-                                          setEditSelectedDocIds(next)
-                                        }}
-                                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                      />
-                                      <div>
-                                        <span className="font-mono font-bold">{d.numero_documento}</span>
-                                        <span className="text-[10px] text-gray-500 block">
-                                          {d.fecha_emision ? new Date(d.fecha_emision).toLocaleDateString("es-PY") : ""}
-                                        </span>
-                                      </div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-extrabold text-xs text-gray-900 dark:text-white truncate">
+                                        {f.customer_name}
+                                      </span>
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 font-mono">
+                                        CI: {f.ci_numero || "—"}
+                                      </span>
                                     </div>
-                                    <span className="font-mono font-bold text-gray-900 dark:text-white">
-                                      {formatPYG(d.saldo_pendiente || d.monto_original || 0)}
-                                    </span>
-                                  </label>
-                                )
-                              })}
+                                    <div className="text-[11px] text-gray-500 flex items-center gap-2 mt-0.5">
+                                      <span className={`font-semibold ${
+                                        allSelected
+                                          ? "text-blue-600 dark:text-blue-400"
+                                          : someSelected
+                                          ? "text-amber-600 dark:text-amber-400"
+                                          : "text-gray-400 line-through"
+                                      }`}>
+                                        {selectedCount} de {totalCount} comprobantes incluidos
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Montos y Botón Desplegar */}
+                                <div className="flex items-center gap-3 shrink-0">
+                                  <div className="text-right">
+                                    <div className="text-xs font-mono font-black text-gray-900 dark:text-white">
+                                      {formatPYG(totalFunc)}
+                                    </div>
+                                    {selectedCount < totalCount && (
+                                      <div className="text-[10px] text-gray-400 font-mono line-through">
+                                        Total: {formatPYG(totalOriginalFunc)}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleExpandEditFunc(f.customer_id)}
+                                    className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-700 transition"
+                                    title={isExpanded ? "Colapsar comprobantes" : "Ver comprobantes"}
+                                  >
+                                    {isExpanded ? (
+                                      <ChevronDown className="w-4 h-4" />
+                                    ) : (
+                                      <ChevronRight className="w-4 h-4" />
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Comprobantes Desplegados */}
+                              {isExpanded && (
+                                <div className="p-3 pt-0 border-t border-gray-100 dark:border-gray-700/60 mt-1">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2.5">
+                                    {f.documentos?.map((d: any) => {
+                                      const isChecked = editSelectedDocIds.has(d.id)
+                                      return (
+                                        <label
+                                          key={d.id}
+                                          className={`flex items-center justify-between p-2 rounded-lg border text-[11px] cursor-pointer transition ${
+                                            isChecked
+                                              ? "bg-blue-50/70 dark:bg-blue-950/40 border-blue-200 dark:border-blue-900/70 text-blue-950 dark:text-blue-100 shadow-2xs"
+                                              : "bg-gray-50/60 dark:bg-slate-900/40 border-gray-200 dark:border-gray-800 text-gray-400 line-through opacity-60"
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-2">
+                                            <input
+                                              type="checkbox"
+                                              checked={isChecked}
+                                              onChange={() => {
+                                                const next = new Set(editSelectedDocIds)
+                                                if (isChecked) next.delete(d.id)
+                                                else next.add(d.id)
+                                                setEditSelectedDocIds(next)
+                                              }}
+                                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 cursor-pointer"
+                                            />
+                                            <div>
+                                              <span className="font-mono font-bold block">{d.numero_documento}</span>
+                                              <span className="text-[10px] text-gray-500">
+                                                {d.fecha_emision ? new Date(d.fecha_emision).toLocaleDateString("es-PY") : ""}
+                                              </span>
+                                            </div>
+                                          </div>
+                                          <span className="font-mono font-bold text-gray-900 dark:text-white">
+                                            {formatPYG(d.saldo_pendiente || d.monto_original || 0)}
+                                          </span>
+                                        </label>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        )
-                      })}
+                          )
+                        })
+                      )}
                     </div>
                   </div>
 
@@ -5887,7 +6081,7 @@ export default function AccountsReceivablePage() {
                         <div className="flex items-center gap-2">
                           <Plus className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                           <span className="font-bold text-indigo-900 dark:text-indigo-200 text-xs">
-                            Comprobantes pendientes disponibles ({editAvailablePendingDocs.length})
+                            Comprobantes pendientes disponibles ({filteredAvailablePendingDocs.length}{editSearchQuery ? ` de ${editAvailablePendingDocs.length}` : ""})
                           </span>
                         </div>
                         <button
@@ -5901,42 +6095,48 @@ export default function AccountsReceivablePage() {
 
                       {editShowAddPending && (
                         <div className="space-y-1.5 pt-2 max-h-48 overflow-y-auto">
-                          {editAvailablePendingDocs.map((d: any) => {
-                            const isChecked = editSelectedDocIds.has(d.id)
-                            return (
-                              <label
-                                key={d.id}
-                                className={`flex items-center justify-between p-2 rounded-lg border text-xs cursor-pointer transition ${
-                                  isChecked
-                                    ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-100"
-                                    : "bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700 hover:bg-gray-50"
-                                }`}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={() => {
-                                      const next = new Set(editSelectedDocIds)
-                                      if (isChecked) next.delete(d.id)
-                                      else next.add(d.id)
-                                      setEditSelectedDocIds(next)
-                                    }}
-                                    className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                                  />
-                                  <div>
-                                    <div className="font-bold">{d.funcionario_nombre}</div>
-                                    <div className="text-[10px] text-gray-500 font-mono">
-                                      {d.numero_documento} · {d.fecha_emision ? new Date(d.fecha_emision).toLocaleDateString("es-PY") : ""}
+                          {filteredAvailablePendingDocs.length === 0 ? (
+                            <div className="py-4 text-center text-gray-500 text-xs">
+                              No hay comprobantes pendientes que coincidan con la búsqueda.
+                            </div>
+                          ) : (
+                            filteredAvailablePendingDocs.map((d: any) => {
+                              const isChecked = editSelectedDocIds.has(d.id)
+                              return (
+                                <label
+                                  key={d.id}
+                                  className={`flex items-center justify-between p-2 rounded-lg border text-xs cursor-pointer transition ${
+                                    isChecked
+                                      ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-100"
+                                      : "bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => {
+                                        const next = new Set(editSelectedDocIds)
+                                        if (isChecked) next.delete(d.id)
+                                        else next.add(d.id)
+                                        setEditSelectedDocIds(next)
+                                      }}
+                                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                                    />
+                                    <div>
+                                      <div className="font-bold">{d.funcionario_nombre}</div>
+                                      <div className="text-[10px] text-gray-500 font-mono">
+                                        {d.numero_documento} · {d.fecha_emision ? new Date(d.fecha_emision).toLocaleDateString("es-PY") : ""}
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                                  +{formatPYG(d.saldo_pendiente || d.monto_original || 0)}
-                                </span>
-                              </label>
-                            )
-                          })}
+                                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                    +{formatPYG(d.saldo_pendiente || d.monto_original || 0)}
+                                  </span>
+                                </label>
+                              )
+                            })
+                          )}
                         </div>
                       )}
                     </div>
