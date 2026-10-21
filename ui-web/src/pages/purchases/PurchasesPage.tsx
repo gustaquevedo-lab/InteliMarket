@@ -5755,6 +5755,11 @@ export default function PurchasesPage() {
                                 <CheckCircle2 className="w-3 h-3" /> Completada
                               </span>
                             )}
+                            {(estado === "acreditado_parcial" || estado === "parcial") && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                <Clock className="w-3 h-3" /> Acreditada Parcial
+                              </span>
+                            )}
                             {estado === "rechazado" && (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300 border border-rose-200 dark:border-rose-800" title={item.motivo_rechazo}>
                                 <Ban className="w-3 h-3" /> Rechazada
@@ -5764,7 +5769,7 @@ export default function PurchasesPage() {
 
                           {/* Nueva Columna: Impacto en Stock & Etapa */}
                           <td className="p-3 text-center">
-                            {estado === "completado" ? (
+                            {(estado === "completado" || estado === "acreditado_parcial" || estado === "parcial") ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
                                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                                 <span>Stock Descontado</span>

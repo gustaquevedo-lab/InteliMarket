@@ -834,7 +834,6 @@ async def complete_supplier_return(
         raise HTTPException(400, "Esta devolución ya fue completada previamente")
 
     now = datetime.utcnow()
-    sr.estado = "completado"
     sr.completado_por = user_id
     sr.completado_at = now
 
@@ -1078,16 +1077,19 @@ async def complete_supplier_return(
             await _post_return_loss_accounting(db, company_id, sr, p_monto, sr.motivo_perdida)
 
     # 3. IMPACTO FINANCIERO Y LEGAL:
-    # La devolución física (DEV) es el acto administrativo de baja de inventario / Kardex en depósito.
-    # El impacto financiero en deuda lo formaliza legalmente la Nota de Crédito (SupplierCreditNote)
-    # creada arriba y aplicada a facturas o al saldo disponible del monedero.
-    # NO se crea FinancialSupplierReturn aquí para evitar duplicar la deducción de deuda en extractos y estados de cuenta.
+    # Si la suma de NCs más lo enviado a pérdida cubre el valor total, estado es 'completado'.
+    # Si faltan cuotas de NC por recibir y no se mandó a pérdida el saldo, queda 'acreditado_parcial'.
+    total_cubierto = (sr.nota_credito_monto or Decimal(0)) + (sr.monto_perdida or Decimal(0))
+    if sr.valor_total_estimado and total_cubierto < sr.valor_total_estimado and not sr.enviado_a_perdida:
+        sr.estado = "acreditado_parcial"
+    else:
+        sr.estado = "completado"
 
     await db.commit()
     await db.refresh(sr)
 
     res_list = await list_supplier_returns(db, company_id)
-    return next((r for r in res_list if r["id"] == str(return_id)), {"id": str(return_id), "estado": "completado"})
+    return next((r for r in res_list if r["id"] == str(return_id)), {"id": str(return_id), "estado": sr.estado})
 
 
 async def add_nc_to_supplier_return(
@@ -1248,8 +1250,14 @@ async def add_nc_to_supplier_return(
         if p_monto > Decimal(0):
             await _post_return_loss_accounting(db, company_id, sr, p_monto, sr.motivo_perdida)
 
+    total_cubierto = (sr.nota_credito_monto or Decimal(0)) + (sr.monto_perdida or Decimal(0))
+    if sr.valor_total_estimado and total_cubierto < sr.valor_total_estimado and not sr.enviado_a_perdida:
+        sr.estado = "acreditado_parcial"
+    else:
+        sr.estado = "completado"
+
     await db.commit()
     await db.refresh(sr)
 
     res_list = await list_supplier_returns(db, company_id)
-    return next((r for r in res_list if r["id"] == str(return_id)), {"id": str(return_id), "notas_credito": sr.notas_credito})
+    return next((r for r in res_list if r["id"] == str(return_id)), {"id": str(return_id), "estado": sr.estado, "notas_credito": sr.notas_credito})

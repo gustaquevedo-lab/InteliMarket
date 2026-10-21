@@ -15,6 +15,7 @@ from sqlalchemy import select, and_, or_, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.purchases.models import Supplier, SupplierNcRequest
+from api.src.supermer.models import SupplierReturn as SupermerSupplierReturn
 from api.src.financial.models import (
     SupplierInvoice, SupplierInvoicePayment,
     SupplierCreditNote, SupplierCreditNoteApplication,
@@ -219,6 +220,38 @@ async def get_supplier_account_statement(
             "fecha": _date_str(s.created_at),
         })
 
+    # 5c. Devoluciones Físicas de Mercadería con NCs pendientes de emisión (o saldo de cuotas)
+    q_dev = (
+        select(SupermerSupplierReturn)
+        .where(
+            SupermerSupplierReturn.company_id == company_id,
+            SupermerSupplierReturn.proveedor_id == supplier_id,
+            SupermerSupplierReturn.estado.in_(["autorizado", "pendiente", "acreditado_parcial", "parcial"]),
+        )
+        .order_by(SupermerSupplierReturn.fecha_creacion.desc())
+    )
+    dev_res = await db.execute(q_dev)
+    dev_pendientes_rows = dev_res.scalars().all()
+
+    for d in dev_pendientes_rows:
+        val_est = _dec_to_float(d.valor_total_estimado)
+        m_nc = _dec_to_float(d.nota_credito_monto)
+        m_perd = _dec_to_float(d.monto_perdida)
+        saldo_dev = max(0.0, val_est - m_nc - m_perd)
+        if saldo_dev > 0:
+            total_snc_reclamado_monto += saldo_dev
+            solicitudes_nc_pendientes.append({
+                "id": str(d.id),
+                "numero_solicitud": d.codigo,
+                "invoice_id": "",
+                "factura_relacionada": f"DEV Física ({d.nota_credito_numero})" if d.nota_credito_numero else "Devolución en Depósito",
+                "tipo_motivo": f"Devolución física ({d.tipo or 'devolucion'})",
+                "monto_reclamado": saldo_dev,
+                "estado": d.estado or "acreditado_parcial",
+                "observaciones": d.observaciones or f"Saldo de NC pendiente ({d.codigo})",
+                "fecha": _date_str(d.fecha_creacion),
+            })
+
     # 6. Construir lista unificada de movimientos
     raw_movements = []
 
@@ -378,6 +411,40 @@ async def get_supplier_account_statement(
             "factura_relacionada": num_fac,
             "orden_dia": 2,  # En segundo lugar al igual que NC
         })
+
+    # 6.5 Movimientos de Devoluciones físicas con saldo de NC pendiente
+    for d in dev_pendientes_rows:
+        val_est = _dec_to_float(d.valor_total_estimado)
+        m_nc = _dec_to_float(d.nota_credito_monto)
+        m_perd = _dec_to_float(d.monto_perdida)
+        saldo_dev = max(0.0, val_est - m_nc - m_perd)
+        if saldo_dev > 0:
+            f_dev = d.fecha_creacion.date() if d.fecha_creacion else today
+            concepto_dev = f"Devolución {d.codigo} - Saldo de NC pendiente de recibir"
+            if d.nota_credito_numero:
+                concepto_dev += f" [NCs: {d.nota_credito_numero}]"
+            if d.observaciones:
+                concepto_dev += f" - {d.observaciones}"
+
+            raw_movements.append({
+                "id": f"dev_{d.id}",
+                "entidad_id": str(d.id),
+                "fecha": f_dev,
+                "fecha_str": _date_str(f_dev),
+                "fecha_vencimiento_str": "",
+                "tipo": "SOLICITUD_NC",
+                "tipo_badge": "DEV",
+                "tipo_label": "Devolución Faltante / Salón",
+                "comprobante": d.codigo,
+                "timbrado": "",
+                "concepto": concepto_dev,
+                "debito": 0.0,
+                "credito": saldo_dev,
+                "saldo_documento": saldo_dev,
+                "estado": "Acreditado Parcial (Pendiente NC)" if m_nc > 0 else "Reclamado (Pendiente NC)",
+                "factura_relacionada": d.nota_credito_numero or "",
+                "orden_dia": 2,
+            })
 
     # 7. Ordenar cronológicamente (ascendente)
     raw_movements.sort(key=lambda m: (m["fecha"], m["orden_dia"], m["id"]))
@@ -566,6 +633,39 @@ async def get_supplier_account_statement(
                 "orden_dia": 2,
                 "punteado": False,
             })
+
+        # 6. Devoluciones físicas con saldo de NC pendiente
+        for d in dev_pendientes_rows:
+            val_est = _dec_to_float(d.valor_total_estimado)
+            m_nc = _dec_to_float(d.nota_credito_monto)
+            m_perd = _dec_to_float(d.monto_perdida)
+            saldo_dev = max(0.0, val_est - m_nc - m_perd)
+            if saldo_dev > 0:
+                f_dev = d.fecha_creacion.date() if d.fecha_creacion else today
+                concepto_dev = f"Devolución {d.codigo} - Saldo de NC pendiente"
+                if d.nota_credito_numero:
+                    concepto_dev += f" [NCs: {d.nota_credito_numero}]"
+
+                pendientes_list.append({
+                    "id": f"dev_{d.id}",
+                    "entidad_id": str(d.id),
+                    "fecha": f_dev,
+                    "fecha_str": _date_str(f_dev),
+                    "fecha_vencimiento_str": "",
+                    "tipo": "SOLICITUD_NC",
+                    "tipo_badge": "DEV",
+                    "tipo_label": "Devolución Física",
+                    "comprobante": f"DEV {d.codigo or 'S/N'}",
+                    "timbrado": "",
+                    "concepto": concepto_dev,
+                    "debito": 0.0,
+                    "credito": saldo_dev,
+                    "saldo_documento": saldo_dev,
+                    "estado": "Pendiente NC (Cuotas restantes)",
+                    "factura_relacionada": d.nota_credito_numero or "",
+                    "orden_dia": 2,
+                    "punteado": False,
+                })
 
         # Aplicar filtros de fecha si se proveyeron
         filtrados_pend = []
