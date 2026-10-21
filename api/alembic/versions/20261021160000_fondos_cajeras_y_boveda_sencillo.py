@@ -21,10 +21,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # 1. Ampliación anti-truncamiento en vault_entries (Regla 12)
-    op.execute("""
-        ALTER TABLE vault_entries ALTER COLUMN origen TYPE VARCHAR(60);
-        ALTER TABLE vault_entries ALTER COLUMN estado TYPE VARCHAR(50);
-    """)
+    op.execute("ALTER TABLE vault_entries ALTER COLUMN origen TYPE VARCHAR(60);")
+    op.execute("ALTER TABLE vault_entries ALTER COLUMN estado TYPE VARCHAR(50);")
 
     # 2. Tabla de fondos asignados a cajeras
     op.execute("""
@@ -44,11 +42,10 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ DEFAULT clock_timestamp(),
             CONSTRAINT uq_cashier_fund_company_user UNIQUE (company_id, user_id)
         );
-
-        CREATE INDEX IF NOT EXISTS idx_cfa_company ON cashier_fund_assignments(company_id);
-        CREATE INDEX IF NOT EXISTS idx_cfa_user ON cashier_fund_assignments(user_id);
-        CREATE INDEX IF NOT EXISTS idx_cfa_estado ON cashier_fund_assignments(estado);
     """)
+    op.execute("CREATE INDEX IF NOT EXISTS idx_cfa_company ON cashier_fund_assignments(company_id);")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_cfa_user ON cashier_fund_assignments(user_id);")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_cfa_estado ON cashier_fund_assignments(estado);")
 
     # 3. Tabla de fondo permanente de sencillo en bóveda central
     op.execute("""
@@ -64,9 +61,8 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ DEFAULT clock_timestamp(),
             updated_at TIMESTAMPTZ DEFAULT clock_timestamp()
         );
-
-        CREATE INDEX IF NOT EXISTS idx_vpf_company ON vault_petty_funds(company_id);
     """)
+    op.execute("CREATE INDEX IF NOT EXISTS idx_vpf_company ON vault_petty_funds(company_id);")
 
     # 4. Tabla de arqueos del fondo de sencillo en bóveda
     op.execute("""
@@ -85,10 +81,9 @@ def upgrade() -> None:
             observaciones TEXT,
             created_at TIMESTAMPTZ DEFAULT clock_timestamp()
         );
-
-        CREATE INDEX IF NOT EXISTS idx_vpfa_company_fund ON vault_petty_fund_audits(company_id, fund_id);
-        CREATE INDEX IF NOT EXISTS idx_vpfa_fecha ON vault_petty_fund_audits(fecha);
     """)
+    op.execute("CREATE INDEX IF NOT EXISTS idx_vpfa_company_fund ON vault_petty_fund_audits(company_id, fund_id);")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_vpfa_fecha ON vault_petty_fund_audits(fecha);")
 
     # 5. Tabla de arqueos sorpresa de cajeras en turnos abiertos
     op.execute("""
@@ -114,11 +109,10 @@ def upgrade() -> None:
             observaciones TEXT,
             created_at TIMESTAMPTZ DEFAULT clock_timestamp()
         );
-
-        CREATE INDEX IF NOT EXISTS idx_csa_session ON cash_surprise_audits(session_id);
-        CREATE INDEX IF NOT EXISTS idx_csa_company ON cash_surprise_audits(company_id);
-        CREATE INDEX IF NOT EXISTS idx_csa_fecha ON cash_surprise_audits(fecha);
     """)
+    op.execute("CREATE INDEX IF NOT EXISTS idx_csa_session ON cash_surprise_audits(session_id);")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_csa_company ON cash_surprise_audits(company_id);")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_csa_fecha ON cash_surprise_audits(fecha);")
 
     # 6. Semilla inicial del Fondo Permanente de Sencillo Bóveda (₲ 3.800.000)
     op.execute("""
@@ -145,9 +139,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("""
-        DROP TABLE IF EXISTS cash_surprise_audits;
-        DROP TABLE IF EXISTS vault_petty_fund_audits;
-        DROP TABLE IF EXISTS vault_petty_funds;
-        DROP TABLE IF EXISTS cashier_fund_assignments;
-    """)
+    op.execute("DROP TABLE IF EXISTS cash_surprise_audits;")
+    op.execute("DROP TABLE IF EXISTS vault_petty_fund_audits;")
+    op.execute("DROP TABLE IF EXISTS vault_petty_funds;")
+    op.execute("DROP TABLE IF EXISTS cashier_fund_assignments;")
