@@ -15,7 +15,7 @@ TRANSICIONES_VALIDAS = {
     "rechazado": {"pendiente", "anulado"},
     "en_cartera": {"depositado", "cobrado", "rechazado", "anulado"},
     "depositado": {"cobrado", "rechazado", "anulado"},
-    "cobrado": set(),
+    "cobrado": {"entregado", "rechazado"},
     "anulado": set(),
 }
 
