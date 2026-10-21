@@ -281,6 +281,8 @@ export default function PurchasesPage() {
   const [editingPOId, setEditingPOId] = useState<string | null>(null)
   const [editingPO, setEditingPO] = useState<PurchaseOrder | null>(null)
   const [manualPOSupplierId, setManualPOSupplierId] = useState("")
+  const [manualPOSupplierSearch, setManualPOSupplierSearch] = useState("")
+  const [manualPOSupplierComboboxOpen, setManualPOSupplierComboboxOpen] = useState(false)
   const [manualPOFechaEntrega, setManualPOFechaEntrega] = useState("")
   const [manualPOPrioridad, setManualPOPrioridad] = useState("normal")
   const [manualPOEstado, setManualPOEstado] = useState("borrador")
@@ -299,6 +301,33 @@ export default function PurchasesPage() {
   const [savingManualPO, setSavingManualPO] = useState(false)
   const [comparisonProductId, setComparisonProductId] = useState<string | null>(null)
   const [comparisonProductNombre, setComparisonProductNombre] = useState<string>("")
+
+  const selectedManualPOSupplier = useMemo(() => {
+    return suppliers.find(s => s.id === manualPOSupplierId) || null
+  }, [suppliers, manualPOSupplierId])
+
+  const filteredSuppliersForManualPO = useMemo(() => {
+    if (!manualPOSupplierSearch.trim()) return suppliers.slice(0, 50)
+    const q = manualPOSupplierSearch.toLowerCase().trim()
+    return suppliers.filter(s => {
+      const razon = (s.razon_social || "").toLowerCase()
+      const fantasia = (s.nombre_fantasia || "").toLowerCase()
+      const nombre = (s.nombre || "").toLowerCase()
+      const ruc = (s.ruc || "").toLowerCase()
+      const ci = (s.ci || "").toLowerCase()
+      const contacto = (s.contacto_nombre || s.contacto || "").toLowerCase()
+      const tel = (s.telefono || "").toLowerCase()
+      return (
+        razon.includes(q) ||
+        fantasia.includes(q) ||
+        nombre.includes(q) ||
+        ruc.includes(q) ||
+        ci.includes(q) ||
+        contacto.includes(q) ||
+        tel.includes(q)
+      )
+    })
+  }, [suppliers, manualPOSupplierSearch])
 
   // Estados para Inbox IMAP cPanel y Facturas SIFEN
   const [showInboxConfigModal, setShowInboxConfigModal] = useState(false)
@@ -1429,6 +1458,8 @@ export default function PurchasesPage() {
     setEditingPOId(null)
     setEditingPO(null)
     setManualPOSupplierId(suppliers[0]?.id || "")
+    setManualPOSupplierSearch("")
+    setManualPOSupplierComboboxOpen(false)
     const defDate = new Date()
     defDate.setDate(defDate.getDate() + 3)
     setManualPOFechaEntrega(defDate.toISOString().split("T")[0])
@@ -1446,6 +1477,8 @@ export default function PurchasesPage() {
     setEditingPOId(po.id)
     setEditingPO(po)
     setManualPOSupplierId(po.supplier_id || "")
+    setManualPOSupplierSearch("")
+    setManualPOSupplierComboboxOpen(false)
     setManualPOFechaEntrega(po.fecha_entrega_estimada ? po.fecha_entrega_estimada.split("T")[0] : "")
     setManualPOPrioridad(po.prioridad || "normal")
     setManualPOCondiciones(po.condiciones_pago || "30 Días")
@@ -8272,23 +8305,160 @@ export default function PurchasesPage() {
 
             <form onSubmit={handleSaveManualPO} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
-                <div className="sm:col-span-2">
+                <div className="sm:col-span-2 relative">
                   <label className="text-xs font-bold text-gray-500 uppercase tracking-wider block mb-1">
                     Proveedor *
                   </label>
-                  <select
-                    value={manualPOSupplierId}
-                    onChange={(e) => setManualPOSupplierId(e.target.value)}
-                    className="input-field w-full text-xs font-semibold"
-                    required
-                  >
-                    <option value="">Seleccione un proveedor...</option>
-                    {suppliers.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {s.razon_social || s.nombre_fantasia} (RUC: {s.ruc || "—"})
-                      </option>
-                    ))}
-                  </select>
+
+                  {/* Backdrop para cerrar dropdown al hacer click afuera */}
+                  {manualPOSupplierComboboxOpen && (
+                    <div
+                      className="fixed inset-0 z-40 bg-transparent"
+                      onClick={() => setManualPOSupplierComboboxOpen(false)}
+                    />
+                  )}
+
+                  {/* Input Buscador con Fallback y Filtro Dinámico */}
+                  <div className="relative z-50">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-500 pointer-events-none">
+                      <Search className="w-4 h-4" />
+                    </div>
+                    <input
+                      type="text"
+                      placeholder={
+                        selectedManualPOSupplier
+                          ? `${selectedManualPOSupplier.razon_social || selectedManualPOSupplier.nombre_fantasia || selectedManualPOSupplier.nombre} (RUC/CI: ${selectedManualPOSupplier.ruc || selectedManualPOSupplier.ci || "—"})`
+                          : "Buscar proveedor por Razón Social, Fantasía, RUC o CI..."
+                      }
+                      value={manualPOSupplierSearch}
+                      onFocus={() => setManualPOSupplierComboboxOpen(true)}
+                      onChange={(e) => {
+                        setManualPOSupplierSearch(e.target.value)
+                        setManualPOSupplierComboboxOpen(true)
+                      }}
+                      className={`input-field pl-9 pr-10 w-full text-xs font-semibold py-2 bg-white dark:bg-slate-900 border transition-all ${
+                        manualPOSupplierId
+                          ? "border-indigo-500 ring-1 ring-indigo-500/20 text-gray-900 dark:text-white"
+                          : "border-slate-300 dark:border-slate-700"
+                      }`}
+                    />
+                    {manualPOSupplierSearch ? (
+                      <button
+                        type="button"
+                        onClick={() => setManualPOSupplierSearch("")}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-red-500 rounded-full"
+                        title="Limpiar texto"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setManualPOSupplierComboboxOpen(prev => !prev)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-indigo-500"
+                        title="Desplegar lista"
+                      >
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Resumen del Proveedor Seleccionado Actualmente (Certeza Visual) */}
+                  {selectedManualPOSupplier && !manualPOSupplierComboboxOpen && (
+                    <div className="mt-1.5 p-2 rounded-lg bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/60 flex items-center justify-between text-xs animate-in fade-in duration-150">
+                      <div className="min-w-0 pr-2">
+                        <div className="font-bold text-indigo-950 dark:text-indigo-200 truncate flex items-center gap-1.5">
+                          <Building2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          <span className="truncate">
+                            {selectedManualPOSupplier.razon_social || selectedManualPOSupplier.nombre_fantasia || selectedManualPOSupplier.nombre || "Proveedor"}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-indigo-700 dark:text-indigo-300 flex items-center gap-2 mt-0.5 flex-wrap">
+                          {selectedManualPOSupplier.nombre_fantasia && selectedManualPOSupplier.razon_social && selectedManualPOSupplier.nombre_fantasia !== selectedManualPOSupplier.razon_social && (
+                            <span className="font-medium bg-indigo-100 dark:bg-indigo-900/60 px-1 rounded">
+                              Fant: {selectedManualPOSupplier.nombre_fantasia}
+                            </span>
+                          )}
+                          <span className="font-mono">Doc: {selectedManualPOSupplier.ruc || selectedManualPOSupplier.ci || "Sin documento"}</span>
+                          {selectedManualPOSupplier.telefono && <span>Tel: {selectedManualPOSupplier.telefono}</span>}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setManualPOSupplierComboboxOpen(true)
+                          setManualPOSupplierSearch("")
+                        }}
+                        className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline shrink-0"
+                      >
+                        Cambiar
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Dropdown de Proveedores Filtrados */}
+                  {manualPOSupplierComboboxOpen && (
+                    <div className="absolute z-50 left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-64 flex flex-col animate-in fade-in zoom-in-95 duration-100">
+                      <div className="p-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center justify-between">
+                        <span>Seleccionar Proveedor</span>
+                        <span>{filteredSuppliersForManualPO.length} encontrados</span>
+                      </div>
+
+                      <div className="overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/60 p-1">
+                        {filteredSuppliersForManualPO.map(s => {
+                          const isSelected = manualPOSupplierId === s.id
+                          const displayName = s.razon_social || s.nombre_fantasia || s.nombre || "Proveedor"
+                          const hasDiffFantasia = s.nombre_fantasia && s.razon_social && s.nombre_fantasia !== s.razon_social
+                          const docStr = s.ruc ? `RUC: ${s.ruc}` : (s.ci ? `CI: ${s.ci}` : "Sin RUC/CI")
+
+                          return (
+                            <button
+                              key={s.id}
+                              type="button"
+                              onClick={() => {
+                                setManualPOSupplierId(s.id)
+                                setManualPOSupplierSearch("")
+                                setManualPOSupplierComboboxOpen(false)
+                              }}
+                              className={`w-full text-left p-2 rounded-lg text-xs flex items-center justify-between transition-colors ${
+                                isSelected
+                                  ? "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-200 font-bold"
+                                  : "hover:bg-slate-50 dark:hover:bg-slate-800 text-gray-700 dark:text-gray-300"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center font-black text-[10px] shrink-0 border border-slate-200 dark:border-slate-700">
+                                  {displayName.substring(0, 2).toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="font-bold truncate text-xs text-gray-900 dark:text-gray-100">
+                                    {displayName}
+                                  </div>
+                                  <div className="text-[10px] text-gray-500 dark:text-gray-400 flex items-center gap-2 mt-0.5 flex-wrap">
+                                    {hasDiffFantasia && (
+                                      <span className="font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-1 rounded">
+                                        Fant: {s.nombre_fantasia}
+                                      </span>
+                                    )}
+                                    <span className="font-mono">{docStr}</span>
+                                    {s.telefono && <span>Tel: {s.telefono}</span>}
+                                    {s.contacto && <span>Contacto: {s.contacto}</span>}
+                                  </div>
+                                </div>
+                              </div>
+                              {isSelected && <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />}
+                            </button>
+                          )
+                        })}
+
+                        {filteredSuppliersForManualPO.length === 0 && (
+                          <div className="p-4 text-center text-xs text-gray-400">
+                            No se encontró ningún proveedor con "{manualPOSupplierSearch}"
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>
