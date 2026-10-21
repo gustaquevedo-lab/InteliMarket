@@ -7399,6 +7399,30 @@ export default function PurchasesPage() {
                       <div><strong>Moneda:</strong> {selectedPO.moneda || "PYG"} (Guaraníes)</div>
                       <div><strong>Comprador Responsable:</strong> {selectedPO.created_by_name || "Departamento de Compras"}</div>
                       <div><strong>Prioridad:</strong> <span className="capitalize font-bold">{selectedPO.prioridad || "Normal"}</span></div>
+                      {(() => {
+                        const poRecs = receipts.filter(r => r.purchase_order_id === selectedPO.id && r.estado !== "cancelado")
+                        if (poRecs.length === 0) return null
+                        return (
+                          <div className="mt-2 pt-1.5 border-t border-dashed border-indigo-200 dark:border-indigo-800/50 space-y-1 bg-indigo-50/70 dark:bg-indigo-950/30 p-2 rounded-lg">
+                            <div className="text-[10px] font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300 flex items-center gap-1">
+                              <Truck className="w-3 h-3" /> Recepciones en Muelle & Comprobantes:
+                            </div>
+                            {poRecs.map((rc, idx) => {
+                              const relatedInv = invoices.find(inv => inv.receipt_id === rc.id || (inv.purchase_order_id === selectedPO.id && inv.numero_factura === `AUTO-${rc.numero}`))
+                              const autoRecNum = relatedInv?.numero_factura || (rc.proveedor_ref ? rc.proveedor_ref : `AUTO-${rc.numero}`)
+                              return (
+                                <div key={rc.id || idx} className="text-[11px] text-slate-800 dark:text-slate-200 font-medium flex flex-wrap items-center gap-1.5">
+                                  <span>• Rec: <strong className="font-mono font-bold text-indigo-900 dark:text-indigo-200">{rc.numero}</strong></span>
+                                  <span>({formatDate(rc.fecha || rc.created_at || "")})</span>
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-black bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                                    COMPROBANTE: {autoRecNum}
+                                  </span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )
+                      })()}
                     </div>
                   </div>
 

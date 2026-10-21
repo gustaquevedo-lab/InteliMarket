@@ -231,6 +231,10 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
         Paragraph(f"<b>Moneda:</b> {order.get('moneda') or 'PYG'}", styles["Small"]),
         Paragraph(f"<b>Comprador:</b> {order.get('created_by_name') or generated_by or 'Departamento de Compras'}", styles["Small"]),
     ]
+    recs_list = order.get("recepciones") or []
+    if recs_list:
+        rec_texts = [f"{r.get('numero')} (Comp: <b>{r.get('comprobante')}</b>)" for r in recs_list]
+        col_der.append(Paragraph(f"<b>Recepción / AUTO-REC:</b> {', '.join(rec_texts)}", styles["SmallBold"]))
 
     info_table = Table([[col_izq, col_der]], colWidths=[93 * mm, 93 * mm])
     info_table.setStyle(TableStyle([

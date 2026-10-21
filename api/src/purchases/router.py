@@ -616,6 +616,35 @@ async def export_purchase_order_pdf(order_id: str, db: AsyncSession = Depends(ge
     items = await service.get_po_items(db, order_id)
     company = await _get_company_info(db, str(order.company_id))
     
+    # Obtener recepciones y comprobantes AUTO-REC vinculados
+    from api.src.purchases.models import PurchaseReceipt
+    from api.src.financial.models import SupplierInvoice
+    recs_res = await db.execute(
+        select(PurchaseReceipt).where(
+            PurchaseReceipt.purchase_order_id == uuid.UUID(order_id),
+            PurchaseReceipt.estado != "cancelado"
+        ).order_by(PurchaseReceipt.created_at.asc())
+    )
+    po_recs = list(recs_res.scalars().all())
+    recepciones_info = []
+    if po_recs:
+        rec_ids = [r.id for r in po_recs]
+        inv_res = await db.execute(
+            select(SupplierInvoice).where(
+                (SupplierInvoice.receipt_id.in_(rec_ids)) |
+                (SupplierInvoice.purchase_order_id == uuid.UUID(order_id))
+            )
+        )
+        invoices_map = {str(inv.receipt_id): inv.numero_factura for inv in inv_res.scalars().all() if inv.receipt_id}
+        for r in po_recs:
+            inv_num = invoices_map.get(str(r.id)) or (r.proveedor_ref if r.proveedor_ref else f"AUTO-{r.numero}")
+            fecha_str = r.fecha.strftime("%d/%m/%Y") if r.fecha else ""
+            recepciones_info.append({
+                "numero": r.numero,
+                "fecha": fecha_str,
+                "comprobante": inv_num,
+            })
+
     order_dict = {
         "id": str(order.id),
         "numero": order.numero,
@@ -627,6 +656,7 @@ async def export_purchase_order_pdf(order_id: str, db: AsyncSession = Depends(ge
         "created_by_name": order.created_by_name,
         "observaciones": order.observaciones,
         "total": float(order.total or 0),
+        "recepciones": recepciones_info,
         "supplier": {
             "razon_social": order.supplier.razon_social if order.supplier else None,
             "ruc": order.supplier.ruc if order.supplier else None,

@@ -143,7 +143,7 @@ export default function DepositoRecepcionPage() {
   const [showOverrideInvoiceModal, setShowOverrideInvoiceModal] = useState(false)
   const [observaciones, setObservaciones] = useState("")
   const [confirmingReceipt, setConfirmingReceipt] = useState(false)
-  const [lastReceiptCreated, setLastReceiptCreated] = useState<{ id: string; numero: string } | null>(null)
+  const [lastReceiptCreated, setLastReceiptCreated] = useState<{ id: string; numero: string; comprobante?: string; poId?: string; poNumero?: string } | null>(null)
   const [restoredFromDraft, setRestoredFromDraft] = useState(false)
   const [draftLastSaved, setDraftLastSaved] = useState<string | null>(null)
 
@@ -867,10 +867,13 @@ export default function DepositoRecepcionPage() {
       const receipt = await api.purchases.createReceipt(payload)
       soundAlerts.playRestockChime()
       clearDraftFromStorage(selectedPO.id)
-      setRestoredFromDraft(false)
+      const generatedAutoRec = (proveedorRef && /\d/.test(proveedorRef)) ? proveedorRef.trim() : `AUTO-${receipt.numero || 'REC'}`
       setLastReceiptCreated({
         id: receipt.id,
         numero: receipt.numero || "REC-2026",
+        comprobante: generatedAutoRec,
+        poId: selectedPO.id,
+        poNumero: selectedPO.numero,
       })
       setViewState("success")
       toast.success("Recepción Confirmada", `Stock y lotes actualizados con éxito (${receipt.numero}).`)
@@ -1079,9 +1082,35 @@ export default function DepositoRecepcionPage() {
                 {itemsDraft.reduce((acc, it) => acc + (it.cantidad_recibir || 0), 0)} un.
               </span>
             </div>
+            {lastReceiptCreated?.comprobante && (
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-sm bg-purple-50/70 dark:bg-purple-950/30 p-2.5 rounded-xl">
+                <span className="text-purple-700 dark:text-purple-300 font-bold text-xs uppercase tracking-wider">
+                  Comprobante Creado:
+                </span>
+                <span className="font-mono font-black text-purple-900 dark:text-purple-200 text-sm">
+                  {lastReceiptCreated.comprobante}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="space-y-3 pt-2">
+            {selectedPO?.id && (
+              <button
+                onClick={async () => {
+                  try {
+                    await api.purchases.downloadOrderPdf(selectedPO.id, selectedPO.numero)
+                    toast.success("PDF Descargado", `Se descargó la OC ${selectedPO.numero} con la referencia a la recepción ${lastReceiptCreated?.numero || ""}.`)
+                  } catch (e: any) {
+                    toast.error("Error al descargar PDF", e.message)
+                  }
+                }}
+                className="w-full py-3.5 rounded-2xl font-bold text-sm bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              >
+                <Download className="w-4 h-4 text-indigo-600 dark:text-indigo-400" /> Descargar / Imprimir OC con AUTO-REC
+              </button>
+            )}
+
             <button
               onClick={() => window.print()}
               className="w-full py-3.5 rounded-2xl font-bold text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
