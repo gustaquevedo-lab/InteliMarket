@@ -165,6 +165,13 @@ class CorporateRemissionCreate(BaseModel):
     notas: Optional[str] = None
 
 
+class CorporateRemissionUpdate(BaseModel):
+    periodo_mes: Optional[str] = None
+    fecha_corte: Optional[date] = None
+    notas: Optional[str] = None
+    accounts_receivable_ids: Optional[list[UUID]] = None
+
+
 class CorporateRemissionPayInput(BaseModel):
     monto: Decimal = Field(gt=0)
     forma_pago: str = "transferencia"

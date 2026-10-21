@@ -17,6 +17,7 @@ from api.src.accounts_receivable.schemas import (
     ReceivableGlobalPaymentCreate,
     CompensateInternalConsumptionInput,
     CorporateRemissionCreate,
+    CorporateRemissionUpdate,
     CorporateRemissionPayInput,
     CorporateRemissionRevertInput,
     CreditBlockingPolicy,
@@ -537,6 +538,23 @@ async def get_corporate_remission_detail(
     if not rem:
         raise HTTPException(status_code=404, detail="Remisión corporativa no encontrada")
     return rem
+
+
+@router.put("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}")
+async def update_corporate_remission_endpoint(
+    company_id: str,
+    remission_id: str,
+    body: CorporateRemissionUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Actualiza metadatos (periodo, fecha corte, notas) y/o la nómina de comprobantes asignados a una remisión corporativa."""
+    result = await service.update_corporate_remission(
+        db, company_id, remission_id, body, user.get("id")
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 @router.get("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/pdf")

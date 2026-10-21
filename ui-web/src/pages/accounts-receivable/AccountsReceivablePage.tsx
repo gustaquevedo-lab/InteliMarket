@@ -6,7 +6,7 @@ import {
   User, Check, Phone, ArrowUpRight, ShieldCheck, ShieldAlert, RefreshCw, BarChart2,
   Printer, QrCode, ExternalLink, CheckSquare, Square, Building2, Building,
   Users, Send, Landmark, ArrowRight, DownloadCloud, FileCheck, Layers, Filter,
-  Banknote, RotateCcw, Ban, Trash2, Warehouse
+  Banknote, RotateCcw, Ban, Trash2, Warehouse, Pencil
 } from "lucide-react"
 import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -364,6 +364,48 @@ export default function AccountsReceivablePage() {
     titular_cheque: "",
   })
   const [payingRemission, setPayingRemission] = useState(false)
+
+  // 📝 Estados para Edición de Remisión Corporativa
+  const [showEditRemissionModal, setShowEditRemissionModal] = useState<any | null>(null)
+  const [editRemDetail, setEditRemDetail] = useState<any | null>(null)
+  const [editRemLoading, setEditRemLoading] = useState(false)
+  const [editRemSaving, setEditRemSaving] = useState(false)
+  const [editPeriodo, setEditPeriodo] = useState("")
+  const [editFechaCorte, setEditFechaCorte] = useState("")
+  const [editNotas, setEditNotas] = useState("")
+  const [editSelectedDocIds, setEditSelectedDocIds] = useState<Set<string>>(new Set())
+  const [editAvailablePendingDocs, setEditAvailablePendingDocs] = useState<any[]>([])
+  const [editShowAddPending, setEditShowAddPending] = useState(false)
+
+  const editComputedTotals = useMemo(() => {
+    if (!showEditRemissionModal) return { total: 0, cantDocs: 0, cantFuncs: 0 }
+    let total = 0
+    const funcIds = new Set<string>()
+
+    // Comprobantes del detalle original de la remisión
+    editRemDetail?.funcionarios?.forEach((f: any) => {
+      f.documentos?.forEach((d: any) => {
+        if (editSelectedDocIds.has(d.id)) {
+          total += Number(d.saldo_pendiente || d.monto_original || 0)
+          funcIds.add(f.customer_id)
+        }
+      })
+    })
+
+    // Comprobantes adicionales agregados de pendientes
+    editAvailablePendingDocs.forEach((d: any) => {
+      if (editSelectedDocIds.has(d.id)) {
+        total += Number(d.saldo_pendiente || d.monto_original || 0)
+        funcIds.add(d.customer_id)
+      }
+    })
+
+    return {
+      total,
+      cantDocs: editSelectedDocIds.size,
+      cantFuncs: funcIds.size,
+    }
+  }, [showEditRemissionModal, editRemDetail, editSelectedDocIds, editAvailablePendingDocs])
 
   // 📊 Filtros en línea del Centro de Reportes
   const [repAgingDesde, setRepAgingDesde] = useState(() => getAsuncionDateStr(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
@@ -817,6 +859,72 @@ export default function AccountsReceivablePage() {
       toast.error("Error al anular remisión", e.message || "No se pudo anular la remisión")
     } finally {
       setCancelingRemission(false)
+    }
+  }
+
+  const handleOpenEditRemission = async (rem: any) => {
+    setShowEditRemissionModal(rem)
+    setEditPeriodo(rem.periodo_mes || "")
+    setEditFechaCorte(rem.fecha_corte ? String(rem.fecha_corte).slice(0, 10) : "")
+    setEditNotas(rem.notas || "")
+    setEditRemLoading(true)
+    setEditShowAddPending(false)
+    try {
+      const detail = await api.accountsReceivable.getCorporateRemissionDetail(rem.id)
+      setEditRemDetail(detail)
+      const docIds = new Set<string>()
+      detail?.funcionarios?.forEach((f: any) => {
+        f.documentos?.forEach((d: any) => {
+          docIds.add(d.id)
+        })
+      })
+      setEditSelectedDocIds(docIds)
+
+      try {
+        const pending = await api.accountsReceivable.corporateAgreementPendingDocs(rem.empresa_vinculada_nombre)
+        const unassigned: any[] = []
+        pending?.funcionarios?.forEach((f: any) => {
+          f.documentos?.forEach((d: any) => {
+            if (!docIds.has(d.id)) {
+              unassigned.push({ ...d, funcionario_nombre: f.customer_name, funcionario_ci: f.ci_numero, customer_id: f.customer_id })
+            }
+          })
+        })
+        setEditAvailablePendingDocs(unassigned)
+      } catch {
+        setEditAvailablePendingDocs([])
+      }
+    } catch (e: any) {
+      toast.error("Error", e.message || "No se pudo cargar el detalle del remito")
+      setShowEditRemissionModal(null)
+    } finally {
+      setEditRemLoading(false)
+    }
+  }
+
+  const handleSaveEditRemission = async () => {
+    if (!showEditRemissionModal) return
+    if (editSelectedDocIds.size === 0) {
+      toast.warning("Comprobantes requeridos", "El remito debe contener al menos un comprobante. Si desea cancelarlo por completo, use la opción Anular.")
+      return
+    }
+    setEditRemSaving(true)
+    try {
+      await api.accountsReceivable.updateCorporateRemission(showEditRemissionModal.id, {
+        periodo_mes: editPeriodo,
+        fecha_corte: editFechaCorte || undefined,
+        notas: editNotas,
+        accounts_receivable_ids: Array.from(editSelectedDocIds),
+      })
+      toast.success("Remito actualizado", `El remito ${showEditRemissionModal.numero_remision} se actualizó correctamente`)
+      setShowEditRemissionModal(null)
+      fetchRemissions()
+      fetchAgreements()
+      fetchData()
+    } catch (e: any) {
+      toast.error("Error al actualizar remito", e.message || "No se pudieron guardar los cambios")
+    } finally {
+      setEditRemSaving(false)
     }
   }
 
@@ -2764,17 +2872,28 @@ export default function AccountsReceivablePage() {
                                 )}
 
                                 {r.estado === "REMITIDO" && (
-                                  <button
-                                    onClick={() => {
-                                      setCancelRemissionModal(r)
-                                      setCancelMotivo("")
-                                    }}
-                                    className="btn-outline py-1 px-2.5 text-xs text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 inline-flex items-center gap-1"
-                                    title="Anular remisión y devolver comprobantes a pendientes"
-                                  >
-                                    <Ban className="w-3.5 h-3.5" />
-                                    <span>Anular</span>
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => handleOpenEditRemission(r)}
+                                      className="btn-outline py-1 px-2.5 text-xs text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-950/40 inline-flex items-center gap-1 font-semibold"
+                                      title="Editar datos, período, observaciones o comprobantes del remito"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                      <span>Editar</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setCancelRemissionModal(r)
+                                        setCancelMotivo("")
+                                      }}
+                                      className="btn-outline py-1 px-2.5 text-xs text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 inline-flex items-center gap-1"
+                                      title="Anular remisión y devolver comprobantes a pendientes"
+                                    >
+                                      <Ban className="w-3.5 h-3.5" />
+                                      <span>Anular</span>
+                                    </button>
+                                  </>
                                 )}
                               </td>
                             </tr>
@@ -5563,6 +5682,287 @@ export default function AccountsReceivablePage() {
               >
                 {cancelingRemission ? <Loader2 className="w-4 h-4 animate-spin" /> : <Ban className="w-4 h-4" />}
                 <span>Confirmar Anulación del Lote</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Editar Remito de Nómina de Deuda (Metadatos y Comprobantes) */}
+      {showEditRemissionModal && (
+        <div className="modal-overlay" onClick={() => !editRemSaving && setShowEditRemissionModal(null)}>
+          <div
+            className="modal-content max-w-3xl w-full flex flex-col max-h-[90vh] shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-5 border-b shrink-0 flex items-center justify-between bg-white dark:bg-slate-900">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+                  <Pencil className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    Editar Remito de Nómina de Deuda
+                    <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                      {showEditRemissionModal.numero_remision}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Empresa: <strong className="text-gray-900 dark:text-white">{showEditRemissionModal.empresa_vinculada_nombre}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !editRemSaving && setShowEditRemissionModal(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                title="Cerrar"
+                disabled={editRemSaving}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4 text-xs overflow-y-auto flex-1">
+              {editRemLoading ? (
+                <div className="py-16 text-center text-gray-500 flex flex-col items-center justify-center gap-3">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                  <p className="text-sm font-semibold">Cargando nómina y comprobantes del remito...</p>
+                </div>
+              ) : (
+                <>
+                  {/* Configuración Básica del Remito */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+                    <div>
+                      <label className="label-field text-[11px] font-bold">Período de Liquidación (Mes)</label>
+                      <input
+                        type="month"
+                        className="input-field text-xs font-bold"
+                        value={editPeriodo}
+                        onChange={e => setEditPeriodo(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="label-field text-[11px] font-bold">Fecha Tope de Corte</label>
+                      <input
+                        type="date"
+                        className="input-field text-xs font-bold"
+                        value={editFechaCorte}
+                        onChange={e => setEditFechaCorte(e.target.value)}
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="label-field text-[11px] font-bold">Observaciones / Notas del Remito</label>
+                      <textarea
+                        rows={2}
+                        className="input-field text-xs"
+                        placeholder="Notas adicionales sobre este lote..."
+                        value={editNotas}
+                        onChange={e => setEditNotas(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Tarjeta de Resumen en Tiempo Real */}
+                  <div className="p-4 rounded-xl bg-slate-900 text-white flex flex-wrap items-center justify-between gap-4 shadow-sm">
+                    <div>
+                      <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Total Remitido Resultante</div>
+                      <div className="text-xl font-black text-emerald-400 font-mono mt-0.5">
+                        {formatPYG(editComputedTotals.total)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6 text-xs">
+                      <div className="text-center">
+                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Socios / Funcionarios</div>
+                        <div className="text-base font-bold text-white font-mono">{editComputedTotals.cantFuncs}</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Comprobantes</div>
+                        <div className="text-base font-bold text-indigo-400 font-mono">{editComputedTotals.cantDocs}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Listado de Funcionarios y Comprobantes Asignados */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-extrabold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                        <Users className="w-4 h-4 text-blue-600" />
+                        Comprobantes en el Remito ({editRemDetail?.funcionarios?.length || 0} funcionarios)
+                      </h4>
+                      <span className="text-[11px] text-gray-500">
+                        Desmarcá comprobantes para excluirlos del remito
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 max-h-72 overflow-y-auto border border-gray-200 dark:border-gray-800 rounded-xl p-2 bg-gray-50/50 dark:bg-slate-900/50">
+                      {editRemDetail?.funcionarios?.map((f: any) => {
+                        const totalFunc = f.documentos?.reduce((acc: number, d: any) => editSelectedDocIds.has(d.id) ? acc + Number(d.saldo_pendiente || d.monto_original || 0) : acc, 0) || 0
+                        const allSelected = f.documentos?.every((d: any) => editSelectedDocIds.has(d.id))
+                        const someSelected = f.documentos?.some((d: any) => editSelectedDocIds.has(d.id))
+
+                        return (
+                          <div key={f.customer_id} className="bg-white dark:bg-slate-800 rounded-xl p-3 border border-gray-200 dark:border-gray-700/80 shadow-xs space-y-2">
+                            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700/50 pb-2">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={allSelected}
+                                  ref={el => { if (el) el.indeterminate = !allSelected && someSelected }}
+                                  onChange={e => {
+                                    const next = new Set(editSelectedDocIds)
+                                    f.documentos?.forEach((d: any) => {
+                                      if (e.target.checked) next.add(d.id)
+                                      else next.delete(d.id)
+                                    })
+                                    setEditSelectedDocIds(next)
+                                  }}
+                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                                />
+                                <div>
+                                  <div className="font-bold text-gray-900 dark:text-white">{f.customer_name}</div>
+                                  <div className="text-[10px] text-gray-500 font-mono">CI: {f.ci_numero || "—"}</div>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-xs font-mono font-black text-gray-900 dark:text-white">
+                                  {formatPYG(totalFunc)}
+                                </div>
+                                <div className="text-[10px] text-gray-500">
+                                  {f.documentos?.filter((d: any) => editSelectedDocIds.has(d.id)).length} / {f.documentos?.length} docs
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 pl-6">
+                              {f.documentos?.map((d: any) => {
+                                const isChecked = editSelectedDocIds.has(d.id)
+                                return (
+                                  <label
+                                    key={d.id}
+                                    className={`flex items-center justify-between p-2 rounded-lg border text-[11px] cursor-pointer transition ${
+                                      isChecked
+                                        ? "bg-blue-50/60 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900/60 text-blue-950 dark:text-blue-100"
+                                        : "bg-gray-50/60 dark:bg-slate-800/40 border-gray-200 dark:border-gray-700 text-gray-400 line-through"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={isChecked}
+                                        onChange={() => {
+                                          const next = new Set(editSelectedDocIds)
+                                          if (isChecked) next.delete(d.id)
+                                          else next.add(d.id)
+                                          setEditSelectedDocIds(next)
+                                        }}
+                                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                                      />
+                                      <div>
+                                        <span className="font-mono font-bold">{d.numero_documento}</span>
+                                        <span className="text-[10px] text-gray-500 block">
+                                          {d.fecha_emision ? new Date(d.fecha_emision).toLocaleDateString("es-PY") : ""}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <span className="font-mono font-bold text-gray-900 dark:text-white">
+                                      {formatPYG(d.saldo_pendiente || d.monto_original || 0)}
+                                    </span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Sección: Agregar Comprobantes Pendientes Que Quedaron Fuera */}
+                  {editAvailablePendingDocs.length > 0 && (
+                    <div className="p-3.5 rounded-xl border border-dashed border-indigo-300 dark:border-indigo-800 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Plus className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          <span className="font-bold text-indigo-900 dark:text-indigo-200 text-xs">
+                            Comprobantes pendientes disponibles ({editAvailablePendingDocs.length})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEditShowAddPending(!editShowAddPending)}
+                          className="text-xs text-indigo-600 dark:text-indigo-400 font-bold hover:underline"
+                        >
+                          {editShowAddPending ? "Ocultar" : "Ver y Sumar al Remito"}
+                        </button>
+                      </div>
+
+                      {editShowAddPending && (
+                        <div className="space-y-1.5 pt-2 max-h-48 overflow-y-auto">
+                          {editAvailablePendingDocs.map((d: any) => {
+                            const isChecked = editSelectedDocIds.has(d.id)
+                            return (
+                              <label
+                                key={d.id}
+                                className={`flex items-center justify-between p-2 rounded-lg border text-xs cursor-pointer transition ${
+                                  isChecked
+                                    ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 text-emerald-950 dark:text-emerald-100"
+                                    : "bg-white dark:bg-slate-800 border-gray-200 dark:border-gray-700 hover:bg-gray-50"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => {
+                                      const next = new Set(editSelectedDocIds)
+                                      if (isChecked) next.delete(d.id)
+                                      else next.add(d.id)
+                                      setEditSelectedDocIds(next)
+                                    }}
+                                    className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                                  />
+                                  <div>
+                                    <div className="font-bold">{d.funcionario_nombre}</div>
+                                    <div className="text-[10px] text-gray-500 font-mono">
+                                      {d.numero_documento} · {d.fecha_emision ? new Date(d.fecha_emision).toLocaleDateString("es-PY") : ""}
+                                    </div>
+                                  </div>
+                                </div>
+                                <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                  +{formatPYG(d.saldo_pendiente || d.monto_original || 0)}
+                                </span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t flex items-center justify-between shrink-0 bg-slate-50 dark:bg-slate-900">
+              <button
+                type="button"
+                onClick={() => setShowEditRemissionModal(null)}
+                className="btn-ghost text-xs px-4 py-2"
+                disabled={editRemSaving}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEditRemission}
+                disabled={editRemSaving || editRemLoading || editSelectedDocIds.size === 0}
+                className="btn-primary bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-md transition disabled:opacity-50"
+              >
+                {editRemSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                <span>Guardar Cambios del Remito</span>
               </button>
             </div>
           </div>

@@ -406,6 +406,10 @@ export interface KioskProductLookup { id: string; nombre: string; sku?: string |
 export interface KioskBanner { id: string; company_id: string; titulo: string; subtitulo?: string | null; etiqueta?: string | null; descuento_texto?: string | null; color?: string | null; imagen_url?: string | null; orden: number; activo: boolean; fecha_inicio?: string | null; fecha_fin?: string | null; created_at: string; updated_at?: string | null }
 export interface VaultEntry { id: string; origen: string; monto_pyg: number; monto_usd: number; monto_brl: number; estado: string; bank_transaction_id?: string | null; created_at: string; fecha_deposito?: string | null }
 export interface VaultDashboard { saldo_en_boveda_pyg: number; saldo_en_boveda_usd: number; saldo_en_boveda_brl: number; entradas_en_boveda: number; entregas_pendientes: number; entregas_pendientes_detalle: CashHandoff[]; retiros_pendientes: number; retiros_pendientes_detalle: any[]; movimientos_recientes: VaultEntry[] }
+export interface CashierFundAssignmentItem { id: string; user_id: string; cajero_nombre: string; monto_pyg: number; monto_brl: number; monto_usd: number; estado: string; fecha_asignacion?: string | null; asignado_por?: string | null; observaciones?: string | null; created_at?: string | null }
+export interface VaultPettyFundData { id: string; company_id: string; nombre: string; monto_objetivo_pyg: number; saldo_actual_pyg: number; monto_objetivo_brl: number; saldo_actual_brl: number; activo: boolean; updated_at?: string | null }
+export interface VaultPettyFundAuditItem { id: string; fecha: string | null; auditado_por_nombre?: string | null; monto_esperado_pyg: number; monto_contado_pyg: number; diferencia_pyg: number; resultado: string; desglose?: any; observaciones?: string | null }
+export interface CashSurpriseAuditItem { id: string; session_id: string; fecha: string | null; cajero_nombre: string; auditor_nombre: string; monto_esperado_pyg: number; monto_contado_pyg: number; diferencia_pyg: number; monto_esperado_brl: number; monto_contado_brl: number; diferencia_brl: number; resultado: string; desglose?: any; observaciones?: string | null }
 export interface CashSession { id: string; caja_id?: string; caja?: CashRegister; cash_register?: CashRegister; usuario_id?: string; fecha_apertura?: string; fecha_cierre?: string; monto_apertura?: number; monto_cierre?: number; total_ventas?: number; total_retiros?: number; total_ingresos?: number; estado?: string; observaciones?: string; created_at?: string }
 export interface Branch { id: string; nombre: string; codigo: string; direccion?: string; ciudad?: string; departamento?: string; telefono?: string; email?: string; ruc?: string; punto_emision?: string | number; activo?: boolean; company_id?: string; created_at?: string; updated_at?: string }
 export interface CreditAccount { id: string; customer_id?: string; customer?: Customer; customer_nombre?: string; customer_ruc?: string; empresa_vinculada_nombre?: string; saldo?: number; limite_credito?: number; saldo_utilizado?: number; saldo_disponible?: number; porcentaje_uso?: number; estado?: string; activo?: boolean; dias_mora_max?: number; en_mora?: boolean; created_at?: string; updated_at?: string }
@@ -2434,6 +2438,13 @@ export const api = {
       preCloseSummary: (sessionId: string) => client.get<{ session_id: string; cajero_nombre: string | null; fecha_apertura: string; monto_apertura: number; total_ventas_count: number; total_cobrado_pyg: number; total_donaciones_pyg: number; efectivo_pyg_esperado: number; efectivo_usd_esperado: number; efectivo_brl_esperado: number; monto_cierre_esperado_pyg: number; efectivo_en_gaveta_esperado_pyg: number; efectivo_en_gaveta_esperado_usd: number; efectivo_en_gaveta_esperado_brl: number; desglose_formas_pago: { forma_pago: string; moneda: string; cantidad: number; monto: number }[]; cash_drops: any[]; total_drops_confirmados_pyg: number; total_drops_confirmados_usd: number; total_drops_confirmados_brl: number; reconciliation?: any; ticket_text?: string; ticket_escpos_b64?: string }>(`/v1/cash-sessions/${sessionId}/pre-close-summary`),
       ticketEscpos: (sessionId: string) => client.get<{ session_id: string; ticket_text: string; ticket_escpos_b64: string; reconciliation: any }>(`/v1/cash-sessions/${sessionId}/ticket-escpos`),
       updateFondo: (id: string, data: { monto_apertura: number; monto_apertura_brl?: number; monto_apertura_usd?: number; motivo?: string }) => client.patch<CashSession>(`/v1/cash-sessions/${id}/fondo-inicial`, data),
+      surpriseAudit: (sessionId: string, data: { monto_contado_pyg: number; monto_contado_brl?: number; monto_contado_usd?: number; desglose?: any; observaciones?: string }) => client.post<any>(`/v1/cash-sessions/${sessionId}/surprise-audit`, data),
+      listSurpriseAudits: (sessionId: string) => client.get<CashSurpriseAuditItem[]>(`/v1/cash-sessions/${sessionId}/surprise-audits`),
+    },
+    cashierFunds: {
+      list: () => client.get<CashierFundAssignmentItem[]>("/v1/caja/cashier-funds"),
+      assign: (data: { user_id: string; monto_pyg: number; monto_brl: number; monto_usd?: number; debitar_de_boveda?: boolean; observaciones?: string }) => client.post<any>("/v1/caja/cashier-funds", data),
+      return: (assignmentId: string, data: { monto_pyg?: number; monto_brl?: number; monto_usd?: number; desactivar_asignacion?: boolean; ingresar_a_boveda?: boolean; observaciones?: string }) => client.post<any>(`/v1/caja/cashier-funds/${assignmentId}/return`, data),
     },
     sessionsSummary: (params?: { estado?: string; register_id?: string; limit?: number; offset?: number; fecha_desde?: string; fecha_hasta?: string; cajero_nombre?: string; user_id?: string; search?: string }) =>
       client.get<{ id: string; register_id: string; user_id: string; cajero_nombre: string | null; fecha_apertura: string; fecha_cierre: string | null; monto_apertura: number; monto_apertura_brl?: number; monto_apertura_usd?: number; monto_cierre: number | null; monto_cierre_esperado: number | null; diferencia: number | null; diferencia_usd: number | null; diferencia_brl: number | null; monto_cobrado: number; estado: string; cash_drop_alert: boolean; cash_drop_warning: boolean; cash_drop_threshold: number | null; efectivo_acumulado: number; efectivo_usd_acumulado: number; efectivo_brl_acumulado: number; ultimo_cash_drop_at: string | null }[]>(
@@ -2696,6 +2707,12 @@ export const api = {
       list: (estado?: string) => client.get<{ id: string; entry_ids: string[]; monto_total_pyg: number; estado: string; aprobado_supervisor_id: string | null; aprobado_gerente_id: string | null; created_at: string }[]>("/v1/vault/deposit-approvals", estado ? { estado } : undefined),
       approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/vault/deposit-approvals/${id}/approve`, {}),
       reject: (id: string, motivo: string) => client.post<{ success: boolean }>(`/v1/vault/deposit-approvals/${id}/reject`, { motivo }),
+    },
+    pettyFund: {
+      get: () => client.get<VaultPettyFundData>("/v1/vault/petty-fund"),
+      adjust: (data: { monto_ajuste_pyg: number; tipo: "aumento" | "disminucion"; afectar_boveda_recaudacion?: boolean; motivo: string }) => client.post<any>("/v1/vault/petty-fund/adjust", data),
+      audit: (data: { monto_contado_pyg: number; desglose?: any; observaciones?: string; ajustar_saldo?: boolean }) => client.post<any>("/v1/vault/petty-fund/audit", data),
+      listAudits: () => client.get<VaultPettyFundAuditItem[]>("/v1/vault/petty-fund/audits"),
     },
   },
   branches: {
@@ -3838,6 +3855,8 @@ export const api = {
     createCorporateRemission: (data: { empresa_vinculada_nombre: string; periodo_mes: string; fecha_corte?: string; tipo_destino?: string; accounts_receivable_ids?: string[]; notas?: string }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/remit`, data),
     listCorporateRemissions: (empresa?: string) => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions`, empresa ? { empresa_nombre: empresa } : undefined),
     getCorporateRemissionDetail: (id: string) => client.get<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}`),
+    updateCorporateRemission: (id: string, data: { periodo_mes?: string; fecha_corte?: string; notas?: string; accounts_receivable_ids?: string[] }) =>
+      client.put<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}`, data),
     downloadRemisionPdf: (id: string, numero?: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pdf`, undefined, `remision_${numero || id.slice(0, 8)}.pdf`),
     downloadRemisionExtractosPdf: (id: string, numero?: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/extractos.pdf`, undefined, `extractos_remision_${numero || id.slice(0, 8)}.pdf`),
     payCorporateRemission: (id: string, data: {

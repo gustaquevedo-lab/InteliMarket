@@ -2667,6 +2667,208 @@ async def cancel_corporate_remission(
     }
 
 
+async def update_corporate_remission(
+    db: AsyncSession, company_id: str, remission_id: str, data, user_id: str | None
+) -> dict:
+    """Edita los metadatos o la nómina de comprobantes asignados a una remisión corporativa:
+    - Solo se permite si estado == 'REMITIDO' (sin cobros aplicados).
+    - Permite actualizar periodo_mes, fecha_corte, notas.
+    - Si se especifica accounts_receivable_ids:
+        * Desvincula comprobantes removidos: los devuelve a 'pendiente' y restablece la deuda del funcionario.
+        * Vincula comprobantes agregados: los pasa a 'REMITIDO_EMPRESA' y descuenta la deuda del funcionario.
+        * Recalcula monto_total, saldo_pendiente, cantidad_funcionarios y cantidad_documentos.
+    """
+    r_res = await db.execute(
+        text("SELECT * FROM ar_corporate_remissions WHERE id = :id AND company_id = :cid"),
+        {"id": remission_id, "cid": company_id},
+    )
+    rem = r_res.fetchone()
+    if not rem:
+        return {"error": "Remisión corporativa no encontrada"}
+
+    if rem.estado in ("PAGADO", "PAGADO_PARCIAL"):
+        return {"error": "No se puede editar una remisión con pagos registrados. Revierta el pago primero para poder modificarla."}
+    if rem.estado == "ANULADO":
+        return {"error": "No se puede editar una remisión que se encuentra anulada."}
+
+    updates = []
+    params = {"id": remission_id, "cid": company_id}
+
+    if getattr(data, "periodo_mes", None) is not None and data.periodo_mes.strip():
+        updates.append("periodo_mes = :periodo_mes")
+        params["periodo_mes"] = data.periodo_mes.strip()
+
+    if getattr(data, "fecha_corte", None) is not None:
+        updates.append("fecha_corte = :fecha_corte")
+        params["fecha_corte"] = data.fecha_corte
+
+    if getattr(data, "notas", None) is not None:
+        updates.append("notas = :notas")
+        params["notas"] = data.notas
+
+    # Si se envía la lista de comprobantes que deben permanecer/incluirse
+    if getattr(data, "accounts_receivable_ids", None) is not None:
+        new_ids = set(str(i) for i in data.accounts_receivable_ids)
+
+        curr_res = await db.execute(
+            text("""
+                SELECT ar.id, ar.customer_id, ar.monto_original, ar.saldo_pendiente, ar.notas_cobranza
+                FROM accounts_receivable ar
+                WHERE ar.corporate_remission_id = :rem_id
+            """),
+            {"rem_id": remission_id}
+        )
+        curr_docs = curr_res.fetchall()
+        curr_ids = set(str(d.id) for d in curr_docs)
+
+        removed_ids = curr_ids - new_ids
+        added_ids = new_ids - curr_ids
+
+        # Procesar removidos (desvincular y restaurar saldo/crédito personal)
+        if removed_ids:
+            import re
+            docs_to_remove = [d for d in curr_docs if str(d.id) in removed_ids]
+            funcs_restablecer = {}
+            for d in docs_to_remove:
+                cid = str(d.customer_id)
+                saldo = Decimal(str(d.monto_original or 0))
+                if getattr(d, "notas_cobranza", None):
+                    matches = re.findall(r"-₲\s*([0-9\.,]+)", d.notas_cobranza)
+                    for m in matches:
+                        clean_m = m.replace(".", "").replace(",", ".")
+                        try:
+                            saldo -= Decimal(clean_m)
+                        except Exception:
+                            pass
+                saldo = max(Decimal("0"), saldo)
+                funcs_restablecer[cid] = funcs_restablecer.get(cid, Decimal("0")) + saldo
+
+                await db.execute(
+                    text("""
+                        UPDATE accounts_receivable
+                        SET corporate_remission_id = NULL,
+                            remitido_empresa_at = NULL,
+                            estado = 'pendiente',
+                            saldo_pendiente = :saldo,
+                            updated_at = NOW()
+                        WHERE id = :id
+                    """),
+                    {"saldo": float(saldo), "id": d.id}
+                )
+
+            for cid, monto in funcs_restablecer.items():
+                await db.execute(
+                    text("""
+                        UPDATE credit_accounts
+                        SET saldo_utilizado = saldo_utilizado + :monto,
+                            saldo_disponible = GREATEST(0, saldo_disponible - :monto),
+                            updated_at = NOW()
+                        WHERE company_id = :company_id AND customer_id = :customer_id
+                    """),
+                    {"monto": float(monto), "company_id": company_id, "customer_id": cid}
+                )
+                await db.execute(
+                    text("""
+                        UPDATE customers
+                        SET credito_usado = credito_usado + :monto
+                        WHERE id = :customer_id
+                    """),
+                    {"monto": float(monto), "customer_id": cid}
+                )
+
+        # Procesar agregados (vincular y liberar saldo/crédito personal)
+        if added_ids:
+            q_add = await db.execute(
+                text("""
+                    SELECT ar.id, ar.customer_id, ar.saldo_pendiente
+                    FROM accounts_receivable ar
+                    WHERE ar.id = ANY(:ids) AND ar.company_id = :cid
+                      AND ar.corporate_remission_id IS NULL AND ar.estado = 'pendiente'
+                """),
+                {"ids": list(added_ids), "cid": company_id}
+            )
+            add_docs = q_add.fetchall()
+            valid_added_ids = [str(d.id) for d in add_docs]
+            funcs_liberar = {}
+            for d in add_docs:
+                cid = str(d.customer_id)
+                monto = Decimal(str(d.saldo_pendiente or 0))
+                funcs_liberar[cid] = funcs_liberar.get(cid, Decimal("0")) + monto
+
+            if valid_added_ids:
+                await db.execute(
+                    text("""
+                        UPDATE accounts_receivable
+                        SET estado = 'REMITIDO_EMPRESA',
+                            corporate_remission_id = :rem_id,
+                            remitido_empresa_at = NOW(),
+                            updated_at = NOW()
+                        WHERE id = ANY(:ids)
+                    """),
+                    {"rem_id": remission_id, "ids": valid_added_ids}
+                )
+
+                for cid, monto in funcs_liberar.items():
+                    await db.execute(
+                        text("""
+                            UPDATE credit_accounts
+                            SET saldo_utilizado = GREATEST(0, saldo_utilizado - :monto),
+                                saldo_disponible = LEAST(limite_credito, saldo_disponible + :monto),
+                                updated_at = NOW()
+                            WHERE company_id = :company_id AND customer_id = :customer_id
+                        """),
+                        {"monto": float(monto), "company_id": company_id, "customer_id": cid}
+                    )
+                    await db.execute(
+                        text("""
+                            UPDATE customers
+                            SET credito_usado = GREATEST(0, credito_usado - :monto)
+                            WHERE id = :customer_id
+                        """),
+                        {"monto": float(monto), "customer_id": cid}
+                    )
+
+        # Recalcular totales de la remisión
+        tot_res = await db.execute(
+            text("""
+                SELECT
+                    COUNT(DISTINCT customer_id) as cant_func,
+                    COUNT(*) as cant_docs,
+                    COALESCE(SUM(saldo_pendiente), 0) as total_monto
+                FROM accounts_receivable
+                WHERE corporate_remission_id = :rem_id
+            """),
+            {"rem_id": remission_id}
+        )
+        tot_row = tot_res.fetchone()
+        cant_func = tot_row.cant_func if tot_row else 0
+        cant_docs = tot_row.cant_docs if tot_row else 0
+        total_monto = Decimal(str(tot_row.total_monto or 0)) if tot_row else Decimal("0")
+
+        updates.extend([
+            "monto_total = :tot_monto",
+            "saldo_pendiente = :tot_monto",
+            "cantidad_funcionarios = :cant_func",
+            "cantidad_documentos = :cant_docs"
+        ])
+        params.update({
+            "tot_monto": float(total_monto),
+            "cant_func": cant_func,
+            "cant_docs": cant_docs,
+        })
+
+    if updates:
+        updates.append("updated_at = NOW()")
+        set_clause = ", ".join(updates)
+        await db.execute(
+            text(f"UPDATE ar_corporate_remissions SET {set_clause} WHERE id = :id AND company_id = :cid"),
+            params
+        )
+
+    await db.flush()
+    return await get_corporate_remission_detail(db, remission_id)
+
+
 # ── Política de Bloqueo por Mora en Crédito / Extra Club ───────────────────────
 _CREDIT_BLOCKING_POLICY_KEY = "ar_credit_blocking_policy"
 
