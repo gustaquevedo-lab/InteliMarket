@@ -2809,15 +2809,15 @@ export default function AccountsReceivablePage() {
                     <table className="w-full text-left text-xs">
                       <thead>
                         <tr className="bg-gray-50 dark:bg-slate-800/80 text-[11px] font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 dark:border-gray-700">
-                          <th className="p-3.5">N° Remisión</th>
-                          <th className="p-3.5">Empresa Vinculada</th>
-                          <th className="p-3.5">Período</th>
-                          <th className="p-3.5">Fecha Emisión</th>
-                          <th className="p-3.5">Funcionarios</th>
-                          <th className="p-3.5">Total Remitido</th>
-                          <th className="p-3.5">Saldo Pendiente</th>
-                          <th className="p-3.5">Estado</th>
-                          <th className="p-3.5 text-right">Acciones</th>
+                          <th className="p-3.5 whitespace-nowrap">N° Remisión</th>
+                          <th className="p-3.5 whitespace-nowrap">Empresa Vinculada</th>
+                          <th className="p-3.5 whitespace-nowrap">Período</th>
+                          <th className="p-3.5 whitespace-nowrap">Fecha Emisión</th>
+                          <th className="p-3.5 whitespace-nowrap">Funcionarios</th>
+                          <th className="p-3.5 whitespace-nowrap">Total Remitido</th>
+                          <th className="p-3.5 whitespace-nowrap">Saldo Pendiente</th>
+                          <th className="p-3.5 whitespace-nowrap">Estado</th>
+                          <th className="p-3.5 text-right whitespace-nowrap">Acciones</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -2825,29 +2825,29 @@ export default function AccountsReceivablePage() {
                           const isPagado = r.estado === "PAGADO"
                           return (
                             <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
-                              <td className="p-3.5 font-mono font-black text-indigo-600 dark:text-indigo-400">
+                              <td className="p-3.5 font-mono font-black text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
                                 {r.numero_remision}
                               </td>
-                              <td className="p-3.5 font-bold text-gray-900 dark:text-white">
+                              <td className="p-3.5 font-bold text-gray-900 dark:text-white whitespace-nowrap">
                                 {r.empresa_vinculada_nombre}
                               </td>
-                              <td className="p-3.5 font-mono font-semibold">
+                              <td className="p-3.5 font-mono font-semibold whitespace-nowrap">
                                 {r.periodo_mes}
                               </td>
-                              <td className="p-3.5 text-gray-500 font-mono text-[11px]">
+                              <td className="p-3.5 text-gray-500 font-mono text-[11px] whitespace-nowrap">
                                 {r.created_at ? new Date(r.created_at).toLocaleDateString("es-PY") : "—"}
                               </td>
-                              <td className="p-3.5 font-mono">
+                              <td className="p-3.5 font-mono whitespace-nowrap">
                                 {r.cantidad_funcionarios} socios
                               </td>
-                              <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
+                              <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white whitespace-nowrap">
                                 {formatPYG(r.monto_total)}
                               </td>
-                              <td className="p-3.5 font-mono font-black text-amber-600 dark:text-amber-400">
+                              <td className="p-3.5 font-mono font-black text-amber-600 dark:text-amber-400 whitespace-nowrap">
                                 {formatPYG(r.saldo_pendiente)}
                               </td>
-                              <td className="p-3.5">
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              <td className="p-3.5 whitespace-nowrap">
+                                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap inline-block ${
                                   r.estado === "PAGADO"
                                     ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
                                     : r.estado === "PAGADO_PARCIAL"
@@ -2862,20 +2862,20 @@ export default function AccountsReceivablePage() {
                               <td className="p-3.5 text-right space-x-1.5 whitespace-nowrap">
                                 <button
                                   onClick={() => api.accountsReceivable.downloadRemisionPdf(r.id, r.numero_remision)}
-                                  className="btn-outline py-1 px-2.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 inline-flex items-center gap-1.5 shadow-sm"
+                                  className="p-1.5 px-2 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 inline-flex items-center gap-1 text-[11px] font-bold shadow-2xs transition"
                                   title="Reimprimir Resumen Consolidado Nómina A4 con Acta de Recepción y Firmas"
                                 >
                                   <Printer className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                                  <span>Resumen Consolidado A4 (PDF)</span>
+                                  <span>Consolidado</span>
                                 </button>
 
                                 <button
                                   onClick={() => api.accountsReceivable.downloadRemisionExtractosPdf(r.id, r.numero_remision)}
-                                  className="btn-outline py-1 px-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 inline-flex items-center gap-1"
+                                  className="p-1.5 px-2 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 inline-flex items-center gap-1 text-[11px] font-semibold transition"
                                   title="Descargar Extractos Masivos por Funcionario (PDF) de este lote emitido"
                                 >
                                   <FileDown className="w-3.5 h-3.5 text-slate-500" />
-                                  <span>Extractos Personal (PDF)</span>
+                                  <span>Extractos</span>
                                 </button>
 
                                 {r.estado !== "PAGADO" && r.estado !== "ANULADO" && (
@@ -2897,11 +2897,11 @@ export default function AccountsReceivablePage() {
                                         titular_cheque: r.empresa_vinculada_nombre || "",
                                       })
                                     }}
-                                    className="btn-primary py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs inline-flex items-center gap-1 shadow-sm font-bold"
+                                    className="p-1.5 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] inline-flex items-center gap-1 font-bold shadow-2xs transition"
                                     title="Registrar pago de la empresa en tesorería"
                                   >
                                     <DollarSign className="w-3.5 h-3.5" />
-                                    <span>{r.estado === "PAGADO_PARCIAL" ? "Cobrar Saldo" : "Cobrar Lote"}</span>
+                                    <span>{r.estado === "PAGADO_PARCIAL" ? "Cobrar Saldo" : "Cobrar"}</span>
                                   </button>
                                 )}
 
@@ -2911,11 +2911,11 @@ export default function AccountsReceivablePage() {
                                       setRevertRemissionModal(r)
                                       setRevertMotivo("")
                                     }}
-                                    className="btn-outline py-1 px-2.5 text-xs text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 inline-flex items-center gap-1"
+                                    className="p-1.5 px-2 rounded-lg border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 inline-flex items-center gap-1 text-[11px] font-semibold transition"
                                     title="Revertir cobro: descuenta de tesorería y reabre los comprobantes"
                                   >
                                     <RotateCcw className="w-3.5 h-3.5" />
-                                    <span>Revertir Pago</span>
+                                    <span>Revertir</span>
                                   </button>
                                 )}
 
@@ -2923,7 +2923,7 @@ export default function AccountsReceivablePage() {
                                   <>
                                     <button
                                       onClick={() => handleOpenEditRemission(r)}
-                                      className="btn-outline py-1 px-2.5 text-xs text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-950/40 inline-flex items-center gap-1 font-semibold"
+                                      className="p-1.5 px-2 rounded-lg border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 inline-flex items-center gap-1 text-[11px] font-bold transition"
                                       title="Editar datos, período, observaciones o comprobantes del remito"
                                     >
                                       <Pencil className="w-3.5 h-3.5" />
@@ -2935,7 +2935,7 @@ export default function AccountsReceivablePage() {
                                         setCancelRemissionModal(r)
                                         setCancelMotivo("")
                                       }}
-                                      className="btn-outline py-1 px-2.5 text-xs text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/40 inline-flex items-center gap-1"
+                                      className="p-1.5 px-2 rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 inline-flex items-center gap-1 text-[11px] font-semibold transition"
                                       title="Anular remisión y devolver comprobantes a pendientes"
                                     >
                                       <Ban className="w-3.5 h-3.5" />
