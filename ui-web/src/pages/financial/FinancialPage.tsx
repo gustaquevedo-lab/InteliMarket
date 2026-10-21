@@ -700,7 +700,9 @@ export default function FinancialPage() {
         !search ||
         inv.numero_factura?.toLowerCase().includes(search.toLowerCase()) ||
         inv.supplier_nombre?.toLowerCase().includes(search.toLowerCase()) ||
-        inv.timbrado?.includes(search)
+        inv.timbrado?.includes(search) ||
+        inv.purchase_order_numero?.toLowerCase().includes(search.toLowerCase()) ||
+        Boolean((inv as any).oc_numero && (inv as any).oc_numero.toLowerCase().includes(search.toLowerCase()))
 
       const isPendiente = !!inv.estado && ["pendiente", "aprobada", "parcial", "retenida_discrepancia"].includes(inv.estado) && Number(inv.saldo_pendiente ?? inv.total ?? 0) > 0
       const isVencida = isPendiente && !!inv.fecha_vencimiento && new Date(inv.fecha_vencimiento) < new Date()
@@ -1461,7 +1463,7 @@ export default function FinancialPage() {
     else if (detailDocFilter === "devoluciones") filtered = docs.filter(d => d.docType === "devolucion")
     else if (detailDocFilter === "cheques") filtered = docs.filter(d => d.docType === "cheque")
 
-    // Filtrado por búsqueda de texto (N° factura, N° NC, timbrado, motivo, etc.)
+    // Filtrado por búsqueda de texto (N° factura, N° NC, OC, timbrado, motivo, etc.)
     if (detailDocSearch.trim()) {
       const q = detailDocSearch.trim().toLowerCase()
       filtered = filtered.filter(d => {
@@ -1470,7 +1472,10 @@ export default function FinancialPage() {
         const estMatch = (d.estado || "").toLowerCase().includes(q)
         const motivoMatch = d.raw?.motivo ? String(d.raw.motivo).toLowerCase().includes(q) : false
         const facOrigMatch = d.raw?.numero_factura_origen ? String(d.raw.numero_factura_origen).toLowerCase().includes(q) : false
-        return numMatch || timbMatch || estMatch || motivoMatch || facOrigMatch
+        const ocMatch = (d.raw?.purchase_order_numero || d.raw?.oc_numero)
+          ? String(d.raw?.purchase_order_numero || d.raw?.oc_numero).toLowerCase().includes(q)
+          : false
+        return numMatch || timbMatch || estMatch || motivoMatch || facOrigMatch || ocMatch
       })
     }
 
@@ -2662,7 +2667,7 @@ export default function FinancialPage() {
                             type="text"
                             value={detailDocSearch}
                             onChange={(e) => setDetailDocSearch(e.target.value)}
-                            placeholder="Buscar por N° factura (ej: 001-002-...), NC o timbrado..."
+                            placeholder="Buscar por N° factura (ej: 001-002-...), AUTO-REC, OC, NC o timbrado..."
                             className="w-full pl-9 pr-8 py-1.5 text-xs bg-white dark:bg-slate-900 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition text-gray-900 dark:text-gray-100 placeholder-gray-400"
                           />
                           {detailDocSearch && (
@@ -2935,7 +2940,33 @@ export default function FinancialPage() {
 
                                   {/* 4. N° Documento */}
                                   <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white whitespace-nowrap">
-                                    {isCheque ? `CHQ #${doc.numero}` : doc.numero}
+                                    {isCheque ? (
+                                      `CHQ #${doc.numero}`
+                                    ) : isFactura && (doc.numero.startsWith("AUTO-REC-") || doc.raw?.numero_factura?.startsWith("AUTO-REC-")) ? (
+                                      <div className="flex flex-col gap-1 items-start">
+                                        <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30">
+                                          📦 {doc.numero}
+                                        </span>
+                                        {(doc.raw?.purchase_order_numero || doc.raw?.oc_numero) ? (
+                                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/60 shadow-xs">
+                                            📋 OC: {doc.raw?.purchase_order_numero || doc.raw?.oc_numero}
+                                          </span>
+                                        ) : (
+                                          <span className="text-[10px] text-gray-400 italic font-sans font-normal">
+                                            (Sin OC vinculada)
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div className="flex flex-col gap-0.5 items-start">
+                                        <span>{doc.numero}</span>
+                                        {isFactura && (doc.raw?.purchase_order_numero || doc.raw?.oc_numero) && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50/70 dark:bg-indigo-950/40 px-1.5 py-0.2 rounded border border-indigo-200/60 dark:border-indigo-800/40">
+                                            OC: {doc.raw?.purchase_order_numero || doc.raw?.oc_numero}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
                                   </td>
 
                                   {/* 5. Emisión */}
@@ -3957,7 +3988,31 @@ export default function FinancialPage() {
                                       </div>
                                     </td>
                                     <td className="p-3.5 font-mono font-bold text-xs text-gray-900 dark:text-white">
-                                      {inv.numero_factura || "—"}
+                                      {inv.numero_factura?.startsWith("AUTO-REC-") ? (
+                                        <div className="flex flex-col gap-1 items-start">
+                                          <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30">
+                                            📦 {inv.numero_factura}
+                                          </span>
+                                          {(inv.purchase_order_numero || (inv as any).oc_numero) ? (
+                                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/60 shadow-xs">
+                                              📋 OC: {inv.purchase_order_numero || (inv as any).oc_numero}
+                                            </span>
+                                          ) : (
+                                            <span className="text-[10px] text-gray-400 italic font-sans font-normal">
+                                              (Sin OC vinculada)
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div className="flex flex-col gap-0.5 items-start">
+                                          <span>{inv.numero_factura || "—"}</span>
+                                          {(inv.purchase_order_numero || (inv as any).oc_numero) && (
+                                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50/70 dark:bg-indigo-950/40 px-1.5 py-0.2 rounded border border-indigo-200/60 dark:border-indigo-800/40">
+                                              OC: {inv.purchase_order_numero || (inv as any).oc_numero}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
                                     </td>
                                     <td className="p-3.5 font-mono text-xs text-gray-500">
                                       {inv.timbrado || "—"}
@@ -4541,8 +4596,13 @@ export default function FinancialPage() {
           <div className="modal-content max-w-md" onClick={e => e.stopPropagation()}>
             <div className="p-6 border-b">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">Registrar Pago a Proveedor</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {showPayModal.supplier_nombre} — Factura N° {showPayModal.numero_factura}
+              <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <span>{showPayModal.supplier_nombre} — Factura N° {showPayModal.numero_factura}</span>
+                {(showPayModal.purchase_order_numero || (showPayModal as any).oc_numero) && (
+                  <span className="font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/60 text-[11px]">
+                    📋 OC: {showPayModal.purchase_order_numero || (showPayModal as any).oc_numero}
+                  </span>
+                )}
               </p>
               <div className="mt-3 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
                 <div>
@@ -4712,7 +4772,14 @@ export default function FinancialPage() {
                                   <input type="checkbox" checked={isSelected} readOnly className="rounded text-primary" />
                                 </td>
                                 <td className="p-3 font-bold">{inv.supplier_nombre}</td>
-                                <td className="p-3 font-mono">{inv.numero_factura}</td>
+                                <td className="p-3 font-mono">
+                                  <div>{inv.numero_factura}</div>
+                                  {(inv.purchase_order_numero || (inv as any).oc_numero) && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400">
+                                      📋 OC: {inv.purchase_order_numero || (inv as any).oc_numero}
+                                    </span>
+                                  )}
+                                </td>
                                 <td className="p-3 font-mono">{inv.fecha_vencimiento || "—"}</td>
                                 <td className="p-3 font-mono font-bold text-right">{formatPYG(inv.saldo_pendiente ?? inv.total)}</td>
                               </tr>
