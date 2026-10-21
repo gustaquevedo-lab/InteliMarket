@@ -1459,6 +1459,10 @@ async def equipment_list_alerts(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
+    try:
+        await service_equipment.check_equipment_alerts(user["company_id"], db)
+    except Exception:
+        pass
     return await service_equipment.list_alerts(user["company_id"], db, resuelta)
 
 

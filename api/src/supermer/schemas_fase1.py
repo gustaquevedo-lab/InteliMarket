@@ -410,6 +410,9 @@ class EquipmentCreate(BaseModel):
     temp_max_operacion: Optional[Decimal] = None
     alerta_habilitada: bool = True
     proveedor_mantenimiento: Optional[str] = None
+    fecha_ultimo_mantenimiento: Optional[date] = None
+    fecha_proximo_mantenimiento: Optional[date] = None
+    prioridad: Optional[str] = "media"
     garantia_vencimiento: Optional[date] = None
     costo_adquisicion: Optional[Decimal] = None
     notas: Optional[str] = None
@@ -488,9 +491,10 @@ class EquipmentScheduleResponse(BaseModel):
 class WorkOrderCreate(BaseModel):
     equipo_id: UUID
     schedule_id: Optional[UUID] = None
-    tipo: str
+    tipo: str = "preventivo"
     prioridad: str = "media"
     descripcion_falla: Optional[str] = None
+    descripcion: Optional[str] = None
     sintomas: Optional[list[str]] = None
     asignado_a: Optional[UUID] = None
     fecha_programada: Optional[date] = None
@@ -507,10 +511,16 @@ class WorkOrderComplete(BaseModel):
     acciones_realizadas: str
     repuestos_utilizados: Optional[list[dict]] = None
     horas_trabajadas: Optional[Decimal] = None
-    costo_repuestos: Optional[Decimal] = None
-    costo_mano_obra: Optional[Decimal] = None
+    costo_repuestos: Optional[Decimal] = Decimal("0")
+    costo_mano_obra: Optional[Decimal] = Decimal("0")
     resultado: str = "resuelto"
     requiere_seguimiento: bool = False
+    fecha_proximo_mantenimiento: Optional[date] = None
+    crear_gasto: bool = False
+    tipo_pago: Optional[str] = "transferencia"
+    numero_factura: Optional[str] = None
+    timbrado: Optional[str] = None
+    proveedor: Optional[str] = None
 
 class WorkOrderResponse(BaseModel):
     id: UUID

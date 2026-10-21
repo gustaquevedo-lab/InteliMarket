@@ -132,14 +132,19 @@ async def get_work_order(wo_id: UUID, db: AsyncSession):
 
 async def create_work_order(company_id: UUID, data, db: AsyncSession):
     equip = await get_equipment(data.equipo_id, db)
-    # Generate OT number
+    # Generate OT number safely whether company_id is UUID or str
     count = (await db.execute(
         select(func.count()).select_from(WorkOrder).where(WorkOrder.company_id == company_id)
     )).scalar() + 1
+    cid_str = str(company_id).replace("-", "").upper()
+    prefix = cid_str[:4] if cid_str else "EXTR"
+    payload = data.model_dump(exclude_none=True)
+    if "descripcion" in payload and not payload.get("descripcion_falla"):
+        payload["descripcion_falla"] = payload.pop("descripcion")
     wo = WorkOrder(
         company_id=company_id,
-        numero_ot=f"OT-{company_id.hex[:4].upper()}-{count:04d}",
-        **data.model_dump(exclude_none=True),
+        numero_ot=f"OT-{prefix}-{count:04d}",
+        **payload,
     )
     db.add(wo)
     await db.commit()
@@ -167,7 +172,7 @@ async def start_work_order(wo_id: UUID, db: AsyncSession):
 
 async def complete_work_order(wo_id: UUID, data, db: AsyncSession):
     wo = await get_work_order(wo_id, db)
-    wo.estado = "completado"
+    wo.estado = "completada"
     wo.fecha_fin = datetime.utcnow()
     wo.diagnostico = data.diagnostico
     wo.acciones_realizadas = data.acciones_realizadas
@@ -176,13 +181,36 @@ async def complete_work_order(wo_id: UUID, data, db: AsyncSession):
         wo.horas_trabajadas = data.horas_trabajadas
     total = Decimal("0")
     if data.costo_repuestos:
-        total += data.costo_repuestos
+        total += Decimal(str(data.costo_repuestos))
     if data.costo_mano_obra:
-        total += data.costo_mano_obra
+        total += Decimal(str(data.costo_mano_obra))
     wo.costo_total = total
-    # Update equipment last maintenance date
+
+    # Update equipment maintenance dates
     equip = await get_equipment(wo.equipo_id, db)
     equip.fecha_ultimo_mantenimiento = date.today()
+    if getattr(data, "fecha_proximo_mantenimiento", None):
+        equip.fecha_proximo_mantenimiento = data.fecha_proximo_mantenimiento
+
+    # Crear comprobante de gasto financiero si fue solicitado y hubo costo
+    if getattr(data, "crear_gasto", False) and total > 0:
+        try:
+            from api.src.petty_cash.models import Expense
+            exp = Expense(
+                company_id=wo.company_id,
+                monto=total,
+                descripcion=f"Mantenimiento {equip.nombre} (OT: {wo.numero_ot})",
+                proveedor=getattr(data, "proveedor", None) or equip.proveedor_mantenimiento or "Servicio Técnico",
+                tipo_pago=getattr(data, "tipo_pago", "transferencia") or "transferencia",
+                numero_factura=getattr(data, "numero_factura", None),
+                timbrado=getattr(data, "timbrado", None),
+                fecha_gasto=date.today(),
+                es_inversion=False,
+            )
+            db.add(exp)
+        except Exception:
+            pass
+
     await db.commit()
     await db.refresh(wo)
     return await get_work_order(wo_id, db)
