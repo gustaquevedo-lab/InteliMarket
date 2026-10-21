@@ -4547,7 +4547,7 @@ async def _execute_disbursements_internal(
             ))
             disb_record.petty_cash_fund_id = fund.id
 
-            from api.src.petty_cash.models import Expense, CostCenter
+            from api.src.petty_cash.models import Expense, CostCenter, ExpenseDisbursement
             fecha_op = payload.fecha_pago or _today()
             op_num = order.numero_orden or ""
             factura_num = op_num if op_num.startswith("OP-") else (f"OP-{op_num}" if op_num else "OP-S/N")
@@ -4581,11 +4581,28 @@ async def _execute_disbursements_internal(
                 iva_5=Decimal("0"),
                 exentas=m_pyg,
                 estado="pagado",
+                es_pago_proveedor=True if (order.subtipo or "proveedor") == "proveedor" else False,
+                supplier_id=order.supplier_id,
+                supplier_invoice_id=primera_factura_id,
+                forma_pago_resumen=f"Fondo Fijo ({fund.nombre})",
                 notas=f"Desembolso orden de pago {order.numero_orden}. Subtipo: {order.subtipo or 'proveedor'}",
                 registrado_por=uuid.UUID(user_id) if user_id else None,
                 pagado_por=uuid.UUID(user_id) if user_id else None,
             )
             db.add(exp)
+            await db.flush()
+
+            db.add(ExpenseDisbursement(
+                company_id=cid,
+                expense_id=exp.id,
+                medio_pago="fondo_fijo",
+                monto=m_pyg,
+                moneda="PYG",
+                petty_cash_fund_id=fund.id,
+                fecha_efectiva=fecha_op,
+                numero_comprobante=order.numero_orden,
+                created_by=uuid.UUID(user_id) if user_id else None,
+            ))
 
         # ── C. BANCO - TRANSFERENCIA ─────────────────────────────────────────
         elif fp == "transferencia":

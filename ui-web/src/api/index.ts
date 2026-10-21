@@ -64,7 +64,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   if (!localStorage.getItem("access_token") && token) {
     try { localStorage.setItem("access_token", token) } catch {}
   }
-  const cleanEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
+  const rawEndpoint = endpoint.startsWith("/api") ? endpoint.substring(4) : endpoint
+  // Saneamiento estructural anti-redirect 307: remover trailing slash de la ruta base
+  const [urlPath, ...queryParts] = rawEndpoint.split("?")
+  const sanitizedPath = (urlPath.length > 1 && urlPath.endsWith("/")) ? urlPath.slice(0, -1) : urlPath
+  const cleanEndpoint = queryParts.length > 0 ? `${sanitizedPath}?${queryParts.join("?")}` : sanitizedPath
+
   const isPublicEndpoint =
     cleanEndpoint.startsWith("/v1/auth/login") ||
     cleanEndpoint.startsWith("/v1/auth/pos-staff") ||
