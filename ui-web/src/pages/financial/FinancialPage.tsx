@@ -1108,15 +1108,26 @@ export default function FinancialPage() {
       const supId = String(ret.supplier_id || ret.proveedor_id || "")
       if (!supId) return
 
-      const hasNC = !!(
-        ret.numero_nota_credito ||
-        ret.nota_credito_numero ||
-        (Array.isArray(ret.notas_credito) && ret.notas_credito.length > 0)
-      )
-      const isExcluded = ["completado", "anulado", "cancelado", "archivado", "rechazado"].includes((ret.estado || "").toLowerCase())
-      if (hasNC || isExcluded) return
+      // Si fue consolidado en otra devolución (ej. DEV-...), no duplicar
+      if (ret.observaciones && ret.observaciones.includes("[CONSOLIDADO EN")) return
 
-      if (ret.observaciones && /DEV-\d|NCs:/i.test(ret.observaciones)) return
+      const estadoLower = (ret.estado || "").toLowerCase()
+      const isExcluded = ["completado", "anulado", "cancelado", "archivado", "rechazado"].includes(estadoLower)
+      if (isExcluded) return
+
+      // Calcular saldo real pendiente de devolución
+      const totalVal = Number(ret.valor_total_estimado || ret.monto || ret.total || ret.total_costo || 0)
+      const ncMonto = Number(ret.nota_credito_monto || 0)
+      const perdMonto = Number(ret.monto_perdida || 0)
+      const saldoDev = Math.max(0, totalVal - ncMonto - perdMonto)
+
+      // Si ya no tiene saldo pendiente, ignorar
+      if (saldoDev <= 0) return
+
+      // Para devoluciones legacy que ya tenían NC asignada y no tenían desglose de saldo parcial
+      if ((ret.numero_nota_credito || ret.nota_credito_numero) && ncMonto === 0 && estadoLower !== "acreditado_parcial") {
+        return
+      }
 
       let item = map.get(supId)
       if (!item) {
@@ -1124,17 +1135,16 @@ export default function FinancialPage() {
         map.set(supId, item)
       }
 
-      const montoDev = Number(ret.monto || ret.total || ret.total_costo || ret.valor_total_estimado || 0)
-      if (montoDev > 0) {
-        item.devolucionesPendientes.push({
-          ...ret,
-          tipo_origen: "devolucion_fisica",
-          codigo: ret.codigo || "DEV",
-          monto: montoDev,
-        })
-        item.ncNoRegistrada += montoDev
-        item.ncLibrePendiente += montoDev
-      }
+      item.devolucionesPendientes.push({
+        ...ret,
+        tipo_origen: "devolucion_fisica",
+        codigo: ret.codigo || ret.numero_devolucion || "DEV",
+        monto: saldoDev,
+        monto_original: totalVal,
+        saldo_pendiente: saldoDev,
+      })
+      item.ncNoRegistrada += saldoDev
+      item.ncLibrePendiente += saldoDev
     })
 
     // 6. Consolidar deuda compuesta y neto exigible
@@ -1331,17 +1341,22 @@ export default function FinancialPage() {
 
     // 3. Devoluciones de Mercadería (NC Pendiente de Proveedor)
     currentSelectedSupplier.devolucionesPendientes.forEach(ret => {
-      const montoDev = Number(ret.monto || ret.total || ret.total_costo || 0)
+      const montoDev = Number(ret.saldo_pendiente || ret.monto || ret.total || ret.total_costo || ret.valor_total_estimado || 0)
+      const montoOriginal = Number(ret.monto_original || ret.valor_total_estimado || ret.monto || ret.total || ret.total_costo || montoDev)
+      const isParcial = ret.estado === "acreditado_parcial" || (Number(ret.nota_credito_monto || 0) > 0 && montoDev > 0)
+      const estadoLabel = isParcial
+        ? `Acreditada Parcial (Pendiente: Gs. ${formatPYG(montoDev)})`
+        : "NC Pendiente (Reclamo Físico)"
       docs.push({
         id: ret.id,
         docType: "devolucion",
-        numero: ret.numero_devolucion || (ret.id ? `DEV-${String(ret.id).slice(0, 8)}` : "DEV-PEND"),
-        timbrado: null,
-        fechaEmision: ret.fecha || ret.created_at ? String(ret.fecha || ret.created_at) : null,
+        numero: ret.codigo || ret.numero_devolucion || (ret.id ? `DEV-${String(ret.id).slice(0, 8)}` : "DEV-PEND"),
+        timbrado: ret.nota_credito_numero ? `NC: ${ret.nota_credito_numero}` : null,
+        fechaEmision: ret.fecha_creacion || ret.fecha || ret.created_at ? String(ret.fecha_creacion || ret.fecha || ret.created_at).slice(0, 10) : null,
         fechaVencimiento: null,
-        montoOriginal: -montoDev,
+        montoOriginal: -montoOriginal,
         saldoEfectivo: -montoDev,
-        estado: "NC Pendiente (Reclamo Físico)",
+        estado: estadoLabel,
         isSelected: selectedOpReturnIds.has(ret.id),
         raw: ret,
       })
@@ -1587,7 +1602,7 @@ export default function FinancialPage() {
               id: String(r.id),
               credit_note_id: String(r.id),
               tipo: "devolucion",
-              numero: r.numero_devolucion || (r.id ? String(r.id).slice(0, 8) : "DEV-PEND"),
+              numero: r.codigo || r.numero_devolucion || (r.id ? String(r.id).slice(0, 8) : "DEV-PEND"),
               timbrado: null,
               fecha: r.fecha || r.created_at ? String(r.fecha || r.created_at) : null,
               motivo: r.motivo || "Devolución Física de Mercadería (NC Pendiente de Proveedor)",
@@ -1658,7 +1673,7 @@ export default function FinancialPage() {
       let obsFinal = opObservaciones ? `[AGUARDANDO PAGO] ${opObservaciones}` : "[AGUARDANDO PAGO] Orden de pago generada desde preparación de liquidación AP"
       if (selectedOpReturnIds.size > 0) {
         const rets = currentSelectedSupplier.devolucionesPendientes.filter(r => selectedOpReturnIds.has(r.id))
-        const retsText = rets.map(r => `Devolución N° ${r.numero_devolucion || String(r.id).slice(0, 8)} (₲ ${Number(r.monto || r.total || 0).toLocaleString("es-PY")})`).join(", ")
+        const retsText = rets.map(r => `Devolución N° ${r.codigo || r.numero_devolucion || String(r.id).slice(0, 8)} (₲ ${Number(r.saldo_pendiente || r.monto || r.total || 0).toLocaleString("es-PY")})`).join(", ")
         obsFinal += ` | Reclamos físicos vinculados: ${retsText}`
       }
 
@@ -2917,8 +2932,12 @@ export default function FinancialPage() {
                                         Crédito a Favor
                                       </span>
                                     ) : (
-                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200">
-                                        Reclamo Físico
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                        doc.raw?.estado === "acreditado_parcial"
+                                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
+                                          : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
+                                      }`}>
+                                        {doc.raw?.estado === "acreditado_parcial" ? "Acreditado Parcial" : "Reclamo Físico"}
                                       </span>
                                     )}
                                   </td>

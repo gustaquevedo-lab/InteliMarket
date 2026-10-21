@@ -1914,9 +1914,11 @@ export interface Supplier360Response {
       tipo: string
       fecha: string
       valor_estimado: number
+      saldo_pendiente?: number
       tiene_nc: boolean
       nota_credito_numero?: string
       nota_credito_monto?: number
+      monto_perdida?: number
       estado: string
       etapa_codigo: string
       etapa_label: string

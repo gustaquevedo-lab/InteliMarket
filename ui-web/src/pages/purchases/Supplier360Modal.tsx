@@ -1847,6 +1847,11 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                   </td>
                                   <td className="p-3 text-right font-mono font-black text-slate-700 dark:text-slate-300">
                                     {formatPYG(d.valor_estimado)}
+                                    {d.saldo_pendiente !== undefined && d.saldo_pendiente > 0 && d.saldo_pendiente < d.valor_estimado && (
+                                      <span className="block text-[10px] text-amber-600 dark:text-amber-400 font-bold mt-0.5">
+                                        Pend: {formatPYG(d.saldo_pendiente)}
+                                      </span>
+                                    )}
                                   </td>
                                   <td className="p-3 font-mono font-bold">
                                     {d.nota_credito_numero ? (
@@ -1855,7 +1860,9 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                           <CheckCircle2 className="w-3 h-3" /> {d.nota_credito_numero}
                                         </span>
                                         <span className="text-[9px] text-slate-400 font-normal">
-                                          Formalizada en Monedero de NCs
+                                          {d.estado === "acreditado_parcial"
+                                            ? `Cuota Acreditada (${formatPYG(d.nota_credito_monto || 0)})`
+                                            : "Formalizada en Monedero de NCs"}
                                         </span>
                                       </div>
                                     ) : (
@@ -1864,11 +1871,13 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                   </td>
                                   <td className="p-3 text-center">
                                     <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                                      d.tiene_nc
+                                      d.estado === "acreditado_parcial"
+                                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700"
+                                        : d.tiene_nc
                                         ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700"
                                         : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700"
                                     }`}>
-                                      {d.tiene_nc ? "Etapa 2: NC Emitida" : "Etapa 1: Obligación Pendiente"}
+                                      {d.estado === "acreditado_parcial" ? "Acreditado Parcial" : (d.tiene_nc ? "Etapa 2: NC Emitida" : "Etapa 1: Obligación Pendiente")}
                                     </span>
                                   </td>
                                   <td className="p-3 text-center">

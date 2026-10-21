@@ -422,6 +422,7 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
 
     # 4. Devoluciones Físicas de Mercadería
     devoluciones_fisicas = []
+    obligaciones_pendientes_monto = 0.0
     try:
         q_sm_ret = select(SupermerSupplierReturn).where(
             SupermerSupplierReturn.company_id == company_id,
@@ -430,22 +431,46 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         sm_ret_res = await db.execute(q_sm_ret)
         for r in sm_ret_res.scalars().all():
             val = _dec_to_float(r.valor_total_estimado or r.nota_credito_monto)
-            tiene_nc = bool(r.nota_credito_numero)
+            nc_monto = _dec_to_float(r.nota_credito_monto or 0)
+            perd_monto = _dec_to_float(r.monto_perdida or 0)
+            saldo_dev = max(0.0, val - nc_monto - perd_monto)
             estado_ret = (r.estado or "pendiente").lower()
             es_anulada = estado_ret in ("anulado", "cancelado", "archivado", "rechazado")
+            es_completada = estado_ret == "completado" or (saldo_dev <= 0.0 and bool(r.nota_credito_numero))
+            es_parcial = estado_ret == "acreditado_parcial" or (nc_monto > 0 and saldo_dev > 0)
+            tiene_nc = bool(r.nota_credito_numero)
+
+            if not es_anulada and not es_completada:
+                obligaciones_pendientes_monto += saldo_dev
+
+            if es_anulada:
+                etapa_codigo = "anulada"
+                etapa_label = "Devolución Anulada / Archivada"
+            elif es_completada:
+                etapa_codigo = "2_emitida_monedero"
+                etapa_label = "NC Formal Emitida (Impacto Contable en Monedero)"
+            elif es_parcial:
+                etapa_codigo = "1_parcial"
+                etapa_label = f"Acreditada Parcial (Saldo Pendiente: Gs. {int(saldo_dev):,})"
+            else:
+                etapa_codigo = "1_requerimiento"
+                etapa_label = "Etapa 1: Mercadería Entregada - Obligación de NC Pendiente"
+
             devoluciones_fisicas.append({
                 "id": str(r.id),
                 "codigo": r.codigo or "DEV-S/N",
                 "tipo": r.tipo or "devolucion",
                 "fecha": _date_str(r.fecha_creacion),
                 "valor_estimado": val,
+                "saldo_pendiente": saldo_dev,
                 "tiene_nc": tiene_nc,
                 "nota_credito_numero": r.nota_credito_numero or "",
-                "nota_credito_monto": _dec_to_float(r.nota_credito_monto),
+                "nota_credito_monto": nc_monto,
+                "monto_perdida": perd_monto,
                 "estado": r.estado or "pendiente",
-                "etapa_codigo": "anulada" if es_anulada else ("2_emitida_monedero" if tiene_nc else "1_requerimiento"),
-                "etapa_label": "Devolución Anulada / Archivada" if es_anulada else ("NC Formal Emitida (Impacto Contable en Monedero)" if tiene_nc else "Etapa 1: Mercadería Entregada - Obligación de NC Pendiente"),
-                "formalizada_en_finanzas": tiene_nc,
+                "etapa_codigo": etapa_codigo,
+                "etapa_label": etapa_label,
+                "formalizada_en_finanzas": es_completada,
                 "origen_clave": "devolucion_merma",
                 "origen_label": "Devolución Física de Mercadería (Salón / Depósito)",
                 "observaciones": r.observaciones or "",
@@ -455,7 +480,6 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
 
     # 5. Reclamos y Solicitudes de NC con Orígenes y Etapas
     reclamos_enriquecidos = []
-    obligaciones_pendientes_monto = 0.0
 
     for n in nc_requests:
         inv_num = invoice_map_by_id.get(n.invoice_id, "Factura S/N")
