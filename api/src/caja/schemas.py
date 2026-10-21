@@ -296,6 +296,8 @@ class CreatePaymentAdjustmentRequest(BaseModel):
     ticket_numero: Optional[str] = None
     sale_id: Optional[str] = None
     motivo: Optional[str] = None
+    voucher_id: Optional[str] = None
+
 
 
 class PaymentAdjustmentResponse(BaseModel):

@@ -7,7 +7,7 @@ import {
   Layers, Users, RefreshCw, Printer, Check, ChevronRight, Activity, ShieldAlert,
   Coins, Sparkles, Building2, Store, Lock, KeyRound, Heart, FileSpreadsheet,
   BarChart3, Calendar, Filter, PieChart, Receipt, ClipboardCheck, Info,
-  ArrowLeftRight, Trash2, Landmark, FilePlus2, Edit3
+  ArrowLeftRight, Trash2, Landmark, FilePlus2, Edit3, Ticket
 } from "lucide-react"
 import {
   api,
@@ -342,8 +342,48 @@ export default function CajaPage() {
     setAdjNroComprobante(nc.numero || "")
     setAdjTicketNumero(nc.sale_numero || nc.sale_numero_interno || "")
     setAdjMotivo(`Nota de Crédito #${nc.numero} aplicada a Venta ${nc.sale_numero || ''} (${nc.motivo || 'Devolución'})`)
+    setSelectedVoucherId(null)
+    setSelectedVoucherMeta(null)
     setNcSelectorOpen(false)
     toast.success("Nota de Crédito Asignada", `NC #${nc.numero} por ₲ ${monto.toLocaleString("es-PY")}`)
+  }
+
+  // ── Selector de Vales de Convenio para Reclasificación ──
+  const [voucherSelectorOpen, setVoucherSelectorOpen] = useState(false)
+  const [voucherList, setVoucherList] = useState<any[]>([])
+  const [loadingVoucherList, setLoadingVoucherList] = useState(false)
+  const [voucherSearch, setVoucherSearch] = useState("")
+  const [selectedVoucherId, setSelectedVoucherId] = useState<string | null>(null)
+  const [selectedVoucherMeta, setSelectedVoucherMeta] = useState<any | null>(null)
+
+  const handleOpenVoucherSelector = async () => {
+    setVoucherSelectorOpen(true)
+    setLoadingVoucherList(true)
+    try {
+      const res = await api.caja.paymentAdjustments.listValesConvenio({
+        limit: 100,
+      })
+      setVoucherList(res || [])
+    } catch (err: any) {
+      toast.error("Error al cargar Vales", err?.message || "No se pudieron obtener los Vales de Convenio.")
+    } finally {
+      setLoadingVoucherList(false)
+    }
+  }
+
+  const handleSelectVoucher = (v: any) => {
+    setAdjDestinoCanal("VALE_CONVENIO")
+    const monto = Math.round(v.saldo_disponible || v.monto_inicial || 0)
+    setAdjMontoGs(monto)
+    setAdjMontoGsStr(monto.toLocaleString("es-PY"))
+    setAdjNroComprobante(v.codigo_barras || v.numero_vale || "")
+    setAdjBancoEntidad(v.convenio_nombre || "")
+    setAdjTitular(v.cliente_razon_social || v.convenio_nombre || "")
+    setAdjMotivo(`Vale #${v.numero_vale} (${v.convenio_nombre}) canjeado en caja registrado erróneamente como Efectivo`)
+    setSelectedVoucherId(v.id)
+    setSelectedVoucherMeta(v)
+    setVoucherSelectorOpen(false)
+    toast.success("Vale de Convenio Asignado", `Vale #${v.numero_vale} (${v.convenio_nombre}) por ₲ ${monto.toLocaleString("es-PY")}`)
   }
 
   const handleOpenAdjustmentModal = () => {
@@ -356,6 +396,8 @@ export default function CajaPage() {
     setAdjTitular("")
     setAdjTicketNumero("")
     setAdjMotivo("")
+    setSelectedVoucherId(null)
+    setSelectedVoucherMeta(null)
     setAdjustmentModalOpen(true)
   }
 
@@ -376,13 +418,17 @@ export default function CajaPage() {
         titular: adjTitular.trim() || undefined,
         ticket_numero: adjTicketNumero.trim() || undefined,
         motivo: adjMotivo.trim() || (adjOrigenCanal === "EFECTIVO" ? "Comprobante entregado en Tesorería registrado como Efectivo en POS" : `Reclasificación de ${adjOrigenCanal} a ${adjDestinoCanal}`),
+        voucher_id: selectedVoucherId || undefined,
       })
       toast.success("Comprobante Reclasificado", "El comprobante fue imputado al canal respectivo y ajustado en el cuadre.")
       setAdjustmentModalOpen(false)
+      setSelectedVoucherId(null)
+      setSelectedVoucherMeta(null)
       await handleOpenPunteoModal(punteoData.session_data.id)
       fetchHistorial()
     } catch (err: any) {
       toast.error("Error al reclasificar", err?.message || "No se pudo guardar la reclasificación.")
+
     } finally {
       setSavingAdjustment(false)
     }
@@ -7413,6 +7459,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                       <option value="DINELCO_QR">Dinelco QR</option>
                     </optgroup>
                     <optgroup label="📄 Documentos de Valor y Devoluciones">
+                      <option value="VALE_CONVENIO">🎟️ Vales de Compra / Convenio Institucional</option>
                       <option value="NOTA_CREDITO">📑 Nota de Crédito (NC) / Devolución</option>
                       <option value="CHEQUES">Cheques / Vales</option>
                       <option value="EXTRA_CLUB">Extra Club / Crédito</option>
@@ -7423,18 +7470,28 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                     Monto del Comprobante (Guaraníes ₲) *
                   </label>
-                  <button
-                    type="button"
-                    onClick={handleOpenNcSelector}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50 transition shadow-sm"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Estirar de NCs Emitidas</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleOpenVoucherSelector}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800/60 transition shadow-sm"
+                    >
+                      <Ticket className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>Estirar Vale de Convenio</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleOpenNcSelector}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50 transition shadow-sm"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>Estirar de NCs Emitidas</span>
+                    </button>
+                  </div>
                 </div>
                 <input
                   type="text"
@@ -7456,6 +7513,31 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   required
                 />
               </div>
+
+              {selectedVoucherMeta && (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700/60 text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2.5 animate-fade-in">
+                  <Ticket className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-extrabold text-[12px] text-emerald-950 dark:text-emerald-100">
+                      Vale Seleccionado: #{selectedVoucherMeta.numero_vale} — {selectedVoucherMeta.convenio_nombre}
+                    </p>
+                    <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5">
+                      Código: <span className="font-mono font-bold">{selectedVoucherMeta.codigo_barras}</span> · Monto Original: <strong>{formatPYG(selectedVoucherMeta.monto_inicial)}</strong>
+                    </p>
+                    <p className="text-[10px] text-emerald-800 dark:text-emerald-300/90 font-medium mt-1">
+                      ⚠️ Al guardar la reclasificación, este vale quedará registrado como <strong>CANJEADO</strong> en el sistema para prevenir doble uso o que quede como pendiente.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedVoucherId(null); setSelectedVoucherMeta(null); }}
+                    className="text-xs text-emerald-700 dark:text-emerald-300 hover:underline font-bold"
+                  >
+                    Quitar
+                  </button>
+                </div>
+              )}
+
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
@@ -7665,6 +7747,122 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
           </div>
         </div>
       )}
+
+      {/* ── Modal Selector de Vales de Convenio Institucional ── */}
+      {voucherSelectorOpen && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-scale-up">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-300 dark:border-emerald-700/50">
+                  <Ticket className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">Seleccionar Vale de Convenio Activo</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Estirar vale emitido para imputarlo a la caja y marcarlo como CANJEADO
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setVoucherSelectorOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 shrink-0">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Buscar por N° Vale (ej. 025), código de barras (V-UP-025), convenio o cliente..."
+                  value={voucherSearch}
+                  onChange={(e) => setVoucherSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="p-3 overflow-y-auto flex-1 divide-y divide-slate-100 dark:divide-slate-800/60">
+              {loadingVoucherList ? (
+                <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400">
+                  <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+                  <p className="text-xs">Cargando vales de convenio institucionales...</p>
+                </div>
+              ) : voucherList.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs">
+                  <Ticket className="w-8 h-8 mx-auto mb-2 opacity-40 text-emerald-500" />
+                  <p className="font-bold text-slate-600 dark:text-slate-300">No hay vales activos disponibles</p>
+                  <p className="mt-1">Todos los vales registrados ya fueron canjeados o no existen convenios creados.</p>
+                </div>
+              ) : (
+                voucherList
+                  .filter((v) => {
+                    if (!voucherSearch) return true
+                    const s = voucherSearch.toLowerCase()
+                    return (
+                      (v.numero_vale || "").toLowerCase().includes(s) ||
+                      (v.codigo_barras || "").toLowerCase().includes(s) ||
+                      (v.convenio_nombre || "").toLowerCase().includes(s) ||
+                      (v.cliente_razon_social || "").toLowerCase().includes(s) ||
+                      (v.beneficiario_nombre || "").toLowerCase().includes(s)
+                    )
+                  })
+                  .map((v) => (
+                    <div
+                      key={v.id}
+                      onClick={() => handleSelectVoucher(v)}
+                      className="py-2.5 px-3 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-950/30 cursor-pointer transition flex items-center justify-between gap-3 group"
+                    >
+                      <div className="space-y-0.5 flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-bold text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/40">
+                            VALE #{v.numero_vale}
+                          </span>
+                          <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200">
+                            {v.convenio_nombre}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                            {v.codigo_barras}
+                          </span>
+                        </div>
+                        {v.cliente_razon_social && (
+                          <p className="text-xs text-slate-600 dark:text-slate-400 truncate">
+                            {v.cliente_razon_social} {v.cliente_ruc ? `(${v.cliente_ruc})` : ""}
+                          </p>
+                        )}
+                        <p className="text-[11px] text-slate-400">
+                          Vence: {v.fecha_vencimiento || "Sin vencimiento"} · Factura Madre: {v.factura_emision_numero || "N/A"}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="font-mono font-black text-sm text-emerald-600 dark:text-emerald-400">
+                          {formatPYG(v.saldo_disponible || v.monto_inicial || 0)}
+                        </p>
+                        <span className="inline-block mt-0.5 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 group-hover:underline">
+                          Estirar y Canjear ➔
+                        </span>
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+
+            <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setVoucherSelectorOpen(false)}
+                className="px-4 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold hover:bg-slate-300 dark:hover:bg-slate-600 transition"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

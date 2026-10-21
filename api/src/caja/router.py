@@ -174,6 +174,25 @@ async def list_emitted_notas_credito(
     )
 
 
+@router.get("/cash-sessions/vales-convenio-disponibles")
+async def list_available_vales_convenio(
+    search: str | None = Query(None),
+    convenio: str | None = Query(None),
+    limit: int | None = Query(60),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Lista vales de convenio institucionales activos para reclasificación en punteo."""
+    return await service.list_available_vales_convenio(
+        db,
+        company_id=user["company_id"],
+        search=search,
+        convenio=convenio,
+        limit=limit or 60,
+    )
+
+
+
 @router.get("/cash-sessions/{session_id}")
 async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
     result = await service.get_session_with_summary(db, session_id)

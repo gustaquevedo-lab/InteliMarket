@@ -2578,12 +2578,16 @@ export const api = {
         ticket_numero?: string
         sale_id?: string
         motivo?: string
+        voucher_id?: string
       }) => client.post<any>(`/v1/cash-sessions/${sessionId}/punteo/ajustes`, data),
       list: (sessionId: string) => client.get<any[]>(`/v1/cash-sessions/${sessionId}/punteo/ajustes`),
       delete: (sessionId: string, adjustmentId: string) => client.delete<any>(`/v1/cash-sessions/${sessionId}/punteo/ajustes/${adjustmentId}`),
       listNotasCredito: (params?: { search?: string; session_id?: string; limit?: number }) =>
         client.get<any[]>(`/v1/cash-sessions/notas-credito-emitidas`, params as any),
+      listValesConvenio: (params?: { search?: string; convenio?: string; limit?: number }) =>
+        client.get<any[]>(`/v1/cash-sessions/vales-convenio-disponibles`, params as any),
     },
+
     bankMappings: {
       list: () => client.get<{
         id: string

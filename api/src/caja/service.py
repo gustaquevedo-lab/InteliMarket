@@ -4717,6 +4717,59 @@ async def create_payment_adjustment(
     if m_gs <= 0:
         raise ValueError("El monto de la reclasificación debe ser mayor a 0 Gs.")
 
+    # 🎟️ CANJE ATÓMICO DE VALE DE CONVENIO SI EL DESTINO ES VALE_CONVENIO
+    voucher_id_str = data.get("voucher_id")
+    if d_key == "VALE_CONVENIO":
+        from api.src.vouchers.models import InstitutionalVoucher
+        from api.src.vouchers.service import normalize_barcode
+
+        voucher = None
+        if voucher_id_str:
+            try:
+                v_uuid = uuid.UUID(str(voucher_id_str))
+                v_res = await db.execute(
+                    select(InstitutionalVoucher).where(
+                        InstitutionalVoucher.id == v_uuid,
+                        InstitutionalVoucher.company_id == cid,
+                    ).with_for_update()
+                )
+                voucher = v_res.scalars().first()
+            except Exception:
+                pass
+
+        if not voucher and data.get("nro_comprobante"):
+            comp = data["nro_comprobante"].strip()
+            variants = normalize_barcode(comp)
+            v_res = await db.execute(
+                select(InstitutionalVoucher).where(
+                    InstitutionalVoucher.company_id == cid,
+                    or_(
+                        InstitutionalVoucher.codigo_barras.in_(variants),
+                        InstitutionalVoucher.numero_vale.in_(variants),
+                    )
+                ).with_for_update()
+            )
+            voucher = v_res.scalars().first()
+
+        if voucher:
+            if voucher.estado != "ACTIVO" and voucher.canjeado_en_caja_session_id != sid:
+                raise ValueError(f"El vale N° {voucher.numero_vale} ({voucher.convenio_nombre}) ya se encuentra {voucher.estado} previamente.")
+
+            voucher.estado = "CANJEADO"
+            voucher.saldo_disponible = Decimal("0")
+            voucher.canjeado_en_caja_session_id = sid
+            voucher.canjeado_caja_numero = row.caja_nombre or f"Caja {sid}"
+            voucher.canjeado_por_usuario_id = uuid.UUID(user_id) if user_id else None
+            voucher.canjeado_at = datetime.now(timezone.utc)
+            voucher.notas = (voucher.notas or "") + f" [Canjeado en Punteo de Caja por reclasificación de efectivo en sesión {sid}]"
+
+            # Asociamos el ID del vale en codigo_autorizacion del ajuste
+            data["codigo_autorizacion"] = str(voucher.id)
+            if not data.get("nro_comprobante"):
+                data["nro_comprobante"] = voucher.codigo_barras
+            if not data.get("titular"):
+                data["titular"] = voucher.convenio_nombre
+
     adj = CashSessionPaymentAdjustment(
         company_id=cid,
         session_id=sid,
@@ -4811,9 +4864,110 @@ async def delete_payment_adjustment(db: AsyncSession, adjustment_id: str, sessio
     if not adj:
         raise ValueError("Ajuste de reclasificación no encontrado")
 
+    # 🎟️ REACTIVACIÓN DEL VALE SI ERA UN VALE_CONVENIO
+    if adj.destino_canal_key == "VALE_CONVENIO":
+        from api.src.vouchers.models import InstitutionalVoucher
+        voucher_target = None
+        if adj.codigo_autorizacion:
+            try:
+                v_id = uuid.UUID(adj.codigo_autorizacion)
+                v_res = await db.execute(
+                    select(InstitutionalVoucher).where(
+                        InstitutionalVoucher.id == v_id,
+                        InstitutionalVoucher.company_id == cid,
+                    ).with_for_update()
+                )
+                voucher_target = v_res.scalars().first()
+            except Exception:
+                pass
+
+        if not voucher_target and adj.nro_comprobante:
+            v_res = await db.execute(
+                select(InstitutionalVoucher).where(
+                    InstitutionalVoucher.company_id == cid,
+                    InstitutionalVoucher.codigo_barras == adj.nro_comprobante,
+                ).with_for_update()
+            )
+            voucher_target = v_res.scalars().first()
+
+        if voucher_target and voucher_target.canjeado_en_caja_session_id == sid:
+            voucher_target.estado = "ACTIVO"
+            voucher_target.saldo_disponible = voucher_target.monto_inicial
+            voucher_target.canjeado_en_caja_session_id = None
+            voucher_target.canjeado_at = None
+            voucher_target.notas = (voucher_target.notas or "") + " [Reactivado al eliminar reclasificación en punteo]"
+
     await db.delete(adj)
     await db.commit()
     return True
+
+
+async def list_available_vales_convenio(
+    db: AsyncSession,
+    company_id: str,
+    search: str | None = None,
+    convenio: str | None = None,
+    limit: int = 60,
+) -> list[dict]:
+    """Lista los Vales de Convenio institucionales activos disponibles para estirar
+    en la reclasificación de cobros en Tesorería y Punteo de Caja."""
+    from api.src.vouchers.models import InstitutionalVoucher
+    from api.src.vouchers.service import normalize_barcode
+
+    try:
+        cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
+    except Exception:
+        return []
+
+    query = (
+        select(InstitutionalVoucher)
+        .where(
+            InstitutionalVoucher.company_id == cid,
+            InstitutionalVoucher.estado == "ACTIVO",
+            InstitutionalVoucher.saldo_disponible > 0,
+        )
+        .order_by(InstitutionalVoucher.convenio_nombre.asc(), InstitutionalVoucher.numero_vale.asc())
+    )
+
+    if convenio:
+        query = query.where(InstitutionalVoucher.convenio_nombre.ilike(f"%{convenio.strip()}%"))
+
+    if search:
+        s = search.strip()
+        variants = normalize_barcode(s)
+        conds = [
+            InstitutionalVoucher.numero_vale.in_(variants),
+            InstitutionalVoucher.codigo_barras.in_(variants),
+            InstitutionalVoucher.convenio_nombre.ilike(f"%{s}%"),
+        ]
+        conds.append(InstitutionalVoucher.cliente_razon_social.ilike(f"%{s}%"))
+        conds.append(InstitutionalVoucher.beneficiario_nombre.ilike(f"%{s}%"))
+        query = query.where(or_(*conds))
+
+    if limit:
+        query = query.limit(limit)
+
+    res = await db.execute(query)
+    vouchers = res.scalars().all()
+
+    return [
+        {
+            "id": str(v.id),
+            "convenio_nombre": v.convenio_nombre,
+            "cliente_ruc": v.cliente_ruc,
+            "cliente_razon_social": v.cliente_razon_social,
+            "numero_vale": v.numero_vale,
+            "codigo_barras": v.codigo_barras,
+            "monto_inicial": float(v.monto_inicial),
+            "saldo_disponible": float(v.saldo_disponible),
+            "fecha_vencimiento": v.fecha_vencimiento.strftime("%d/%m/%Y") if v.fecha_vencimiento else None,
+            "estado": v.estado,
+            "beneficiario_nombre": v.beneficiario_nombre,
+            "factura_emision_numero": v.factura_emision_numero,
+        }
+        for v in vouchers
+    ]
+
 
 
 async def list_emitted_notas_credito(
