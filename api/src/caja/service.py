@@ -26,6 +26,7 @@ from api.src.caja.models import (
     TreasuryRemittance, TreasuryRemittanceItem,
     PaymentMethodBankMapping, CashShortageDeductionRequest, CashShortageConfig, CashAdvance,
     CashSessionPaymentAdjustment, CashSessionPunteoItem,
+    CashierFundAssignment, VaultPettyFund, VaultPettyFundAudit, CashSurpriseAudit,
 )
 from api.src.sales.models import Sale, SalePayment
 from api.src.pos_terminal_transactions.models import PosTerminalTransaction
@@ -539,17 +540,36 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
         or any(s in cajero_nom for s in ["supervisor", "zunilda", "maristela", "admin"])
     )
 
+    # Consultar si la cajera tiene un fondo fijo registrado asignado
+    cfa_res = await db.execute(
+        select(CashierFundAssignment).where(
+            CashierFundAssignment.user_id == user_id,
+            CashierFundAssignment.estado == "activo",
+        ).limit(1)
+    ) if user_id else None
+    cfa_obj = cfa_res.scalar_one_or_none() if cfa_res else None
+
     raw_pyg = data.get("monto_apertura")
     raw_brl = data.get("monto_apertura_brl")
     raw_usd = data.get("monto_apertura_usd", 0)
 
-    if is_supervisora:
+    if raw_pyg is not None:
+        monto_pyg = Decimal(str(raw_pyg))
+    elif is_supervisora:
         monto_pyg = Decimal("0")
-        monto_brl = Decimal("0.00")
-        monto_usd = Decimal("0.00")
+    elif cfa_obj:
+        monto_pyg = Decimal(str(cfa_obj.monto_pyg))
     else:
-        monto_pyg = Decimal(str(raw_pyg)) if raw_pyg is not None and float(raw_pyg) > 0 else Decimal("500000")
-        monto_brl = Decimal(str(raw_brl)) if raw_brl is not None and float(raw_brl) > 0 else Decimal("300.00")
+        monto_pyg = Decimal("500000")
+
+    if raw_brl is not None:
+        monto_brl = Decimal(str(raw_brl))
+    elif is_supervisora:
+        monto_brl = Decimal("0.00")
+    elif cfa_obj:
+        monto_brl = Decimal(str(cfa_obj.monto_brl))
+    else:
+        monto_brl = Decimal("300.00")
 
     session_obj = CashSession(
         register_id=register_id,
@@ -6427,6 +6447,8 @@ async def get_vault_kardex(
                 "cobranza_ar": "Cobranza CxC Clientes",
                 "ajuste": "Ajuste de Bóveda",
                 "cheque_caja": "Cheques de Caja",
+                "devolucion_cajero": "Devolución Fondo Cajera",
+                "reintegro_sencillo": "Reintegro desde Fondo Sencillo",
             }.get(e.origen, e.origen.replace("_", " ").title())
 
             # 1. Ingreso a Bóveda
@@ -6444,7 +6466,7 @@ async def get_vault_kardex(
                 "observaciones": e.observaciones or "",
             })
 
-            # 2. Egreso si fue depositado al banco
+            # 2. Egreso si fue depositado al banco o transferido/asignado
             if e.estado == "depositado" and e.fecha_deposito:
                 ref_txt = str(e.bank_transaction_id)[:8].upper() if e.bank_transaction_id else "BANCO"
                 raw_events.append({
@@ -6459,6 +6481,25 @@ async def get_vault_kardex(
                     "estado": "depositado",
                     "usuario": user_name,
                     "observaciones": e.observaciones or "Fondos remesados al banco",
+                })
+            elif e.estado in ("asignado_cajero", "fondo_sencillo", "pagado_proveedor"):
+                egreso_label = {
+                    "asignado_cajero": "Salida por Dotación Fondo de Cajera",
+                    "fondo_sencillo": "Traspaso a Fondo Permanente de Sencillo",
+                    "pagado_proveedor": "Egreso por Pago a Proveedor",
+                }.get(e.estado, e.estado.replace("_", " ").title())
+                raw_events.append({
+                    "id": f"EGR-{str(e.id)}",
+                    "fecha": e.fecha_deposito or e.created_at,
+                    "tipo": "egreso",
+                    "concepto": f"{egreso_label}" + (f" ({e.observaciones})" if e.observaciones else ""),
+                    "origen": e.estado,
+                    "referencia": str(e.id)[:8].upper(),
+                    "monto_ingreso": 0.0,
+                    "monto_egreso": monto_val,
+                    "estado": e.estado,
+                    "usuario": user_name,
+                    "observaciones": e.observaciones or "",
                 })
 
     # Ordenar cronológicamente para calcular el saldo acumulado progresivo
@@ -6496,6 +6537,732 @@ async def get_vault_kardex(
         "cantidad_movimientos": len(kardex),
         "movimientos": kardex,
     }
+
+
+# ── FONDOS INICIALES DE CAJERAS & SENCILLO EN BÓVEDA ─────────────────────────
+
+async def _deduct_from_vault_fifo(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    monto_pyg: Decimal,
+    monto_brl: Decimal,
+    estado_terminal: str,
+    observaciones: str,
+    user_id: uuid.UUID | None,
+):
+    """Consume entradas de bóveda FIFO para Pyg y Brl, salvaguardando monedas cruzadas."""
+    now_dt = datetime.now(timezone.utc)
+    if monto_pyg > Decimal("0"):
+        res_pyg = await db.execute(
+            select(func.coalesce(func.sum(VaultEntry.monto_pyg), 0))
+            .where(VaultEntry.company_id == company_id, VaultEntry.estado == "en_boveda")
+        )
+        saldo_pyg = Decimal(str(res_pyg.scalar() or 0))
+        if monto_pyg > saldo_pyg:
+            raise ValueError(
+                f"Saldo insuficiente en Bóveda Central. Disponible: ₲ {saldo_pyg:,.0f} | Requerido: ₲ {monto_pyg:,.0f}"
+            )
+        entries_res = await db.execute(
+            select(VaultEntry)
+            .where(VaultEntry.company_id == company_id, VaultEntry.estado == "en_boveda", VaultEntry.monto_pyg > 0)
+            .order_by(VaultEntry.created_at.asc())
+        )
+        remaining = monto_pyg
+        for e in entries_res.scalars().all():
+            if remaining <= Decimal("0"):
+                break
+            e_monto = Decimal(str(e.monto_pyg or 0))
+            if e_monto <= remaining:
+                if (e.monto_brl and e.monto_brl > 0) or (e.monto_usd and e.monto_usd > 0):
+                    db.add(VaultEntry(
+                        company_id=company_id,
+                        branch_id=e.branch_id,
+                        origen=e.origen,
+                        handoff_id=e.handoff_id,
+                        monto_pyg=e_monto,
+                        monto_usd=Decimal("0"),
+                        monto_brl=Decimal("0"),
+                        estado=estado_terminal,
+                        fecha_deposito=now_dt,
+                        registrado_por=user_id or e.registrado_por,
+                        observaciones=observaciones,
+                    ))
+                    e.monto_pyg = Decimal("0")
+                else:
+                    e.estado = estado_terminal
+                    e.fecha_deposito = now_dt
+                    e.observaciones = observaciones
+                    if user_id:
+                        e.registrado_por = user_id
+                remaining -= e_monto
+            else:
+                db.add(VaultEntry(
+                    company_id=company_id,
+                    branch_id=e.branch_id,
+                    origen=e.origen,
+                    handoff_id=e.handoff_id,
+                    monto_pyg=remaining,
+                    monto_usd=Decimal("0"),
+                    monto_brl=Decimal("0"),
+                    estado=estado_terminal,
+                    fecha_deposito=now_dt,
+                    registrado_por=user_id or e.registrado_por,
+                    observaciones=observaciones,
+                ))
+                e.monto_pyg = e_monto - remaining
+                remaining = Decimal("0")
+
+    if monto_brl > Decimal("0"):
+        res_brl = await db.execute(
+            select(func.coalesce(func.sum(VaultEntry.monto_brl), 0))
+            .where(VaultEntry.company_id == company_id, VaultEntry.estado == "en_boveda")
+        )
+        saldo_brl = Decimal(str(res_brl.scalar() or 0))
+        if monto_brl > saldo_brl:
+            raise ValueError(
+                f"Saldo en Reales insuficiente en Bóveda Central. Disponible: R$ {saldo_brl:,.2f} | Requerido: R$ {monto_brl:,.2f}"
+            )
+        entries_brl = await db.execute(
+            select(VaultEntry)
+            .where(VaultEntry.company_id == company_id, VaultEntry.estado == "en_boveda", VaultEntry.monto_brl > 0)
+            .order_by(VaultEntry.created_at.asc())
+        )
+        rem_brl = monto_brl
+        for e in entries_brl.scalars().all():
+            if rem_brl <= Decimal("0"):
+                break
+            e_brl = Decimal(str(e.monto_brl or 0))
+            if e_brl <= rem_brl:
+                if (e.monto_pyg and e.monto_pyg > 0) or (e.monto_usd and e.monto_usd > 0):
+                    db.add(VaultEntry(
+                        company_id=company_id,
+                        branch_id=e.branch_id,
+                        origen=e.origen,
+                        handoff_id=e.handoff_id,
+                        monto_pyg=Decimal("0"),
+                        monto_usd=Decimal("0"),
+                        monto_brl=e_brl,
+                        estado=estado_terminal,
+                        fecha_deposito=now_dt,
+                        registrado_por=user_id or e.registrado_por,
+                        observaciones=observaciones,
+                    ))
+                    e.monto_brl = Decimal("0")
+                else:
+                    e.estado = estado_terminal
+                    e.fecha_deposito = now_dt
+                    e.observaciones = observaciones
+                    if user_id:
+                        e.registrado_por = user_id
+                rem_brl -= e_brl
+            else:
+                db.add(VaultEntry(
+                    company_id=company_id,
+                    branch_id=e.branch_id,
+                    origen=e.origen,
+                    handoff_id=e.handoff_id,
+                    monto_pyg=Decimal("0"),
+                    monto_usd=Decimal("0"),
+                    monto_brl=rem_brl,
+                    estado=estado_terminal,
+                    fecha_deposito=now_dt,
+                    registrado_por=user_id or e.registrado_por,
+                    observaciones=observaciones,
+                ))
+                e.monto_brl = e_brl - rem_brl
+                rem_brl = Decimal("0")
+
+
+async def list_cashier_fund_assignments(db: AsyncSession, company_id: str) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    res = await db.execute(
+        select(CashierFundAssignment)
+        .where(CashierFundAssignment.company_id == cid)
+        .order_by(CashierFundAssignment.estado.asc(), CashierFundAssignment.cajero_nombre.asc())
+    )
+    items = res.scalars().all()
+    return [
+        {
+            "id": str(i.id),
+            "user_id": str(i.user_id),
+            "cajero_nombre": i.cajero_nombre,
+            "monto_pyg": float(i.monto_pyg),
+            "monto_brl": float(i.monto_brl),
+            "monto_usd": float(i.monto_usd),
+            "estado": i.estado,
+            "fecha_asignacion": i.fecha_asignacion.isoformat() if i.fecha_asignacion else None,
+            "asignado_por": str(i.asignado_por) if i.asignado_por else None,
+            "observaciones": i.observaciones,
+            "created_at": i.created_at.isoformat() if i.created_at else None,
+        }
+        for i in items
+    ]
+
+
+async def assign_cashier_fund(
+    db: AsyncSession,
+    company_id: str,
+    data: dict,
+    admin_user: dict,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    uid = uuid.UUID(str(data["user_id"]))
+    admin_id = uuid.UUID(str(admin_user["id"])) if admin_user.get("id") else None
+
+    # Obtener nombre del usuario
+    u_res = await db.execute(select(User).where(User.id == uid))
+    user_obj = u_res.scalar_one_or_none()
+    if not user_obj:
+        raise ValueError("Usuario cajero no encontrado")
+    cajero_nombre = user_obj.nombre or user_obj.email or "Cajero"
+
+    monto_pyg = Decimal(str(data.get("monto_pyg") or 500000))
+    monto_brl = Decimal(str(data.get("monto_brl") or 300.00))
+    monto_usd = Decimal(str(data.get("monto_usd") or 0.00))
+    debitar = data.get("debitar_de_boveda", True)
+    obs = data.get("observaciones") or f"Dotación fondo inicial asignado a {cajero_nombre}"
+
+    # Si se pide debitar de bóveda, extraer de la recaudación corriente
+    if debitar:
+        await _deduct_from_vault_fifo(
+            db=db,
+            company_id=cid,
+            monto_pyg=monto_pyg,
+            monto_brl=monto_brl,
+            estado_terminal="asignado_cajero",
+            observaciones=f"Dotación fondo inicial a cajera {cajero_nombre}",
+            user_id=admin_id,
+        )
+        # Registrar salida en CashRegisterMovement
+        reg_res = await db.execute(
+            select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc()).limit(1)
+        )
+        main_reg = reg_res.scalar_one_or_none()
+        if main_reg and monto_pyg > Decimal("0"):
+            db.add(CashRegisterMovement(
+                company_id=cid,
+                register_id=main_reg.id,
+                tipo="retiro",
+                monto=monto_pyg,
+                moneda="PYG",
+                fecha=datetime.now(TZ_ASUNCION),
+                usuario=admin_user.get("nombre") or "Administración",
+                observaciones=f"Dotación fondo inicial permanente cajera {cajero_nombre}",
+            ))
+
+    # Guardar o actualizar asignación
+    cfa_res = await db.execute(
+        select(CashierFundAssignment).where(
+            CashierFundAssignment.company_id == cid,
+            CashierFundAssignment.user_id == uid,
+        )
+    )
+    cfa = cfa_res.scalar_one_or_none()
+    if cfa:
+        cfa.monto_pyg = monto_pyg
+        cfa.monto_brl = monto_brl
+        cfa.monto_usd = monto_usd
+        cfa.estado = "activo"
+        cfa.fecha_asignacion = datetime.now(timezone.utc)
+        cfa.asignado_por = admin_id
+        cfa.observaciones = obs
+        cfa.cajero_nombre = cajero_nombre
+    else:
+        cfa = CashierFundAssignment(
+            company_id=cid,
+            user_id=uid,
+            cajero_nombre=cajero_nombre,
+            monto_pyg=monto_pyg,
+            monto_brl=monto_brl,
+            monto_usd=monto_usd,
+            estado="activo",
+            fecha_asignacion=datetime.now(timezone.utc),
+            asignado_por=admin_id,
+            observaciones=obs,
+        )
+        db.add(cfa)
+
+    await db.flush()
+    await db.refresh(cfa)
+    return {
+        "id": str(cfa.id),
+        "user_id": str(cfa.user_id),
+        "cajero_nombre": cfa.cajero_nombre,
+        "monto_pyg": float(cfa.monto_pyg),
+        "monto_brl": float(cfa.monto_brl),
+        "monto_usd": float(cfa.monto_usd),
+        "estado": cfa.estado,
+        "observaciones": cfa.observaciones,
+    }
+
+
+async def return_cashier_fund(
+    db: AsyncSession,
+    company_id: str,
+    assignment_id: str,
+    data: dict,
+    admin_user: dict,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    aid = uuid.UUID(assignment_id)
+    admin_id = uuid.UUID(str(admin_user["id"])) if admin_user.get("id") else None
+
+    cfa_res = await db.execute(
+        select(CashierFundAssignment).where(
+            CashierFundAssignment.id == aid,
+            CashierFundAssignment.company_id == cid,
+        )
+    )
+    cfa = cfa_res.scalar_one_or_none()
+    if not cfa:
+        raise ValueError("Asignación de fondo no encontrada")
+
+    monto_pyg = Decimal(str(data.get("monto_pyg") or cfa.monto_pyg))
+    monto_brl = Decimal(str(data.get("monto_brl") or cfa.monto_brl))
+    monto_usd = Decimal(str(data.get("monto_usd") or 0.00))
+    desactivar = data.get("desactivar_asignacion", True)
+    ingresar_a_boveda = data.get("ingresar_a_boveda", True)
+    obs = data.get("observaciones") or f"Devolución de fondo inicial de cajera {cfa.cajero_nombre}"
+
+    if ingresar_a_boveda and (monto_pyg > 0 or monto_brl > 0 or monto_usd > 0):
+        # Reingreso a la recaudación de bóveda central
+        db.add(VaultEntry(
+            company_id=cid,
+            origen="devolucion_cajero",
+            monto_pyg=monto_pyg,
+            monto_brl=monto_brl,
+            monto_usd=monto_usd,
+            estado="en_boveda",
+            registrado_por=admin_id,
+            observaciones=f"Devolución fondo inicial cajera {cfa.cajero_nombre} — {obs}",
+        ))
+        # Registrar entrada en CashRegisterMovement
+        reg_res = await db.execute(
+            select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc()).limit(1)
+        )
+        main_reg = reg_res.scalar_one_or_none()
+        if main_reg and monto_pyg > Decimal("0"):
+            db.add(CashRegisterMovement(
+                company_id=cid,
+                register_id=main_reg.id,
+                tipo="entrada",
+                monto=monto_pyg,
+                moneda="PYG",
+                fecha=datetime.now(TZ_ASUNCION),
+                usuario=admin_user.get("nombre") or "Administración",
+                observaciones=f"Devolución fondo inicial cajera {cfa.cajero_nombre} — {obs}",
+            ))
+
+    if desactivar:
+        cfa.estado = "inactivo"
+        cfa.monto_pyg = Decimal("0")
+        cfa.monto_brl = Decimal("0.00")
+        cfa.monto_usd = Decimal("0.00")
+    else:
+        cfa.monto_pyg = max(Decimal("0"), cfa.monto_pyg - monto_pyg)
+        cfa.monto_brl = max(Decimal("0"), cfa.monto_brl - monto_brl)
+        cfa.monto_usd = max(Decimal("0"), cfa.monto_usd - monto_usd)
+
+    cfa.observaciones = obs
+    await db.flush()
+    await db.refresh(cfa)
+    return {
+        "id": str(cfa.id),
+        "cajero_nombre": cfa.cajero_nombre,
+        "monto_pyg": float(cfa.monto_pyg),
+        "monto_brl": float(cfa.monto_brl),
+        "monto_usd": float(cfa.monto_usd),
+        "estado": cfa.estado,
+        "observaciones": cfa.observaciones,
+    }
+
+
+async def get_vault_petty_fund(db: AsyncSession, company_id: str) -> dict:
+    cid = uuid.UUID(company_id)
+    res = await db.execute(select(VaultPettyFund).where(VaultPettyFund.company_id == cid))
+    fund = res.scalar_one_or_none()
+    if not fund:
+        fund = VaultPettyFund(
+            company_id=cid,
+            nombre="Fondo Permanente de Sencillo Bóveda",
+            monto_objetivo_pyg=Decimal("3800000"),
+            saldo_actual_pyg=Decimal("3800000"),
+            monto_objetivo_brl=Decimal("0.00"),
+            saldo_actual_brl=Decimal("0.00"),
+            activo=True,
+        )
+        db.add(fund)
+        await db.flush()
+        await db.refresh(fund)
+
+    return {
+        "id": str(fund.id),
+        "company_id": str(fund.company_id),
+        "nombre": fund.nombre,
+        "monto_objetivo_pyg": float(fund.monto_objetivo_pyg),
+        "saldo_actual_pyg": float(fund.saldo_actual_pyg),
+        "monto_objetivo_brl": float(fund.monto_objetivo_brl),
+        "saldo_actual_brl": float(fund.saldo_actual_brl),
+        "activo": fund.activo,
+        "updated_at": fund.updated_at.isoformat() if fund.updated_at else None,
+    }
+
+
+async def adjust_vault_petty_fund(
+    db: AsyncSession,
+    company_id: str,
+    data: dict,
+    admin_user: dict,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    admin_id = uuid.UUID(str(admin_user["id"])) if admin_user.get("id") else None
+
+    fund_res = await db.execute(select(VaultPettyFund).where(VaultPettyFund.company_id == cid))
+    fund = fund_res.scalar_one_or_none()
+    if not fund:
+        fund = VaultPettyFund(company_id=cid, nombre="Fondo Permanente de Sencillo Bóveda")
+        db.add(fund)
+        await db.flush()
+
+    monto = Decimal(str(data.get("monto_ajuste_pyg") or 0))
+    tipo = data.get("tipo", "aumento")  # "aumento" | "disminucion"
+    afectar_boveda = data.get("afectar_boveda_recaudacion", True)
+    motivo = data.get("motivo") or ("Ajuste de fondo permanente de sencillo" if tipo == "aumento" else "Disminución de fondo permanente de sencillo")
+
+    if monto <= Decimal("0"):
+        raise ValueError("El monto de ajuste debe ser mayor a 0")
+
+    reg_res = await db.execute(
+        select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc()).limit(1)
+    )
+    main_reg = reg_res.scalar_one_or_none()
+
+    if tipo == "aumento":
+        if afectar_boveda:
+            # Deduce de la recaudación de bóveda central
+            await _deduct_from_vault_fifo(
+                db=db,
+                company_id=cid,
+                monto_pyg=monto,
+                monto_brl=Decimal("0"),
+                estado_terminal="fondo_sencillo",
+                observaciones=f"Traspaso a Fondo Permanente de Sencillo: {motivo}",
+                user_id=admin_id,
+            )
+            if main_reg:
+                db.add(CashRegisterMovement(
+                    company_id=cid,
+                    register_id=main_reg.id,
+                    tipo="retiro",
+                    monto=monto,
+                    moneda="PYG",
+                    fecha=datetime.now(TZ_ASUNCION),
+                    usuario=admin_user.get("nombre") or "Administración",
+                    observaciones=f"Traspaso a Fondo Permanente de Sencillo: {motivo}",
+                ))
+        fund.saldo_actual_pyg = (fund.saldo_actual_pyg or Decimal("0")) + monto
+        fund.monto_objetivo_pyg = fund.saldo_actual_pyg
+
+    elif tipo == "disminucion":
+        if monto > fund.saldo_actual_pyg:
+            raise ValueError(f"El monto a disminuir (₲ {monto:,.0f}) supera el saldo actual del fondo de sencillo (₲ {fund.saldo_actual_pyg:,.0f})")
+        if afectar_boveda:
+            # Reingresa a la masa de recaudación de bóveda
+            db.add(VaultEntry(
+                company_id=cid,
+                origen="reintegro_sencillo",
+                monto_pyg=monto,
+                monto_brl=Decimal("0"),
+                monto_usd=Decimal("0"),
+                estado="en_boveda",
+                registrado_por=admin_id,
+                observaciones=f"Reintegro desde Fondo Permanente de Sencillo: {motivo}",
+            ))
+            if main_reg:
+                db.add(CashRegisterMovement(
+                    company_id=cid,
+                    register_id=main_reg.id,
+                    tipo="entrada",
+                    monto=monto,
+                    moneda="PYG",
+                    fecha=datetime.now(TZ_ASUNCION),
+                    usuario=admin_user.get("nombre") or "Administración",
+                    observaciones=f"Reintegro desde Fondo Permanente de Sencillo: {motivo}",
+                ))
+        fund.saldo_actual_pyg = max(Decimal("0"), fund.saldo_actual_pyg - monto)
+        fund.monto_objetivo_pyg = fund.saldo_actual_pyg
+
+    fund.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(fund)
+
+    return {
+        "id": str(fund.id),
+        "saldo_actual_pyg": float(fund.saldo_actual_pyg),
+        "monto_objetivo_pyg": float(fund.monto_objetivo_pyg),
+        "tipo": tipo,
+        "monto_ajustado": float(monto),
+        "motivo": motivo,
+    }
+
+
+async def audit_vault_petty_fund(
+    db: AsyncSession,
+    company_id: str,
+    data: dict,
+    admin_user: dict,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    admin_id = uuid.UUID(str(admin_user["id"])) if admin_user.get("id") else None
+    admin_nombre = admin_user.get("nombre") or admin_user.get("email") or "Administrador"
+
+    fund_res = await db.execute(select(VaultPettyFund).where(VaultPettyFund.company_id == cid))
+    fund = fund_res.scalar_one_or_none()
+    if not fund:
+        fund = VaultPettyFund(company_id=cid, nombre="Fondo Permanente de Sencillo Bóveda")
+        db.add(fund)
+        await db.flush()
+
+    esperado = fund.saldo_actual_pyg or Decimal("0")
+    contado = Decimal(str(data.get("monto_contado_pyg") or 0))
+    diferencia = contado - esperado
+
+    if diferencia == Decimal("0"):
+        resultado = "cuadrado"
+    elif diferencia < Decimal("0"):
+        resultado = "faltante"
+    else:
+        resultado = "sobrante"
+
+    audit = VaultPettyFundAudit(
+        company_id=cid,
+        fund_id=fund.id,
+        auditado_por=admin_id,
+        auditado_por_nombre=admin_nombre,
+        fecha=datetime.now(timezone.utc),
+        monto_esperado_pyg=esperado,
+        monto_contado_pyg=contado,
+        diferencia_pyg=diferencia,
+        desglose=data.get("desglose"),
+        resultado=resultado,
+        observaciones=data.get("observaciones"),
+    )
+    db.add(audit)
+
+    if data.get("ajustar_saldo"):
+        fund.saldo_actual_pyg = contado
+        fund.updated_at = datetime.now(timezone.utc)
+
+    await db.flush()
+    await db.refresh(audit)
+
+    return {
+        "id": str(audit.id),
+        "fecha": audit.fecha.isoformat(),
+        "auditado_por_nombre": audit.auditado_por_nombre,
+        "monto_esperado_pyg": float(audit.monto_esperado_pyg),
+        "monto_contado_pyg": float(audit.monto_contado_pyg),
+        "diferencia_pyg": float(audit.diferencia_pyg),
+        "resultado": audit.resultado,
+        "saldo_actualizado_pyg": float(fund.saldo_actual_pyg),
+        "observaciones": audit.observaciones,
+    }
+
+
+async def list_vault_petty_fund_audits(db: AsyncSession, company_id: str) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    res = await db.execute(
+        select(VaultPettyFundAudit)
+        .where(VaultPettyFundAudit.company_id == cid)
+        .order_by(VaultPettyFundAudit.fecha.desc())
+        .limit(50)
+    )
+    items = res.scalars().all()
+    return [
+        {
+            "id": str(a.id),
+            "fecha": a.fecha.isoformat() if a.fecha else None,
+            "auditado_por_nombre": a.auditado_por_nombre,
+            "monto_esperado_pyg": float(a.monto_esperado_pyg),
+            "monto_contado_pyg": float(a.monto_contado_pyg),
+            "diferencia_pyg": float(a.diferencia_pyg),
+            "resultado": a.resultado,
+            "desglose": a.desglose,
+            "observaciones": a.observaciones,
+        }
+        for a in items
+    ]
+
+
+async def execute_surprise_audit(
+    db: AsyncSession,
+    company_id: str,
+    session_id: str,
+    data: dict,
+    auditor_user: dict,
+) -> dict:
+    cid = uuid.UUID(company_id)
+    sid = uuid.UUID(session_id)
+
+    sess_res = await db.execute(select(CashSession).where(CashSession.id == sid))
+    sess = sess_res.scalar_one_or_none()
+    if not sess:
+        raise ValueError("Sesión de caja no encontrada")
+
+    if sess.estado != "abierta":
+        raise ValueError(f"Solo se pueden realizar arqueos sorpresa en turnos abiertos (estado actual: {sess.estado})")
+
+    fondo_pyg = Decimal(str(sess.monto_apertura or 0))
+    fondo_brl = Decimal(str(sess.monto_apertura_brl or 0))
+    fondo_usd = Decimal(str(sess.monto_apertura_usd or 0))
+
+    # Ventas cobradas en efectivo hasta este minuto
+    desde = sess.fecha_apertura
+    monedas_result = await db.execute(
+        select(SalePayment.moneda, func.coalesce(func.sum(SalePayment.monto), 0))
+        .select_from(SalePayment)
+        .join(Sale, Sale.id == SalePayment.sale_id)
+        .where(
+            Sale.session_id == sid,
+            Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
+            SalePayment.forma_pago == "EFECTIVO",
+            Sale.fecha >= desde,
+        )
+        .group_by(SalePayment.moneda)
+    )
+    ventas_ef = {row[0]: Decimal(str(row[1])) for row in monedas_result.all()}
+    ef_pyg = ventas_ef.get("PYG", Decimal("0"))
+    ef_brl = ventas_ef.get("BRL", Decimal("0"))
+    ef_usd = ventas_ef.get("USD", Decimal("0"))
+
+    # Retiros/Drops confirmados en esta sesión
+    drops_res = await db.execute(
+        select(
+            func.coalesce(func.sum(CashDropRequest.monto_pyg), 0),
+            func.coalesce(func.sum(CashDropRequest.monto_brl), 0),
+            func.coalesce(func.sum(CashDropRequest.monto_usd), 0),
+        ).where(
+            CashDropRequest.session_id == sid,
+            CashDropRequest.estado == "confirmado",
+        )
+    )
+    d_pyg, d_brl, d_usd = [Decimal(str(v)) for v in drops_res.first()]
+
+    # Adelantos de efectivo contra tarjeta (Dinelco)
+    adv_res = await db.execute(
+        select(func.coalesce(func.sum(CashAdvance.monto), 0))
+        .where(
+            CashAdvance.session_id == sid,
+            CashAdvance.estado == "aprobado",
+        )
+    )
+    adelantos_pyg = Decimal(str(adv_res.scalar() or 0))
+
+    # Esperados físicos en gaveta al minuto exacto
+    esp_pyg = max(Decimal("0"), fondo_pyg + ef_pyg - d_pyg - adelantos_pyg)
+    esp_brl = max(Decimal("0"), fondo_brl + ef_brl - d_brl)
+    esp_usd = max(Decimal("0"), fondo_usd + ef_usd - d_usd)
+
+    contado_pyg = Decimal(str(data.get("monto_contado_pyg") or 0))
+    contado_brl = Decimal(str(data.get("monto_contado_brl") or 0))
+    contado_usd = Decimal(str(data.get("monto_contado_usd") or 0))
+
+    dif_pyg = contado_pyg - esp_pyg
+    dif_brl = contado_brl - esp_brl
+    dif_usd = contado_usd - esp_usd
+
+    if dif_pyg == 0 and dif_brl == 0 and dif_usd == 0:
+        resultado = "cuadrado"
+    elif dif_pyg < 0 or dif_brl < 0 or dif_usd < 0:
+        resultado = "faltante"
+    else:
+        resultado = "sobrante"
+
+    auditor_id = uuid.UUID(str(auditor_user["id"])) if auditor_user.get("id") else None
+    auditor_nombre = auditor_user.get("nombre") or auditor_user.get("email") or "Auditoría"
+
+    audit = CashSurpriseAudit(
+        session_id=sid,
+        company_id=cid,
+        auditor_id=auditor_id,
+        auditor_nombre=auditor_nombre,
+        cajero_nombre=sess.cajero_nombre or "Cajero",
+        fecha=datetime.now(timezone.utc),
+        monto_esperado_pyg=esp_pyg,
+        monto_contado_pyg=contado_pyg,
+        diferencia_pyg=dif_pyg,
+        monto_esperado_brl=esp_brl,
+        monto_contado_brl=contado_brl,
+        diferencia_brl=dif_brl,
+        monto_esperado_usd=esp_usd,
+        monto_contado_usd=contado_usd,
+        diferencia_usd=dif_usd,
+        desglose=data.get("desglose"),
+        resultado=resultado,
+        observaciones=data.get("observaciones"),
+    )
+    db.add(audit)
+    await db.flush()
+    await db.refresh(audit)
+
+    return {
+        "id": str(audit.id),
+        "session_id": str(sid),
+        "cajero_nombre": audit.cajero_nombre,
+        "auditor_nombre": audit.auditor_nombre,
+        "fecha": audit.fecha.isoformat(),
+        "esperado_pyg": float(esp_pyg),
+        "contado_pyg": float(contado_pyg),
+        "diferencia_pyg": float(dif_pyg),
+        "esperado_brl": float(esp_brl),
+        "contado_brl": float(contado_brl),
+        "diferencia_brl": float(dif_brl),
+        "esperado_usd": float(esp_usd),
+        "contado_usd": float(contado_usd),
+        "diferencia_usd": float(dif_usd),
+        "fondo_pyg": float(fondo_pyg),
+        "fondo_brl": float(fondo_brl),
+        "ventas_efectivo_pyg": float(ef_pyg),
+        "ventas_efectivo_brl": float(ef_brl),
+        "drops_pyg": float(d_pyg),
+        "adelantos_pyg": float(adelantos_pyg),
+        "resultado": resultado,
+        "observaciones": audit.observaciones,
+    }
+
+
+async def list_surprise_audits(
+    db: AsyncSession,
+    company_id: str,
+    session_id: str | None = None,
+) -> list[dict]:
+    cid = uuid.UUID(company_id)
+    query = select(CashSurpriseAudit).where(CashSurpriseAudit.company_id == cid)
+    if session_id:
+        query = query.where(CashSurpriseAudit.session_id == uuid.UUID(session_id))
+    query = query.order_by(CashSurpriseAudit.fecha.desc()).limit(100)
+    res = await db.execute(query)
+    items = res.scalars().all()
+    return [
+        {
+            "id": str(a.id),
+            "session_id": str(a.session_id),
+            "fecha": a.fecha.isoformat() if a.fecha else None,
+            "cajero_nombre": a.cajero_nombre,
+            "auditor_nombre": a.auditor_nombre,
+            "monto_esperado_pyg": float(a.monto_esperado_pyg),
+            "monto_contado_pyg": float(a.monto_contado_pyg),
+            "diferencia_pyg": float(a.diferencia_pyg),
+            "monto_esperado_brl": float(a.monto_esperado_brl),
+            "monto_contado_brl": float(a.monto_contado_brl),
+            "diferencia_brl": float(a.diferencia_brl),
+            "resultado": a.resultado,
+            "desglose": a.desglose,
+            "observaciones": a.observaciones,
+        }
+        for a in items
+    ]
+
 
 
 

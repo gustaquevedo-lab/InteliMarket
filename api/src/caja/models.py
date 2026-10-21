@@ -141,12 +141,12 @@ class VaultEntry(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     branch_id = Column(UUID(as_uuid=True))
-    origen = Column(String(20), nullable=False, default="entrega_cajero")  # entrega_cajero | ajuste | otro
+    origen = Column(String(60), nullable=False, default="entrega_cajero")  # entrega_cajero | ajuste | dotacion_cajero | devolucion_cajero | reintegro_sencillo | otro
     handoff_id = Column(UUID(as_uuid=True), ForeignKey("cash_handoffs.id"), index=True)
     monto_pyg = Column(Numeric(15, 0), nullable=False, default=0)
     monto_usd = Column(Numeric(12, 2), default=0)
     monto_brl = Column(Numeric(12, 2), default=0)
-    estado = Column(String(20), nullable=False, default="en_boveda")  # en_boveda | depositado
+    estado = Column(String(50), nullable=False, default="en_boveda")  # en_boveda | depositado | asignado_cajero | fondo_sencillo | custodia_supervisor
     bank_transaction_id = Column(UUID(as_uuid=True))  # set cuando se concilia con el depósito real
     fecha_deposito = Column(DateTime(timezone=True))
     registrado_por = Column(UUID(as_uuid=True))
@@ -399,3 +399,88 @@ class CashAdvance(Base):
     observaciones = Column(Text)
     raw_response = Column(JSONB)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CashierFundAssignment(Base):
+    """Fondo fijo inicial de cambio asignado bajo responsabilidad de una cajera.
+    (Por defecto: ₲ 500.000 y R$ 300,00). Su creación o incremento descuenta
+    de la bóveda central; su devolución o desafectación reingresa a bóveda."""
+    __tablename__ = "cashier_fund_assignments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    cajero_nombre = Column(String(100), nullable=False)
+    monto_pyg = Column(Numeric(15, 0), nullable=False, default=500000)
+    monto_brl = Column(Numeric(12, 2), nullable=False, default=300.00)
+    monto_usd = Column(Numeric(12, 2), nullable=False, default=0.00)
+    estado = Column(String(30), nullable=False, default="activo", index=True)  # activo | inactivo
+    fecha_asignacion = Column(DateTime(timezone=True), server_default=func.now())
+    asignado_por = Column(UUID(as_uuid=True))
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class VaultPettyFund(Base):
+    """Fondo permanente de sencillo custodiado en Bóveda Central (separado de la
+    recaudación corriente de ventas). Monto base: ₲ 3.800.000."""
+    __tablename__ = "vault_petty_funds"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
+    nombre = Column(String(100), nullable=False, default="Fondo Permanente de Sencillo Bóveda")
+    monto_objetivo_pyg = Column(Numeric(15, 0), nullable=False, default=3800000)
+    saldo_actual_pyg = Column(Numeric(15, 0), nullable=False, default=3800000)
+    monto_objetivo_brl = Column(Numeric(12, 2), nullable=False, default=0.00)
+    saldo_actual_brl = Column(Numeric(12, 2), nullable=False, default=0.00)
+    activo = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class VaultPettyFundAudit(Base):
+    """Arqueo físico de auditoría sobre el fondo permanente de sencillo en bóveda central."""
+    __tablename__ = "vault_petty_fund_audits"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    fund_id = Column(UUID(as_uuid=True), ForeignKey("vault_petty_funds.id", ondelete="CASCADE"), nullable=False, index=True)
+    auditado_por = Column(UUID(as_uuid=True))
+    auditado_por_nombre = Column(String(100))
+    fecha = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    monto_esperado_pyg = Column(Numeric(15, 0), nullable=False)
+    monto_contado_pyg = Column(Numeric(15, 0), nullable=False)
+    diferencia_pyg = Column(Numeric(15, 0), nullable=False, default=0)
+    desglose = Column(JSONB)
+    resultado = Column(String(30), nullable=False, default="cuadrado")  # cuadrado | sobrante | faltante
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CashSurpriseAudit(Base):
+    """Acta de arqueo sorpresa realizado a una cajera en turno abierto (auditoría en caliente
+    sin cerrar la sesión de caja)."""
+    __tablename__ = "cash_surprise_audits"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    session_id = Column(UUID(as_uuid=True), ForeignKey("cash_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    auditor_id = Column(UUID(as_uuid=True))
+    auditor_nombre = Column(String(100))
+    cajero_nombre = Column(String(100))
+    fecha = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    monto_esperado_pyg = Column(Numeric(15, 0), nullable=False, default=0)
+    monto_contado_pyg = Column(Numeric(15, 0), nullable=False, default=0)
+    diferencia_pyg = Column(Numeric(15, 0), nullable=False, default=0)
+    monto_esperado_brl = Column(Numeric(12, 2), nullable=False, default=0.00)
+    monto_contado_brl = Column(Numeric(12, 2), nullable=False, default=0.00)
+    diferencia_brl = Column(Numeric(12, 2), nullable=False, default=0.00)
+    monto_esperado_usd = Column(Numeric(12, 2), nullable=False, default=0.00)
+    monto_contado_usd = Column(Numeric(12, 2), nullable=False, default=0.00)
+    diferencia_usd = Column(Numeric(12, 2), nullable=False, default=0.00)
+    desglose = Column(JSONB)
+    resultado = Column(String(30), nullable=False, default="cuadrado")  # cuadrado | sobrante | faltante
+    observaciones = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+

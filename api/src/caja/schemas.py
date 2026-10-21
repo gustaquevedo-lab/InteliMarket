@@ -359,3 +359,78 @@ class CashAdvanceResponse(BaseModel):
     estado: str
     observaciones: Optional[str] = None
     created_at: Optional[datetime] = None
+
+
+class CashierFundAssignmentResponse(BaseModel):
+    id: UUID
+    user_id: UUID
+    cajero_nombre: str
+    monto_pyg: float
+    monto_brl: float
+    monto_usd: float
+    estado: str
+    fecha_asignacion: Optional[datetime] = None
+    asignado_por: Optional[UUID] = None
+    observaciones: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CashierFundAssignRequest(BaseModel):
+    user_id: UUID
+    monto_pyg: Decimal = Decimal("500000")
+    monto_brl: Decimal = Decimal("300.00")
+    monto_usd: Decimal = Decimal("0.00")
+    debitar_de_boveda: bool = True
+    observaciones: Optional[str] = None
+
+
+class CashierFundReturnRequest(BaseModel):
+    monto_pyg: Decimal = Decimal("0")
+    monto_brl: Decimal = Decimal("0")
+    monto_usd: Decimal = Decimal("0")
+    desactivar_asignacion: bool = False
+    ingresar_a_boveda: bool = True
+    observaciones: Optional[str] = None
+
+
+class VaultPettyFundResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    nombre: str
+    monto_objetivo_pyg: float
+    saldo_actual_pyg: float
+    monto_objetivo_brl: float
+    saldo_actual_brl: float
+    activo: bool
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VaultPettyFundAdjustRequest(BaseModel):
+    monto_ajuste_pyg: Decimal
+    tipo: str  # "aumento" | "disminucion"
+    afectar_boveda_recaudacion: bool = True
+    motivo: str
+
+
+class VaultPettyFundAuditCreate(BaseModel):
+    monto_contado_pyg: Decimal
+    desglose: Optional[dict] = None
+    observaciones: Optional[str] = None
+    ajustar_saldo: bool = False
+
+
+class CashSurpriseAuditCreate(BaseModel):
+    monto_contado_pyg: Decimal
+    monto_contado_brl: Decimal = Decimal("0")
+    monto_contado_usd: Decimal = Decimal("0")
+    monto_tarjetas: Decimal = Decimal("0")
+    monto_transferencias: Decimal = Decimal("0")
+    monto_cheques: Decimal = Decimal("0")
+    monto_vales: Decimal = Decimal("0")
+    desglose: Optional[dict] = None
+    observaciones: Optional[str] = None
+

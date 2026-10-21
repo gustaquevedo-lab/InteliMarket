@@ -25,6 +25,9 @@ from api.src.caja.schemas import (
     ConfirmSessionCashReceptionRequest, CashSessionRendicionUpdate,
     CreatePaymentAdjustmentRequest, PaymentAdjustmentResponse,
     CashAdvanceCreate, CashAdvanceResponse,
+    CashierFundAssignmentResponse, CashierFundAssignRequest, CashierFundReturnRequest,
+    VaultPettyFundResponse, VaultPettyFundAdjustRequest,
+    VaultPettyFundAuditCreate, CashSurpriseAuditCreate,
 )
 from api.src.caja import service
 from api.src.caja import pdf_reports
@@ -1060,6 +1063,114 @@ async def delete_payment_adjustment(
         return {"ok": True, "message": "Reclasificación eliminada con éxito"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── FONDOS ASIGNADOS A CAJERAS ──────────────────────────────────────────────
+
+@router.get("/caja/cashier-funds")
+async def list_cashier_funds(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.list_cashier_fund_assignments(db, user["company_id"])
+
+
+@router.post("/caja/cashier-funds")
+async def assign_cashier_fund(
+    body: CashierFundAssignRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_rol = (user.get("rol") or "").lower()
+    if user_rol not in ("supervisor", "admin", "superadmin", "gerente"):
+        raise HTTPException(status_code=403, detail="Solo administradores o supervisores pueden asignar fondos de caja")
+    try:
+        return await service.assign_cashier_fund(db, user["company_id"], body.model_dump(), user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/caja/cashier-funds/{assignment_id}/return")
+async def return_cashier_fund(
+    assignment_id: str,
+    body: CashierFundReturnRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_rol = (user.get("rol") or "").lower()
+    if user_rol not in ("supervisor", "admin", "superadmin", "gerente"):
+        raise HTTPException(status_code=403, detail="Solo administradores o supervisores pueden recibir devolución de fondos")
+    try:
+        return await service.return_cashier_fund(db, user["company_id"], assignment_id, body.model_dump(), user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── FONDO PERMANENTE DE SENCILLO EN BÓVEDA CENTRAL ──────────────────────────
+
+@router.get("/vault/petty-fund")
+async def get_vault_petty_fund(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.get_vault_petty_fund(db, user["company_id"])
+
+
+@router.post("/vault/petty-fund/adjust")
+async def adjust_vault_petty_fund(
+    body: VaultPettyFundAdjustRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_rol = (user.get("rol") or "").lower()
+    if user_rol not in ("admin", "superadmin", "gerente"):
+        raise HTTPException(status_code=403, detail="Solo el administrador puede ajustar el fondo permanente de sencillo en bóveda")
+    try:
+        return await service.adjust_vault_petty_fund(db, user["company_id"], body.model_dump(), user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/vault/petty-fund/audit")
+async def audit_vault_petty_fund(
+    body: VaultPettyFundAuditCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_rol = (user.get("rol") or "").lower()
+    if user_rol not in ("admin", "superadmin", "gerente"):
+        raise HTTPException(status_code=403, detail="Solo el administrador puede realizar arqueos del fondo de sencillo de bóveda")
+    try:
+        return await service.audit_vault_petty_fund(db, user["company_id"], body.model_dump(), user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/vault/petty-fund/audits")
+async def list_vault_petty_fund_audits(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.list_vault_petty_fund_audits(db, user["company_id"])
+
+
+# ── ARQUEOS SORPRESA DE CAJERA EN TURNO ACTIVO ──────────────────────────────
+
+@router.post("/cash-sessions/{session_id}/surprise-audit")
+async def execute_session_surprise_audit(
+    session_id: str,
+    body: CashSurpriseAuditCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    user_rol = (user.get("rol") or "").lower()
+    if user_rol not in ("supervisor", "admin", "superadmin", "gerente", "auditor"):
+        raise HTTPException(status_code=403, detail="Solo supervisores o auditores pueden realizar arqueos sorpresa")
+    try:
+        return await service.execute_surprise_audit(db, user["company_id"], session_id, body.model_dump(), user)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/cash-sessions/{session_id}/surprise-audits")
+async def list_session_surprise_audits(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.list_surprise_audits(db, user["company_id"], session_id)
+
 
 
 

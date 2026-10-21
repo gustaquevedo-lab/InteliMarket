@@ -99,6 +99,7 @@ interface SessionSummary {
   fecha_apertura: string
   fecha_cierre: string | null
   monto_apertura: number
+  monto_apertura_brl?: number
   monto_cierre: number | null
   monto_cierre_esperado: number | null
   diferencia: number | null
@@ -257,6 +258,7 @@ export default function CajaPage() {
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null)
   const [selectedRegister, setSelectedRegister] = useState<string>("")
   const [montoApertura, setMontoApertura] = useState("0")
+  const [montoAperturaBrl, setMontoAperturaBrl] = useState("0")
   const [montoCierre, setMontoCierre] = useState("0")
   const [montoCierreUsd, setMontoCierreUsd] = useState("0")
   const [montoCierreBrl, setMontoCierreBrl] = useState("0")
@@ -272,6 +274,19 @@ export default function CajaPage() {
   const [escposModalOpen, setEscposModalOpen] = useState(false)
   const [escposLoading, setEscposLoading] = useState(false)
   const [escposTicketData, setEscposTicketData] = useState<{ session_id: string; ticket_text: string; ticket_escpos_b64: string; reconciliation: any } | null>(null)
+
+  // ── Arqueo Sorpresa Inopinado de Gaveta en Vivo ──
+  const [showSurpriseModal, setShowSurpriseModal] = useState(false)
+  const [surpriseSession, setSurpriseSession] = useState<SessionSummary | null>(null)
+  const [surpriseContadoPyg, setSurpriseContadoPyg] = useState("0")
+  const [surpriseContadoBrl, setSurpriseContadoBrl] = useState("0")
+  const [surpriseContadoUsd, setSurpriseContadoUsd] = useState("0")
+  const [surpriseObs, setSurpriseObs] = useState("")
+  const [surpriseLoading, setSurpriseLoading] = useState(false)
+  const [surpriseResult, setSurpriseResult] = useState<any | null>(null)
+  const [historySurpriseModal, setHistorySurpriseModal] = useState(false)
+  const [surpriseHistoryList, setSurpriseHistoryList] = useState<any[]>([])
+  const [loadingSurpriseHistory, setLoadingSurpriseHistory] = useState(false)
 
   // ── Planilla de Punteo de Arqueo Detallado (Fase 5) ──
   const [punteoModalOpen, setPunteoModalOpen] = useState(false)
@@ -1197,6 +1212,31 @@ export default function CajaPage() {
     setMontoCierre(String(suma))
   }
 
+  const openAperturaModal = async (registerId?: string) => {
+    if (registerId) setSelectedRegister(registerId)
+    const isSupervisor = user?.rol?.toLowerCase().includes("supervis") || user?.rol?.toLowerCase().includes("admin")
+    if (isSupervisor) {
+      setMontoApertura("0")
+      setMontoAperturaBrl("0")
+    } else {
+      try {
+        const assignments = await api.caja.cashierFunds.list()
+        const userAssign = assignments.find(a => a.user_id === user?.id && a.estado === "activo")
+        if (userAssign) {
+          setMontoApertura(String(userAssign.monto_pyg))
+          setMontoAperturaBrl(String(userAssign.monto_brl))
+        } else {
+          setMontoApertura("500000")
+          setMontoAperturaBrl("300")
+        }
+      } catch {
+        setMontoApertura("500000")
+        setMontoAperturaBrl("300")
+      }
+    }
+    setShowOpenModal(true)
+  }
+
   const handleOpenSession = async () => {
     if (!selectedRegister) {
       toast.error("Error", "Seleccioná una caja registradora")
@@ -1208,14 +1248,59 @@ export default function CajaPage() {
         user_id: user?.id || "00000000-0000-0000-0000-000000000000",
         cajero_nombre: user?.nombre,
         monto_apertura: parseFloat(montoApertura) || 0,
+        monto_apertura_brl: parseFloat(montoAperturaBrl) || 0,
       })
       toast.success("Caja abierta", "Turno de caja iniciado correctamente")
       setShowOpenModal(false)
       setMontoApertura("0")
+      setMontoAperturaBrl("0")
       setSelectedRegister("")
       fetchData()
     } catch {
       toast.error("Error", "No se pudo abrir la caja")
+    }
+  }
+
+  const handleOpenSurpriseModal = (session: SessionSummary) => {
+    setSurpriseSession(session)
+    setSurpriseContadoPyg("0")
+    setSurpriseContadoBrl("0")
+    setSurpriseContadoUsd("0")
+    setSurpriseObs("")
+    setSurpriseResult(null)
+    setShowSurpriseModal(true)
+  }
+
+  const handleExecuteSurpriseAudit = async () => {
+    if (!surpriseSession) return
+    setSurpriseLoading(true)
+    try {
+      const res = await api.caja.sessions.surpriseAudit(surpriseSession.id, {
+        monto_contado_pyg: parseFloat(surpriseContadoPyg) || 0,
+        monto_contado_brl: parseFloat(surpriseContadoBrl) || 0,
+        monto_contado_usd: parseFloat(surpriseContadoUsd) || 0,
+        observaciones: surpriseObs.trim() || undefined,
+      })
+      setSurpriseResult(res)
+      toast.success("Arqueo Sorpresa Registrado", `Estado: ${res.estado.toUpperCase()}`)
+    } catch (err: any) {
+      toast.error("Error", err?.message || "No se pudo registrar el arqueo sorpresa")
+    } finally {
+      setSurpriseLoading(false)
+    }
+  }
+
+  const handleOpenSurpriseHistory = async (sessionId: string) => {
+    setLoadingSurpriseHistory(true)
+    setHistorySurpriseModal(true)
+    try {
+      const list = await api.caja.sessions.listSurpriseAudits(sessionId)
+      setSurpriseHistoryList(list)
+    } catch {
+      toast.error("Error", "No se pudo cargar el historial de arqueos sorpresa")
+      setSurpriseHistoryList([])
+    } finally {
+      setLoadingSurpriseHistory(false)
     }
   }
 
@@ -1472,7 +1557,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               <span>Nueva Terminal</span>
             </button>
             <button
-              onClick={() => setShowOpenModal(true)}
+              onClick={() => openAperturaModal()}
               className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white text-xs font-extrabold transition flex items-center gap-2 shadow-lg shadow-emerald-500/25"
             >
               <Wallet className="w-4 h-4" />
@@ -1662,12 +1747,20 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                       </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-2 pt-2">
+                    <div className="grid grid-cols-3 gap-1.5 pt-2">
+                      <button
+                        onClick={() => handleOpenSurpriseModal(activeSession)}
+                        className="btn-outline !py-1.5 text-[11px] font-bold text-amber-700 dark:text-amber-400 border-amber-300 hover:bg-amber-50 flex items-center justify-center gap-1"
+                        title="Auditoría inopinada durante el turno"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
+                        Sorpresa
+                      </button>
                       <button
                         onClick={() => handleOpenCashDrop(activeSession)}
                         className="btn-outline !py-1.5 text-xs text-amber-700 dark:text-amber-400 border-amber-300 hover:bg-amber-50"
                       >
-                        Retiro / Sangría
+                        Retiro / Drop
                       </button>
                       <button
                         onClick={() => {
@@ -1676,7 +1769,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         }}
                         className="btn-primary !bg-red-600 hover:!bg-red-500 !py-1.5 text-xs"
                       >
-                        Cierre & Arqueo
+                        Cierre
                       </button>
                     </div>
 
@@ -1691,10 +1784,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   <div className="pt-4 border-t border-gray-100 dark:border-gray-700/60 text-center py-4">
                     <p className="text-xs text-gray-400 mb-3">No hay turno abierto en esta caja</p>
                     <button
-                      onClick={() => {
-                        setSelectedRegister(r.id)
-                        setShowOpenModal(true)
-                      }}
+                      onClick={() => openAperturaModal(r.id)}
                       className="btn-outline text-xs !py-1.5 mx-auto"
                     >
                       Abrir Turno
@@ -1743,7 +1833,12 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         {formatDateTime(s.fecha_apertura)}
                       </td>
                       <td className="p-3.5 text-right font-mono font-bold text-gray-700 dark:text-gray-300">
-                        {formatPYG(s.monto_apertura)}
+                        <div>{formatPYG(s.monto_apertura)}</div>
+                        {(s.monto_apertura_brl || 0) > 0 && (
+                          <div className="text-[10px] text-emerald-600 font-semibold">
+                            + {formatBRL(s.monto_apertura_brl || 0)}
+                          </div>
+                        )}
                       </td>
                       <td className="p-3.5 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
                         {formatPYG(s.efectivo_acumulado)}
@@ -1752,7 +1847,15 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         {formatPYG(s.monto_cobrado)}
                       </td>
                       <td className="p-3.5 text-center">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenSurpriseModal(s)}
+                            className="p-1.5 rounded-lg border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 inline-flex items-center gap-1 font-bold text-[11px] transition-colors shadow-sm"
+                            title="Auditar en vivo y registrar Arqueo Sorpresa de Gaveta"
+                          >
+                            <ShieldAlert className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                            Sorpresa
+                          </button>
                           <button
                             onClick={() => handleOpenBreakdown(s)}
                             className="btn-outline !py-1 !px-2.5 text-[11px]"
@@ -3976,22 +4079,24 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
       {/* MODAL: APERTURA DE CAJA */}
       {showOpenModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="card max-w-md w-full p-6 space-y-4 shadow-2xl animate-fade-in-up">
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-700 pb-3">
+          <div className="max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-xl max-w-md w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 animate-fade-in-up">
+            <div className="shrink-0 flex items-center justify-between border-b border-gray-100 dark:border-gray-800 p-4">
               <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
                 <Wallet className="w-5 h-5 text-emerald-600" />
                 Apertura de Turno de Caja
               </h3>
-              <button onClick={() => setShowOpenModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowOpenModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
               <div>
-                <label className="input-label">Seleccionar Terminal POS</label>
+                <label className="input-label block font-bold mb-1 text-gray-700 dark:text-gray-300">
+                  Terminal POS
+                </label>
                 <select
-                  className="input-field"
+                  className="input-field w-full"
                   value={selectedRegister}
                   onChange={e => setSelectedRegister(e.target.value)}
                 >
@@ -4004,25 +4109,344 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 </select>
               </div>
 
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-emerald-900 dark:text-emerald-200">
+                <p className="font-semibold flex items-center gap-1.5 mb-1 text-[11px]">
+                  <Coins className="w-3.5 h-3.5 text-emerald-600" />
+                  Dotación de Fondo Inicial de Gaveta
+                </p>
+                <p className="text-[10px] text-emerald-800 dark:text-emerald-300">
+                  {user?.rol?.toLowerCase().includes("supervis") || user?.rol?.toLowerCase().includes("admin")
+                    ? "Perfil supervisor: sin dotación de cambio inicial asignada."
+                    : "Fondo permanente bajo custodia de la cajera (500.000 y R$ 300,00). Modificá únicamente ante casos extraordinarios autorizados."}
+                </p>
+              </div>
+
               <div>
-                <label className="input-label">Monto de Fondo Fijo / Cambio Inicial (PYG)</label>
-                <input
-                  type="number"
-                  className="input-field font-mono font-bold text-sm"
-                  placeholder="500000"
+                <label className="input-label block font-bold mb-1 text-gray-700 dark:text-gray-300">
+                  Fondo Inicial en Guaraníes
+                </label>
+                <CurrencyInput
+                  currency="PYG"
+                  className="input-field font-mono font-bold text-sm w-full"
+                  placeholder="500.000"
                   value={montoApertura}
-                  onChange={e => setMontoApertura(e.target.value)}
+                  onChangeValue={(num) => setMontoApertura(String(num))}
                 />
-                <p className="text-[11px] text-gray-400 mt-1">Efectivo entregado para cambio inicial en gaveta.</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">Efectivo para cambio inicial en gaveta.</p>
+              </div>
+
+              <div>
+                <label className="input-label block font-bold mb-1 text-gray-700 dark:text-gray-300">
+                  Fondo Inicial en Reales (R$)
+                </label>
+                <CurrencyInput
+                  currency="BRL"
+                  className="input-field font-mono font-bold text-sm w-full"
+                  placeholder="300,00"
+                  value={montoAperturaBrl}
+                  onChangeValue={(num) => setMontoAperturaBrl(String(num))}
+                />
+                <p className="text-[10px] text-gray-400 mt-0.5">Sencillo en R$ para vuelto de clientes de frontera.</p>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="shrink-0 flex justify-end gap-2 p-4 border-t border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-900">
               <button onClick={() => setShowOpenModal(false)} className="btn-outline text-xs">
                 Cancelar
               </button>
-              <button onClick={handleOpenSession} className="btn-primary !bg-emerald-600 text-xs">
+              <button onClick={handleOpenSession} className="btn-primary !bg-emerald-600 hover:!bg-emerald-500 text-xs">
                 Confirmar Apertura
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ARQUEO SORPRESA INOPINADO EN VIVO */}
+      {showSurpriseModal && surpriseSession && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-xl max-w-xl w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 animate-fade-in-up">
+            <div className="shrink-0 flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 bg-amber-500/10">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-500/20 text-amber-600 dark:text-amber-400 rounded-xl">
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-gray-900 dark:text-white flex items-center gap-2">
+                    Arqueo Sorpresa Inopinado de Gaveta
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                      EN VIVO
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Caja: <strong className="text-gray-800 dark:text-gray-200">{getRegisterName(surpriseSession.register_id)}</strong> · Cajero: <strong className="text-gray-800 dark:text-gray-200">{getCajero(surpriseSession)}</strong>
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowSurpriseModal(false)
+                  setSurpriseResult(null)
+                }}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              {!surpriseResult ? (
+                <>
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-xl text-amber-900 dark:text-amber-200 leading-relaxed">
+                    <p className="font-semibold flex items-center gap-1.5 mb-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                      Auditoría inopinada sin cierre de turno
+                    </p>
+                    <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                      Esta operación no interrumpe la sesión activa del cajero. Registra el conteo físico real de billetes y monedas en gaveta en este instante exacto para compararlo automáticamente con el saldo teórico acumulado (Fondo Inicial + Ventas Efectivo - Sangrías/Retiros).
+                    </p>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="input-label block font-bold mb-1 text-gray-700 dark:text-gray-300">
+                        Efectivo Físico Contado en Gaveta (Guaraníes)
+                      </label>
+                      <CurrencyInput
+                        currency="PYG"
+                        value={surpriseContadoPyg}
+                        onChangeValue={(num) => setSurpriseContadoPyg(String(num))}
+                        className="input-field font-mono font-bold text-sm w-full"
+                        placeholder="0"
+                      />
+                      <span className="text-[10px] text-gray-400">Total físico contado en ₲</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="input-label block font-bold mb-1 text-gray-700 dark:text-gray-300">
+                          Reales en Gaveta (R$)
+                        </label>
+                        <CurrencyInput
+                          currency="BRL"
+                          value={surpriseContadoBrl}
+                          onChangeValue={(num) => setSurpriseContadoBrl(String(num))}
+                          className="input-field font-mono font-bold text-sm w-full"
+                          placeholder="0,00"
+                        />
+                        <span className="text-[10px] text-gray-400">Total físico contado en R$</span>
+                      </div>
+                      <div>
+                        <label className="input-label block font-bold mb-1 text-gray-700 dark:text-gray-300">
+                          Dólares en Gaveta (US$)
+                        </label>
+                        <CurrencyInput
+                          currency="USD"
+                          value={surpriseContadoUsd}
+                          onChangeValue={(num) => setSurpriseContadoUsd(String(num))}
+                          className="input-field font-mono font-bold text-sm w-full"
+                          placeholder="0,00"
+                        />
+                        <span className="text-[10px] text-gray-400">Total físico contado en US$</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="input-label block font-bold mb-1 text-gray-700 dark:text-gray-300">
+                        Observaciones del Arqueo / Motivo
+                      </label>
+                      <input
+                        type="text"
+                        className="input-field text-xs w-full"
+                        placeholder="Ej: Auditoría inopinada de mediodía, cambio de turno provisional..."
+                        value={surpriseObs}
+                        onChange={e => setSurpriseObs(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <div className={`p-4 rounded-xl border text-center ${
+                    surpriseResult.estado === "cuadrado"
+                      ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 text-emerald-800 dark:text-emerald-300"
+                      : surpriseResult.estado === "sobrante"
+                      ? "bg-blue-50 dark:bg-blue-950/40 border-blue-300 text-blue-800 dark:text-blue-300"
+                      : "bg-red-50 dark:bg-red-950/40 border-red-300 text-red-800 dark:text-red-300"
+                  }`}>
+                    <div className="text-2xl font-black mb-1">
+                      {surpriseResult.estado === "cuadrado" ? "✓ CUADRADO EXACTO" : surpriseResult.estado === "sobrante" ? "↑ SOBRANTE DE DINERO" : "↓ FALTANTE EN GAVETA"}
+                    </div>
+                    <p className="text-xs opacity-90">
+                      Auditado por: <span className="font-bold">{surpriseResult.auditado_por}</span> · {formatDateTime(surpriseResult.fecha_arqueo)}
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h4 className="font-bold text-gray-900 dark:text-white uppercase tracking-wider text-[11px]">
+                      Dictamen Comparativo Instantáneo
+                    </h4>
+                    <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-200 dark:divide-slate-800">
+                      <div className="p-3 bg-slate-50 dark:bg-slate-800/50 flex justify-between items-center">
+                        <div>
+                          <span className="font-bold text-gray-900 dark:text-white">Efectivo en Guaraníes</span>
+                          <div className="text-[11px] text-gray-500">
+                            Esperado: {formatPYG(surpriseResult.efectivo_esperado_pyg)} | Contado: {formatPYG(surpriseResult.efectivo_contado_pyg)}
+                          </div>
+                        </div>
+                        <div className={`font-mono font-bold text-sm ${
+                          surpriseResult.diferencia_pyg === 0 ? "text-emerald-600" : surpriseResult.diferencia_pyg > 0 ? "text-blue-600" : "text-red-600"
+                        }`}>
+                          {surpriseResult.diferencia_pyg > 0 ? `+${formatPYG(surpriseResult.diferencia_pyg)}` : formatPYG(surpriseResult.diferencia_pyg)}
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 dark:bg-slate-800/50 flex justify-between items-center">
+                        <div>
+                          <span className="font-bold text-gray-900 dark:text-white">Reales (R$)</span>
+                          <div className="text-[11px] text-gray-500">
+                            Esperado: {formatBRL(surpriseResult.efectivo_esperado_brl)} | Contado: {formatBRL(surpriseResult.efectivo_contado_brl)}
+                          </div>
+                        </div>
+                        <div className={`font-mono font-bold text-sm ${
+                          surpriseResult.diferencia_brl === 0 ? "text-emerald-600" : surpriseResult.diferencia_brl > 0 ? "text-blue-600" : "text-red-600"
+                        }`}>
+                          {surpriseResult.diferencia_brl > 0 ? `+${formatBRL(surpriseResult.diferencia_brl)}` : formatBRL(surpriseResult.diferencia_brl)}
+                        </div>
+                      </div>
+
+                      {(surpriseResult.efectivo_esperado_usd > 0 || surpriseResult.efectivo_contado_usd > 0) && (
+                        <div className="p-3 bg-slate-50 dark:bg-slate-800/50 flex justify-between items-center">
+                          <div>
+                            <span className="font-bold text-gray-900 dark:text-white">Dólares (US$)</span>
+                            <div className="text-[11px] text-gray-500">
+                              Esperado: {formatUSD(surpriseResult.efectivo_esperado_usd)} | Contado: {formatUSD(surpriseResult.efectivo_contado_usd)}
+                            </div>
+                          </div>
+                          <div className={`font-mono font-bold text-sm ${
+                            surpriseResult.diferencia_usd === 0 ? "text-emerald-600" : surpriseResult.diferencia_usd > 0 ? "text-blue-600" : "text-red-600"
+                          }`}>
+                            {surpriseResult.diferencia_usd > 0 ? `+${formatUSD(surpriseResult.diferencia_usd)}` : formatUSD(surpriseResult.diferencia_usd)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="shrink-0 p-4 border-t border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => handleOpenSurpriseHistory(surpriseSession.id)}
+                className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold flex items-center gap-1"
+              >
+                <ClipboardCheck className="w-3.5 h-3.5" />
+                Historial de Arqueos
+              </button>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSurpriseModal(false)
+                    setSurpriseResult(null)
+                  }}
+                  className="btn-outline text-xs"
+                >
+                  {surpriseResult ? "Cerrar" : "Cancelar"}
+                </button>
+                {!surpriseResult && (
+                  <button
+                    type="button"
+                    disabled={surpriseLoading}
+                    onClick={handleExecuteSurpriseAudit}
+                    className="btn-primary !bg-amber-600 hover:!bg-amber-500 text-xs flex items-center gap-1.5"
+                  >
+                    {surpriseLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldAlert className="w-4 h-4" />}
+                    Confirmar Arqueo Sorpresa
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: HISTORIAL ARQUEOS SORPRESA DEL TURNO */}
+      {historySurpriseModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-xl max-w-2xl w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            <div className="shrink-0 flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+              <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                <ShieldAlert className="w-5 h-5 text-amber-500" />
+                Historial de Arqueos Sorpresa del Turno
+              </h3>
+              <button onClick={() => setHistorySurpriseModal(false)} className="text-gray-400 hover:text-gray-600 p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {loadingSurpriseHistory ? (
+                <div className="p-8 text-center text-gray-400">
+                  <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
+                  Cargando arqueos sorpresa...
+                </div>
+              ) : surpriseHistoryList.length === 0 ? (
+                <div className="p-8 text-center text-gray-400">
+                  No se registraron arqueos sorpresa en esta sesión de caja.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {surpriseHistoryList.map(a => (
+                    <div key={a.id} className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 text-xs space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="font-mono text-gray-500">{formatDateTime(a.fecha_arqueo)}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          a.estado === "cuadrado"
+                            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                            : a.estado === "sobrante"
+                            ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                            : "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
+                        }`}>
+                          {a.estado.toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div>
+                          <span className="text-gray-400">Guaraníes:</span>
+                          <div className="font-mono font-semibold">
+                            Esperado: {formatPYG(a.efectivo_esperado_pyg)} | Contado: {formatPYG(a.efectivo_contado_pyg)}
+                          </div>
+                          <div className={`font-mono font-bold ${a.diferencia_pyg === 0 ? "text-emerald-600" : a.diferencia_pyg > 0 ? "text-blue-600" : "text-red-600"}`}>
+                            Dif: {a.diferencia_pyg > 0 ? `+${formatPYG(a.diferencia_pyg)}` : formatPYG(a.diferencia_pyg)}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Reales:</span>
+                          <div className="font-mono font-semibold">
+                            Esperado: {formatBRL(a.efectivo_esperado_brl)} | Contado: {formatBRL(a.efectivo_contado_brl)}
+                          </div>
+                          <div className={`font-mono font-bold ${a.diferencia_brl === 0 ? "text-emerald-600" : a.diferencia_brl > 0 ? "text-blue-600" : "text-red-600"}`}>
+                            Dif: {a.diferencia_brl > 0 ? `+${formatBRL(a.diferencia_brl)}` : formatBRL(a.diferencia_brl)}
+                          </div>
+                        </div>
+                      </div>
+                      {a.observaciones && (
+                        <p className="text-[11px] text-gray-500 italic">“{a.observaciones}”</p>
+                      )}
+                      <div className="text-[10px] text-gray-400 text-right">
+                        Auditado por: <span className="font-medium text-gray-600 dark:text-gray-300">{a.auditado_por}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="shrink-0 p-3 border-t border-gray-100 dark:border-gray-800 bg-slate-50 dark:bg-slate-900 flex justify-end">
+              <button onClick={() => setHistorySurpriseModal(false)} className="btn-outline text-xs">
+                Cerrar
               </button>
             </div>
           </div>

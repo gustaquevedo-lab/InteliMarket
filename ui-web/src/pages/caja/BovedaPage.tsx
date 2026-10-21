@@ -4,9 +4,14 @@ import {
   TrendingDown, TrendingUp, AlertTriangle, Clock, Landmark, CheckCircle,
   XCircle, FileText, Lock, KeyRound, DollarSign, ArrowUpRight, ArrowDownRight,
   ChevronRight, Building2, Store, Activity, Layers, Download, Check, Sparkles, X,
-  PackageCheck, Inbox, Send, FileSpreadsheet, Calendar, Search, Printer, Wallet, RotateCcw
+  PackageCheck, Inbox, Send, FileSpreadsheet, Calendar, Search, Printer, Wallet, RotateCcw,
+  Coins, ArrowLeftRight, Plus
 } from "lucide-react"
-import { api, downloadAuthenticated, type BankAccount, type BankTransaction, type VaultDashboard, type VaultEntry } from "../../api"
+import {
+  api, downloadAuthenticated, type BankAccount, type BankTransaction,
+  type VaultDashboard, type VaultEntry, type CashierFundAssignmentItem,
+  type VaultPettyFundData, type VaultPettyFundAuditItem, type TenantUser
+} from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatDateTime, getTodayAsuncion, formatBRL, formatUSD, formatCurrency } from "../../utils/format"
 import CurrencyInput from "../../components/CurrencyInput"
@@ -68,6 +73,45 @@ export default function BovedaPage() {
   const [approvalActionId, setApprovalActionId] = useState<string | null>(null)
   const [exportingPdf, setExportingPdf] = useState(false)
   const [searchMovements, setSearchMovements] = useState("")
+
+  // Fondo Permanente de Sencillo & Asignaciones de Cajeras
+  const [pettyFund, setPettyFund] = useState<VaultPettyFundData | null>(null)
+  const [pettyFundAudits, setPettyFundAudits] = useState<VaultPettyFundAuditItem[]>([])
+  const [cashierFunds, setCashierFunds] = useState<CashierFundAssignmentItem[]>([])
+  const [tenantUsers, setTenantUsers] = useState<TenantUser[]>([])
+
+  // Modales de Fondo Permanente de Sencillo
+  const [showAdjustPettyModal, setShowAdjustPettyModal] = useState(false)
+  const [adjustPettyMonto, setAdjustPettyMonto] = useState("0")
+  const [adjustPettyTipo, setAdjustPettyTipo] = useState<"aumento" | "disminucion">("aumento")
+  const [adjustPettyMotivo, setAdjustPettyMotivo] = useState("")
+  const [adjustPettyAfectarBoveda, setAdjustPettyAfectarBoveda] = useState(true)
+  const [adjustPettyLoading, setAdjustPettyLoading] = useState(false)
+
+  const [showAuditPettyModal, setShowAuditPettyModal] = useState(false)
+  const [auditPettyContado, setAuditPettyContado] = useState("0")
+  const [auditPettyAjustar, setAuditPettyAjustar] = useState(false)
+  const [auditPettyObs, setAuditPettyObs] = useState("")
+  const [auditPettyLoading, setAuditPettyLoading] = useState(false)
+
+  const [showPettyAuditsModal, setShowPettyAuditsModal] = useState(false)
+
+  // Modales de Asignación y Devolución de Fondos a Cajeras
+  const [showAssignCashierModal, setShowAssignCashierModal] = useState(false)
+  const [assignUserId, setAssignUserId] = useState("")
+  const [assignPyg, setAssignPyg] = useState("500000")
+  const [assignBrl, setAssignBrl] = useState("300")
+  const [assignDebitar, setAssignDebitar] = useState(true)
+  const [assignObs, setAssignObs] = useState("")
+  const [assignLoading, setAssignLoading] = useState(false)
+
+  const [showReturnCashierModal, setShowReturnCashierModal] = useState<CashierFundAssignmentItem | null>(null)
+  const [returnPyg, setReturnPyg] = useState("0")
+  const [returnBrl, setReturnBrl] = useState("0")
+  const [returnDesactivar, setReturnDesactivar] = useState(true)
+  const [returnIngresar, setReturnIngresar] = useState(true)
+  const [returnObs, setReturnObs] = useState("")
+  const [returnLoading, setReturnLoading] = useState(false)
 
   type VaultCurrency = "PYG" | "BRL" | "USD" | "CHEQUE"
   const [kardexMoneda, setKardexMoneda] = useState<VaultCurrency>("PYG")
@@ -148,7 +192,7 @@ export default function BovedaPage() {
 
   const load = async () => {
     try {
-      const [bankList, deps, recs, ap, ar, movs, vaultData, entriesData, approvals, remList] = await Promise.all([
+      const [bankList, deps, recs, ap, ar, movs, vaultData, entriesData, approvals, remList, pFund, pAudits, cFunds, uList] = await Promise.all([
         api.financial.banks.list(),
         api.financial.banks.allTransactions({ categoria: "deposito_caja", limit: 100 }),
         api.financeAgent.recommendations("pending").catch(() => []),
@@ -159,6 +203,10 @@ export default function BovedaPage() {
         api.vault.entries({ estado: "en_boveda" }),
         api.vault.depositApprovals.list("pendiente"),
         api.caja.treasuryRemittances.list(),
+        api.vault.pettyFund.get().catch(() => null),
+        api.vault.pettyFund.listAudits().catch(() => []),
+        api.caja.cashierFunds.list().catch(() => []),
+        api.auth.users.list().catch(() => []),
       ])
       setBanks(bankList)
       setDeposits([...(deps || [])].sort((a: any, b: any) => new Date(b.fecha || b.created_at || 0).getTime() - new Date(a.fecha || a.created_at || 0).getTime()))
@@ -170,11 +218,18 @@ export default function BovedaPage() {
       setVaultEntries([...(entriesData || [])].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()))
       setDepositApprovals([...(approvals || [])].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()))
       setRemittances([...(remList || [])].sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()))
+      setPettyFund(pFund)
+      setPettyFundAudits(pAudits || [])
+      setCashierFunds(cFunds || [])
+      setTenantUsers(uList || [])
     } catch {
       setBanks([])
       setDeposits([])
       setPendientes([])
       setRemittances([])
+      setPettyFundAudits([])
+      setCashierFunds([])
+      setTenantUsers([])
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -425,6 +480,152 @@ export default function BovedaPage() {
       toast.error("Error", "No se pudo rechazar")
     } finally {
       setApprovalActionId(null)
+    }
+  }
+
+  // Manejadores para Fondo Permanente de Sencillo
+  const handleOpenAdjustPetty = () => {
+    setAdjustPettyMonto("0")
+    setAdjustPettyTipo("aumento")
+    setAdjustPettyMotivo("")
+    setAdjustPettyAfectarBoveda(true)
+    setShowAdjustPettyModal(true)
+  }
+
+  const handleConfirmAdjustPetty = async () => {
+    const numericMonto = parseFloat(adjustPettyMonto) || 0
+    if (numericMonto <= 0) {
+      toast.warning("Monto inválido", "El monto de ajuste debe ser mayor a 0.")
+      return
+    }
+    if (!adjustPettyMotivo.trim()) {
+      toast.warning("Motivo requerido", "Ingrese una justificación para el movimiento de sencillo.")
+      return
+    }
+    setAdjustPettyLoading(true)
+    try {
+      await api.vault.pettyFund.adjust({
+        monto_ajuste_pyg: numericMonto,
+        tipo: adjustPettyTipo,
+        afectar_boveda_recaudacion: adjustPettyAfectarBoveda,
+        motivo: adjustPettyMotivo.trim(),
+      })
+      toast.success(
+        "Fondo actualizado",
+        adjustPettyTipo === "aumento"
+          ? `Se ampliaron ₲ ${numericMonto.toLocaleString("es-PY")} al fondo de sencillo.`
+          : `Se reintegraron ₲ ${numericMonto.toLocaleString("es-PY")} a la recaudación de bóveda.`
+      )
+      setShowAdjustPettyModal(false)
+      load()
+    } catch (e: any) {
+      toast.error("Error al ajustar fondo", e?.message || "No se pudo procesar el ajuste.")
+    } finally {
+      setAdjustPettyLoading(false)
+    }
+  }
+
+  const handleOpenAuditPetty = () => {
+    setAuditPettyContado(pettyFund ? String(pettyFund.saldo_actual_pyg) : "0")
+    setAuditPettyAjustar(false)
+    setAuditPettyObs("")
+    setShowAuditPettyModal(true)
+  }
+
+  const handleConfirmAuditPetty = async () => {
+    const numericContado = parseFloat(auditPettyContado) || 0
+    setAuditPettyLoading(true)
+    try {
+      const res = await api.vault.pettyFund.audit({
+        monto_contado_pyg: numericContado,
+        observaciones: auditPettyObs.trim() || undefined,
+        ajustar_saldo: auditPettyAjustar,
+      })
+      toast.success(
+        "Arqueo de sencillo registrado",
+        `Resultado: ${res.resultado.toUpperCase()} (Diferencia: ₲ ${res.diferencia_pyg.toLocaleString("es-PY")})`
+      )
+      setShowAuditPettyModal(false)
+      load()
+    } catch (e: any) {
+      toast.error("Error en arqueo", e?.message || "No se pudo registrar el arqueo.")
+    } finally {
+      setAuditPettyLoading(false)
+    }
+  }
+
+  // Manejadores para Fondos de Cajeras
+  const handleOpenAssignCashier = () => {
+    const activeCashiers = tenantUsers.filter(u => (u.rol || "").toLowerCase().includes("cajer") && u.activo)
+    if (activeCashiers.length > 0 && !assignUserId) {
+      setAssignUserId(activeCashiers[0].id)
+    }
+    setAssignPyg("500000")
+    setAssignBrl("300")
+    setAssignDebitar(true)
+    setAssignObs("")
+    setShowAssignCashierModal(true)
+  }
+
+  const handleConfirmAssignCashier = async () => {
+    if (!assignUserId) {
+      toast.warning("Seleccione cajera", "Debe elegir una colaboradora para asignarle el fondo.")
+      return
+    }
+    const numPyg = parseFloat(assignPyg) || 0
+    const numBrl = parseFloat(assignBrl) || 0
+    if (numPyg <= 0 && numBrl <= 0) {
+      toast.warning("Monto requerido", "Debe asignar al menos un monto en Guaraníes o Reales.")
+      return
+    }
+    setAssignLoading(true)
+    try {
+      await api.caja.cashierFunds.assign({
+        user_id: assignUserId,
+        monto_pyg: numPyg,
+        monto_brl: numBrl,
+        debitar_de_boveda: assignDebitar,
+        observaciones: assignObs.trim() || undefined,
+      })
+      toast.success("Fondo asignado", "El fondo fijo fue registrado bajo custodia de la cajera.")
+      setShowAssignCashierModal(false)
+      load()
+    } catch (e: any) {
+      toast.error("Error al asignar fondo", e?.message || "No se pudo registrar la asignación.")
+    } finally {
+      setAssignLoading(false)
+    }
+  }
+
+  const handleOpenReturnCashier = (item: CashierFundAssignmentItem) => {
+    setShowReturnCashierModal(item)
+    setReturnPyg(String(item.monto_pyg || 0))
+    setReturnBrl(String(item.monto_brl || 0))
+    setReturnDesactivar(true)
+    setReturnIngresar(true)
+    setReturnObs("")
+  }
+
+  const handleConfirmReturnCashier = async () => {
+    if (!showReturnCashierModal) return
+    const numPyg = parseFloat(returnPyg) || 0
+    const numBrl = parseFloat(returnBrl) || 0
+    setReturnLoading(true)
+    try {
+      await api.caja.cashierFunds.return(showReturnCashierModal.id, {
+        monto_pyg: numPyg,
+        monto_brl: numBrl,
+        desactivar_asignacion: returnDesactivar,
+        ingresar_a_boveda: returnIngresar,
+        observaciones: returnObs.trim() || undefined,
+      })
+      toast.success("Devolución registrada", "El efectivo fue devuelto y reingresado a Bóveda Central.")
+      setShowReturnCashierModal(null)
+      load()
+    } catch (e: any) {
+      toast.error("Error al devolver fondo", e?.message || "No se pudo procesar la devolución.")
+    } finally {
+      setReturnLoading(false)
     }
   }
 
@@ -738,6 +939,180 @@ export default function BovedaPage() {
       {/* TAB 1: CUSTODIA FÍSICA & REMESAS */}
       {activeTab === "custodia" && (
         <div className="space-y-5">
+          {/* 🌟 CARD DESTACADA: FONDO PERMANENTE DE SENCILLO EN BÓVEDA CENTRAL */}
+          <div className="card p-5 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-slate-900/60 border border-amber-500/30 rounded-3xl shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-500/20 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-amber-500/20 text-amber-500 rounded-2xl border border-amber-500/30">
+                  <Coins className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-black text-base text-gray-900 dark:text-white">
+                      Fondo Permanente de Sencillo en Bóveda Central
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                      Separado de Recaudación
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Reserva fija exclusiva para cambio y provisión de sencillo a cajeras. Aumentos o disminuciones impactan en la bóveda corriente.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setShowPettyAuditsModal(true)}
+                  className="btn-outline !text-amber-500 border-amber-500/30 hover:bg-amber-500/10 text-xs flex items-center gap-1.5 font-bold"
+                  title="Ver actas anteriores de arqueo de sencillo"
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>Historial ({pettyFundAudits.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenAdjustPetty}
+                  className="btn-outline !text-amber-600 dark:!text-amber-400 border-amber-400/40 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-xs flex items-center gap-1.5 font-bold"
+                  title="Aumentar o disminuir el fondo trasladando efectivo desde/hacia la recaudación"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                  <span>Ajustar Monto</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenAuditPetty}
+                  className="btn-primary !bg-amber-600 hover:!bg-amber-500 text-xs flex items-center gap-1.5 font-black shadow-md"
+                  title="Auditoría física de monedas y billetes chicos custodiados en la gaveta de sencillo"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>Arqueo de Sencillo</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+              <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-amber-500/20">
+                <span className="text-[10px] font-black text-amber-500 uppercase tracking-wider block">Saldo Disponible en Gaveta</span>
+                <p className="text-2xl font-black font-mono text-amber-500 mt-1">
+                  {formatPYG(pettyFund?.saldo_actual_pyg ?? 3800000)}
+                </p>
+                <span className="text-[11px] text-gray-400">Efectivo para cambio disponible</span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">Monto Objetivo Asignado</span>
+                <p className="text-2xl font-black font-mono text-gray-800 dark:text-gray-200 mt-1">
+                  {formatPYG(pettyFund?.monto_objetivo_pyg ?? 3800000)}
+                </p>
+                <span className="text-[11px] text-gray-400">Límite permanente configurado</span>
+              </div>
+              <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider block">Último Arqueo Físico</span>
+                <p className="text-sm font-bold text-gray-700 dark:text-gray-300 mt-1">
+                  {pettyFundAudits[0] ? formatDateTime(pettyFundAudits[0].fecha) : "Sin arqueos previos"}
+                </p>
+                <span className="text-[11px] text-gray-400">
+                  {pettyFundAudits[0] ? `Resultado: ${pettyFundAudits[0].resultado.toUpperCase()}` : "Auditoría periódica del administrador"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 💼 SECCIÓN: FONDOS FIJOS ASIGNADOS A CAJERAS */}
+          <div className="card p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-700 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
+                    <Wallet className="w-5 h-5 text-indigo-600" />
+                    Fondos Iniciales de Gaveta Asignados a Cajeras
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                    {cashierFunds.filter(c => c.estado === "activo").length} Activas
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400">
+                  Responsabilidad personal de cada cajera (500.000 y R$ 300). La entrega inicial debita de Bóveda Central y la devolución reingresa.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOpenAssignCashier}
+                className="btn-primary !bg-indigo-600 hover:!bg-indigo-500 text-xs flex items-center gap-1.5 font-bold shadow-md self-start sm:self-auto"
+                title="Registrar una nueva cajera o asignarle fondo fijo debitando de Bóveda"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Asignar Fondo a Cajera</span>
+              </button>
+            </div>
+
+            {cashierFunds.length === 0 ? (
+              <div className="text-center py-6 text-gray-400 text-xs">
+                No hay fondos asignados registrados.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-gray-50 dark:bg-slate-800/80 text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wider">
+                    <tr>
+                      <th className="p-3">Cajera / Colaboradora</th>
+                      <th className="p-3 text-right">Fondo PYG</th>
+                      <th className="p-3 text-right">Fondo R$ (BRL)</th>
+                      <th className="p-3">Estado</th>
+                      <th className="p-3">Fecha Entrega</th>
+                      <th className="p-3">Observaciones</th>
+                      <th className="p-3 text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                    {cashierFunds.map((cf) => (
+                      <tr key={cf.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
+                        <td className="p-3 font-bold text-gray-900 dark:text-white">
+                          {cf.cajero_nombre}
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-gray-800 dark:text-gray-200">
+                          {formatPYG(cf.monto_pyg)}
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-teal-500">
+                          {formatBRL(cf.monto_brl)}
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                            cf.estado === "activo"
+                              ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                              : "bg-gray-500/20 text-gray-400 border border-gray-500/30"
+                          }`}>
+                            {cf.estado === "activo" ? "En Custodia" : "Inactivo / Devuelto"}
+                          </span>
+                        </td>
+                        <td className="p-3 font-mono text-gray-500 text-[11px]">
+                          {formatDateTime(cf.fecha_asignacion)}
+                        </td>
+                        <td className="p-3 text-gray-400 truncate max-w-[200px]">
+                          {cf.observaciones || "—"}
+                        </td>
+                        <td className="p-3 text-center">
+                          {cf.estado === "activo" && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReturnCashier(cf)}
+                              className="px-2.5 py-1 text-[11px] rounded-lg border border-rose-300 dark:border-rose-900/50 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 font-bold transition"
+                              title="Registrar devolución de efectivo a Bóveda Central"
+                            >
+                              Devolver Fondo
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
           <div className="card p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-700 pb-3">
               <div>
@@ -2253,6 +2628,567 @@ export default function BovedaPage() {
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🪙 MODAL: AJUSTAR FONDO PERMANENTE DE SENCILLO */}
+      {showAdjustPettyModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="card max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-2xl animate-fade-in-up">
+            <div className="shrink-0 p-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500/20 text-amber-500 rounded-xl">
+                  <Coins className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-gray-900 dark:text-white">
+                    Ajustar Fondo Permanente de Sencillo
+                  </h3>
+                  <p className="text-[11px] text-gray-400">
+                    Saldo actual en gaveta: {formatPYG(pettyFund?.saldo_actual_pyg ?? 3800000)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdjustPettyModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              <div>
+                <label className="input-label font-bold">Tipo de Ajuste</label>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setAdjustPettyTipo("aumento")}
+                    className={`p-3 rounded-xl border text-center font-bold transition ${
+                      adjustPettyTipo === "aumento"
+                        ? "bg-amber-500/10 border-amber-500 text-amber-600 dark:text-amber-400 shadow-sm"
+                        : "border-gray-200 dark:border-gray-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    ⬆️ Aumento de Sencillo
+                    <span className="block text-[10px] font-normal text-gray-400 mt-0.5">
+                      Sale de recaudación hacia sencillo
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdjustPettyTipo("disminucion")}
+                    className={`p-3 rounded-xl border text-center font-bold transition ${
+                      adjustPettyTipo === "disminucion"
+                        ? "bg-purple-500/10 border-purple-500 text-purple-600 dark:text-purple-400 shadow-sm"
+                        : "border-gray-200 dark:border-gray-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-slate-800"
+                    }`}
+                  >
+                    ⬇️ Disminución de Sencillo
+                    <span className="block text-[10px] font-normal text-gray-400 mt-0.5">
+                      Reintegra de sencillo a recaudación
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="input-label font-bold">Monto del Ajuste (PYG)</label>
+                <CurrencyInput
+                  value={adjustPettyMonto}
+                  onChangeValue={(num) => setAdjustPettyMonto(String(num))}
+                  placeholder="0"
+                  currency="PYG"
+                  className="input-field text-base font-bold font-mono text-amber-500"
+                />
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={adjustPettyAfectarBoveda}
+                    onChange={(e) => setAdjustPettyAfectarBoveda(e.target.checked)}
+                    className="rounded text-amber-500"
+                  />
+                  <span className="font-bold text-gray-800 dark:text-gray-200 text-xs">
+                    Impactar en Bóveda Central (Recaudación)
+                  </span>
+                </label>
+                <p className="text-[11px] text-gray-400 pl-5">
+                  {adjustPettyTipo === "aumento"
+                    ? "Deduce el importe del efectivo disponible para depósito bancario en Bóveda Central."
+                    : "Suma el importe al efectivo disponible para remesa bancaria en Bóveda Central."}
+                </p>
+              </div>
+
+              <div>
+                <label className="input-label font-bold">Motivo / Justificación *</label>
+                <textarea
+                  className="input-field text-xs resize-none"
+                  rows={2}
+                  value={adjustPettyMotivo}
+                  onChange={(e) => setAdjustPettyMotivo(e.target.value)}
+                  placeholder="Ej: Dotación de monedas de 500 y 1.000 para fin de semana..."
+                />
+              </div>
+            </div>
+
+            <div className="shrink-0 p-4 bg-slate-50 dark:bg-slate-900 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAdjustPettyModal(false)}
+                className="btn-outline text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAdjustPetty}
+                disabled={adjustPettyLoading}
+                className="btn-primary !bg-amber-600 hover:!bg-amber-500 text-xs flex items-center gap-1.5 font-bold shadow-md"
+              >
+                {adjustPettyLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                <span>Confirmar Ajuste</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔍 MODAL: ARQUEO FÍSICO DE SENCILLO EN BÓVEDA */}
+      {showAuditPettyModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="card max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-2xl animate-fade-in-up">
+            <div className="shrink-0 p-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500/20 text-amber-500 rounded-xl">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-gray-900 dark:text-white">
+                    Arqueo de Auditoría del Fondo de Sencillo
+                  </h3>
+                  <p className="text-[11px] text-gray-400">
+                    Conteo físico de monedas y billetes chicos custodiados en bóveda
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAuditPettyModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider block">
+                    Saldo Contable Esperado
+                  </span>
+                  <p className="text-xl font-black font-mono text-amber-500 mt-0.5">
+                    {formatPYG(pettyFund?.saldo_actual_pyg ?? 3800000)}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
+                    Diferencia
+                  </span>
+                  {(() => {
+                    const cont = parseFloat(auditPettyContado) || 0
+                    const esp = pettyFund?.saldo_actual_pyg ?? 3800000
+                    const dif = cont - esp
+                    return (
+                      <p className={`text-xl font-black font-mono mt-0.5 ${
+                        dif === 0 ? "text-emerald-500" : dif > 0 ? "text-blue-500" : "text-rose-500"
+                      }`}>
+                        {dif === 0 ? "₲ 0 (Cuadrado)" : (dif > 0 ? `+${formatPYG(dif)}` : formatPYG(dif))}
+                      </p>
+                    )
+                  })()}
+                </div>
+              </div>
+
+              <div>
+                <label className="input-label font-bold">Monto Contado Real en Gaveta (PYG) *</label>
+                <CurrencyInput
+                  value={auditPettyContado}
+                  onChangeValue={(num) => setAuditPettyContado(String(num))}
+                  placeholder="0"
+                  currency="PYG"
+                  className="input-field text-base font-bold font-mono text-emerald-600 dark:text-emerald-400"
+                />
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={auditPettyAjustar}
+                    onChange={(e) => setAuditPettyAjustar(e.target.checked)}
+                    className="rounded text-amber-500"
+                  />
+                  <span className="font-bold text-gray-800 dark:text-gray-200 text-xs">
+                    Actualizar saldo contable al monto contado real
+                  </span>
+                </label>
+                <p className="text-[11px] text-gray-400 pl-5 mt-1">
+                  Si hay sobrante o faltante, asienta la calibración en el saldo disponible de sencillo.
+                </p>
+              </div>
+
+              <div>
+                <label className="input-label font-bold">Observaciones del Arqueo</label>
+                <textarea
+                  className="input-field text-xs resize-none"
+                  rows={2}
+                  value={auditPettyObs}
+                  onChange={(e) => setAuditPettyObs(e.target.value)}
+                  placeholder="Ej: Conteo físico conforme de 3 paquetes de monedas de 1.000 y billetes de 2.000..."
+                />
+              </div>
+            </div>
+
+            <div className="shrink-0 p-4 bg-slate-50 dark:bg-slate-900 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAuditPettyModal(false)}
+                className="btn-outline text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAuditPetty}
+                disabled={auditPettyLoading}
+                className="btn-primary !bg-emerald-600 hover:!bg-emerald-500 text-xs flex items-center gap-1.5 font-bold shadow-md"
+              >
+                {auditPettyLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                <span>Asentar Arqueo de Sencillo</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📜 MODAL: HISTORIAL DE ARQUEOS DE SENCILLO */}
+      {showPettyAuditsModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="card max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-2xl animate-fade-in-up">
+            <div className="shrink-0 p-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500/20 text-amber-500 rounded-xl">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-gray-900 dark:text-white">
+                    Historial de Arqueos del Fondo de Sencillo
+                  </h3>
+                  <p className="text-[11px] text-gray-400">
+                    Registro de auditorías físicas realizadas por el Administrador
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPettyAuditsModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 text-xs">
+              {pettyFundAudits.length === 0 ? (
+                <div className="text-center py-10 text-gray-400">
+                  No hay actas de arqueo registradas aún.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-gray-50 dark:bg-slate-800 text-gray-500 font-bold uppercase tracking-wider">
+                      <tr>
+                        <th className="p-2.5">Fecha</th>
+                        <th className="p-2.5">Auditor</th>
+                        <th className="p-2.5 text-right">Esperado</th>
+                        <th className="p-2.5 text-right">Contado</th>
+                        <th className="p-2.5 text-right">Diferencia</th>
+                        <th className="p-2.5">Resultado</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {pettyFundAudits.map((a) => (
+                        <tr key={a.id} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40">
+                          <td className="p-2.5 font-mono text-gray-500">{formatDateTime(a.fecha)}</td>
+                          <td className="p-2.5 font-bold text-gray-800 dark:text-gray-200">{a.auditado_por_nombre || "Admin"}</td>
+                          <td className="p-2.5 text-right font-mono">{formatPYG(a.monto_esperado_pyg)}</td>
+                          <td className="p-2.5 text-right font-mono font-bold text-emerald-500">{formatPYG(a.monto_contado_pyg)}</td>
+                          <td className="p-2.5 text-right font-mono font-bold">
+                            {a.diferencia_pyg === 0 ? "0" : formatPYG(a.diferencia_pyg)}
+                          </td>
+                          <td className="p-2.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                              a.resultado === "cuadrado"
+                                ? "bg-emerald-500/20 text-emerald-400"
+                                : a.resultado === "sobrante"
+                                ? "bg-blue-500/20 text-blue-400"
+                                : "bg-rose-500/20 text-rose-400"
+                            }`}>
+                              {a.resultado.toUpperCase()}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="shrink-0 p-4 bg-slate-50 dark:bg-slate-900 border-t border-gray-100 dark:border-gray-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowPettyAuditsModal(false)}
+                className="btn-outline text-xs"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 💼 MODAL: ASIGNAR FONDO INICIAL A CAJERA */}
+      {showAssignCashierModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="card max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-2xl animate-fade-in-up">
+            <div className="shrink-0 p-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-500/20 text-indigo-500 rounded-xl">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-gray-900 dark:text-white">
+                    Asignación de Fondo Fijo a Cajera
+                  </h3>
+                  <p className="text-[11px] text-gray-400">
+                    Entrega de efectivo bajo responsabilidad personal de la cajera
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAssignCashierModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              <div>
+                <label className="input-label font-bold">Colaboradora / Cajera *</label>
+                <select
+                  className="input-field text-xs font-bold"
+                  value={assignUserId}
+                  onChange={(e) => setAssignUserId(e.target.value)}
+                >
+                  <option value="">Seleccione una colaboradora...</option>
+                  {tenantUsers
+                    .filter((u) => u.activo)
+                    .map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.nombre} ({u.rol || "cajero"})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="input-label font-bold">Fondo en Guaraníes (PYG)</label>
+                  <CurrencyInput
+                    value={assignPyg}
+                    onChangeValue={(num) => setAssignPyg(String(num))}
+                    placeholder="500000"
+                    currency="PYG"
+                    className="input-field font-bold font-mono text-sm"
+                  />
+                  <span className="text-[10px] text-gray-400">Default: 500.000</span>
+                </div>
+                <div>
+                  <label className="input-label font-bold">Fondo en Reales (R$)</label>
+                  <CurrencyInput
+                    value={assignBrl}
+                    onChangeValue={(num) => setAssignBrl(String(num))}
+                    placeholder="300"
+                    currency="BRL"
+                    className="input-field font-bold font-mono text-sm text-teal-500"
+                  />
+                  <span className="text-[10px] text-gray-400">Default: R$ 300,00</span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={assignDebitar}
+                    onChange={(e) => setAssignDebitar(e.target.checked)}
+                    className="rounded text-indigo-600"
+                  />
+                  <span className="font-bold text-gray-800 dark:text-gray-200 text-xs">
+                    Debitar efectivo de Bóveda Central
+                  </span>
+                </label>
+                <p className="text-[11px] text-gray-400 pl-5">
+                  Genera la salida de fondos de la recaudación corriente de Bóveda Central.
+                </p>
+              </div>
+
+              <div>
+                <label className="input-label font-bold">Observaciones</label>
+                <textarea
+                  className="input-field text-xs resize-none"
+                  rows={2}
+                  value={assignObs}
+                  onChange={(e) => setAssignObs(e.target.value)}
+                  placeholder="Ej: Fondo inicial para cambio de gaveta..."
+                />
+              </div>
+            </div>
+
+            <div className="shrink-0 p-4 bg-slate-50 dark:bg-slate-900 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowAssignCashierModal(false)}
+                className="btn-outline text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAssignCashier}
+                disabled={assignLoading}
+                className="btn-primary !bg-indigo-600 hover:!bg-indigo-500 text-xs flex items-center gap-1.5 font-bold shadow-md"
+              >
+                {assignLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                <span>Confirmar Asignación</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ↩️ MODAL: DEVOLVER FONDO DE CAJERA */}
+      {showReturnCashierModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="card max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-2xl animate-fade-in-up">
+            <div className="shrink-0 p-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-rose-500/20 text-rose-500 rounded-xl">
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-gray-900 dark:text-white">
+                    Devolución de Fondo Inicial
+                  </h3>
+                  <p className="text-[11px] text-gray-400">
+                    Cajera: {showReturnCashierModal.cajero_nombre}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReturnCashierModal(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="input-label font-bold">Devolución Guaraníes (PYG)</label>
+                  <CurrencyInput
+                    value={returnPyg}
+                    onChangeValue={(num) => setReturnPyg(String(num))}
+                    currency="PYG"
+                    className="input-field font-bold font-mono text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="input-label font-bold">Devolución Reales (R$)</label>
+                  <CurrencyInput
+                    value={returnBrl}
+                    onChangeValue={(num) => setReturnBrl(String(num))}
+                    currency="BRL"
+                    className="input-field font-bold font-mono text-sm text-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={returnIngresar}
+                    onChange={(e) => setReturnIngresar(e.target.checked)}
+                    className="rounded text-rose-600"
+                  />
+                  <span className="font-bold text-gray-800 dark:text-gray-200 text-xs">
+                    Reingresar efectivo a Bóveda Central
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={returnDesactivar}
+                    onChange={(e) => setReturnDesactivar(e.target.checked)}
+                    className="rounded text-rose-600"
+                  />
+                  <span className="font-bold text-gray-800 dark:text-gray-200 text-xs">
+                    Marcar asignación como Inactiva (Cajera sin fondo)
+                  </span>
+                </label>
+              </div>
+
+              <div>
+                <label className="input-label font-bold">Observaciones</label>
+                <textarea
+                  className="input-field text-xs resize-none"
+                  rows={2}
+                  value={returnObs}
+                  onChange={(e) => setReturnObs(e.target.value)}
+                  placeholder="Ej: Devolución por finalización de contrato o rotación de puesto..."
+                />
+              </div>
+            </div>
+
+            <div className="shrink-0 p-4 bg-slate-50 dark:bg-slate-900 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowReturnCashierModal(null)}
+                className="btn-outline text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReturnCashier}
+                disabled={returnLoading}
+                className="btn-primary !bg-rose-600 hover:!bg-rose-500 text-xs flex items-center gap-1.5 font-bold shadow-md"
+              >
+                {returnLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                <span>Confirmar Reingreso a Bóveda</span>
+              </button>
             </div>
           </div>
         </div>
