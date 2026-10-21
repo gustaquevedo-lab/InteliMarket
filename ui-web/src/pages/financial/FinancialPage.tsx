@@ -357,7 +357,10 @@ export default function FinancialPage() {
         api.financial.banks.list().catch(() => []),
         api.purchases.suppliers().catch(() => []),
         api.expenses.funds.list().catch(() => []),
-        api.supplierReturns.list().catch(() => []),
+        api.supplierReturns.list().catch(err => {
+          console.error("Error al cargar devoluciones de proveedores:", err)
+          return []
+        }),
         api.cheques.list({ limit: 5000 }).catch(() => []),
         api.purchases.listSupplierNcRequests().catch(() => []),
       ])
@@ -1119,7 +1122,9 @@ export default function FinancialPage() {
       const totalVal = Number(ret.valor_total_estimado || ret.monto || ret.total || ret.total_costo || 0)
       const ncMonto = Number(ret.nota_credito_monto || 0)
       const perdMonto = Number(ret.monto_perdida || 0)
-      const saldoDev = Math.max(0, totalVal - ncMonto - perdMonto)
+      const saldoDev = ret.saldo_pendiente !== undefined && ret.saldo_pendiente !== null
+        ? Number(ret.saldo_pendiente)
+        : Math.max(0, totalVal - ncMonto - perdMonto)
 
       // Si ya no tiene saldo pendiente, ignorar
       if (saldoDev <= 0) return
@@ -3592,6 +3597,46 @@ export default function FinancialPage() {
                                       </span>
                                     </div>
                                   </div>
+
+                                  {/* Detalle visual de Devoluciones Físicas / Reclamos Activos */}
+                                  {sup.devolucionesPendientes.length > 0 && (
+                                    <div className="p-2 rounded-lg bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 text-[11px] space-y-1">
+                                      <div className="flex items-center justify-between text-[10px] font-bold text-amber-800 dark:text-amber-300">
+                                        <span className="flex items-center gap-1">
+                                          <PackageMinus className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                                          Devoluciones Activas ({sup.devolucionesPendientes.length}):
+                                        </span>
+                                        <span className="font-mono text-amber-900 dark:text-amber-200 font-bold">
+                                          {formatPYG(sup.ncNoRegistrada)}
+                                        </span>
+                                      </div>
+                                      <div className="space-y-1 pt-1 border-t border-amber-200/40 dark:border-amber-800/30">
+                                        {sup.devolucionesPendientes.slice(0, 3).map((d: any, idx: number) => {
+                                          const isParcial = d.estado === "acreditado_parcial" || (Number(d.nota_credito_monto || 0) > 0 && Number(d.saldo_pendiente || d.monto || 0) > 0)
+                                          return (
+                                            <div key={d.id || idx} className="flex items-center justify-between text-[10px] text-gray-700 dark:text-gray-300">
+                                              <div className="flex items-center gap-1 font-mono truncate max-w-[65%]">
+                                                <span className="font-bold text-gray-900 dark:text-gray-100">{d.codigo}</span>
+                                                {isParcial && (
+                                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 whitespace-nowrap">
+                                                    Acreditado Parcial
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <span className="font-mono font-bold text-amber-800 dark:text-amber-300 whitespace-nowrap">
+                                                {formatPYG(d.saldo_pendiente ?? d.monto)}
+                                              </span>
+                                            </div>
+                                          )
+                                        })}
+                                        {sup.devolucionesPendientes.length > 3 && (
+                                          <span className="text-[9px] text-gray-400 italic block text-right">
+                                            +{sup.devolucionesPendientes.length - 3} devoluciones más
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
 
                                   {/* Neto Exigible Teórico */}
                                   <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30">

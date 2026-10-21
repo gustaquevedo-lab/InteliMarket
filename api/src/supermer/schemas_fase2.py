@@ -446,6 +446,8 @@ class ReturnItemCreate(BaseModel):
     detalle: Optional[str] = None
 
 class ReturnItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     producto_id: UUID
     producto_nombre: Optional[str] = None
@@ -460,6 +462,8 @@ class ReturnItemResponse(BaseModel):
     created_at: datetime
 
 class SupplierReturnResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     proveedor_id: UUID
     proveedor_nombre: Optional[str] = None
@@ -472,6 +476,10 @@ class SupplierReturnResponse(BaseModel):
     nota_credito_numero: Optional[str] = None
     nota_credito_monto: Optional[Decimal] = None
     notas_credito: Optional[list[dict]] = None
+    monto_perdida: Optional[Decimal] = None
+    motivo_perdida: Optional[str] = None
+    enviado_a_perdida: Optional[bool] = None
+    saldo_pendiente: Optional[Decimal] = None
     estado: str
     autorizado_por: Optional[UUID] = None
     autorizado_at: Optional[datetime] = None

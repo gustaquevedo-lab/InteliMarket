@@ -10,7 +10,17 @@ from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
 from .models import SupplierReturn, SupplierReturnItem, ReturnAuthorization, BackhaulSchedule
+from api.src.purchases.models import Supplier
 
+
+def _enrich_return(r: SupplierReturn, proveedor_nombre: Optional[str] = None) -> SupplierReturn:
+    if proveedor_nombre:
+        setattr(r, "proveedor_nombre", proveedor_nombre)
+    val = r.valor_total_estimado or Decimal(0)
+    nc = r.nota_credito_monto or Decimal(0)
+    perd = r.monto_perdida or Decimal(0)
+    setattr(r, "saldo_pendiente", max(Decimal(0), val - nc - perd))
+    return r
 
 
 # ---------------------------------------------------------------------------
@@ -19,7 +29,8 @@ from .models import SupplierReturn, SupplierReturnItem, ReturnAuthorization, Bac
 
 async def list_returns(company_id: UUID, db: AsyncSession, estado: Optional[str] = None, proveedor_id: Optional[UUID] = None):
     q = (
-        select(SupplierReturn)
+        select(SupplierReturn, Supplier.razon_social.label("proveedor_nombre"))
+        .outerjoin(Supplier, Supplier.id == SupplierReturn.proveedor_id)
         .options(selectinload(SupplierReturn.items))
         .where(SupplierReturn.company_id == company_id)
     )
@@ -29,19 +40,22 @@ async def list_returns(company_id: UUID, db: AsyncSession, estado: Optional[str]
         q = q.where(SupplierReturn.proveedor_id == proveedor_id)
     q = q.order_by(SupplierReturn.fecha_creacion.desc())
     result = await db.execute(q)
-    return result.scalars().all()
+    rows = result.all()
+    return [_enrich_return(r, prov_nom) for r, prov_nom in rows]
 
 
 async def get_return(return_id: UUID, db: AsyncSession):
     result = await db.execute(
-        select(SupplierReturn)
+        select(SupplierReturn, Supplier.razon_social.label("proveedor_nombre"))
+        .outerjoin(Supplier, Supplier.id == SupplierReturn.proveedor_id)
         .options(selectinload(SupplierReturn.items))
         .where(SupplierReturn.id == return_id)
     )
-    r = result.scalar_one_or_none()
-    if not r:
+    row = result.first()
+    if not row:
         raise HTTPException(404, "Supplier return not found")
-    return r
+    r, prov_nom = row
+    return _enrich_return(r, prov_nom)
 
 
 async def create_return(company_id: UUID, data, db: AsyncSession):
