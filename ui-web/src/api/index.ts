@@ -1635,7 +1635,7 @@ export interface ExpenseDashboard {
   top_proveedores: { proveedor: string; total: number }[]
   sugerencias: { tipo: string; titulo: string; detalle: string }[]
 }
-export interface SupplierInvoice { id: string; company_id?: string; supplier_id?: string; supplier_nombre?: string; supplier_ruc?: string; numero_factura?: string; timbrado?: string; cdc?: string; fecha_emision?: string; fecha_recepcion?: string; fecha_vencimiento?: string; subtotal?: number; descuento?: number; iva_10?: number; iva_5?: number; total?: number; saldo_pendiente?: number; moneda?: string; tipo_cambio?: number; total_brl?: number; saldo_pendiente_brl?: number; condicion?: string; tipo_comprobante?: string; estado?: string; concepto?: string; notas?: string; created_by?: string; approved_by?: string; purchase_order_id?: string; created_at?: string; notas_credito?: any[]; solicitudes_nc?: any[]; bloqueada_para_pago?: boolean; motivo_bloqueo?: string; monto_retenido_nc?: number; requiere_nc?: boolean }
+export interface SupplierInvoice { id: string; company_id?: string; supplier_id?: string; supplier_nombre?: string; supplier_ruc?: string; numero_factura?: string; timbrado?: string; cdc?: string; fecha_emision?: string; fecha_recepcion?: string; fecha_vencimiento?: string; subtotal?: number; descuento?: number; iva_10?: number; iva_5?: number; total?: number; saldo_pendiente?: number; moneda?: string; tipo_cambio?: number; total_brl?: number; saldo_pendiente_brl?: number; condicion?: string; tipo_comprobante?: string; estado?: string; concepto?: string; notas?: string; created_by?: string; approved_by?: string; purchase_order_id?: string; receipt_id?: string; created_at?: string; notas_credito?: any[]; solicitudes_nc?: any[]; bloqueada_para_pago?: boolean; motivo_bloqueo?: string; monto_retenido_nc?: number; requiere_nc?: boolean }
 export interface SupplierInvoicePayment { id: string; invoice_id?: string; payment_method?: string; monto?: number; moneda?: string; fecha_pago?: string; referencia?: string; estado?: string; created_at?: string }
 export interface BankAccount { id: string; company_id?: string; alias?: string | null; banco?: string; tipo?: string; numero_cuenta?: string; moneda?: string; saldo_inicial?: number; saldo_actual?: number; titular?: string; activo?: boolean; saldo_minimo_alerta?: number | null; saldo_verificado_manualmente?: boolean; saldo_verificado_at?: string | null; saldo_verificado_por?: string | null; created_at?: string }
 export interface BankBalanceCorrection { id: string; company_id?: string; bank_account_id: string; origen: string; saldo_actual: number; saldo_propuesto: number; motivo?: string; estado: string; solicitado_por?: string | null; aprobado_supervisor_id?: string | null; aprobado_supervisor_at?: string | null; aprobado_gerente_id?: string | null; aprobado_gerente_at?: string | null; rechazado_por?: string | null; rechazado_motivo?: string | null; created_at?: string }
@@ -4509,6 +4509,11 @@ export const api = {
     batchAssignInvoice: (data: { expense_ids: string[]; supplier_invoice_id: string; notas?: string }) =>
       client.post<{ success: boolean; assigned_count: number; assigned_ids: string[]; total_aplicado: number; invoice_saldo_remanente: number; invoice_estado: string }>(
         "/v1/expenses/batch-assign-invoice",
+        data
+      ),
+    batchDisburse: (data: { expense_ids: string[]; medio_pago: string; bank_account_id?: string; petty_cash_fund_id?: string; numero_comprobante?: string; fecha_pago?: string; notas?: string }) =>
+      client.post<{ success: boolean; paid_count: number; total_disbursed: number; medio_pago: string; paid_ids: string[] }>(
+        "/v1/expenses/batch-disburse",
         data
       ),
     disburse: (id: string, data: { fecha_pago?: string; disbursements: any[]; notas?: string }) => client.post<Expense>(`/v1/expenses/${id}/disburse`, data),
