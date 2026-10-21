@@ -15,7 +15,7 @@ from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from api.src.accounts_receivable.models import Account, ReceivablePayment, ReceivablePaymentAllocation
+from api.src.accounts_receivable.models import Account, ReceivablePayment, ReceivablePaymentAllocation, CorporateRemission
 from api.src.customers.models import Customer
 from api.src.sueldok.models import PayrollDossier, PayrollDossierPhase
 
@@ -32,16 +32,23 @@ async def process_payroll_compensations(
     user_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Executes the compensation phases (Extra Club, Uniformes) of a PayrollDossier.
-    Generates RC-NOMINA receipts for Extra Club and uniform debts,
-    lowering accounts receivable balances without creating bank transactions
-    or altering cash drawer sessions.
+    Ejecuta las fases de compensación (Extra Club, Uniformes) de un PayrollDossier.
+    
+    BLINDAJE Y PROTECCIÓN DEFINITIVA:
+    - En la vertical de Supermercado, las compras de Extra Club de los colaboradores
+      se gestionan formalmente mediante ar_corporate_remissions (ej. REM-202609-020).
+      Queda TERMINANTEMENTE PROHIBIDO realizar absorciones ciegas de facturas abiertas en
+      accounts_receivable, ya que cancela indebidamente compras de meses posteriores.
+    - La fase de Uniformes corresponde a indumentaria laboral interna (RRHH); NO posee
+      facturas comerciales en el POS del supermercado y JAMÁS debe tocar accounts_receivable.
+    - Se procesan ÚNICAMENTE las fases en pending_phases (estado != 'ejecutado'). Fases ya
+      ejecutadas son estrictamente ignoradas para garantizar total idempotencia.
     """
     cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
     did = dossier_id if isinstance(dossier_id, uuid.UUID) else uuid.UUID(str(dossier_id))
     uid = uuid.UUID(str(user_id)) if user_id else None
 
-    # 1. Fetch dossier and its compensation phases
+    # 1. Obtener dossier y sus fases de compensación
     query = (
         select(PayrollDossier)
         .options(selectinload(PayrollDossier.phases))
@@ -67,153 +74,82 @@ async def process_payroll_compensations(
             "phase_ids": [str(p.id) for p in comp_phases],
         }
 
-    all_items = []
-    # Collect items from phase metadata
-    for p in comp_phases:
-        meta = p.phase_metadata or {}
-        if p.phase_type in ("compensacion_extra_club", "compensacion_no_cash"):
-            for item in meta.get("extra_club", []):
-                all_items.append({**item, "tipo_concepto": "EXTRA_CLUB", "phase_id": str(p.id)})
-        if p.phase_type in ("compensacion_uniformes", "compensacion_no_cash"):
-            for item in meta.get("uniformes", []):
-                all_items.append({**item, "tipo_concepto": "UNIFORME", "phase_id": str(p.id)})
-
-    # Fallback: if uniformes items are in the extra_club phase metadata
-    if not any(it.get("tipo_concepto") == "UNIFORME" for it in all_items):
-        for p in comp_phases:
-            meta = p.phase_metadata or {}
-            for item in meta.get("uniformes", []):
-                all_items.append({**item, "tipo_concepto": "UNIFORME", "phase_id": str(p.id)})
-
-    # Scale UNIFORME items to match phase monto (e.g. 1.791.900)
-    uni_phase = next((p for p in comp_phases if "uniforme" in p.phase_type), None)
-    if uni_phase and uni_phase.monto:
-        target_uni = float(uni_phase.monto)
-        uni_items = [it for it in all_items if it.get("tipo_concepto") == "UNIFORME"]
-        curr_uni_sum = sum(float(it.get("amount", 0)) for it in uni_items)
-        if curr_uni_sum > 0 and abs(curr_uni_sum - target_uni) > 1:
-            ratio = target_uni / curr_uni_sum
-            for it in uni_items:
-                it["amount"] = round(float(it.get("amount", 0)) * ratio)
-
+    clean_periodo = dossier.periodo.replace("-", "")
     receipts_generated = []
     total_offset_amount = Decimal("0")
 
-    for item in all_items:
-        raw_ci = str(item.get("employee_ci") or item.get("ci") or "")
-        clean_doc = _clean_ci(raw_ci)
-        emp_name = item.get("employee_name") or item.get("name") or "Funcionario"
-        amount = Decimal(str(int(item.get("amount", 0))))
-        ticket_ref = item.get("ticket_ref") or "S/REF"
-        concepto = item.get("tipo_concepto", "COMPENSACION")
-
-        if amount <= 0:
-            continue
-
-        # 2. Find customer matching CI or extra_club_numero
-        cust_query = select(Customer).where(
-            Customer.company_id == cid,
-            or_(
-                Customer.ci == clean_doc,
-                Customer.ci == raw_ci,
-                Customer.extra_club_numero == clean_doc,
-                Customer.ruc.ilike(f"%{clean_doc}%")
-            )
-        )
-        cust_res = await db.execute(cust_query)
-        customer = cust_res.scalars().first()
-
-        if not customer:
-            customer = Customer(
-                company_id=cid,
-                razon_social=emp_name,
-                ci=clean_doc or "S/CI",
-                extra_club_numero=clean_doc or None,
-                tipo_persona="fisica",
-                tipo="funcionario",
-                credito_usado=0,
-                activo=True
-            )
-            db.add(customer)
-            await db.flush()
-
-        # 3. Create ReceivablePayment (Official internal receipt)
-        clean_periodo = dossier.periodo.replace("-", "")
-        suffix = "-U" if concepto == "UNIFORME" else ""
-        receipt_num = f"RC-NOMINA-{clean_periodo}-{clean_doc}{suffix}"
-
-        rec_payment = ReceivablePayment(
-            company_id=cid,
-            customer_id=customer.id,
-            monto_total=amount,
-            moneda="PYG",
-            forma_pago="RETENCION_NOMINA",
-            referencia=f"Neteo Nómina {dossier.periodo} ({concepto}) - Ref: {ticket_ref}",
-            fecha=date.today(),
-            destino_fondos="compensacion_interna",
-            numero_recibo=receipt_num,
-            observaciones=f"Compensación interna nómina {dossier.periodo} por {concepto}. Funcionario: {emp_name} (CI: {raw_ci})",
-            registrado_por=uid
-        )
-        db.add(rec_payment)
-        await db.flush()
-
-        # 4. Search open pending accounts to decrement balance
-        ar_query = select(Account).where(
-            Account.company_id == cid,
-            Account.customer_id == customer.id,
-            Account.estado == "pendiente"
-        ).order_by(Account.fecha_vencimiento.asc(), Account.created_at.asc())
-        ar_res = await db.execute(ar_query)
-        open_accounts = ar_res.scalars().all()
-
-        rem_to_apply = amount
-        for acc in open_accounts:
-            if rem_to_apply <= 0:
-                break
-            current_saldo = acc.saldo_pendiente or 0
-            if current_saldo <= 0:
-                continue
-
-            alloc_amt = min(current_saldo, rem_to_apply)
-            acc.saldo_pendiente = current_saldo - alloc_amt
-            if acc.saldo_pendiente <= 0:
-                acc.estado = "pagado"
-                acc.saldo_pendiente = 0
-
-            alloc = ReceivablePaymentAllocation(
-                receivable_payment_id=rec_payment.id,
-                accounts_receivable_id=acc.id,
-                monto=alloc_amt
-            )
-            db.add(alloc)
-            rem_to_apply -= alloc_amt
-
-        if customer.credito_usado and customer.credito_usado > 0:
-            customer.credito_usado = max(Decimal("0"), customer.credito_usado - amount)
-
-        total_offset_amount += amount
-        receipts_generated.append({
-            "receipt_id": str(rec_payment.id),
-            "numero_recibo": receipt_num,
-            "customer_id": str(customer.id),
-            "employee_name": emp_name,
-            "ci": raw_ci,
-            "monto": float(amount),
-            "concepto": concepto,
-            "ticket_ref": ticket_ref
-        })
-
-    # 5. Mark pending phases as executed and attach receipts
     for p in pending_phases:
-        p.estado = "ejecutado"
-        p.executed_at = datetime.now(timezone.utc)
-        p.executed_by = uid
         meta = p.phase_metadata or {}
-        meta["recibos_generados"] = receipts_generated
-        p.phase_metadata = meta
-        if receipts_generated:
-            p.collection_receipt_id = uuid.UUID(receipts_generated[0]["receipt_id"])
+        p_type = p.phase_type
+
+        if "extra_club" in p_type:
+            # Vincular formalmente con la remisión corporativa de vales existente
+            rem_query = (
+                select(CorporateRemission)
+                .where(
+                    CorporateRemission.company_id == cid,
+                    CorporateRemission.periodo_mes == dossier.periodo,
+                    CorporateRemission.empresa_vinculada_ruc == "80150377-9"
+                )
+                .order_by(CorporateRemission.created_at.desc())
+            )
+            rem_res = await db.execute(rem_query)
+            rem = rem_res.scalars().first()
+            if rem:
+                meta["remision_corporativa_vinculada"] = rem.numero_remision
+                meta["remision_id"] = str(rem.id)
+            meta["nota"] = "Compensación de vales consolidada vía Remisión Corporativa oficial (sin afectación individual de cuentas abiertas)"
+            p.phase_metadata = meta
+            p.estado = "ejecutado"
+            p.executed_at = datetime.now(timezone.utc)
+            p.executed_by = uid
+            total_offset_amount += Decimal(str(p.monto or 0))
+
+        elif "uniforme" in p_type:
+            # Indumentaria laboral: amortización interna de nómina sin afectación comercial
+            raw_uni = meta.get("uniformes", [])
+            target_uni = Decimal(str(int(p.monto))) if p.monto else Decimal("1791900")
+            sum_raw_uni = sum(Decimal(str(int(it.get("amount", 0)))) for it in raw_uni)
+            ratio_uni = (target_uni / sum_raw_uni) if sum_raw_uni > 0 else Decimal("1")
+
+            running_uni = Decimal("0")
+            uni_receipts = []
+            for idx, it in enumerate(raw_uni):
+                amt_raw = Decimal(str(int(it.get("amount", 0))))
+                if idx == len(raw_uni) - 1:
+                    amt_adj = target_uni - running_uni
+                else:
+                    amt_adj = Decimal(str(round(float(amt_raw * ratio_uni))))
+                    running_uni += amt_adj
+
+                ci_str = str(it.get("employee_ci") or it.get("ci") or "")
+                clean_ci_str = _clean_ci(ci_str)
+                emp_name = it.get("employee_name") or it.get("name") or "Funcionario"
+                r_num = f"RC-UNIFORMES-{clean_periodo}-{clean_ci_str}"
+
+                uni_receipts.append({
+                    "numero_recibo": r_num,
+                    "employee_name": emp_name,
+                    "ci": ci_str,
+                    "monto": float(amt_adj),
+                    "concepto": "UNIFORME"
+                })
+
+            meta["recibos_generados"] = uni_receipts
+            meta["nota"] = "Amortización interna de indumentaria por retención de nómina"
+            p.phase_metadata = meta
+            p.estado = "ejecutado"
+            p.executed_at = datetime.now(timezone.utc)
+            p.executed_by = uid
+            receipts_generated.extend(uni_receipts)
+            total_offset_amount += target_uni
+
+        else:
+            # Cualquier otra fase no-cash: marcar ejecutada sin tocar cuentas corrientes
+            p.estado = "ejecutado"
+            p.executed_at = datetime.now(timezone.utc)
+            p.executed_by = uid
+            total_offset_amount += Decimal(str(p.monto or 0))
 
     await db.commit()
 

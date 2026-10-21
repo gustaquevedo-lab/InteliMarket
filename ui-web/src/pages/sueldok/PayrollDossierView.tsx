@@ -217,15 +217,15 @@ export default function PayrollDossierView({
   const handleExecuteCompensations = async () => {
     if (!selectedDossier) return
     const totComp = (selectedDossier.total_extra_club || 0) + (selectedDossier.total_uniformes || 0)
-    const confirmMsg = `¿Desea ejecutar las compensaciones de nómina (Extra Club + Uniformes) por valor de ${formatPYG(totComp)}?\n\nSe generarán los recibos RC-NOMINA y se saldarán las cuentas por cobrar del personal.`
+    const confirmMsg = `¿Desea asentar las compensaciones internas de nómina (Extra Club + Uniformes) por valor de ${formatPYG(totComp)}?\n\nSe vinculará la Remisión Corporativa de Vales y se registrará la retención de uniformes sin alterar las facturas de compras abiertas del personal.`
     if (!window.confirm(confirmMsg)) return
 
     try {
       setActionLoading("compensations")
       const res = await api.sueldok.executeCompensations(selectedDossier.id)
       toast.success(
-        "Compensaciones ejecutadas exitosamente",
-        `${res.recibos_count} recibos RC-NOMINA generados.`
+        "Compensaciones asentadas exitosamente",
+        "Fases de nómina sincronizadas e indumentaria retenida formalmente."
       )
       await reloadSelected(selectedDossier.id)
     } catch (err: any) {
