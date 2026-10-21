@@ -87,7 +87,7 @@ from .schemas_fase2 import (
     ReplenishmentSuggestionResponse, SuggestionReview, ReplenishmentGenerateInput,
     CrossDockOrderCreate, CrossDockOrderResponse,
     ReplenishmentDashboard,
-    SupplierReturnCreate, SupplierReturnUpdate, SupplierReturnResponse,
+    SupplierReturnCreate, SupplierReturnUpdate, SupplierReturnResponse, ReturnCreditNoteCreate,
     ReturnItemCreate, ReturnItemResponse,
     ReturnAuthCreate, ReturnAuthResponse,
     BackhaulCreate, BackhaulUpdate, BackhaulResponse,
@@ -1960,6 +1960,16 @@ async def returns_archive(
 ):
     user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
     return await service_returns.cancel_return(return_id, user_id, db, motivo="Archivado desde Gestión Financiera")
+@router.post("/returns/{return_id}/credit-note", response_model=SupplierReturnResponse)
+async def returns_add_credit_note(
+    return_id: UUID,
+    data: ReturnCreditNoteCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = user.get("company_id") if isinstance(user, dict) else getattr(user, "company_id", None)
+    return await service_returns.add_return_credit_note(return_id, data, UUID(str(cid)), db)
+
 
 
 @router.post("/returns/{return_id}/items", response_model=ReturnItemResponse, status_code=201)

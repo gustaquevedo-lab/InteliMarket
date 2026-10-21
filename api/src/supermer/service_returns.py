@@ -113,6 +113,82 @@ async def cancel_return(return_id: UUID, user_id: Optional[UUID], db: AsyncSessi
     return await get_return(return_id, db)
 
 
+async def add_return_credit_note(return_id: UUID, data, company_id: UUID, db: AsyncSession):
+    import uuid
+    from api.src.financial.models import SupplierCreditNote
+
+    r = await get_return(return_id, db)
+
+    # 1. Armar entrada de NC / cuota en historial
+    nc_entry = {
+        "id": str(uuid.uuid4()),
+        "fecha": str(data.fecha or date.today()),
+        "monto": float(data.monto),
+        "motivo": data.motivo or f"Nota de Crédito sobre {r.codigo}",
+        "numero": data.numero.strip(),
+        "timbrado": data.timbrado.strip(),
+        "cdc": (data.cdc or "").strip() or None,
+        "observaciones": (data.observaciones or "").strip() or None,
+        "ya_reconocida": True,
+        "factura_numero": None,
+    }
+
+    current_ncs = list(r.notas_credito or [])
+    current_ncs.append(nc_entry)
+    r.notas_credito = current_ncs
+
+    total_nc = sum(Decimal(str(x.get("monto", 0))) for x in current_ncs)
+    r.nota_credito_monto = total_nc
+    r.nota_credito_numero = ", ".join(dict.fromkeys(x.get("numero") for x in current_ncs if x.get("numero")))
+
+    if data.monto_perdida is not None and data.monto_perdida >= 0:
+        r.monto_perdida = data.monto_perdida
+        if data.monto_perdida > 0:
+            r.enviado_a_perdida = True
+
+    total_val = r.valor_total_estimado or Decimal(0)
+    perdida = r.monto_perdida or Decimal(0)
+    saldo = max(Decimal(0), total_val - total_nc - perdida)
+
+    if saldo <= Decimal(0):
+        r.estado = "completado"
+    else:
+        r.estado = "acreditado_parcial"
+
+    # 2. Registrar en la cartera formal (SupplierCreditNote) si no existe ya
+    existing_nc = (await db.execute(
+        select(SupplierCreditNote).where(
+            SupplierCreditNote.company_id == company_id,
+            SupplierCreditNote.supplier_id == r.proveedor_id,
+            SupplierCreditNote.numero == data.numero.strip(),
+            SupplierCreditNote.timbrado == data.timbrado.strip(),
+            SupplierCreditNote.cancelado == False,
+        )
+    )).scalar_one_or_none()
+
+    if not existing_nc:
+        new_scn = SupplierCreditNote(
+            company_id=company_id,
+            supplier_id=r.proveedor_id,
+            numero=data.numero.strip(),
+            numero_factura_origen=r.codigo,
+            timbrado=data.timbrado.strip(),
+            fecha=data.fecha or date.today(),
+            fecha_recepcion=date.today(),
+            motivo=f"Devolución {r.codigo} - {data.motivo or 'Mercadería Vencida / Averiada'}"[:150],
+            motivo_categoria="devolucion_vencimiento",
+            impacto_contable="recuperacion_merma",
+            monto=data.monto,
+            saldo_disponible=data.monto,
+            moneda="PYG",
+            observaciones=data.observaciones or f"Generada por acreditación (parcial/total) de devolución {r.codigo}",
+        )
+        db.add(new_scn)
+
+    await db.commit()
+    return await get_return(r.id, db)
+
+
 # ---------------------------------------------------------------------------
 # RETURN ITEMS
 # ---------------------------------------------------------------------------

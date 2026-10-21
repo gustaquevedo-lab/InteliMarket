@@ -435,6 +435,16 @@ class SupplierReturnUpdate(BaseModel):
     nota_credito_monto: Optional[Decimal] = None
     observaciones: Optional[str] = None
 
+class ReturnCreditNoteCreate(BaseModel):
+    numero: str
+    timbrado: str
+    monto: Decimal
+    fecha: Optional[date] = None
+    cdc: Optional[str] = None
+    motivo: Optional[str] = None
+    observaciones: Optional[str] = None
+    monto_perdida: Optional[Decimal] = None
+
 class ReturnItemCreate(BaseModel):
     producto_id: UUID
     cantidad: Decimal

@@ -5347,6 +5347,8 @@ export const api = {
     complete: (id: string) => client.post<any>(`/v1/supermer/returns/${id}/complete`),
     cancel: (id: string) => client.post<any>(`/v1/supermer/returns/${id}/cancel`),
     archive: (id: string) => client.post<any>(`/v1/supermer/returns/${id}/archive`),
+    addCreditNote: (returnId: string, data: { numero: string; timbrado: string; monto: number; fecha?: string; cdc?: string; motivo?: string; observaciones?: string; monto_perdida?: number }) =>
+      client.post<any>(`/v1/supermer/returns/${returnId}/credit-note`, data),
     items: {
       create: (returnId: string, data: any) => client.post<any>(`/v1/supermer/returns/${returnId}/items`, data),
     },

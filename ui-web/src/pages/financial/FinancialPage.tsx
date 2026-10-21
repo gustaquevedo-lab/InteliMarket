@@ -163,6 +163,75 @@ export default function FinancialPage() {
     cdc: string
   }>>([])
 
+  // Modal de Cargar NC sobre Devolución Física (acepta cuotas parciales)
+  const [showReturnNcModal, setShowReturnNcModal] = useState(false)
+  const [selectedReturnForNc, setSelectedReturnForNc] = useState<any | null>(null)
+  const [savingReturnNc, setSavingReturnNc] = useState(false)
+  const [returnNcForm, setReturnNcForm] = useState({
+    numero: "",
+    timbrado: "",
+    monto: 0,
+    fecha: getTodayAsuncion(),
+    cdc: "",
+    motivo: "",
+    observaciones: "",
+  })
+
+  const handleOpenReturnNcModal = (ret: any) => {
+    setSelectedReturnForNc(ret)
+    const totalOriginal = Number(ret.valor_total_estimado || ret.monto_original || ret.monto || 0)
+    const yaReconocido = Number(ret.nota_credito_monto || 0)
+    const perdida = Number(ret.monto_perdida || 0)
+    const saldoPend = Number(ret.saldo_pendiente ?? Math.max(0, totalOriginal - yaReconocido - perdida))
+    setReturnNcForm({
+      numero: "",
+      timbrado: "",
+      monto: saldoPend > 0 ? saldoPend : totalOriginal,
+      fecha: getTodayAsuncion(),
+      cdc: "",
+      motivo: `Devolución ${ret.codigo || "DEV"}`,
+      observaciones: "",
+    })
+    setShowReturnNcModal(true)
+  }
+
+  const handleSaveReturnNc = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!selectedReturnForNc) return
+    if (!returnNcForm.numero.trim()) {
+      toast.warning("Número requerido", "Ingrese el número de la Nota de Crédito.")
+      return
+    }
+    if (!returnNcForm.timbrado.trim()) {
+      toast.warning("Timbrado requerido", "Ingrese el timbrado de la Nota de Crédito.")
+      return
+    }
+    if (Number(returnNcForm.monto) <= 0) {
+      toast.warning("Monto requerido", "El monto de la Nota de Crédito debe ser mayor a 0.")
+      return
+    }
+
+    setSavingReturnNc(true)
+    try {
+      await api.supplierReturns.addCreditNote(selectedReturnForNc.id, {
+        numero: returnNcForm.numero.trim(),
+        timbrado: returnNcForm.timbrado.trim(),
+        monto: Number(returnNcForm.monto),
+        fecha: returnNcForm.fecha || getTodayAsuncion(),
+        cdc: returnNcForm.cdc.trim() || undefined,
+        motivo: returnNcForm.motivo.trim() || undefined,
+        observaciones: returnNcForm.observaciones.trim() || undefined,
+      })
+      toast.success("Nota de Crédito Registrada", `Se acreditó ${formatPYG(returnNcForm.monto)} a la devolución ${selectedReturnForNc.codigo || ""}.`)
+      setShowReturnNcModal(false)
+      fetchAll()
+    } catch (e: any) {
+      toast.error("Error al registrar Nota de Crédito", e.message)
+    } finally {
+      setSavingReturnNc(false)
+    }
+  }
+
   const handleOpenResolveNcModal = (snc: any) => {
     setSelectedNcRequestForResolve(snc)
     const montoReclamado = Number(snc.monto_reclamado || 0)
@@ -3007,6 +3076,15 @@ export default function FinancialPage() {
                                       <div className="flex items-center justify-end gap-1.5">
                                         <button
                                           type="button"
+                                          onClick={() => handleOpenReturnNcModal(doc.raw)}
+                                          className="py-1 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm transition active:scale-[0.98]"
+                                          title="Registrar Nota de Crédito física o electrónica (total o parcial) emitida por el proveedor para esta devolución"
+                                        >
+                                          <FileCheck className="w-3.5 h-3.5" />
+                                          <span>Cargar NC</span>
+                                        </button>
+                                        <button
+                                          type="button"
                                           onClick={() => handleArchiveReturn(doc.raw)}
                                           disabled={archivingReturn}
                                           className="btn-ghost text-xs py-1 px-2.5 text-rose-600 hover:text-rose-800 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded inline-flex items-center gap-1 font-semibold"
@@ -3019,6 +3097,37 @@ export default function FinancialPage() {
                                     )}
                                   </td>
                                 </tr>
+                                {isDev && doc.raw?.notas_credito && doc.raw.notas_credito.length > 0 && (
+                                  <tr className="bg-emerald-50/40 dark:bg-emerald-950/20 border-b border-emerald-200/40">
+                                    <td colSpan={10} className="py-2.5 px-6 pl-12">
+                                      <div className="space-y-1">
+                                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 dark:text-emerald-300">
+                                          <CornerDownRight className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                          <span>Cuotas / Notas de Crédito Registradas sobre esta Devolución:</span>
+                                        </div>
+                                        <div className="space-y-1 pl-5">
+                                          {doc.raw.notas_credito.map((nc: any, idx: number) => (
+                                            <div key={nc.id || idx} className="flex items-center justify-between text-xs text-gray-700 dark:text-gray-300 bg-white/70 dark:bg-slate-900/60 p-2 rounded border border-emerald-100 dark:border-emerald-900/40">
+                                              <span className="font-mono flex items-center gap-2">
+                                                <span className="font-bold text-emerald-700 dark:text-emerald-400">NC {nc.numero || "S/N"}</span>
+                                                {nc.timbrado && <span className="text-gray-400 text-[11px]">(Timb: {nc.timbrado})</span>}
+                                                {nc.fecha && <span className="text-gray-500 text-[11px]">• {formatDate(nc.fecha)}</span>}
+                                                {nc.motivo && <span className="text-gray-600 dark:text-gray-400 text-[11px] italic">— {nc.motivo}</span>}
+                                              </span>
+                                              <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                                                {formatPYG(nc.monto)}
+                                              </span>
+                                            </div>
+                                          ))}
+                                          <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 dark:text-slate-400 border-t border-emerald-200/50 pt-1 mt-1">
+                                            <span>Valor Total Devolución: {formatPYG(Math.abs(doc.montoOriginal))}</span>
+                                            <span>Saldo Pendiente Restante: <strong className="text-amber-700 dark:text-amber-400 font-mono text-xs">{formatPYG(Math.abs(doc.saldoEfectivo))}</strong></span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
                                 {isFactura && doc.raw?.notas_credito && doc.raw.notas_credito.length > 0 && (
                                   <tr className="bg-amber-50/60 dark:bg-amber-950/20 border-b border-amber-200/50">
                                     <td colSpan={10} className="py-2.5 px-6 pl-12">
@@ -5756,6 +5865,228 @@ export default function FinancialPage() {
                   >
                     {resolvingNc ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
                     <span>{resolvingNc ? "Aplicando..." : "Aplicar NC y Habilitar"}</span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: CARGAR NOTA DE CRÉDITO DE DEVOLUCIÓN (TOTAL O PARCIAL) ── */}
+      {showReturnNcModal && selectedReturnForNc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in" onClick={() => !savingReturnNc && setShowReturnNcModal(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col border border-gray-200 dark:border-slate-800 overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* Cabecera */}
+            <div className="p-5 border-b border-gray-100 dark:border-slate-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-850 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+                  <FileCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-gray-900 dark:text-white">
+                    Cargar Nota de Crédito
+                  </h3>
+                  <p className="text-xs text-gray-500 font-mono">
+                    Devolución {selectedReturnForNc.codigo || "DEV"} · {currentSelectedSupplier?.supplier_nombre}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !savingReturnNc && setShowReturnNcModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveReturnNc} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                {/* Resumen de la Devolución */}
+                {(() => {
+                  const totalOriginal = Number(selectedReturnForNc.valor_total_estimado || selectedReturnForNc.monto_original || selectedReturnForNc.monto || 0)
+                  const yaReconocido = Number(selectedReturnForNc.nota_credito_monto || 0)
+                  const perdida = Number(selectedReturnForNc.monto_perdida || 0)
+                  const saldoRestante = Number(selectedReturnForNc.saldo_pendiente ?? Math.max(0, totalOriginal - yaReconocido - perdida))
+                  const nuevoMonto = Number(returnNcForm.monto || 0)
+                  const remDespues = Math.max(0, saldoRestante - nuevoMonto)
+
+                  return (
+                    <div className="p-3.5 bg-amber-50/70 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/60 rounded-xl space-y-2 text-xs">
+                      <div className="flex items-center justify-between pb-1.5 border-b border-amber-200/60 dark:border-amber-900/40">
+                        <span className="font-mono font-bold text-amber-900 dark:text-amber-200 text-sm">
+                          {selectedReturnForNc.codigo || "DEV"}
+                        </span>
+                        <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-amber-200/70 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300">
+                          {selectedReturnForNc.estado?.replace("_", " ") || "PENDIENTE"}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                        <div>
+                          <span className="text-gray-500 block">Total Estimado Devolución:</span>
+                          <strong className="text-gray-900 dark:text-white">{formatPYG(totalOriginal)}</strong>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 block">Acreditado Previamente:</span>
+                          <strong className="text-emerald-700 dark:text-emerald-400">{formatPYG(yaReconocido)}</strong>
+                        </div>
+                      </div>
+
+                      {perdida > 0 && (
+                        <div className="text-[11px] font-mono text-gray-500">
+                          Merma/Ajuste no reclamable: <strong className="text-gray-700 dark:text-gray-300">{formatPYG(perdida)}</strong>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between pt-1.5 border-t border-amber-200/60 dark:border-amber-900/40 font-mono">
+                        <span className="text-gray-700 dark:text-gray-300 font-bold">Saldo Pendiente a Cobrar:</span>
+                        <span className="text-amber-700 dark:text-amber-300 font-black text-sm">
+                          {formatPYG(saldoRestante)}
+                        </span>
+                      </div>
+
+                      {/* Historial de cuotas previas */}
+                      {selectedReturnForNc.notas_credito && selectedReturnForNc.notas_credito.length > 0 && (
+                        <div className="pt-2 border-t border-amber-200/60 dark:border-amber-900/40 space-y-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 block">
+                            Cuotas ya registradas ({selectedReturnForNc.notas_credito.length}):
+                          </span>
+                          {selectedReturnForNc.notas_credito.map((nc: any, idx: number) => (
+                            <div key={nc.id || idx} className="flex items-center justify-between text-[11px] font-mono bg-white/60 dark:bg-slate-900/50 px-2 py-1 rounded">
+                              <span>NC {nc.numero} ({nc.fecha ? formatDate(nc.fecha) : "—"})</span>
+                              <strong className="text-emerald-600 dark:text-emerald-400">{formatPYG(nc.monto)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {nuevoMonto > 0 && (
+                        <div className="p-2 rounded-lg bg-emerald-100/60 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40 text-[11px] font-mono space-y-0.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-emerald-800 dark:text-emerald-300">Cargando ahora (esta cuota):</span>
+                            <strong className="text-emerald-700 dark:text-emerald-300">{formatPYG(nuevoMonto)}</strong>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-gray-600 dark:text-gray-400">
+                            <span>Saldo pendiente posterior:</span>
+                            <span className={remDespues === 0 ? "text-emerald-600 font-bold" : "text-amber-600 font-bold"}>
+                              {remDespues === 0 ? "0 (Devolución Saldada 100%)" : formatPYG(remDespues)}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                {/* Formulario de Carga */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                      N° Nota de Crédito *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={returnNcForm.numero}
+                      onChange={e => setReturnNcForm(prev => ({ ...prev, numero: e.target.value }))}
+                      placeholder="001-003-0008380"
+                      className="input-field w-full text-xs font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                      Timbrado *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={returnNcForm.timbrado}
+                      onChange={e => setReturnNcForm(prev => ({ ...prev, timbrado: e.target.value }))}
+                      placeholder="18412288"
+                      className="input-field w-full text-xs font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                      Monto de la NC (₲) * <span className="font-normal text-gray-400">(Acepta parciales)</span>
+                    </label>
+                    <CurrencyInput
+                      value={returnNcForm.monto}
+                      onChangeValue={val => setReturnNcForm(prev => ({ ...prev, monto: val }))}
+                      currency="PYG"
+                      className="input-field w-full text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400"
+                      placeholder="0"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                      Fecha de Emisión *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={returnNcForm.fecha}
+                      onChange={e => setReturnNcForm(prev => ({ ...prev, fecha: e.target.value }))}
+                      className="input-field w-full text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 block mb-0.5">
+                    CDC Electrónico SIFEN (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={44}
+                    value={returnNcForm.cdc}
+                    onChange={e => setReturnNcForm(prev => ({ ...prev, cdc: e.target.value }))}
+                    placeholder="01801503779001001000451212026090412345678901"
+                    className="input-field w-full text-xs font-mono text-[11px]"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-gray-500 block mb-0.5">
+                    Motivo / Observaciones (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={returnNcForm.observaciones}
+                    onChange={e => setReturnNcForm(prev => ({ ...prev, observaciones: e.target.value }))}
+                    placeholder="Ej. Cuota 2/3 acordada de devolución de vencidos"
+                    className="input-field w-full text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Pie de Acciones */}
+              <div className="p-4 bg-gray-50 dark:bg-slate-850 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+                <span className="text-[11px] text-gray-400">
+                  Registra la NC en la cartera con saldo disponible.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={savingReturnNc}
+                    onClick={() => setShowReturnNcModal(false)}
+                    className="btn-ghost text-xs py-2 px-3 text-gray-600 dark:text-gray-300"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingReturnNc}
+                    className="btn-primary text-xs py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5 shadow-sm"
+                  >
+                    {savingReturnNc ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                    <span>{savingReturnNc ? "Guardando..." : "Registrar Nota de Crédito"}</span>
                   </button>
                 </div>
               </div>
