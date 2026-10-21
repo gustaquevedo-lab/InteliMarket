@@ -17,7 +17,7 @@ from api.src.petty_cash.schemas import (
     ExpenseApprovalConfig, ExpenseRejectBody, FundReplenishRequest,
     ExpenseVoidBody, ComprobanteUploadResponse,
     ExpenseRevertPaymentRequest, ExpenseBatchRevertPaymentRequest,
-    ExpenseBatchAssignInvoiceRequest,
+    ExpenseBatchAssignInvoiceRequest, ExpenseBatchDisburseRequest,
     FundCountCreate, FundCountConfirm, PettyCashFundCountResponse,
     PettyCashRendicionCreate, PettyCashRendicionAuditRequest, PettyCashRendicionReplenishRequest,
     PettyCashRendicionResponse, PettyCashRendicionDetailResponse,
@@ -578,6 +578,32 @@ async def batch_assign_invoice(
             expense_ids=body.expense_ids,
             supplier_invoice_id=body.supplier_invoice_id,
             notas=body.notas,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+
+
+@router.post("/batch-disburse")
+async def batch_disburse(
+    body: ExpenseBatchDisburseRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Liquida y desembolsa en lote múltiples comprobantes de gasto con un solo medio de pago (ej. Transferencia bancaria única)."""
+    user_nombre = user.get("nombre") or user.get("username") or "Tesorería"
+    try:
+        return await service.batch_disburse(
+            db=db,
+            company_id=user["company_id"],
+            expense_ids=body.expense_ids,
+            medio_pago=body.medio_pago,
+            bank_account_id=body.bank_account_id,
+            petty_cash_fund_id=body.petty_cash_fund_id,
+            numero_comprobante=body.numero_comprobante,
+            fecha_pago=body.fecha_pago,
+            notas=body.notas,
+            user_id=user.get("id"),
+            user_nombre=user_nombre,
         )
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err))

@@ -222,6 +222,16 @@ export default function ExpensesPage() {
   const [batchAssignSelectedInvoice, setBatchAssignSelectedInvoice] = useState<any | null>(null)
   const [batchAssigning, setBatchAssigning] = useState<boolean>(false)
 
+  // Pago unificado en lote con transferencia / banco
+  const [showBatchDisburseModal, setShowBatchDisburseModal] = useState<boolean>(false)
+  const [batchDisburseMedio, setBatchDisburseMedio] = useState<string>("transferencia")
+  const [batchDisburseBankId, setBatchDisburseBankId] = useState<string>("")
+  const [batchDisburseFundId, setBatchDisburseFundId] = useState<string>("")
+  const [batchDisburseRef, setBatchDisburseRef] = useState<string>("")
+  const [batchDisburseFecha, setBatchDisburseFecha] = useState<string>(getTodayAsuncion())
+  const [batchDisburseNotas, setBatchDisburseNotas] = useState<string>("")
+  const [batchDisbursing, setBatchDisbursing] = useState<boolean>(false)
+
   // Autocomplete proveedores en modal de gasto
   const [suppliersList, setSuppliersList] = useState<any[]>([])
   const [supplierSearch, setSupplierSearch] = useState("")
@@ -667,6 +677,15 @@ export default function ExpensesPage() {
       return e?.estado === "pagado" && !e?.rendicion_id
     }).length
   }, [selectedTableExpenseIds, expenses])
+
+  // Comprobantes seleccionados pendientes o aprobados elegibles para pago en lote
+  const eligibleUnpaidExpenses = useMemo(() => {
+    return expenses.filter(e => selectedTableExpenseIds.includes(e.id) && e.estado !== "pagado" && !e.anulado)
+  }, [selectedTableExpenseIds, expenses])
+
+  const eligibleUnpaidTotal = useMemo(() => {
+    return eligibleUnpaidExpenses.reduce((acc, e) => acc + Number(e.monto || 0), 0)
+  }, [eligibleUnpaidExpenses])
 
   const toast = useToast()
   const { user } = useAuth()
@@ -1695,6 +1714,52 @@ export default function ExpensesPage() {
       toast.error("Error al procesar lote", err.message || String(err))
     } finally {
       setBatchReverting(false)
+    }
+  }
+
+  const handleConfirmBatchDisburse = async () => {
+    if (eligibleUnpaidExpenses.length === 0) {
+      toast.error("Validación", "No hay comprobantes pendientes seleccionados para liquidar.")
+      return
+    }
+    if (batchDisburseMedio === "transferencia") {
+      if (!batchDisburseBankId) {
+        toast.error("Validación", "Debe seleccionar la cuenta bancaria de salida.")
+        return
+      }
+      if (!batchDisburseRef.trim()) {
+        toast.error("Validación", "Debe ingresar el número de comprobante o referencia de la transferencia.")
+        return
+      }
+    } else if (batchDisburseMedio === "fondo_fijo") {
+      if (!batchDisburseFundId && funds.length === 0) {
+        toast.error("Validación", "No se encontró ningún fondo fijo activo.")
+        return
+      }
+    }
+
+    setBatchDisbursing(true)
+    try {
+      const res = await api.expenses.batchDisburse({
+        expense_ids: eligibleUnpaidExpenses.map(e => e.id),
+        medio_pago: batchDisburseMedio,
+        bank_account_id: batchDisburseMedio === "transferencia" ? batchDisburseBankId : undefined,
+        petty_cash_fund_id: batchDisburseMedio === "fondo_fijo" ? (batchDisburseFundId || funds[0]?.id) : undefined,
+        numero_comprobante: batchDisburseRef.trim() || undefined,
+        fecha_pago: batchDisburseFecha,
+        notas: batchDisburseNotas.trim() || undefined,
+      })
+      toast.success(
+        "Pago Masivo Registrado",
+        `Se liquidaron exitosamente ${res.paid_count} comprobantes por ${formatPYG(res.total_disbursed)}.`
+      )
+      setShowBatchDisburseModal(false)
+      setSelectedTableExpenseIds([])
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al procesar pago en lote", err?.message || String(err))
+    } finally {
+      setBatchDisbursing(false)
     }
   }
 
@@ -2997,6 +3062,25 @@ export default function ExpensesPage() {
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap">
+                    {eligibleUnpaidExpenses.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBatchDisburseMedio("transferencia")
+                          setBatchDisburseBankId(bankAccounts[0]?.id || "")
+                          setBatchDisburseFundId(funds[0]?.id || "")
+                          setBatchDisburseRef("")
+                          setBatchDisburseFecha(getTodayAsuncion())
+                          setBatchDisburseNotas("")
+                          setShowBatchDisburseModal(true)
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-md"
+                      >
+                        <Landmark className="w-4 h-4" />
+                        <span>Pagar con Transferencia / Banco ({eligibleUnpaidExpenses.length})</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => {
@@ -6875,6 +6959,266 @@ export default function ExpensesPage() {
               >
                 {batchReverting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
                 <span>{batchReverting ? "Procesando Lote..." : `Revertir ${selectedPaidExpenseIds.length} Gastos`}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PAGO MASIVO / DESEMBOLSO EN LOTE CON TRANSFERENCIA O FONDO FIJO */}
+      {showBatchDisburseModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh] overflow-hidden">
+            {/* Cabecera shrink-0 */}
+            <div className="p-4 bg-gradient-to-r from-emerald-700 via-teal-800 to-slate-900 text-white flex items-center justify-between shrink-0 border-b border-emerald-600/30">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center">
+                  <Landmark className="w-5 h-5 text-emerald-200" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">
+                    Pagar Comprobantes Seleccionados en Lote
+                  </h3>
+                  <p className="text-[11px] text-emerald-200">
+                    Liquida {eligibleUnpaidExpenses.length} comprobante{eligibleUnpaidExpenses.length > 1 ? "s" : ""} con una única transferencia bancaria o fondo fijo
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBatchDisburseModal(false)}
+                disabled={batchDisbursing}
+                className="p-1 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Cuerpo scrollable flex-1 */}
+            <div className="p-5 space-y-4 flex-1 overflow-y-auto text-xs">
+              {/* 1. Lista de comprobantes */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider text-[10px]">
+                    Comprobantes a Liquidar ({eligibleUnpaidExpenses.length})
+                  </span>
+                  <span className="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400">
+                    Total: {formatPYG(eligibleUnpaidTotal)}
+                  </span>
+                </div>
+                <div className="max-h-36 overflow-y-auto space-y-1.5 border border-slate-200 dark:border-slate-700 rounded-xl p-2 bg-slate-50 dark:bg-slate-800/50">
+                  {eligibleUnpaidExpenses.map(e => (
+                    <div
+                      key={e.id}
+                      className="p-2 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3 shadow-xs"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono font-bold text-slate-800 dark:text-slate-200 text-xs">
+                            {e.numero_factura || "S/F"}
+                          </span>
+                          <span className="text-[10px] text-slate-400">•</span>
+                          <span className="text-[11px] text-slate-600 dark:text-slate-300 truncate">
+                            {e.proveedor || "Sin Proveedor"}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate mt-0.5">{e.descripcion}</p>
+                      </div>
+                      <span className="font-mono font-bold text-xs text-slate-900 dark:text-white shrink-0">
+                        {formatPYG(e.monto)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Selector de Medio de Pago */}
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  Medio de Pago / Desembolso *
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBatchDisburseMedio("transferencia")}
+                    className={`p-2.5 rounded-xl border flex items-center gap-2 text-xs font-bold transition text-left ${
+                      batchDisburseMedio === "transferencia"
+                        ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-700 dark:text-emerald-300 shadow-xs"
+                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300"
+                    }`}
+                  >
+                    <Landmark className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <div>Transferencia Bancaria</div>
+                      <div className="text-[10px] font-normal text-slate-500">SIPAP / Cta. Corriente</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBatchDisburseMedio("fondo_fijo")}
+                    className={`p-2.5 rounded-xl border flex items-center gap-2 text-xs font-bold transition text-left ${
+                      batchDisburseMedio === "fondo_fijo"
+                        ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-700 dark:text-emerald-300 shadow-xs"
+                        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-300"
+                    }`}
+                  >
+                    <Wallet className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <div>Fondo Fijo</div>
+                      <div className="text-[10px] font-normal text-slate-500">Caja Chica Efectivo</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. Campos según el medio */}
+              {batchDisburseMedio === "transferencia" && (
+                <div className="space-y-3 p-3 bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-xl">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Cuenta Bancaria de Salida *
+                    </label>
+                    <select
+                      value={batchDisburseBankId}
+                      onChange={e => setBatchDisburseBankId(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="">-- Seleccionar Cuenta Bancaria --</option>
+                      {bankAccounts.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.banco} ({b.tipo || "Cta"} {b.numero_cuenta}) - Saldo: {formatPYG(b.saldo_actual || 0)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        Nº de Comprobante / SIPAP *
+                      </label>
+                      <input
+                        type="text"
+                        value={batchDisburseRef}
+                        onChange={e => setBatchDisburseRef(e.target.value)}
+                        placeholder="Ej. SIPAP 458921"
+                        className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 focus:ring-2 focus:ring-emerald-500 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        Fecha Efectiva
+                      </label>
+                      <input
+                        type="date"
+                        value={batchDisburseFecha}
+                        onChange={e => setBatchDisburseFecha(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {batchDisburseMedio === "fondo_fijo" && (
+                <div className="space-y-3 p-3 bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-xl">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                      Fondo Fijo Custodio *
+                    </label>
+                    <select
+                      value={batchDisburseFundId}
+                      onChange={e => setBatchDisburseFundId(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 focus:ring-2 focus:ring-emerald-500"
+                    >
+                      {funds.map(f => (
+                        <option key={f.id} value={f.id}>
+                          {f.nombre} - Saldo: {formatPYG(f.saldo_actual || 0)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        Nº de Recibo / Vale (Opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={batchDisburseRef}
+                        onChange={e => setBatchDisburseRef(e.target.value)}
+                        placeholder="Ej. Vale 012"
+                        className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        Fecha Efectiva
+                      </label>
+                      <input
+                        type="date"
+                        value={batchDisburseFecha}
+                        onChange={e => setBatchDisburseFecha(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 4. Notas */}
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Notas / Observaciones del Pago en Lote
+                </label>
+                <textarea
+                  rows={2}
+                  value={batchDisburseNotas}
+                  onChange={e => setBatchDisburseNotas(e.target.value)}
+                  placeholder="Observaciones adicionales sobre la transferencia..."
+                  className="w-full px-3 py-2 text-xs border border-slate-300 dark:border-slate-600 rounded-xl bg-white dark:bg-slate-800 focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Resumen Final */}
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] text-emerald-800 dark:text-emerald-300 font-medium">
+                    Total a debitar de la cuenta:
+                  </span>
+                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                    Se generará 1 único movimiento de débito bancario por el total
+                  </p>
+                </div>
+                <span className="font-mono font-extrabold text-sm text-emerald-700 dark:text-emerald-300">
+                  {formatPYG(eligibleUnpaidTotal)}
+                </span>
+              </div>
+            </div>
+
+            {/* Pie de acciones anclado shrink-0 */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 flex justify-end gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowBatchDisburseModal(false)}
+                disabled={batchDisbursing}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBatchDisburse}
+                disabled={batchDisbursing || eligibleUnpaidExpenses.length === 0}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-md shadow-emerald-600/20 disabled:opacity-50"
+              >
+                {batchDisbursing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                <span>
+                  {batchDisbursing
+                    ? "Procesando Transferencia..."
+                    : `Confirmar Pago (${formatPYG(eligibleUnpaidTotal)})`}
+                </span>
               </button>
             </div>
           </div>

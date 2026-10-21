@@ -243,6 +243,16 @@ class ExpenseBatchAssignInvoiceRequest(BaseModel):
     notas: Optional[str] = None
 
 
+class ExpenseBatchDisburseRequest(BaseModel):
+    expense_ids: list[str]
+    medio_pago: str = "transferencia"  # transferencia | fondo_fijo
+    bank_account_id: Optional[str] = None
+    petty_cash_fund_id: Optional[str] = None
+    numero_comprobante: Optional[str] = None
+    fecha_pago: Optional[date] = None
+    notas: Optional[str] = None
+
+
 class ExpenseApprovalConfig(BaseModel):
     umbral_aprobacion: Decimal = Decimal("200000")
     tolerancia_arqueo: Decimal = Decimal("2000")

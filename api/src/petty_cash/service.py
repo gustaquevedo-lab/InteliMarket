@@ -493,22 +493,30 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
     # Nota: NO se verifica saldo del fondo aquí. El gasto se crea en estado 'pendiente'.
     # El saldo se controla en el momento de liquidación/pago (disburse_expense).
 
-    # 1. Control Antifraude de Duplicados (RUC + Timbrado + Factura)
-    if data.ruc and data.timbrado and data.numero_factura:
-        clean_ruc = data.ruc.strip()
-        clean_timb = data.timbrado.strip()
+    # 1. Control Antifraude de Duplicados (Factura + RUC/Proveedor + Timbrado)
+    if data.numero_factura and data.numero_factura.strip():
         clean_num = data.numero_factura.strip()
-        dup_stmt = select(Expense.id, Expense.descripcion, Expense.fecha_gasto).where(
+        clean_ruc = data.ruc.strip() if data.ruc and data.ruc.strip() else None
+        clean_timb = data.timbrado.strip() if data.timbrado and data.timbrado.strip() else None
+
+        conds = [
             Expense.company_id == cid,
-            Expense.ruc == clean_ruc,
-            Expense.timbrado == clean_timb,
             Expense.numero_factura == clean_num,
             Expense.anulado == False,
-        )
+        ]
+        if clean_ruc:
+            conds.append(Expense.ruc == clean_ruc)
+        elif data.supplier_id:
+            conds.append(Expense.supplier_id == _safe_uuid(data.supplier_id))
+        if clean_timb:
+            conds.append(Expense.timbrado == clean_timb)
+
+        dup_stmt = select(Expense.id, Expense.descripcion, Expense.fecha_gasto, Expense.numero_factura, Expense.ruc).where(*conds)
         dup = (await db.execute(dup_stmt)).first()
         if dup:
+            info_ruc = f" (RUC {dup.ruc})" if dup.ruc else ""
             raise ValueError(
-                f"Factura ya registrada: El comprobante Nro {clean_num} (Timbrado {clean_timb}, RUC {clean_ruc}) "
+                f"Factura ya registrada: El comprobante Nro {clean_num}{info_ruc} "
                 f"ya fue cargado previamente el {dup.fecha_gasto} ('{dup.descripcion}')."
             )
 
@@ -1502,6 +1510,175 @@ async def batch_assign_invoice(
         "total_aplicado": float(total_aplicado),
         "invoice_saldo_remanente": float(target_inv.saldo_pendiente),
         "invoice_estado": target_inv.estado,
+    }
+
+
+async def batch_disburse(
+    db: AsyncSession,
+    company_id: str,
+    expense_ids: list[str],
+    medio_pago: str,
+    bank_account_id: str | None = None,
+    petty_cash_fund_id: str | None = None,
+    numero_comprobante: str | None = None,
+    fecha_pago: date | None = None,
+    notas: str | None = None,
+    user_id: str | None = None,
+    user_nombre: str | None = None,
+) -> dict:
+    from api.src.financial.models import BankAccount, BankTransaction
+
+    cid = uuid.UUID(str(company_id))
+    uuids = []
+    for eid in expense_ids:
+        try:
+            uuids.append(uuid.UUID(str(eid)))
+        except ValueError:
+            pass
+
+    if not uuids:
+        raise ValueError("Debe seleccionar al menos un comprobante de gasto.")
+
+    exp_res = await db.execute(
+        select(Expense).where(
+            Expense.id.in_(uuids),
+            Expense.company_id == cid,
+            Expense.anulado == False,
+        )
+    )
+    expenses = exp_res.scalars().all()
+    if not expenses:
+        raise ValueError("No se encontraron gastos válidos para liquidar.")
+
+    for exp in expenses:
+        if exp.estado == "pagado":
+            raise ValueError(f"El comprobante '{exp.descripcion}' ({exp.numero_factura or exp.id}) ya está pagado.")
+
+    total_pyg = sum(Decimal(str(exp.monto)) for exp in expenses)
+    fecha_efectiva = fecha_pago or date.today()
+    fp = (medio_pago or "transferencia").lower()
+
+    if fp in ("transferencia", "banco_transferencia", "sipap"):
+        if not bank_account_id:
+            raise ValueError("Debe seleccionar la cuenta bancaria para la transferencia.")
+        b_res = await db.execute(
+            select(BankAccount).where(BankAccount.id == uuid.UUID(str(bank_account_id)), BankAccount.company_id == cid)
+        )
+        bank_acc = b_res.scalar_one_or_none()
+        if not bank_acc:
+            raise ValueError("Cuenta bancaria no encontrada.")
+
+        bank_acc.saldo_actual = Decimal(str(bank_acc.saldo_actual)) - total_pyg
+
+        resumen_desc = ", ".join([e.numero_factura or e.descripcion[:20] for e in expenses[:3]])
+        if len(expenses) > 3:
+            resumen_desc += f" y {len(expenses) - 3} más"
+
+        proveedores = {e.proveedor for e in expenses if e.proveedor}
+        contraparte = list(proveedores)[0] if len(proveedores) == 1 else "Pago Masivo Gastos"
+
+        bt = BankTransaction(
+            company_id=cid,
+            bank_account_id=bank_acc.id,
+            fecha=fecha_efectiva,
+            tipo="debito",
+            monto=total_pyg,
+            moneda="PYG",
+            descripcion=f"Pago Masivo ({len(expenses)} comprobantes): {resumen_desc}",
+            referencia=numero_comprobante,
+            contraparte=contraparte,
+            conciliado=True,
+            fecha_conciliacion=datetime.now(timezone.utc),
+            categoria="gastos_operativos",
+        )
+        db.add(bt)
+
+        for exp in expenses:
+            db.add(ExpenseDisbursement(
+                company_id=cid,
+                expense_id=exp.id,
+                medio_pago="transferencia",
+                monto=Decimal(str(exp.monto)),
+                moneda="PYG",
+                bank_account_id=bank_acc.id,
+                numero_comprobante=numero_comprobante,
+                fecha_efectiva=fecha_efectiva,
+                created_by=uuid.UUID(user_id) if user_id else None,
+            ))
+            exp.estado = "pagado"
+            exp.fecha_pago = fecha_efectiva
+            exp.pagado_por = uuid.UUID(user_id) if user_id else None
+            exp.pagado_at = datetime.now(timezone.utc)
+            exp.forma_pago_resumen = f"TRANSFERENCIA ({bank_acc.banco})"
+            if exp.estado != "aprobado":
+                exp.aprobado_por = uuid.UUID(user_id) if user_id else None
+                exp.aprobado_at = datetime.now(timezone.utc)
+            if notas:
+                exp.notas = f"{exp.notas or ''}\n[Pago Lote]: {notas}".strip()
+
+    elif fp in ("fondo_fijo", "caja_chica"):
+        target_fund_id = petty_cash_fund_id
+        if not target_fund_id:
+            f_res = await db.execute(
+                select(PettyCashFund).where(PettyCashFund.company_id == cid, PettyCashFund.activo == True).limit(1)
+            )
+            fund_obj = f_res.scalar_one_or_none()
+        else:
+            fund_obj = await get_fund(db, target_fund_id)
+
+        if not fund_obj:
+            raise ValueError("Fondo Fijo (Caja Chica) no encontrado o inactivo.")
+
+        s_ant = Decimal(str(fund_obj.saldo_actual))
+        fund_obj.saldo_actual = s_ant - total_pyg
+        s_nuevo = fund_obj.saldo_actual
+
+        db.add(PettyCashFundMovement(
+            fund_id=fund_obj.id,
+            tipo="gasto",
+            monto=total_pyg,
+            saldo_anterior=s_ant,
+            saldo_nuevo=s_nuevo,
+            referencia_type="expense_batch",
+            referencia_id=expenses[0].id,
+            observaciones=f"Pago Masivo ({len(expenses)} comprobantes) por Caja Chica",
+            created_by=uuid.UUID(user_id) if user_id else None,
+        ))
+
+        for exp in expenses:
+            exp.fund_id = fund_obj.id
+            db.add(ExpenseDisbursement(
+                company_id=cid,
+                expense_id=exp.id,
+                medio_pago="fondo_fijo",
+                monto=Decimal(str(exp.monto)),
+                moneda="PYG",
+                petty_cash_fund_id=fund_obj.id,
+                numero_comprobante=numero_comprobante,
+                fecha_efectiva=fecha_efectiva,
+                created_by=uuid.UUID(user_id) if user_id else None,
+            ))
+            exp.estado = "pagado"
+            exp.fecha_pago = fecha_efectiva
+            exp.pagado_por = uuid.UUID(user_id) if user_id else None
+            exp.pagado_at = datetime.now(timezone.utc)
+            exp.forma_pago_resumen = f"FONDO FIJO ({fund_obj.nombre})"
+            if exp.estado != "aprobado":
+                exp.aprobado_por = uuid.UUID(user_id) if user_id else None
+                exp.aprobado_at = datetime.now(timezone.utc)
+            if notas:
+                exp.notas = f"{exp.notas or ''}\n[Pago Lote]: {notas}".strip()
+
+    else:
+        raise ValueError(f"Medio de pago '{medio_pago}' no soportado para pago masivo.")
+
+    await db.commit()
+    return {
+        "success": True,
+        "paid_count": len(expenses),
+        "total_disbursed": float(total_pyg),
+        "medio_pago": fp,
+        "paid_ids": [str(e.id) for e in expenses],
     }
 
 
