@@ -2193,7 +2193,14 @@ async def get_corporate_remissions_list(db: AsyncSession, company_id: str, empre
     if empresa_nombre:
         q += " AND empresa_vinculada_nombre ILIKE :empresa"
         params["empresa"] = f"%{empresa_nombre.strip()}%"
-    q += " ORDER BY created_at DESC"
+    q += """
+        ORDER BY 
+            CASE 
+                WHEN estado IN ('REMITIDO', 'PENDIENTE', 'PAGADO_PARCIAL') OR saldo_pendiente > 0 THEN 1 
+                ELSE 2 
+            END ASC,
+            created_at DESC
+    """
 
     res = await db.execute(text(q), params)
     rows = []

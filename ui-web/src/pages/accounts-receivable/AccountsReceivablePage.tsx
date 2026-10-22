@@ -6,7 +6,7 @@ import {
   User, Check, Phone, ArrowUpRight, ShieldCheck, ShieldAlert, RefreshCw, BarChart2,
   Printer, QrCode, ExternalLink, CheckSquare, Square, Building2, Building,
   Users, Send, Landmark, ArrowRight, DownloadCloud, FileCheck, Layers, Filter,
-  Banknote, RotateCcw, Ban, Trash2, Warehouse, Pencil
+  Banknote, RotateCcw, Ban, Trash2, Warehouse, Pencil, ArrowUpDown
 } from "lucide-react"
 import { api, type AccountsReceivable, type Sale, type SaleItem, type CreditAccount } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -328,6 +328,8 @@ export default function AccountsReceivablePage() {
   const [empresaPendingLoading, setEmpresaPendingLoading] = useState(false)
   const [remissions, setRemissions] = useState<any[]>([])
   const [remissionsLoading, setRemissionsLoading] = useState(false)
+  const [remissionsSortOrder, setRemissionsSortOrder] = useState<"pendientes_primero" | "recientes" | "antiguos" | "mayor_monto">("pendientes_primero")
+  const [remissionsFilter, setRemissionsFilter] = useState<"todos" | "pendientes" | "pagados">("todos")
   const [showRemitModal, setShowRemitModal] = useState(false)
   const [remitPeriodo, setRemitPeriodo] = useState(() => {
     const now = new Date()
@@ -452,6 +454,47 @@ export default function AccountsReceivablePage() {
       cantFuncs: funcIds.size,
     }
   }, [showEditRemissionModal, editRemDetail, editSelectedDocIds, editAvailablePendingDocs])
+
+  const remissionsCounts = useMemo(() => {
+    let pendientes = 0
+    let pagados = 0
+    remissions.forEach((r) => {
+      const isPend = (r.estado !== "PAGADO" && r.estado !== "ANULADO") || Number(r.saldo_pendiente) > 0
+      if (isPend) pendientes++
+      else if (r.estado === "PAGADO") pagados++
+    })
+    return { total: remissions.length, pendientes, pagados }
+  }, [remissions])
+
+  const filteredAndSortedRemissions = useMemo(() => {
+    let list = [...remissions]
+    if (remissionsFilter === "pendientes") {
+      list = list.filter((r) => (r.estado !== "PAGADO" && r.estado !== "ANULADO") || Number(r.saldo_pendiente) > 0)
+    } else if (remissionsFilter === "pagados") {
+      list = list.filter((r) => r.estado === "PAGADO" && Number(r.saldo_pendiente) <= 0)
+    }
+
+    list.sort((a, b) => {
+      if (remissionsSortOrder === "pendientes_primero") {
+        const aPendiente = (a.estado !== "PAGADO" && a.estado !== "ANULADO") || Number(a.saldo_pendiente) > 0 ? 1 : 0
+        const bPendiente = (b.estado !== "PAGADO" && b.estado !== "ANULADO") || Number(b.saldo_pendiente) > 0 ? 1 : 0
+        if (aPendiente !== bPendiente) {
+          return bPendiente - aPendiente // pendientes primero
+        }
+        return new Date(b.created_at || b.fecha || 0).getTime() - new Date(a.created_at || a.fecha || 0).getTime()
+      } else if (remissionsSortOrder === "recientes") {
+        return new Date(b.created_at || b.fecha || 0).getTime() - new Date(a.created_at || a.fecha || 0).getTime()
+      } else if (remissionsSortOrder === "antiguos") {
+        return new Date(a.created_at || a.fecha || 0).getTime() - new Date(b.created_at || b.fecha || 0).getTime()
+      } else if (remissionsSortOrder === "mayor_monto") {
+        return Number(b.monto_total || 0) - Number(a.monto_total || 0)
+      }
+      return 0
+    })
+
+    return list
+  }, [remissions, remissionsSortOrder, remissionsFilter])
+
 
   // 📊 Filtros en línea del Centro de Reportes
   const [repAgingDesde, setRepAgingDesde] = useState(() => getAsuncionDateStr(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
@@ -585,8 +628,7 @@ export default function AccountsReceivablePage() {
     setRemissionsLoading(true)
     try {
       const data = await api.accountsReceivable.listCorporateRemissions()
-      const sorted = Array.isArray(data) ? [...data].sort((a: any, b: any) => new Date(b.fecha || b.created_at || 0).getTime() - new Date(a.fecha || a.created_at || 0).getTime()) : []
-      setRemissions(sorted)
+      setRemissions(Array.isArray(data) ? data : [])
     } catch {
       toast.error("Error", "No se pudieron cargar las remisiones corporativas")
     } finally {
@@ -2790,7 +2832,7 @@ export default function AccountsReceivablePage() {
 
               {/* Historial de Remisiones y Lotes Emitidos a Empresas */}
               <div className="card p-0 overflow-hidden">
-                <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
                       <FileCheck className="w-4 h-4 text-emerald-500" />
@@ -2798,12 +2840,72 @@ export default function AccountsReceivablePage() {
                     </h3>
                     <p className="text-xs text-gray-500">Lotes formalmente remitidos a las empresas vinculadas. Al cobrar el lote, ingresa a tesorería y cancela la deuda corporativa.</p>
                   </div>
+                  <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                    {/* Filtros rápidos: Todos, Pendientes, Pagados */}
+                    <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-800 text-xs font-semibold">
+                      <button
+                        type="button"
+                        onClick={() => setRemissionsFilter("todos")}
+                        className={`px-2.5 py-1 rounded-md transition ${
+                          remissionsFilter === "todos"
+                            ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-2xs font-bold"
+                            : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
+                        }`}
+                      >
+                        Todas ({remissionsCounts.total})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRemissionsFilter("pendientes")}
+                        className={`px-2.5 py-1 rounded-md transition inline-flex items-center gap-1 ${
+                          remissionsFilter === "pendientes"
+                            ? "bg-amber-500 text-white shadow-2xs font-bold"
+                            : "text-amber-600 dark:text-amber-400 hover:text-amber-700"
+                        }`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                        Pendientes ({remissionsCounts.pendientes})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRemissionsFilter("pagados")}
+                        className={`px-2.5 py-1 rounded-md transition inline-flex items-center gap-1 ${
+                          remissionsFilter === "pagados"
+                            ? "bg-emerald-600 text-white shadow-2xs font-bold"
+                            : "text-emerald-600 dark:text-emerald-400 hover:text-emerald-700"
+                        }`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                        Canceladas ({remissionsCounts.pagados})
+                      </button>
+                    </div>
+
+                    {/* Selector de Orden */}
+                    <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-2.5 py-1 text-xs">
+                      <ArrowUpDown className="w-3.5 h-3.5 text-gray-500" />
+                      <span className="text-gray-400 text-[11px] font-medium hidden md:inline">Ordenar:</span>
+                      <select
+                        value={remissionsSortOrder}
+                        onChange={(e) => setRemissionsSortOrder(e.target.value as any)}
+                        className="bg-transparent border-0 p-0 text-xs font-bold text-gray-700 dark:text-gray-200 focus:ring-0 cursor-pointer"
+                      >
+                        <option value="pendientes_primero">Pendientes primero</option>
+                        <option value="recientes">Más recientes</option>
+                        <option value="antiguos">Más antiguos</option>
+                        <option value="mayor_monto">Mayor monto</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
 
                 {remissionsLoading ? (
                   <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
-                ) : remissions.length === 0 ? (
-                  <div className="text-center py-10 text-gray-400 text-xs">No hay remisiones registradas en el historial.</div>
+                ) : filteredAndSortedRemissions.length === 0 ? (
+                  <div className="text-center py-10 text-gray-400 text-xs">
+                    {remissions.length === 0
+                      ? "No hay remisiones registradas en el historial."
+                      : "No hay remisiones que coincidan con el filtro seleccionado."}
+                  </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
@@ -2821,7 +2923,7 @@ export default function AccountsReceivablePage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                        {remissions.map((r) => {
+                        {filteredAndSortedRemissions.map((r) => {
                           const isPagado = r.estado === "PAGADO"
                           return (
                             <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
