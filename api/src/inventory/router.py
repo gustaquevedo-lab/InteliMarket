@@ -18,6 +18,7 @@ from api.src.inventory.schemas import (
     PhysicalSessionCreate, PhysicalSessionResponse,
     PhysicalSessionItemCountBody, PhysicalSessionItemReconcileBody,
     PhysicalSessionItemResponse,
+    ProductLotCreate, ProductLotResponse,
 )
 from api.src.inventory import service, export_service, pdf_reports
 
@@ -133,6 +134,59 @@ async def get_lots_expiries(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.get_lots_expiries(db, company_id, warehouse_id, estado, limit, offset)
+
+
+@router.get("/companies/{company_id}/inventory/products/{product_id}/lots")
+async def list_product_lots(
+    company_id: str,
+    product_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.list_product_lots(db, company_id, product_id)
+
+
+@router.post("/companies/{company_id}/inventory/products/{product_id}/lots", status_code=status.HTTP_201_CREATED)
+async def create_product_lot(
+    company_id: str,
+    product_id: str,
+    body: ProductLotCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        user_id = UUID(user.get("user_id") or user.get("sub")) if user and (user.get("user_id") or user.get("sub")) else None
+        return await service.create_product_lot(
+            db, company_id, product_id, body.model_dump(exclude_unset=True), user_id=user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/inventory/products/{product_id}/lots")
+async def list_product_lots_current_user(
+    product_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    return await service.list_product_lots(db, company_id, product_id)
+
+
+@router.post("/inventory/products/{product_id}/lots", status_code=status.HTTP_201_CREATED)
+async def create_product_lot_current_user(
+    product_id: str,
+    body: ProductLotCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    company_id = user.get("company_id") or "00000000-0000-0000-0000-000000000010"
+    try:
+        user_id = UUID(user.get("user_id") or user.get("sub")) if user and (user.get("user_id") or user.get("sub")) else None
+        return await service.create_product_lot(
+            db, company_id, product_id, body.model_dump(exclude_unset=True), user_id=user_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/inventory/movements")

@@ -4,7 +4,8 @@ import {
   Calendar, Hash, ImagePlus, ChevronRight, ClipboardList,
   AlertTriangle, CheckCircle2, Search, Download, RefreshCcw, RefreshCw, Zap,
   LogIn, LogOut, User as UserIcon, Lock, Eye, EyeOff, ShieldCheck,
-  Building2, Tag, Layers, Barcode, DollarSign, AlertCircle, Filter, ArrowLeft
+  Building2, Tag, Layers, Barcode, DollarSign, AlertCircle, Filter, ArrowLeft,
+  Clock, Sparkles, History
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -120,6 +121,23 @@ export default function ConteoVencimientosPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
   const [loginTab, setLoginTab] = useState<"staff" | "manual">("staff")
+
+  // ── Modo principal de la App ("menu" | "conteo" | "vencimientos") ──
+  const [appMainMode, setAppMainMode] = useState<"menu" | "conteo" | "vencimientos">("menu")
+
+  // ── Estados para el Flujo de Registro de Vencimientos en Góndola ──
+  const [vencSelectedProduct, setVencSelectedProduct] = useState<Product | null>(null)
+  const [vencSearch, setVencSearch] = useState("")
+  const [vencSearchResults, setVencSearchResults] = useState<Product[]>([])
+  const [vencSearching, setVencSearching] = useState(false)
+  const [vencProductLots, setVencProductLots] = useState<any[]>([])
+  const [vencLoadingLots, setVencLoadingLots] = useState(false)
+  const [vencFecha, setVencFecha] = useState("")
+  const [vencLote, setVencLote] = useState("")
+  const [vencCantidad, setVencCantidad] = useState("1")
+  const [vencSaving, setVencSaving] = useState(false)
+  const [vencSessionHistory, setVencSessionHistory] = useState<any[]>([])
+  const [vencCameraActive, setVencCameraActive] = useState(false)
 
   // ── Items ya contados en esta sesion ──
   const [items, setItems] = useState<CountedItem[]>([])
@@ -474,10 +492,154 @@ export default function ConteoVencimientosPage() {
     stopCamera,
     switchCamera,
   } = useBarcodeScannerCamera({
-    onScan: lookupProduct,
+    onScan: (code) => {
+      if (appMainMode === "vencimientos") {
+        lookupProductForVenc(code)
+      } else {
+        lookupProduct(code)
+      }
+    },
     storageKey: "extra_conteo_camera_id",
-    paused: !!scannedProduct || searching,
+    paused:
+      appMainMode === "vencimientos"
+        ? !vencCameraActive || !!vencSelectedProduct || vencSearching
+        : !!scannedProduct || searching,
   })
+
+  // ── Handlers de Vencimientos en Góndola ──
+  const handleSelectProductForVenc = useCallback(async (prod: Product) => {
+    setVencSelectedProduct(prod)
+    setVencSearch("")
+    setVencSearchResults([])
+    setVencFecha("")
+    setVencLote("")
+    setVencCantidad("1")
+    setVencLoadingLots(true)
+    try {
+      const lots = await api.inventory.getProductLots(prod.id)
+      setVencProductLots(Array.isArray(lots) ? lots : [])
+    } catch (e) {
+      console.warn("Error cargando lotes del producto:", e)
+      setVencProductLots([])
+    } finally {
+      setVencLoadingLots(false)
+    }
+    if (navigator.vibrate) navigator.vibrate(40)
+  }, [])
+
+  const lookupProductForVenc = useCallback(
+    async (raw: string) => {
+      if (vencSearching) return
+      const code = raw.trim()
+      if (!code) return
+
+      setVencSearching(true)
+      try {
+        const res = await api.products.list({ search: code, limit: 10, activo: true })
+        const list = Array.isArray(res) ? res : []
+        const exact = list.find((p) => p.codigo_barra === code || p.sku === code)
+        const found = exact || (list.length === 1 ? list[0] : null)
+        if (found) {
+          await handleSelectProductForVenc(found)
+          toast.success("Producto Identificado", found.nombre)
+        } else if (list.length > 1) {
+          setVencSearchResults(list)
+          toast.info("Varios productos", "Elegí el producto de la lista.")
+        } else {
+          toast.warning("No encontrado", `No se encontró producto con código ${code}`)
+        }
+      } catch (err: any) {
+        toast.error("Error al buscar", err?.message || "No se pudo consultar el producto.")
+      } finally {
+        setVencSearching(false)
+      }
+    },
+    [toast, vencSearching, handleSelectProductForVenc]
+  )
+
+  const handleSaveVencimiento = async () => {
+    if (!vencSelectedProduct) return
+    if (!vencFecha) {
+      toast.warning("Falta la fecha", "Seleccioná la fecha de vencimiento.")
+      return
+    }
+    const qty = parseInt(vencCantidad || "1", 10)
+    if (isNaN(qty) || qty < 0) {
+      toast.warning("Cantidad inválida", "Ingresá una cantidad de unidades válida.")
+      return
+    }
+    setVencSaving(true)
+    try {
+      const saved = await api.inventory.createProductLot(vencSelectedProduct.id, {
+        fecha_vencimiento: vencFecha,
+        referencia: vencLote.trim() || undefined,
+        cantidad: qty,
+      })
+      toast.success("Vencimiento Registrado", `${vencSelectedProduct.nombre}: vence ${vencFecha}`)
+      if (navigator.vibrate) navigator.vibrate([60, 30, 60])
+
+      // Actualizar lotes en tiempo real
+      const updatedLots = await api.inventory.getProductLots(vencSelectedProduct.id)
+      setVencProductLots(Array.isArray(updatedLots) ? updatedLots : [])
+
+      // Guardar en el historial local de la sesión de trabajo
+      setVencSessionHistory((prev) => [
+        {
+          id: saved.id || Math.random().toString(),
+          product_nombre: vencSelectedProduct.nombre,
+          product_codigo: vencSelectedProduct.codigo_barra || vencSelectedProduct.sku,
+          fecha_vencimiento: vencFecha,
+          referencia: vencLote.trim() || "GÓNDOLA",
+          cantidad: qty,
+          estado_vencimiento: saved.estado_vencimiento || "vigente",
+          hora: new Date().toLocaleTimeString("es-PY", { hour: "2-digit", minute: "2-digit" }),
+        },
+        ...prev,
+      ])
+
+      // Limpiar campos para el siguiente registro
+      setVencFecha("")
+      setVencLote("")
+      setVencCantidad("1")
+    } catch (e: any) {
+      toast.error("Error al registrar", e?.message || "No se pudo guardar el vencimiento.")
+    } finally {
+      setVencSaving(false)
+    }
+  }
+
+  const setQuickVencDays = (days: number) => {
+    const d = new Date()
+    d.setDate(d.getDate() + days)
+    setVencFecha(d.toISOString().slice(0, 10))
+  }
+
+  const setQuickVencMonths = (months: number) => {
+    const d = new Date()
+    d.setMonth(d.getMonth() + months)
+    setVencFecha(d.toISOString().slice(0, 10))
+  }
+
+  // ── Búsqueda en catálogo para registro de vencimientos ──
+  useEffect(() => {
+    const q = vencSearch.trim()
+    if (!q || q.length < 2) {
+      setVencSearchResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setVencSearching(true)
+      try {
+        const res = await api.products.list({ search: q, limit: 15, activo: true })
+        setVencSearchResults(Array.isArray(res) ? res : [])
+      } catch (err) {
+        console.warn("Error en búsqueda de vencimientos:", err)
+      } finally {
+        setVencSearching(false)
+      }
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [vencSearch])
 
   // ── Búsqueda en catálogo (Pestaña "Buscar Producto") ──
   useEffect(() => {
@@ -521,9 +683,9 @@ export default function ConteoVencimientosPage() {
     return () => clearTimeout(timer)
   }, [quickSearch])
 
-  // ── Cargar productos del alcance de la sesión (Pestaña "Lista Catálogo") ──
+  // ── Cargar productos del alcance de la sesión (Solo en Pestaña "Lista Catálogo", máx 100 para fluidez total) ──
   useEffect(() => {
-    if (!session) {
+    if (!session || countViewMode !== "list") {
       setScopeProducts([])
       return
     }
@@ -532,7 +694,7 @@ export default function ConteoVencimientosPage() {
 
     const fetchScope = async () => {
       try {
-        const params: any = { limit: 5000, activo: true }
+        const params: any = { limit: 100, activo: true }
         let supId = selectedSupplierId
         if (!supId && (session as any)?.notas) {
           try {
@@ -573,7 +735,7 @@ export default function ConteoVencimientosPage() {
     return () => {
       cancelled = true
     }
-  }, [session, suppliers, selectedSupplierId])
+  }, [session, suppliers, selectedSupplierId, countViewMode])
 
   const handleFotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -864,18 +1026,598 @@ export default function ConteoVencimientosPage() {
     const selectedAreaObj = AREAS.find((a) => a.key === selectedArea)
     const selectedAreaLabel = selectedAreaObj?.label || selectedArea
 
+    // ── MODO 1: MENÚ PRINCIPAL (SELECTOR DE OPERACIÓN GÓNDOLA) ──
+    if (appMainMode === "menu") {
+      return (
+        <div className="min-h-screen bg-slate-950 text-white flex flex-col">
+          {/* Barra superior con identidad de usuario y descarga de APK */}
+          <div className="p-4 pt-5 border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-md flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-cyan-600 to-cyan-400 p-0.5 shadow-md shadow-cyan-500/20 shrink-0">
+                <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center text-cyan-400">
+                  <ClipboardList className="w-5 h-5" />
+                </div>
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-sm font-black tracking-tight text-white truncate">Extra Conteo & Vencimientos</h1>
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                  <span className="font-bold text-slate-200 truncate">{user.nombre || user.email}</span>
+                  <span className="text-slate-400 text-[10px] uppercase font-mono tracking-wider">({user.rol || "góndola"})</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={forceAppRefresh}
+                className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 text-slate-300 transition cursor-pointer"
+                title="Recargar App y limpiar caché"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleLogout}
+                className="p-2 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 hover:text-rose-400 border border-slate-700/60 text-slate-400 transition cursor-pointer"
+                title="Cerrar sesión"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+              <a
+                href="/download/extra-conteo.apk"
+                download="extra-conteo.apk"
+                title="Descargar APK Nativo Android"
+                className="px-2.5 py-1.5 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/25 active:scale-95 transition cursor-pointer flex items-center gap-1.5 text-xs font-black shadow-xs shrink-0"
+              >
+                <Download className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="hidden sm:inline">APK</span>
+              </a>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5 max-w-lg mx-auto w-full">
+            <div className="text-center space-y-1 pt-1 pb-2">
+              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                Operaciones de Salón y Góndola
+              </span>
+              <h2 className="text-lg font-black text-white">¿Qué tarea vas a realizar?</h2>
+              <p className="text-xs text-slate-400">Seleccioná el módulo operativo para comenzar a trabajar:</p>
+            </div>
+
+            {/* OPCIÓN 1: CONTEO FÍSICO */}
+            <div
+              onClick={() => setAppMainMode("conteo")}
+              className="group relative bg-gradient-to-br from-slate-900/90 to-slate-900/50 hover:from-slate-850 hover:to-slate-900 border border-slate-800 hover:border-cyan-500/50 rounded-3xl p-5 cursor-pointer transition-all duration-200 shadow-xl shadow-slate-950/60 active:scale-[0.98]"
+            >
+              <div className="flex items-start gap-4">
+                <div className="w-13 h-13 rounded-2xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0 group-hover:bg-cyan-500/25 group-hover:scale-105 transition">
+                  <ClipboardList className="w-7 h-7" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-base font-black text-white group-hover:text-cyan-300 transition">
+                      Conteo de Stock Físico
+                    </h3>
+                    <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-cyan-400 group-hover:translate-x-0.5 transition shrink-0" />
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    Inventario rotativo de salón por sector o por proveedor. Escaneo rápido de código de barras o búsqueda en catálogo.
+                  </p>
+                  <div className="mt-3.5 flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-slate-800/80 border border-slate-700/60 text-slate-300">
+                      📦 Inventario Rotativo
+                    </span>
+                    {openSessions.length > 0 ? (
+                      <span className="px-2.5 py-1 rounded-xl text-[11px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                        {openSessions.length} sesión(es) para retomar
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-xl text-[11px] font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                        Nueva toma física
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* OPCIÓN 2: REGISTRO DE VENCIMIENTOS */}
+            <div
+              onClick={() => {
+                setAppMainMode("vencimientos")
+                setVencCameraActive(true)
+              }}
+              className="group relative bg-gradient-to-br from-slate-900/90 to-slate-900/50 hover:from-slate-850 hover:to-slate-900 border border-slate-800 hover:border-amber-500/50 rounded-3xl p-5 cursor-pointer transition-all duration-200 shadow-xl shadow-slate-950/60 active:scale-[0.98]"
+            >
+              <div className="flex items-start gap-4">
+                <div className="w-13 h-13 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 group-hover:bg-amber-500/25 group-hover:scale-105 transition">
+                  <Calendar className="w-7 h-7" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-black text-white group-hover:text-amber-300 transition">
+                        Registro de Vencimientos
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                        Nuevo
+                      </span>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-amber-400 group-hover:translate-x-0.5 transition shrink-0" />
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    Auditoría en góndola. Escaneá productos, revisá lotes existentes y agregá nuevas fechas de caducidad. Válido directamente para el ERP.
+                  </p>
+                  <div className="mt-3.5 flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-amber-500/10 border border-amber-500/30 text-amber-300">
+                      🏷️ Registro Aditivo Multilote
+                    </span>
+                    <span className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-slate-800/80 border border-slate-700/60 text-slate-300">
+                      ⚡ Salón Góndola
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Aviso Operativo */}
+            <div className="p-3.5 bg-slate-900/40 border border-slate-800/60 rounded-2xl flex items-center gap-2.5 text-xs text-slate-400">
+              <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>
+                Los registros guardados desde el celular se sincronizan en tiempo real con el servidor de Extra Supermercado.
+              </span>
+            </div>
+          </div>
+
+          {/* Footer info */}
+          <div className="text-center text-[11px] text-slate-400 p-3 border-t border-slate-800/40">
+            Extra Supermercado · Control de Salón Móvil
+          </div>
+        </div>
+      )
+    }
+
+    // ── MODO 2: REGISTRO DE VENCIMIENTOS EN GÓNDOLA ──
+    if (appMainMode === "vencimientos") {
+      return (
+        <div className="min-h-screen bg-slate-950 text-white flex flex-col">
+          {/* Header Vencimientos con botón volver */}
+          <div className="p-3.5 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                onClick={() => {
+                  setAppMainMode("menu")
+                  stopCamera()
+                }}
+                className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer active:scale-95 transition"
+                title="Volver al menú principal"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-sm font-black truncate">Registro de Vencimientos</h1>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Góndola
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 truncate">
+                  Auditoría y control de caducidad · Registro aditivo
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  if (cameraActive) {
+                    stopCamera()
+                    setVencCameraActive(false)
+                  } else {
+                    startCamera()
+                    setVencCameraActive(true)
+                  }
+                }}
+                className={`p-2 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                  cameraActive
+                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-xs"
+                    : "bg-slate-800 border-slate-700 text-slate-400 hover:text-white"
+                }`}
+                title={cameraActive ? "Apagar cámara" : "Encender cámara"}
+              >
+                {cameraActive ? <Camera className="w-4 h-4 text-amber-400" /> : <CameraOff className="w-4 h-4" />}
+                <span className="hidden sm:inline">{cameraActive ? "Cámara Activa" : "Cámara"}</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 max-w-lg mx-auto w-full">
+            {/* Viewport de Cámara si está activa */}
+            {cameraActive && (
+              <div className="relative rounded-3xl overflow-hidden border border-amber-500/40 bg-black aspect-video max-h-56 shadow-2xl">
+                <video ref={setVideoRef} className="w-full h-full object-cover" autoPlay playsInline muted />
+                <div className="absolute inset-0 border-2 border-amber-400/30 rounded-3xl pointer-events-none flex items-center justify-center">
+                  <div className="w-4/5 h-20 border-2 border-dashed border-amber-400/80 rounded-2xl flex items-center justify-center">
+                    <span className="text-[11px] font-bold text-amber-200 bg-slate-950/80 px-2 py-0.5 rounded-lg shadow-sm">
+                      Apuntá al código de barras
+                    </span>
+                  </div>
+                </div>
+
+                {availableCameras.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={switchCamera}
+                    className="absolute top-2.5 right-2.5 p-2 rounded-xl bg-slate-900/80 text-white border border-slate-700 text-xs font-bold backdrop-blur-md active:scale-95 transition"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Buscador predictivo rápido de productos */}
+            <div className="space-y-1.5 relative">
+              <label className="text-[11px] font-black uppercase tracking-wider text-slate-400 px-1">
+                Buscar Producto en Salón:
+              </label>
+              <div className="relative flex items-center">
+                <Search className="w-4 h-4 text-slate-500 absolute left-3.5 pointer-events-none" />
+                <input
+                  type="text"
+                  value={vencSearch}
+                  onChange={(e) => setVencSearch(e.target.value)}
+                  placeholder="Escribí código de barras o nombre..."
+                  className="w-full bg-slate-900 border border-slate-800 rounded-2xl pl-10 pr-9 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500 transition shadow-inner"
+                />
+                {vencSearch ? (
+                  <button
+                    type="button"
+                    onClick={() => setVencSearch("")}
+                    className="absolute right-3 text-slate-500 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                ) : vencSearching ? (
+                  <Loader2 className="w-4 h-4 text-amber-400 animate-spin absolute right-3" />
+                ) : null}
+              </div>
+
+              {/* Resultados desplegables de búsqueda predictiva */}
+              {vencSearchResults.length > 0 && (
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-h-60 overflow-y-auto divide-y divide-slate-800 p-1">
+                  {vencSearchResults.map((prod) => (
+                    <div
+                      key={prod.id}
+                      onClick={() => handleSelectProductForVenc(prod)}
+                      className="p-3 hover:bg-slate-800 rounded-xl cursor-pointer transition active:scale-98 flex items-center justify-between gap-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-xs text-white truncate">{prod.nombre}</div>
+                        <div className="text-[11px] text-slate-400 font-mono">
+                          {prod.codigo_barra || prod.sku} · Stock: {prod.stock ?? 0} un.
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-amber-400 shrink-0" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* FICHA DEL PRODUCTO SELECCIONADO */}
+            {vencSelectedProduct ? (
+              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 sm:p-5 space-y-4 shadow-xl backdrop-blur-xl">
+                {/* Cabecera del producto */}
+                <div className="flex items-start justify-between gap-3 border-b border-slate-800/80 pb-3">
+                  <div className="min-w-0">
+                    <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                      Producto Seleccionado
+                    </span>
+                    <h3 className="text-base font-black text-white mt-1 leading-snug">
+                      {vencSelectedProduct.nombre}
+                    </h3>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 font-mono mt-1">
+                      <span>Cód: <strong className="text-slate-200">{vencSelectedProduct.codigo_barra || vencSelectedProduct.sku}</strong></span>
+                      <span>·</span>
+                      <span>Stock actual: <strong className="text-slate-200">{vencSelectedProduct.stock ?? 0} un.</strong></span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVencSelectedProduct(null)
+                      setVencProductLots([])
+                    }}
+                    className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition shrink-0"
+                    title="Cambiar producto"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* LISTADO DE VENCIMIENTOS EXISTENTES */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-black uppercase tracking-wider text-slate-400">
+                      Lotes y Vencimientos en Sistema ({vencProductLots.length}):
+                    </label>
+                    <span className="text-[10px] text-slate-400">Multilote</span>
+                  </div>
+
+                  {vencLoadingLots ? (
+                    <div className="flex items-center justify-center py-4 text-xs text-slate-400 gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                      <span>Consultando lotes registrados...</span>
+                    </div>
+                  ) : vencProductLots.length === 0 ? (
+                    <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800 text-center space-y-1">
+                      <p className="text-xs text-slate-400 font-medium">
+                        Sin lotes de vencimiento registrados previamente en el sistema.
+                      </p>
+                      <p className="text-[11px] text-amber-300 font-bold">
+                        Cargá el primer vencimiento en el formulario de abajo.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {vencProductLots.map((lot: any) => {
+                        let badgeStyle = "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                        let labelEstado = `Vigente (${lot.dias_restantes}d)`
+                        if (lot.estado_vencimiento === "vencido") {
+                          badgeStyle = "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                          labelEstado = `VENCIDO (${Math.abs(lot.dias_restantes)}d)`
+                        } else if (lot.estado_vencimiento === "critico_7d") {
+                          badgeStyle = "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                          labelEstado = `Crítico (≤ ${lot.dias_restantes}d)`
+                        } else if (lot.estado_vencimiento === "alerta_30d") {
+                          badgeStyle = "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
+                          labelEstado = `Alerta (${lot.dias_restantes}d)`
+                        }
+
+                        const dateStr = lot.fecha_vencimiento
+                          ? new Date(lot.fecha_vencimiento).toLocaleDateString("es-PY", {
+                              day: "2-digit",
+                              month: "2-digit",
+                              year: "numeric",
+                            })
+                          : "Sin fecha"
+
+                        return (
+                          <div
+                            key={lot.id}
+                            className="p-2.5 rounded-2xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-xs text-white">{lot.referencia}</span>
+                                <span className="text-[10px] text-slate-400">· {lot.warehouse_nombre}</span>
+                              </div>
+                              <div className="text-[11px] text-slate-300 font-mono mt-0.5">
+                                Vence: <strong className="text-white">{dateStr}</strong>
+                                {lot.cantidad_disponible > 0 && (
+                                  <span className="text-slate-400"> · Cant: {lot.cantidad_disponible} un.</span>
+                                )}
+                              </div>
+                            </div>
+                            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black border ${badgeStyle} shrink-0`}>
+                              {labelEstado}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* FORMULARIO ADITIVO DE NUEVO VENCIMIENTO */}
+                <div className="pt-3 border-t border-slate-800/80 space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Registrar Nuevo Vencimiento (Aditivo):</span>
+                    </p>
+                  </div>
+
+                  {/* Campo Fecha de Vencimiento */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-300 px-1">
+                      Fecha de Caducidad / Vencimiento: *
+                    </label>
+                    <input
+                      type="date"
+                      value={vencFecha}
+                      onChange={(e) => setVencFecha(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-3 text-sm text-white font-mono outline-none focus:border-amber-400 transition"
+                    />
+
+                    {/* Atajos rápidos de fecha */}
+                    <div className="flex items-center gap-1 pt-1 overflow-x-auto pb-1 text-[10px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setQuickVencDays(30)}
+                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition shrink-0 active:scale-95"
+                      >
+                        +30 días
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuickVencDays(60)}
+                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition shrink-0 active:scale-95"
+                      >
+                        +60 días
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuickVencDays(90)}
+                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition shrink-0 active:scale-95"
+                      >
+                        +90 días
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuickVencMonths(6)}
+                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition shrink-0 active:scale-95"
+                      >
+                        +6 meses
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQuickVencMonths(12)}
+                        className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition shrink-0 active:scale-95"
+                      >
+                        +1 año
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Campo Lote / Referencia */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-300 px-1">
+                      Código de Lote impreso (Opcional):
+                    </label>
+                    <input
+                      type="text"
+                      value={vencLote}
+                      onChange={(e) => setVencLote(e.target.value)}
+                      placeholder="ej: LOTE-2405 o dejar en blanco"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-slate-600 outline-none focus:border-amber-400 transition"
+                    />
+                  </div>
+
+                  {/* Campo Cantidad en Góndola */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-300 px-1">
+                      Cantidad con este vencimiento en salón:
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setVencCantidad((prev) => String(Math.max(1, (parseInt(prev || "1", 10) || 1) - 1)))}
+                        className="w-11 h-11 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-black text-lg flex items-center justify-center active:scale-95 transition"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min="0"
+                        value={vencCantidad}
+                        onChange={(e) => setVencCantidad(e.target.value)}
+                        className="flex-1 bg-slate-950 border border-slate-800 rounded-2xl py-2.5 text-center text-base font-black text-white outline-none focus:border-amber-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setVencCantidad((prev) => String((parseInt(prev || "1", 10) || 0) + 1))}
+                        className="w-11 h-11 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-black text-lg flex items-center justify-center active:scale-95 transition"
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    {/* Presets de cantidad */}
+                    <div className="flex items-center gap-1.5 pt-1 text-[10px] font-bold">
+                      {["1", "6", "12", "24", "48"].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setVencCantidad(preset)}
+                          className={`flex-1 py-1 rounded-lg border transition ${
+                            vencCantidad === preset
+                              ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                              : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
+                          }`}
+                        >
+                          {preset} un.
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Botón Guardar Vencimiento */}
+                  <button
+                    type="button"
+                    onClick={handleSaveVencimiento}
+                    disabled={vencSaving || !vencFecha}
+                    className="w-full mt-2 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 transition disabled:opacity-40 cursor-pointer"
+                  >
+                    {vencSaving ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin text-slate-950" />
+                        <span>Guardando en el sistema...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-5 h-5 text-slate-950" />
+                        <span>Guardar Vencimiento en Góndola</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-8 text-center bg-slate-900/40 border border-slate-800/80 rounded-3xl space-y-3">
+                <div className="w-14 h-14 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+                  <Barcode className="w-7 h-7" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-bold text-white">Ningún producto seleccionado</h3>
+                  <p className="text-xs text-slate-400 max-w-xs mx-auto">
+                    Escaneá el código de barras con la cámara o buscá el producto por nombre en el buscador superior para registrar sus vencimientos.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* HISTORIAL DE LA SESIÓN DE TRABAJO */}
+            {vencSessionHistory.length > 0 && (
+              <div className="space-y-2 pt-2">
+                <div className="flex items-center justify-between text-xs font-black text-slate-400 px-1">
+                  <span className="flex items-center gap-1.5 uppercase tracking-wider">
+                    <History className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Registrados en tu turno ({vencSessionHistory.length}):</span>
+                  </span>
+                </div>
+                <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                  {vencSessionHistory.map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-2.5 rounded-2xl bg-slate-900/60 border border-slate-800 flex items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-white truncate">{item.product_nombre}</div>
+                        <div className="text-[11px] text-slate-400 font-mono">
+                          Lote: {item.referencia} · Vence: <strong className="text-cyan-300">{item.fecha_vencimiento}</strong> · {item.cantidad} un.
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-slate-500 font-mono shrink-0">{item.hora}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )
+    }
+
+    // ── MODO 3: VISTA DE CONFIGURACIÓN DE CONTEO FÍSICO ──
     return (
       <div className="min-h-screen bg-slate-950 text-white flex flex-col">
-        {/* Barra superior con identidad de usuario y descarga de APK */}
+        {/* Barra superior con botón volver al menú */}
         <div className="p-4 pt-5 border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-md flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 shrink-0">
-              <ClipboardList className="w-5 h-5" />
-            </div>
+            <button
+              onClick={() => setAppMainMode("menu")}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer active:scale-95 transition"
+              title="Volver al menú principal"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
             <div className="min-w-0">
-              <h1 className="text-sm font-black truncate">Extra Conteo & Vencimientos</h1>
+              <h1 className="text-sm font-black truncate">Conteo Físico de Stock</h1>
               <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
+                <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
                 <span className="font-bold text-slate-300 truncate">{user.nombre || user.email}</span>
                 <span className="text-slate-400">({user.rol || "operador"})</span>
               </div>
@@ -1216,10 +1958,23 @@ export default function ConteoVencimientosPage() {
       {/* ── CABECERA DE SESIÓN ACTIVA ── */}
       <div className="p-3 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md space-y-2.5">
         <div className="flex items-center justify-between">
-          <div className="min-w-0">
-            <div className="font-black text-sm text-cyan-300 truncate">{session.area}</div>
-            <div className="text-[11px] text-slate-400 font-mono">
-              {session.codigo} · <strong className="text-white">{items.length}</strong> contados
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => {
+                stopCamera()
+                setSession(null)
+                setAppMainMode("menu")
+              }}
+              className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer"
+              title="Pausar conteo y volver al menú principal"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div className="min-w-0">
+              <div className="font-black text-sm text-cyan-300 truncate">{session.area}</div>
+              <div className="text-[11px] text-slate-400 font-mono">
+                {session.codigo} · <strong className="text-white">{items.length}</strong> contados
+              </div>
             </div>
           </div>
           <button

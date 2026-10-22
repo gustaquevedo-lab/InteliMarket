@@ -2350,6 +2350,10 @@ export const api = {
     getStats: () => client.get<InventoryStatsResponse>(`/v1/companies/${COMPANY_ID}/inventory/stats`),
     getLotsExpiries: (params?: { warehouse_id?: string; estado?: string; limit?: number; offset?: number }) =>
       client.get<any>(`/v1/companies/${COMPANY_ID}/inventory/lots/expiries`, params),
+    getProductLots: (productId: string) =>
+      client.get<any[]>(`/v1/companies/${COMPANY_ID}/inventory/products/${productId}/lots`),
+    createProductLot: (productId: string, data: { warehouse_id?: string; referencia?: string; fecha_vencimiento?: string; cantidad?: number; observaciones?: string }) =>
+      client.post<any>(`/v1/companies/${COMPANY_ID}/inventory/products/${productId}/lots`, data),
     listMovements: (params?: { product_id?: string; warehouse_id?: string; tipo?: string; search?: string; fecha_desde?: string; fecha_hasta?: string; limit?: number; offset?: number }) =>
       client.get<InventoryMovementRecord[]>(`/v1/inventory/movements`, { company_id: COMPANY_ID, ...params } as any),
     getKardexSummary: (params?: { fecha_desde?: string; fecha_hasta?: string }) =>

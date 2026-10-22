@@ -1962,3 +1962,197 @@ async def close_physical_session(
         "diferencia_total_gs": diferencia_total_gs,
     }
 
+
+# ---------------------------------------------------------------------------
+# Lotes y Registro de Vencimientos en Góndola
+# ---------------------------------------------------------------------------
+
+async def list_product_lots(db: AsyncSession, company_id: str | uuid.UUID, product_id: str | uuid.UUID) -> list[dict]:
+    comp_id = uuid.UUID(str(company_id))
+    p_id = uuid.UUID(str(product_id))
+
+    query_str = """
+        SELECT 
+            sl.id,
+            sl.referencia,
+            sl.warehouse_id,
+            COALESCE(w.nombre, 'Salón Góndola') as warehouse_nombre,
+            sl.product_id,
+            COALESCE(p.nombre, '') as product_nombre,
+            COALESCE(p.codigo_barra, p.sku, '') as product_codigo,
+            sl.cantidad,
+            sl.cantidad_disponible,
+            sl.costo_unitario,
+            sl.fecha_ingreso,
+            sl.fecha_vencimiento,
+            CASE 
+                WHEN sl.fecha_vencimiento IS NULL THEN 9999
+                ELSE EXTRACT(DAY FROM sl.fecha_vencimiento - NOW())::int
+            END as dias_restantes,
+            CASE 
+                WHEN sl.fecha_vencimiento IS NULL THEN 'sin_vencimiento'
+                WHEN sl.fecha_vencimiento < NOW() THEN 'vencido'
+                WHEN sl.fecha_vencimiento <= NOW() + INTERVAL '7 days' THEN 'critico_7d'
+                WHEN sl.fecha_vencimiento <= NOW() + INTERVAL '30 days' THEN 'alerta_30d'
+                ELSE 'vigente'
+            END as estado_vencimiento
+        FROM stock_lots sl
+        LEFT JOIN warehouses w ON sl.warehouse_id = w.id
+        LEFT JOIN products p ON sl.product_id = p.id
+        WHERE sl.company_id = :comp_id AND sl.product_id = :p_id
+        ORDER BY 
+            CASE 
+                WHEN sl.fecha_vencimiento IS NULL THEN 2 
+                ELSE 1 
+            END,
+            sl.fecha_vencimiento ASC,
+            sl.created_at DESC
+    """
+    res = await db.execute(text(query_str), {"comp_id": comp_id, "p_id": p_id})
+    lots = []
+    for r in res.fetchall():
+        lots.append({
+            "id": str(r.id),
+            "referencia": r.referencia or "GÓNDOLA",
+            "warehouse_id": str(r.warehouse_id),
+            "warehouse_nombre": r.warehouse_nombre,
+            "product_id": str(r.product_id),
+            "product_nombre": r.product_nombre,
+            "product_codigo": r.product_codigo,
+            "cantidad": int(r.cantidad or 0),
+            "cantidad_disponible": int(r.cantidad_disponible or 0),
+            "costo_unitario": float(r.costo_unitario or 0),
+            "fecha_ingreso": r.fecha_ingreso.isoformat() if r.fecha_ingreso else None,
+            "fecha_vencimiento": r.fecha_vencimiento.isoformat() if r.fecha_vencimiento else None,
+            "dias_restantes": int(r.dias_restantes),
+            "estado_vencimiento": r.estado_vencimiento,
+        })
+    return lots
+
+
+async def create_product_lot(
+    db: AsyncSession,
+    company_id: str | uuid.UUID,
+    product_id: str | uuid.UUID,
+    data: dict,
+    user_id: uuid.UUID | None = None,
+) -> dict:
+    comp_id = uuid.UUID(str(company_id))
+    p_id = uuid.UUID(str(product_id))
+
+    # 1. Validar producto existente
+    p_res = await db.execute(select(Product).where(Product.id == p_id, Product.company_id == comp_id))
+    product = p_res.scalar_one_or_none()
+    if not product:
+        raise ValueError("Producto no encontrado")
+
+    # 2. Determinar Warehouse (Góndola por defecto)
+    wh_id = data.get("warehouse_id")
+    wh_nombre = "Salón Góndola"
+    if wh_id:
+        wh_uuid = uuid.UUID(str(wh_id))
+        w_res = await db.execute(text("SELECT nombre FROM warehouses WHERE id = :wh_id"), {"wh_id": wh_uuid})
+        w_row = w_res.fetchone()
+        if w_row:
+            wh_nombre = w_row.nombre
+    else:
+        # Buscar salón góndola o depósito principal
+        w_res = await db.execute(
+            text("""
+                SELECT id, nombre FROM warehouses 
+                WHERE company_id = :comp_id AND activo = true 
+                ORDER BY CASE WHEN tipo = 'salon' OR codigo = 'SALON' THEN 1 ELSE 2 END, created_at ASC
+                LIMIT 1
+            """),
+            {"comp_id": comp_id}
+        )
+        w_row = w_res.fetchone()
+        if w_row:
+            wh_uuid = w_row.id
+            wh_nombre = w_row.nombre
+        else:
+            wh_uuid = uuid.UUID("6488ff79-a027-4f83-9f5d-8892812543e8")
+
+    # 3. Parsear fecha de vencimiento
+    fecha_venc_raw = data.get("fecha_vencimiento")
+    fecha_venc_dt = None
+    if fecha_venc_raw:
+        if isinstance(fecha_venc_raw, str):
+            try:
+                if len(fecha_venc_raw) == 10:
+                    fecha_venc_dt = datetime.strptime(fecha_venc_raw, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                else:
+                    fecha_venc_dt = datetime.fromisoformat(fecha_venc_raw.replace("Z", "+00:00"))
+            except Exception:
+                fecha_venc_dt = datetime.now(timezone.utc)
+        elif isinstance(fecha_venc_raw, datetime):
+            fecha_venc_dt = fecha_venc_raw
+
+    # 4. Parámetros de cantidad y costos
+    cantidad = int(data.get("cantidad", 1))
+    if cantidad < 0:
+        cantidad = 0
+
+    costo_unitario = float(product.costo_promedio or product.ultimo_costo or 0)
+    costo_total = costo_unitario * cantidad
+
+    referencia = (data.get("referencia") or "").strip()
+    if not referencia:
+        referencia = f"GÓNDOLA-{datetime.now().strftime('%d%m%y')}"
+
+    # 5. Asegurar banderas en producto
+    if not product.tiene_vencimiento or not product.tiene_lotes:
+        product.tiene_vencimiento = True
+        product.tiene_lotes = True
+
+    # 6. Insertar en stock_lots (ADITIVO: nuevo registro)
+    new_lot = StockLot(
+        id=uuid.uuid4(),
+        company_id=comp_id,
+        warehouse_id=wh_uuid,
+        product_id=p_id,
+        variant_id=None,
+        cantidad=cantidad,
+        cantidad_disponible=cantidad,
+        costo_unitario=costo_unitario,
+        costo_total=costo_total,
+        referencia=referencia,
+        fecha_ingreso=func.now(),
+        fecha_vencimiento=fecha_venc_dt,
+    )
+    db.add(new_lot)
+    await db.flush()
+    await db.refresh(new_lot)
+
+    # 7. Retornar con formato completo
+    dias_restantes = 9999
+    estado_venc = "sin_vencimiento"
+    if fecha_venc_dt:
+        now_utc = datetime.now(timezone.utc)
+        dias_restantes = (fecha_venc_dt.date() - now_utc.date()).days
+        if dias_restantes < 0:
+            estado_venc = "vencido"
+        elif dias_restantes <= 7:
+            estado_venc = "critico_7d"
+        elif dias_restantes <= 30:
+            estado_venc = "alerta_30d"
+        else:
+            estado_venc = "vigente"
+
+    return {
+        "id": str(new_lot.id),
+        "referencia": new_lot.referencia,
+        "warehouse_id": str(new_lot.warehouse_id),
+        "warehouse_nombre": wh_nombre,
+        "product_id": str(new_lot.product_id),
+        "product_nombre": product.nombre,
+        "product_codigo": product.codigo_barra or product.sku,
+        "cantidad": int(new_lot.cantidad),
+        "cantidad_disponible": int(new_lot.cantidad_disponible),
+        "costo_unitario": float(new_lot.costo_unitario),
+        "fecha_ingreso": new_lot.fecha_ingreso.isoformat() if new_lot.fecha_ingreso else None,
+        "fecha_vencimiento": new_lot.fecha_vencimiento.isoformat() if new_lot.fecha_vencimiento else None,
+        "dias_restantes": dias_restantes,
+        "estado_vencimiento": estado_venc,
+    }
+

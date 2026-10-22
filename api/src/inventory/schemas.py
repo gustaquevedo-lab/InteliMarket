@@ -367,3 +367,32 @@ class PhysicalSessionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# Lotes y Vencimientos (Góndola y Almacén)
+# ---------------------------------------------------------------------------
+
+class ProductLotCreate(BaseModel):
+    warehouse_id: Optional[UUID] = None
+    referencia: Optional[str] = None
+    fecha_vencimiento: Optional[str] = None
+    cantidad: int = Field(default=1, ge=0)
+    observaciones: Optional[str] = None
+
+
+class ProductLotResponse(BaseModel):
+    id: UUID
+    referencia: str
+    warehouse_id: UUID
+    warehouse_nombre: Optional[str] = None
+    product_id: UUID
+    product_nombre: Optional[str] = None
+    product_codigo: Optional[str] = None
+    cantidad: int
+    cantidad_disponible: int
+    costo_unitario: float
+    fecha_ingreso: Optional[datetime] = None
+    fecha_vencimiento: Optional[datetime] = None
+    dias_restantes: int
+    estado_vencimiento: str
