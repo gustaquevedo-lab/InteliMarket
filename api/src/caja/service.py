@@ -4703,6 +4703,10 @@ async def create_payment_adjustment(
     if not row:
         raise ValueError("Sesión de caja no encontrada")
 
+    session_obj = getattr(row, "CashSession", None) or row[0]
+    register_obj = getattr(row, "CashRegister", None) or row[1]
+    caja_nombre = getattr(register_obj, "nombre", None) or getattr(register_obj, "codigo", None) or f"Caja {sid}"
+
     d_key = data["destino_canal_key"]
     if d_key in ["EFECTIVO", "EFECTIVO_PYG"]:
         d_key = "EFECTIVO_PYG"
@@ -4758,7 +4762,7 @@ async def create_payment_adjustment(
             voucher.estado = "CANJEADO"
             voucher.saldo_disponible = Decimal("0")
             voucher.canjeado_en_caja_session_id = sid
-            voucher.canjeado_caja_numero = row.caja_nombre or f"Caja {sid}"
+            voucher.canjeado_caja_numero = caja_nombre
             voucher.canjeado_por_usuario_id = uuid.UUID(user_id) if user_id else None
             voucher.canjeado_at = datetime.now(timezone.utc)
             voucher.notas = (voucher.notas or "") + f" [Canjeado en Punteo de Caja por reclasificación de efectivo en sesión {sid}]"
