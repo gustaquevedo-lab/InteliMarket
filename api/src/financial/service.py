@@ -3031,18 +3031,22 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
     )
     ap_invoices = list(ap_result.scalars().all())
     facturas_mora_vencidas = Decimal("0")
+    facturas_mora_cantidad = 0
     ap_due = {}
+    ap_cnt = {}
     for inv in ap_invoices:
         saldo = inv.saldo_pendiente or Decimal("0")
         if not inv.fecha_vencimiento or inv.fecha_vencimiento < today:
             facturas_mora_vencidas += saldo
+            facturas_mora_cantidad += 1
         else:
             fv = inv.fecha_vencimiento
             ap_due[fv] = ap_due.get(fv, Decimal("0")) + saldo
+            ap_cnt[fv] = ap_cnt.get(fv, 0) + 1
 
     # 5. Cheques Diferidos: separar cheques vencidos no cobrados de cheques futuros
     chq_rows = await db.execute(
-        select(Cheque.fecha_pago, func.coalesce(func.sum(Cheque.monto), 0))
+        select(Cheque.fecha_pago, func.coalesce(func.sum(Cheque.monto), 0), func.count(Cheque.id))
         .where(
             Cheque.company_id == cid,
             Cheque.estado.in_(["pendiente", "entregado"]),
@@ -3051,14 +3055,19 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
         .group_by(Cheque.fecha_pago)
     )
     cheques_mora_vencidos = Decimal("0")
+    cheques_mora_cantidad = 0
     chq_due = {}
+    chq_cnt = {}
     for row in chq_rows.all():
         fp = row[0]
         monto = Decimal(str(row[1]))
+        cnt = int(row[2] or 0)
         if fp < today:
             cheques_mora_vencidos += monto
+            cheques_mora_cantidad += cnt
         else:
             chq_due[fp] = chq_due.get(fp, Decimal("0")) + monto
+            chq_cnt[fp] = chq_cnt.get(fp, 0) + cnt
 
     # 6. Cuentas por Cobrar (AR) a vencer
     ar_rows = await db.execute(
@@ -3089,13 +3098,23 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
         ar_est = ar_due.get(day, Decimal("0"))
         ingresos_totales = v_est + ar_est
 
-        # Egresos (en día 0 se absorbe el pasivo en mora para revelar la verdad exigible de caja)
+        # Egresos desglosados (en día 0 se absorbe el pasivo en mora para revelar la verdad exigible de caja)
         fac_mora = facturas_mora_vencidas if i == 0 else Decimal("0")
+        fac_mora_cnt = facturas_mora_cantidad if i == 0 else 0
         chq_mora = cheques_mora_vencidos if i == 0 else Decimal("0")
-        fac_dia = ap_due.get(day, Decimal("0"))
-        chq_dia = chq_due.get(day, Decimal("0"))
+        chq_mora_cnt = cheques_mora_cantidad if i == 0 else 0
 
-        egresos_totales = fac_dia + chq_dia + fac_mora + chq_mora
+        fac_dia = ap_due.get(day, Decimal("0"))
+        fac_dia_cnt = ap_cnt.get(day, 0)
+        chq_dia = chq_due.get(day, Decimal("0"))
+        chq_dia_cnt = chq_cnt.get(day, 0)
+
+        fac_total = fac_dia + fac_mora
+        fac_total_cnt = fac_dia_cnt + fac_mora_cnt
+        chq_total = chq_dia + chq_mora
+        chq_total_cnt = chq_dia_cnt + chq_mora_cnt
+
+        egresos_totales = fac_total + chq_total
 
         # Saldos
         projected = running_balance + ingresos_totales - egresos_totales
@@ -3118,9 +3137,13 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
             "ingreso_cobranzas_ar": ar_est,
             "ingresos_estimados": ingresos_totales,
             "compromiso_facturas_mora": fac_mora,
-            "compromiso_cheques_mora": chq_mora,
             "compromiso_facturas_dia": fac_dia,
+            "compromiso_facturas_total": fac_total,
+            "compromiso_facturas_cantidad": fac_total_cnt,
+            "compromiso_cheques_mora": chq_mora,
             "compromiso_cheques_dia": chq_dia,
+            "compromiso_cheques_total": chq_total,
+            "compromiso_cheques_cantidad": chq_total_cnt,
             "egresos_estimados": egresos_totales,
             "saldo_final_proyectado": projected,
             "capacidad_obligarse": capacidad_obligarse,
@@ -3134,6 +3157,9 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
     min_saldo_30d = min((d["saldo_final_proyectado"] for d in horizonte_analisis), default=disponibilidad_total)
     capacidad_gasto_hoy = max(Decimal("0"), min_saldo_30d - umbral_seguridad)
 
+    tot_fac_30d = sum((d["compromiso_facturas_total"] for d in horizonte_analisis), Decimal("0"))
+    tot_chq_30d = sum((d["compromiso_cheques_total"] for d in horizonte_analisis), Decimal("0"))
+
     dias_deficit_30d = sum(1 for d in horizonte_analisis if d["capacidad_obligarse"] < Decimal("0"))
     primer_def = next((d["fecha"].isoformat() for d in horizonte_analisis if d["capacidad_obligarse"] < Decimal("0")), None)
 
@@ -3142,12 +3168,16 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
         "disponibilidad_boveda": saldo_boveda,
         "disponibilidad_total": disponibilidad_total,
         "compromisos_vencidos_mora": facturas_mora_vencidas + cheques_mora_vencidos,
+        "compromisos_facturas_mora_total": facturas_mora_vencidas,
+        "compromisos_cheques_mora_total": cheques_mora_vencidos,
         "promedio_diario_ventas": promedio_global,
         "capacidad_gasto_inmediato_hoy": capacidad_gasto_hoy,
         "saldo_proyectado_7d": dias_calc[6]["saldo_final_proyectado"] if len(dias_calc) > 6 else disponibilidad_total,
         "saldo_proyectado_30d": dias_calc[29]["saldo_final_proyectado"] if len(dias_calc) > 29 else disponibilidad_total,
         "dias_deficit_30d": dias_deficit_30d,
         "primer_deficit": primer_def,
+        "total_cheques_cartera_30d": tot_chq_30d,
+        "total_facturas_ap_30d": tot_fac_30d,
     }
 
     return dias_calc, summary_metrics
@@ -3339,6 +3369,8 @@ async def get_cash_flow_dashboard(db: AsyncSession, company_id: str) -> dict:
         "disponibilidad_boveda": metrics["disponibilidad_boveda"],
         "disponibilidad_total": metrics["disponibilidad_total"],
         "compromisos_vencidos_mora": metrics["compromisos_vencidos_mora"],
+        "compromisos_facturas_mora_total": metrics["compromisos_facturas_mora_total"],
+        "compromisos_cheques_mora_total": metrics["compromisos_cheques_mora_total"],
         "promedio_diario_ventas": metrics["promedio_diario_ventas"],
         "capacidad_gasto_inmediato_hoy": metrics["capacidad_gasto_inmediato_hoy"],
         "ingresos_hoy": ingresos_hoy,
@@ -3347,6 +3379,8 @@ async def get_cash_flow_dashboard(db: AsyncSession, company_id: str) -> dict:
         "saldo_proyectado_30d": metrics["saldo_proyectado_30d"],
         "dias_deficit_30d": metrics["dias_deficit_30d"],
         "primer_deficit": metrics["primer_deficit"],
+        "total_cheques_cartera_30d": metrics["total_cheques_cartera_30d"],
+        "total_facturas_ap_30d": metrics["total_facturas_ap_30d"],
         "proyecciones": dias_calc,
     }
 

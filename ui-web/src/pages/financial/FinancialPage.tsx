@@ -119,6 +119,22 @@ export default function FinancialPage() {
     acuerdo_pago_notas: "",
   })
   const [viewingChequesSupplier, setViewingChequesSupplier] = useState<any | null>(null)
+  const [selectedDayCheques, setSelectedDayCheques] = useState<{ fecha: string; dia_nombre: string; isToday: boolean; total: number } | null>(null)
+
+  const dayChequesList = useMemo(() => {
+    if (!selectedDayCheques) return []
+    const { fecha, isToday } = selectedDayCheques
+    return allCheques.filter((c: any) => {
+      const estado = (c.estado || "").toLowerCase()
+      const isActivo = estado === "pendiente" || estado === "entregado" || estado === "emitido"
+      if (!isActivo) return false
+      const fp = (c.fecha_pago || "").slice(0, 10)
+      if (isToday) {
+        return fp <= fecha
+      }
+      return fp === fecha
+    })
+  }, [allCheques, selectedDayCheques])
 
   const [search, setSearch] = useState("")
   const [filterEstado, setFilterEstado] = useState("todos")
@@ -4369,8 +4385,8 @@ export default function FinancialPage() {
                 </div>
               </div>
 
-              {/* 4 KPIs de Alta Dirección */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* 5 KPIs de Alta Dirección */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 {/* 1. Disponibilidad Total */}
                 <div className="card p-5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700/80 shadow-sm space-y-2">
                   <div className="flex items-center justify-between text-gray-500 dark:text-gray-400">
@@ -4403,7 +4419,7 @@ export default function FinancialPage() {
                   <div className="text-[11px] text-gray-500 dark:text-gray-400">
                     {(cashFlowDashboard?.compromisos_vencidos_mora ?? 0) > 0 ? (
                       <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3 inline" /> Pasivo vencido exigible acumulado hoy
+                        <AlertCircle className="w-3 h-3 inline" /> Pasivo vencido acumulado hoy
                       </span>
                     ) : (
                       <span className="text-emerald-600 font-bold flex items-center gap-1">
@@ -4413,7 +4429,23 @@ export default function FinancialPage() {
                   </div>
                 </div>
 
-                {/* 3. Recaudación Diaria Retail */}
+                {/* 3. Cartera Cheques Diferidos (30d) */}
+                <div className="card p-5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700/80 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between text-gray-500 dark:text-gray-400">
+                    <span className="text-xs font-bold uppercase tracking-wider">Cartera Cheques (30d)</span>
+                    <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
+                      <Receipt className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400">
+                    {formatPYG(cashFlowDashboard?.total_cheques_cartera_30d ?? 0)}
+                  </div>
+                  <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                    Cheques diferidos por debitar en horizonte
+                  </div>
+                </div>
+
+                {/* 4. Recaudación Diaria Retail */}
                 <div className="card p-5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700/80 shadow-sm space-y-2">
                   <div className="flex items-center justify-between text-gray-500 dark:text-gray-400">
                     <span className="text-xs font-bold uppercase tracking-wider">Ventas Promedio Diario</span>
@@ -4425,14 +4457,14 @@ export default function FinancialPage() {
                     {formatPYG(cashFlowDashboard?.promedio_diario_ventas ?? 0)}
                   </div>
                   <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                    Últimos 30 días (Sábados duplican a ~72M)
+                    Últimos 30 días (Sábados pico ~72M)
                   </div>
                 </div>
 
-                {/* 4. Capacidad de Gasto Hoy */}
+                {/* 5. Capacidad de Gasto Hoy */}
                 <div className="card p-5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700/80 shadow-sm space-y-2">
                   <div className="flex items-center justify-between text-gray-500 dark:text-gray-400">
-                    <span className="text-xs font-bold uppercase tracking-wider">Capacidad de Gasto Hoy</span>
+                    <span className="text-xs font-bold uppercase tracking-wider">Capacidad Gasto Hoy</span>
                     <div className={`p-2 rounded-xl ${
                       (cashFlowDashboard?.capacidad_gasto_inmediato_hoy ?? 0) > 0
                         ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400"
@@ -4451,11 +4483,11 @@ export default function FinancialPage() {
                   <div className="text-[11px]">
                     {(cashFlowDashboard?.capacidad_gasto_inmediato_hoy ?? 0) > 0 ? (
                       <span className="text-emerald-600 font-bold">
-                        Margen seguro para compras contado hoy
+                        Margen compras contado
                       </span>
                     ) : (
                       <span className="text-rose-600 font-bold">
-                        Restringido: amortizar pasivos vencidos
+                        Restringido por pasivo vencido
                       </span>
                     )}
                   </div>
@@ -4508,7 +4540,7 @@ export default function FinancialPage() {
                       Planilla Diaria de Pronóstico y Capacidad de Obligación
                     </h4>
                     <p className="text-xs text-gray-500">
-                      Evaluación día por día: Disponibilidad inicial, ingresos previstos, compromisos a pagar y cuánto margen queda disponible para obligarse.
+                      Evaluación día por día: Disponibilidad inicial, ingresos previstos, facturas y cartera de cheques por separado, saldo al cierre y capacidad libre.
                     </p>
                   </div>
                   <span className="text-xs font-bold text-gray-500 dark:text-gray-400">
@@ -4520,12 +4552,16 @@ export default function FinancialPage() {
                   <table className="w-full text-xs text-left">
                     <thead className="bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold uppercase tracking-wider sticky top-0 z-10 border-b border-gray-200 dark:border-slate-700">
                       <tr>
-                        <th className="px-4 py-3">Fecha / Día</th>
-                        <th className="px-4 py-3 text-right">Disponibilidad Inicio</th>
-                        <th className="px-4 py-3 text-right">(+) Ingresos Est.</th>
-                        <th className="px-4 py-3 text-right">(-) Compromisos</th>
-                        <th className="px-4 py-3 text-right">(=) Saldo al Cierre</th>
-                        <th className="px-4 py-3 text-center">Capacidad de Obligación / Gasto</th>
+                        <th className="px-3 py-3">Fecha / Día</th>
+                        <th className="px-3 py-3 text-right">Disponibilidad Inicio</th>
+                        <th className="px-3 py-3 text-right">(+) Ingresos Est.</th>
+                        <th className="px-3 py-3 text-right text-rose-700 dark:text-rose-300">(-) Facturas Proveedores</th>
+                        <th className="px-3 py-3 text-right bg-indigo-50/60 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-300 border-x border-indigo-100 dark:border-indigo-900/40">
+                          (-) Cartera Cheques
+                        </th>
+                        <th className="px-3 py-3 text-right">(-) Total Egresos</th>
+                        <th className="px-3 py-3 text-right">(=) Saldo al Cierre</th>
+                        <th className="px-3 py-3 text-center">Capacidad de Obligación</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
@@ -4536,7 +4572,16 @@ export default function FinancialPage() {
                         const saldoFinal = Number(cf.saldo_final_proyectado ?? 0)
                         const ingresos = Number(cf.ingresos_estimados ?? 0)
                         const egresos = Number(cf.egresos_estimados ?? 0)
-                        const moraTotal = Number(cf.compromiso_facturas_mora ?? 0) + Number(cf.compromiso_cheques_mora ?? 0)
+
+                        const facDia = Number(cf.compromiso_facturas_dia ?? 0)
+                        const facMora = Number(cf.compromiso_facturas_mora ?? 0)
+                        const facTotal = Number(cf.compromiso_facturas_total ?? (facDia + facMora))
+                        const facCnt = Number(cf.compromiso_facturas_cantidad ?? 0)
+
+                        const chqDia = Number(cf.compromiso_cheques_dia ?? 0)
+                        const chqMora = Number(cf.compromiso_cheques_mora ?? 0)
+                        const chqTotal = Number(cf.compromiso_cheques_total ?? (chqDia + chqMora))
+                        const chqCnt = Number(cf.compromiso_cheques_cantidad ?? 0)
 
                         return (
                           <tr
@@ -4550,7 +4595,7 @@ export default function FinancialPage() {
                             } hover:bg-blue-50/40 dark:hover:bg-slate-800/60`}
                           >
                             {/* Fecha y Día */}
-                            <td className="px-4 py-3 whitespace-nowrap">
+                            <td className="px-3 py-3 whitespace-nowrap">
                               <div className="flex items-center gap-2">
                                 <span className="font-bold text-gray-900 dark:text-white">
                                   {cf.dia_nombre || cf.fecha}
@@ -4569,12 +4614,12 @@ export default function FinancialPage() {
                             </td>
 
                             {/* Disponibilidad Inicio */}
-                            <td className="px-4 py-3 text-right font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                            <td className="px-3 py-3 text-right font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
                               {formatPYG(Number(cf.saldo_inicial ?? 0))}
                             </td>
 
                             {/* (+) Ingresos Proyectados */}
-                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <td className="px-3 py-3 text-right whitespace-nowrap">
                               <div className="text-emerald-600 dark:text-emerald-400 font-bold">
                                 + {formatPYG(ingresos)}
                               </div>
@@ -4584,24 +4629,63 @@ export default function FinancialPage() {
                               </div>
                             </td>
 
-                            {/* (-) Compromisos */}
-                            <td className="px-4 py-3 text-right whitespace-nowrap">
-                              <div className="text-rose-600 dark:text-rose-400 font-bold">
-                                - {formatPYG(egresos)}
-                              </div>
-                              <div className="text-[10px] text-gray-400">
-                                Fac: {formatPYG(Number(cf.compromiso_facturas_dia ?? egresos))}
-                                {Number(cf.compromiso_cheques_dia ?? 0) > 0 && ` | Chq: ${formatPYG(Number(cf.compromiso_cheques_dia))}`}
-                              </div>
-                              {moraTotal > 0 && (
-                                <div className="text-[10px] text-amber-600 font-bold">
-                                  Incluye Mora: {formatPYG(moraTotal)}
+                            {/* (-) Facturas Proveedores */}
+                            <td className="px-3 py-3 text-right whitespace-nowrap">
+                              {facTotal > 0 ? (
+                                <div>
+                                  <div className="text-rose-600 dark:text-rose-400 font-bold">
+                                    - {formatPYG(facTotal)}
+                                  </div>
+                                  <div className="text-[10px] text-gray-400">
+                                    {facCnt > 0 ? `${facCnt} fac${facCnt > 1 ? "s" : ""}` : "Vencimiento"}
+                                    {isToday && facMora > 0 && (
+                                      <span className="text-amber-600 font-semibold ml-1">(Mora: {formatPYG(facMora)})</span>
+                                    )}
+                                  </div>
                                 </div>
+                              ) : (
+                                <span className="text-gray-300 dark:text-slate-600 font-medium">-</span>
                               )}
                             </td>
 
+                            {/* (-) Cartera Cheques Diferidos */}
+                            <td className="px-3 py-3 text-right whitespace-nowrap bg-indigo-50/30 dark:bg-indigo-950/20 border-x border-indigo-100/60 dark:border-indigo-900/30">
+                              {chqTotal > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedDayCheques({
+                                    fecha: cf.fecha,
+                                    dia_nombre: cf.dia_nombre || cf.fecha,
+                                    isToday,
+                                    total: chqTotal,
+                                  })}
+                                  className="group inline-flex flex-col items-end text-right hover:opacity-80 transition-opacity cursor-pointer"
+                                  title="Clic para ver detalle de cheques de este día"
+                                >
+                                  <div className="text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-1 group-hover:underline">
+                                    <Receipt className="w-3 h-3 text-indigo-500" />
+                                    - {formatPYG(chqTotal)}
+                                  </div>
+                                  <div className="text-[10px] text-indigo-600/80 dark:text-indigo-300/80 font-medium flex items-center gap-1">
+                                    <span>{chqCnt > 0 ? `${chqCnt} chq${chqCnt > 1 ? "s" : ""}` : "Cheque"}</span>
+                                    {isToday && chqMora > 0 && (
+                                      <span className="text-amber-600 font-semibold">(Mora: {formatPYG(chqMora)})</span>
+                                    )}
+                                    <Eye className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100" />
+                                  </div>
+                                </button>
+                              ) : (
+                                <span className="text-gray-300 dark:text-slate-600 font-medium">-</span>
+                              )}
+                            </td>
+
+                            {/* (-) Total Egresos */}
+                            <td className="px-3 py-3 text-right whitespace-nowrap font-bold text-rose-600 dark:text-rose-400">
+                              - {formatPYG(egresos)}
+                            </td>
+
                             {/* (=) Saldo al Cierre */}
-                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                            <td className="px-3 py-3 text-right whitespace-nowrap">
                               <span className={`font-black text-sm ${
                                 saldoFinal >= 30_000_000
                                   ? "text-gray-900 dark:text-white"
@@ -4614,25 +4698,25 @@ export default function FinancialPage() {
                             </td>
 
                             {/* Capacidad de Obligación / Gasto */}
-                            <td className="px-4 py-3 text-center whitespace-nowrap">
+                            <td className="px-3 py-3 text-center whitespace-nowrap">
                               {capacidad >= 0 ? (
                                 <div className="inline-flex flex-col items-center">
-                                  <span className="px-3 py-1 rounded-full text-xs font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 flex items-center gap-1.5 shadow-sm">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 flex items-center gap-1 shadow-sm">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                     + {formatPYG(capacidad)}
                                   </span>
-                                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
-                                    Margen libre para asumir compras o pagos
+                                  <span className="text-[9px] text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
+                                    Margen libre compras
                                   </span>
                                 </div>
                               ) : (
                                 <div className="inline-flex flex-col items-center">
-                                  <span className="px-3 py-1 rounded-full text-xs font-black bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 flex items-center gap-1.5 shadow-sm">
-                                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                                  <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 flex items-center gap-1 shadow-sm">
+                                    <AlertTriangle className="w-3 h-3 text-rose-600" />
                                     Déficit: {formatPYG(capacidad)}
                                   </span>
-                                  <span className="text-[10px] text-rose-600 dark:text-rose-400 font-medium mt-0.5">
-                                    No asumir nuevos compromisos para esta fecha
+                                  <span className="text-[9px] text-rose-600 dark:text-rose-400 font-medium mt-0.5">
+                                    Sin margen para nuevos compromisos
                                   </span>
                                 </div>
                               )}
@@ -4644,6 +4728,125 @@ export default function FinancialPage() {
                   </table>
                 </div>
               </div>
+
+              {/* Modal Detalle de Cartera de Cheques por Día */}
+              {selectedDayCheques && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                  <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-slate-800 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+                    {/* Cabecera */}
+                    <div className="p-4 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-gray-50/50 dark:bg-slate-800/50">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400">
+                          <Receipt className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            Cartera de Cheques del Día — {selectedDayCheques.dia_nombre}
+                          </h3>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">
+                            {selectedDayCheques.isToday
+                              ? "Incluye cheques diferidos con vencimiento hoy y cheques en cartera vencidos pendientes de cobro."
+                              : "Cheques diferidos emitidos programados para débito/cobro en esta fecha."}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setSelectedDayCheques(null)}
+                        className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Resumen */}
+                    <div className="px-6 py-3 bg-indigo-50/60 dark:bg-indigo-950/30 border-b border-indigo-100 dark:border-indigo-900/50 flex items-center justify-between shrink-0">
+                      <div className="text-xs font-semibold text-indigo-900 dark:text-indigo-200">
+                        Cheques en Cartera: <span className="font-black text-sm">{dayChequesList.length}</span>
+                      </div>
+                      <div className="text-xs font-semibold text-indigo-900 dark:text-indigo-200">
+                        Total Comprometido: <span className="font-black text-sm text-indigo-700 dark:text-indigo-300">{formatPYG(selectedDayCheques.total)}</span>
+                      </div>
+                    </div>
+
+                    {/* Cuerpo con tabla scrolleable */}
+                    <div className="flex-1 overflow-y-auto p-4">
+                      {dayChequesList.length === 0 ? (
+                        <div className="py-12 text-center text-gray-400 space-y-2">
+                          <Receipt className="w-10 h-10 mx-auto opacity-30" />
+                          <p className="text-sm">No se encontraron cheques individuales asociados a este día en memoria.</p>
+                        </div>
+                      ) : (
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold uppercase sticky top-0 z-10 border-b border-gray-200 dark:border-slate-700">
+                            <tr>
+                              <th className="px-3 py-2.5">N° Cheque</th>
+                              <th className="px-3 py-2.5">Banco</th>
+                              <th className="px-3 py-2.5">Beneficiario / Proveedor</th>
+                              <th className="px-3 py-2.5">Fecha Emisión</th>
+                              <th className="px-3 py-2.5">Fecha Pago</th>
+                              <th className="px-3 py-2.5 text-center">Estado</th>
+                              <th className="px-3 py-2.5 text-right">Monto</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
+                            {dayChequesList.map((chq: any, i: number) => {
+                              const isVencido = (chq.fecha_pago || "") < selectedDayCheques.fecha
+                              return (
+                                <tr key={chq.id || i} className="hover:bg-gray-50/60 dark:hover:bg-slate-800/40">
+                                  <td className="px-3 py-2 font-mono font-bold text-gray-900 dark:text-white">
+                                    {chq.numero_cheque || "S/N"}
+                                  </td>
+                                  <td className="px-3 py-2 font-medium text-gray-700 dark:text-gray-300">
+                                    {chq.banco || "-"}
+                                  </td>
+                                  <td className="px-3 py-2 text-gray-800 dark:text-gray-200">
+                                    {chq.beneficiario || chq.supplier_nombre || "A la orden"}
+                                  </td>
+                                  <td className="px-3 py-2 text-gray-500 whitespace-nowrap">
+                                    {chq.fecha_emision ? formatDate(chq.fecha_emision) : "-"}
+                                  </td>
+                                  <td className="px-3 py-2 whitespace-nowrap">
+                                    <span className={isVencido ? "text-amber-600 font-bold" : "text-gray-700 dark:text-gray-300 font-medium"}>
+                                      {chq.fecha_pago ? formatDate(chq.fecha_pago) : "-"}
+                                    </span>
+                                    {isVencido && (
+                                      <span className="ml-1 text-[9px] px-1 py-0.2 bg-amber-100 text-amber-800 rounded font-bold">
+                                        Vencido
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                                      {chq.estado || "pendiente"}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 text-right font-black text-sm text-gray-900 dark:text-white whitespace-nowrap">
+                                    {formatPYG(Number(chq.monto || 0))}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+
+                    {/* Pie de acciones fijo */}
+                    <div className="p-3 border-t border-gray-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50 dark:bg-slate-900">
+                      <span className="text-[11px] text-gray-500">
+                        Total cheques listados: {dayChequesList.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDayCheques(null)}
+                        className="px-4 py-1.5 rounded-xl text-xs font-bold bg-gray-200 dark:bg-slate-800 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-slate-700 transition-colors"
+                      >
+                        Cerrar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

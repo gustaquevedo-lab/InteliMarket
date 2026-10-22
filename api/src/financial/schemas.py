@@ -381,6 +381,7 @@ class CashFlowProjectionResponse(BaseModel):
     company_id: Optional[UUID] = None
     fecha: date
     dia_nombre: Optional[str] = None
+    dia_semana: Optional[str] = None
     es_hoy: Optional[bool] = False
     saldo_inicial: Decimal
     ingreso_ventas_retail: Optional[Decimal] = Decimal("0")
@@ -388,7 +389,12 @@ class CashFlowProjectionResponse(BaseModel):
     ingresos_estimados: Decimal
     compromiso_facturas_mora: Optional[Decimal] = Decimal("0")
     compromiso_facturas_dia: Optional[Decimal] = Decimal("0")
+    compromiso_facturas_total: Optional[Decimal] = Decimal("0")
+    compromiso_facturas_cantidad: Optional[int] = 0
+    compromiso_cheques_mora: Optional[Decimal] = Decimal("0")
     compromiso_cheques_dia: Optional[Decimal] = Decimal("0")
+    compromiso_cheques_total: Optional[Decimal] = Decimal("0")
+    compromiso_cheques_cantidad: Optional[int] = 0
     egresos_estimados: Decimal
     saldo_final_proyectado: Decimal
     capacidad_obligarse: Optional[Decimal] = Decimal("0")
@@ -416,6 +422,8 @@ class CashFlowDashboard(BaseModel):
     disponibilidad_boveda: Optional[Decimal] = Decimal("0")
     disponibilidad_total: Optional[Decimal] = Decimal("0")
     compromisos_vencidos_mora: Optional[Decimal] = Decimal("0")
+    compromisos_facturas_mora_total: Optional[Decimal] = Decimal("0")
+    compromisos_cheques_mora_total: Optional[Decimal] = Decimal("0")
     promedio_diario_ventas: Optional[Decimal] = Decimal("0")
     capacidad_gasto_inmediato_hoy: Optional[Decimal] = Decimal("0")
     ingresos_hoy: Decimal
@@ -424,6 +432,8 @@ class CashFlowDashboard(BaseModel):
     saldo_proyectado_30d: Decimal
     dias_deficit_30d: Optional[int] = 0
     primer_deficit: Optional[str] = None
+    total_cheques_cartera_30d: Optional[Decimal] = Decimal("0")
+    total_facturas_ap_30d: Optional[Decimal] = Decimal("0")
     proyecciones: list[dict]
 
 

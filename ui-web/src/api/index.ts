@@ -1685,9 +1685,13 @@ export interface CashFlowProjection {
   ingreso_cobranzas_ar?: number;
   ingresos_estimados: number;
   compromiso_facturas_mora?: number;
-  compromiso_cheques_mora?: number;
   compromiso_facturas_dia?: number;
+  compromiso_facturas_total?: number;
+  compromiso_facturas_cantidad?: number;
+  compromiso_cheques_mora?: number;
   compromiso_cheques_dia?: number;
+  compromiso_cheques_total?: number;
+  compromiso_cheques_cantidad?: number;
   egresos_estimados: number;
   saldo_final_proyectado: number;
   capacidad_obligarse?: number;
@@ -1746,6 +1750,8 @@ export interface CashFlowDashboard {
   disponibilidad_boveda?: number;
   disponibilidad_total?: number;
   compromisos_vencidos_mora?: number;
+  compromisos_facturas_mora_total?: number;
+  compromisos_cheques_mora_total?: number;
   promedio_diario_ventas?: number;
   capacidad_gasto_inmediato_hoy?: number;
   ingresos_hoy: number;
@@ -1754,6 +1760,8 @@ export interface CashFlowDashboard {
   saldo_proyectado_30d: number;
   dias_deficit_30d?: number;
   primer_deficit?: string | null;
+  total_cheques_cartera_30d?: number;
+  total_facturas_ap_30d?: number;
   proyecciones: CashFlowProjection[];
 }
 export interface FinancialDashboard { ap_dashboard?: APDashboard; ar_summary?: any; cash_flow?: CashFlowDashboard; budget_summary?: any[]; liquidity_ratio?: number; rotacion_cartera_dias?: number; rotacion_proveedores_dias?: number }
