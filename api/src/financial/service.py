@@ -5667,7 +5667,12 @@ async def get_supplier_payment_order_detail(
         select(
             SupplierPaymentOrder,
             Supplier.razon_social.label("supplier_nombre"),
-            Supplier.ruc.label("supplier_ruc")
+            Supplier.ruc.label("supplier_ruc"),
+            Supplier.acuerdo_pago_tipo,
+            Supplier.acuerdo_pago_notas,
+            Supplier.plazo_credito_factura_dias,
+            Supplier.plazo_credito_cheque_dias,
+            Supplier.formas_pago_acordadas,
         )
         .join(Supplier, Supplier.id == SupplierPaymentOrder.supplier_id, isouter=True)
         .where(SupplierPaymentOrder.id == ord_id, SupplierPaymentOrder.company_id == cid)
@@ -5680,14 +5685,29 @@ async def get_supplier_payment_order_detail(
         o = row.SupplierPaymentOrder
         sup_nombre = getattr(row, "supplier_nombre", None)
         sup_ruc = getattr(row, "supplier_ruc", None)
+        sup_acuerdo_tipo = getattr(row, "acuerdo_pago_tipo", None)
+        sup_acuerdo_notas = getattr(row, "acuerdo_pago_notas", None)
+        sup_p_fac = getattr(row, "plazo_credito_factura_dias", None)
+        sup_p_chq = getattr(row, "plazo_credito_cheque_dias", None)
+        sup_formas = getattr(row, "formas_pago_acordadas", None)
     elif hasattr(row, "numero_orden"):
         o = row
         sup_nombre = getattr(row, "supplier_nombre", None)
         sup_ruc = getattr(row, "supplier_ruc", None)
+        sup_acuerdo_tipo = getattr(row, "acuerdo_pago_tipo", None)
+        sup_acuerdo_notas = getattr(row, "acuerdo_pago_notas", None)
+        sup_p_fac = getattr(row, "plazo_credito_factura_dias", None)
+        sup_p_chq = getattr(row, "plazo_credito_cheque_dias", None)
+        sup_formas = getattr(row, "formas_pago_acordadas", None)
     else:
         o = row[0]
         sup_nombre = getattr(row, "supplier_nombre", None)
         sup_ruc = getattr(row, "supplier_ruc", None)
+        sup_acuerdo_tipo = getattr(row, "acuerdo_pago_tipo", None)
+        sup_acuerdo_notas = getattr(row, "acuerdo_pago_notas", None)
+        sup_p_fac = getattr(row, "plazo_credito_factura_dias", None)
+        sup_p_chq = getattr(row, "plazo_credito_cheque_dias", None)
+        sup_formas = getattr(row, "formas_pago_acordadas", None)
 
     # Cargar Allocations enriquecidas con monto original y notas de crédito asociadas
     alloc_q = (
@@ -5886,6 +5906,11 @@ async def get_supplier_payment_order_detail(
         "allocations": allocations_data,
         "disbursements": disbursements_data,
         "credit_notes_applied": credit_notes_applied,
+        "acuerdo_pago_tipo": sup_acuerdo_tipo,
+        "acuerdo_pago_notas": sup_acuerdo_notas,
+        "plazo_credito_factura_dias": sup_p_fac,
+        "plazo_credito_cheque_dias": sup_p_chq,
+        "formas_pago_acordadas": sup_formas or [],
     }
 
 

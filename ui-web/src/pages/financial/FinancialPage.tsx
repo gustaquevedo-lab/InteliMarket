@@ -950,7 +950,7 @@ export default function FinancialPage() {
       const supId = editingAgreementsSupplier.supplier_id
       await api.financial.updateSupplierPaymentAgreement(supId, agreementsForm)
       setAllSuppliers(prev => prev.map(s => {
-        if (s.id === supId) {
+        if (String(s.id) === String(supId) || String(s.supplier_id) === String(supId)) {
           return {
             ...s,
             plazo_pago_dias: agreementsForm.plazo_credito_factura_dias,
@@ -963,6 +963,10 @@ export default function FinancialPage() {
         }
         return s
       }))
+      // Sincronizar silenciosamente proveedores en segundo plano
+      api.purchases.suppliers().then(sups => {
+        if (Array.isArray(sups) && sups.length > 0) setAllSuppliers(sups)
+      }).catch(() => {})
       toast.success("Acuerdos Guardados", `Se actualizaron los acuerdos de pago con ${editingAgreementsSupplier.supplier_nombre}.`)
       setEditingAgreementsSupplier(null)
     } catch (err: any) {

@@ -260,18 +260,59 @@ def generate_payment_order_receipt_pdf(
     elif moneda_label != "PYG":
         moneda_label = f"R$ (BRL)" if moneda_label == "BRL" else f"US$ (USD)" if moneda_label == "USD" else moneda_label
 
+    # Resolver Acuerdo Comercial de Pago
+    tipo_labels = {
+        "credito_factura": "Crédito contra Factura",
+        "credito_cheque": "Crédito contra Cheque Diferido",
+        "mixto": "Mixto (Factura + Cheque)",
+        "contado": "Contado / Inmediato",
+        "anticipado": "Anticipado",
+    }
+    tipo_raw = str(order.get("acuerdo_pago_tipo") or "").strip()
+    tipo_desc = tipo_labels.get(tipo_raw, tipo_raw.capitalize() if tipo_raw else "No definido")
+
+    plazos = []
+    p_fac = order.get("plazo_credito_factura_dias")
+    if p_fac is not None and int(p_fac) > 0:
+        plazos.append(f"{p_fac} d. Factura")
+    p_chq = order.get("plazo_credito_cheque_dias")
+    if p_chq is not None and int(p_chq) > 0:
+        plazos.append(f"{p_chq} d. Cheque")
+    plazos_str = " · ".join(plazos) if plazos else ("Contado" if tipo_raw == "contado" else "Sin plazo pactado")
+
+    formas_raw = order.get("formas_pago_acordadas") or []
+    forma_labels = {
+        "cheque_diferido": "Cheque Diferido",
+        "cheque_al_dia": "Cheque al Día",
+        "transferencia_sipap": "Transferencia SIPAP",
+        "efectivo": "Efectivo",
+        "fondo_fijo": "Fondo Fijo",
+    }
+    formas_str = ", ".join(forma_labels.get(f, f) for f in formas_raw) if formas_raw else "—"
+    notas_acuerdo = (order.get("acuerdo_pago_notas") or "").strip()
+
+    acuerdo_p_html = f"<b>ACUERDO DE PAGO PACTADO:</b> {tipo_desc} &nbsp;|&nbsp; <b>Plazo:</b> {plazos_str} &nbsp;|&nbsp; <b>Medio(s):</b> {formas_str}"
+    if notas_acuerdo:
+        acuerdo_p_html += f"<br/><b>Cláusula / Nota Comercial:</b> <i>“{notas_acuerdo}”</i>"
+
     info_data = [
         [
             Paragraph(f"<b>BENEFICIARIO / PROVEEDOR:</b><br/>{prov_nombre}", styles["CellText"]),
             Paragraph(f"<b>RUC / IDENTIF.:</b><br/>{prov_ruc}", styles["CellText"]),
             Paragraph(f"<b>RECIBO OFICIAL PROV.:</b><br/>{recibo_prov}", styles["CellText"]),
             Paragraph(f"<b>MONEDA DE PAGO:</b><br/>{moneda_label}", styles["CellText"]),
+        ],
+        [
+            Paragraph(acuerdo_p_html, styles["CellText"]),
+            "", "", "",
         ]
     ]
     t_info = Table(info_data, colWidths=[70 * mm, 40 * mm, 45 * mm, 35 * mm])
     t_info.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), COLOR_SLATE_50),
         ("BOX", (0, 0), (-1, -1), 0.5, COLOR_SLATE_200),
+        ("SPAN", (0, 1), (3, 1)),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, COLOR_SLATE_200),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),

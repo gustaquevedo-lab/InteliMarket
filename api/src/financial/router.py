@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date
 
 from api.src.db import get_db
-from sqlalchemy import text
+from sqlalchemy import text, select
 from fastapi.responses import StreamingResponse
 from api.src.integrated_finance import pdf_reports
 from api.src.financial import pdf_reports as bancos_pdf_reports
@@ -1081,7 +1081,7 @@ async def get_payment_proposal_proforma_pdf(
     company = await _get_company_info(db, company_id)
     proposal_dict = body.model_dump()
 
-    # Si no vinieron los datos del acuerdo de pago pactado, enriquecer directamente desde el Supplier
+    # Enriquecer prioritariamente con los datos oficiales de la ficha del proveedor en BD
     if body.supplier_id:
         from api.src.purchases.models import Supplier
         import uuid
@@ -1090,16 +1090,16 @@ async def get_payment_proposal_proforma_pdf(
             res_sup = await db.execute(select(Supplier).where(Supplier.id == sup_uuid))
             sup = res_sup.scalar_one_or_none()
             if sup:
-                if not proposal_dict.get("acuerdo_pago_tipo"):
+                if sup.acuerdo_pago_tipo:
                     proposal_dict["acuerdo_pago_tipo"] = sup.acuerdo_pago_tipo
-                if not proposal_dict.get("acuerdo_pago_notas"):
+                if sup.acuerdo_pago_notas is not None:
                     proposal_dict["acuerdo_pago_notas"] = sup.acuerdo_pago_notas
-                if proposal_dict.get("plazo_credito_factura_dias") is None:
+                if sup.plazo_credito_factura_dias is not None:
                     proposal_dict["plazo_credito_factura_dias"] = sup.plazo_credito_factura_dias
-                if proposal_dict.get("plazo_credito_cheque_dias") is None:
+                if sup.plazo_credito_cheque_dias is not None:
                     proposal_dict["plazo_credito_cheque_dias"] = sup.plazo_credito_cheque_dias
-                if not proposal_dict.get("formas_pago_acordadas"):
-                    proposal_dict["formas_pago_acordadas"] = sup.formas_pago_acordadas or []
+                if sup.formas_pago_acordadas is not None and len(sup.formas_pago_acordadas) > 0:
+                    proposal_dict["formas_pago_acordadas"] = sup.formas_pago_acordadas
         except Exception as e:
             logger.warning(f"Error cargando acuerdo de pago de proveedor para proforma: {e}")
 
