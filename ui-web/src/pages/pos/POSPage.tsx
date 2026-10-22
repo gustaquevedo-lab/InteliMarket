@@ -3264,6 +3264,8 @@ export default function POSPage() {
   }, [])
 
   // ── AGREGAR AL CARRITO ────────────────────────────────────────────────────
+  const lastSubmitRef = useRef<{ code: string; ts: number } | null>(null)
+  const lastAddTraceRef = useRef<{ id: string; ts: number } | null>(null)
   const addToCart = useCallback((product: Product, quantityOverride?: number, origenBalanza?: "balmak_bck30" | "etiqueta_plu") => {
     if (!cajaAbiertaRef.current || !cashSessionIdRef.current) {
       toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
@@ -3274,6 +3276,14 @@ export default function POSPage() {
     setLastScannedProduct(product)
 
     const isPesable = isPesableProduct(product)
+
+    // Traza (no bloquea): el mismo producto entrando dos veces muy seguido.
+    const nowAdd = Date.now()
+    const prevAdd = lastAddTraceRef.current
+    if (prevAdd && prevAdd.id === product.id && nowAdd - prevAdd.ts < 500) {
+      console.warn(`[SCAN-TRACE] mismo producto agregado en ${nowAdd - prevAdd.ts}ms sku=${product.sku} pesable=${isPesable} qty=${quantityOverride ?? "-"} origen=${origenBalanza ?? "-"} balanza=${currentScaleWeight.toFixed(3)} estable=${isScaleStable}`)
+    }
+    lastAddTraceRef.current = { id: product.id, ts: nowAdd }
 
 
     let finalQty = 1
@@ -5636,6 +5646,18 @@ export default function POSPage() {
     }
     let code = search.trim()
     if (!code) return
+
+    // Guardia contra doble envío del lector (rebote USB / terminador doble): el
+    // mismo código dentro de 200 ms es el mismo escaneo, no uno nuevo. Un
+    // cajero humano tarda bastante más entre dos escaneos del mismo producto.
+    const nowScan = Date.now()
+    const prevScan = lastSubmitRef.current
+    if (prevScan && prevScan.code === code && nowScan - prevScan.ts < 200) {
+      console.warn(`[SCAN-TRACE] doble envio BLOQUEADO code=${code} dt=${nowScan - prevScan.ts}ms`)
+      setSearch("")
+      return
+    }
+    lastSubmitRef.current = { code, ts: nowScan }
 
     // 0. Cantidad rápida: "3*<codigo>" o "3x<codigo>"
     let qtyPrefix: number | null = null

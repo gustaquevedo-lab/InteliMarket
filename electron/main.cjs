@@ -229,6 +229,12 @@ process.on('unhandledRejection', (reason) => {
 })
 
 // ── GESTOR DE BINARIOS DEL BRIDGE ──────────────────────────────────────────
+function scaleTrace(msg) {
+  try {
+    fs.appendFileSync(path.join(app.getPath('userData'), 'pos-console.log'), `[${new Date().toISOString()}] [WARN] [SCALE-TRACE] ${msg}\n`)
+  } catch (_) {}
+}
+let scaleStartsInFlight = 0
 let scaleProcess = null
 let scaleStdinWritable = null
 let scaleIntentionalStop = false
@@ -387,9 +393,21 @@ function startScaleReader(port = 'COM3', baudRate = 9600) {
     return { success: false, port }
   }
 
+  scaleStartsInFlight++
+  scaleTrace(`start ${port}@${baudRate} enVuelo=${scaleStartsInFlight} procPrevio=${scaleProcess ? scaleProcess.pid : 'no'}`)
   killOrphanScaleBridge(() => {
+    if (scaleProcess) scaleTrace(`FUGA posible: se lanza un puente nuevo con el pid ${scaleProcess.pid} aun referenciado`)
     scaleProcess = spawn(exePath, [port, String(baudRate)], { windowsHide: true })
     scaleStdinWritable = scaleProcess.stdin
+    scaleStartsInFlight = Math.max(0, scaleStartsInFlight - 1)
+    const myPid = scaleProcess.pid
+    scaleTrace(`puente lanzado pid=${myPid}`)
+    setTimeout(() => {
+      exec('tasklist /FI "IMAGENAME eq scale-bridge.exe" /NH', (_e, out) => {
+        const n = (String(out || '').match(/scale-bridge\.exe/gi) || []).length
+        scaleTrace(`puentes vivos=${n} (esperado 1)`)
+      })
+    }, 3000)
 
     if (mainWindow) mainWindow.webContents.send('scale:log', `Bridge de balanza iniciado (${port} @ ${baudRate}bps)...`)
 
@@ -431,7 +449,9 @@ function startScaleReader(port = 'COM3', baudRate = 9600) {
       if (text && mainWindow) mainWindow.webContents.send('scale:log', `ERROR: ${text.substring(0, 200)}`)
     })
 
-    scaleProcess.on('exit', () => {
+    scaleProcess.on('exit', (code) => {
+      scaleTrace(`puente pid=${myPid} salio code=${code}`)
+      if (scaleProcess && scaleProcess.pid !== myPid) { scaleTrace(`salio un puente viejo pid=${myPid}; el vigente es ${scaleProcess.pid}`); return }
       scaleProcess = null
       scaleStdinWritable = null
       if (mainWindow) mainWindow.webContents.send('scale:status', { connected: false, port: scaleLastPort })
