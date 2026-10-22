@@ -1635,6 +1635,39 @@ export interface ExpenseDashboard {
   top_proveedores: { proveedor: string; total: number }[]
   sugerencias: { tipo: string; titulo: string; detalle: string }[]
 }
+export interface SupplierInvoiceItem {
+  id?: string
+  invoice_id?: string
+  product_id?: string | null
+  sku?: string | null
+  codigo_barra?: string | null
+  codigo_proveedor?: string | null
+  descripcion: string
+  cantidad: number
+  precio_unitario: number
+  descuento?: number
+  iva_tasa?: number
+  total: number
+  tipo_producto?: "producto" | "insumo" | "materia_prima" | "servicio" | string
+  origen?: "direct" | "receipt" | "order" | "concepto" | string
+}
+
+export interface SupplierInvoiceWithPayments extends SupplierInvoice {
+  payments?: Array<{
+    id: string
+    invoice_id: string
+    payment_method: string
+    monto: number
+    moneda: string
+    fecha_pago: string
+    referencia?: string
+    comprobante_url?: string
+    estado: string
+    created_at: string
+  }>
+  items?: SupplierInvoiceItem[]
+}
+
 export interface SupplierInvoice { id: string; company_id?: string; supplier_id?: string; supplier_nombre?: string; supplier_ruc?: string; numero_factura?: string; timbrado?: string; cdc?: string; fecha_emision?: string; fecha_recepcion?: string; fecha_vencimiento?: string; subtotal?: number; descuento?: number; iva_10?: number; iva_5?: number; total?: number; saldo_pendiente?: number; moneda?: string; tipo_cambio?: number; total_brl?: number; saldo_pendiente_brl?: number; condicion?: string; tipo_comprobante?: string; estado?: string; concepto?: string; notas?: string; created_by?: string; approved_by?: string; purchase_order_id?: string; purchase_order_numero?: string; oc_numero?: string; receipt_id?: string; created_at?: string; notas_credito?: any[]; solicitudes_nc?: any[]; bloqueada_para_pago?: boolean; motivo_bloqueo?: string; monto_retenido_nc?: number; requiere_nc?: boolean }
 export interface SupplierInvoicePayment { id: string; invoice_id?: string; payment_method?: string; monto?: number; moneda?: string; fecha_pago?: string; referencia?: string; estado?: string; created_at?: string }
 export interface BankAccount { id: string; company_id?: string; alias?: string | null; banco?: string; tipo?: string; numero_cuenta?: string; moneda?: string; saldo_inicial?: number; saldo_actual?: number; titular?: string; activo?: boolean; saldo_minimo_alerta?: number | null; saldo_verificado_manualmente?: boolean; saldo_verificado_at?: string | null; saldo_verificado_por?: string | null; created_at?: string }
@@ -4578,7 +4611,17 @@ export const api = {
     },
     invoices: {
       list: (params?: { estado?: string; supplier_id?: string; vencidas?: boolean; desde?: string; hasta?: string; limit?: number; offset?: number; order_by?: string }) => client.get<SupplierInvoice[]>("/v1/financial/invoices", { company_id: COMPANY_ID, ...params } as any),
-      get: (id: string) => client.get<SupplierInvoice>(`/v1/financial/invoices/${id}`),
+      get: (id: string) => client.get<SupplierInvoiceWithPayments>(`/v1/financial/invoices/${id}`),
+      updateClassification: (id: string, payload: {
+        tipo_comprobante?: string
+        cascade_to_products?: boolean
+        items?: Array<{ product_id: string; tipo_producto: string }>
+      }) => client.patch<SupplierInvoiceWithPayments>(`/v1/financial/invoices/${id}/classification`, payload),
+      updateItemClassification: (invoiceId: string, productId: string, tipo_producto: string) =>
+        client.patch<{ success: boolean; product_id: string; nombre: string; tipo_producto: string }>(
+          `/v1/financial/invoices/${invoiceId}/items/${productId}/classification`,
+          { tipo_producto }
+        ),
       create: (data: any) => client.post<SupplierInvoice>("/v1/financial/invoices", { company_id: COMPANY_ID, ...data }),
       approve: (id: string) => client.post<{ detail: string }>(`/v1/financial/invoices/${id}/approve`),
       pay: (id: string, data: any) => client.post<{ pending_approval: boolean; request_id?: string; id?: string; monto: number; estado?: string }>(`/v1/financial/invoices/${id}/pay`, data),

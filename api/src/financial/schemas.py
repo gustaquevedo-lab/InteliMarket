@@ -89,8 +89,39 @@ class SupplierInvoiceResponse(BaseModel):
         from_attributes = True
 
 
+class SupplierInvoiceItemResponse(BaseModel):
+    id: Optional[UUID] = None
+    invoice_id: Optional[UUID] = None
+    product_id: Optional[UUID] = None
+    sku: Optional[str] = None
+    codigo_barra: Optional[str] = None
+    codigo_proveedor: Optional[str] = None
+    descripcion: str
+    cantidad: Decimal
+    precio_unitario: Decimal
+    descuento: Decimal = Decimal("0")
+    iva_tasa: Decimal = Decimal("10")
+    total: Decimal
+    tipo_producto: Optional[str] = "producto"  # "producto" (Mercadería) | "insumo" (Insumo)
+    origen: str = "direct"  # "direct" | "receipt" | "order" | "concepto"
+
+    class Config:
+        from_attributes = True
+
+
+class InvoiceClassificationUpdate(BaseModel):
+    tipo_comprobante: Optional[str] = None  # "mercaderia" | "insumo_gasto" | "gasto"
+    cascade_to_products: bool = False
+    items: Optional[list[dict[str, Any]]] = None  # [{"product_id": "...", "tipo_producto": "producto" | "insumo"}]
+
+
+class ProductClassificationItemUpdate(BaseModel):
+    tipo_producto: str  # "producto" | "insumo"
+
+
 class SupplierInvoiceWithPayments(SupplierInvoiceResponse):
     payments: list["SupplierInvoicePaymentResponse"] = []
+    items: list[SupplierInvoiceItemResponse] = []
 
 
 class SupplierInvoiceBatchRevertRequest(BaseModel):

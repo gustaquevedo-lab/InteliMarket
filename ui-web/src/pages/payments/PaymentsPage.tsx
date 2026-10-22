@@ -3,6 +3,7 @@ import SupplierPaymentOrderModal from "./SupplierPaymentOrderModal"
 import SupplierPaymentOrderDetailModal from "./SupplierPaymentOrderDetailModal"
 import MultiSupplierPaymentModal from "./MultiSupplierPaymentModal"
 import LiquidacionValesModal from "./LiquidacionValesModal"
+import SupplierInvoiceDetailModal from "../../components/financial/SupplierInvoiceDetailModal"
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
 import {
   CreditCard, Search, Plus, Filter, Download, Eye, CheckCircle2,
@@ -39,6 +40,7 @@ export default function PaymentsPage() {
   const [filterTipoComprobante, setFilterTipoComprobante] = useState("all")
   const [selected360SupplierId, setSelected360SupplierId] = useState<string | null>(null)
   const [selected360SupplierNombre, setSelected360SupplierNombre] = useState<string | null>(null)
+  const [selectedInvoiceIdForDetail, setSelectedInvoiceIdForDetail] = useState<string | null>(null)
 
   // Filtros pestaña Órdenes de Pago
   const [searchOrders, setSearchOrders] = useState("")
@@ -947,13 +949,29 @@ export default function PaymentsPage() {
                                   </>
                                 )}
                                 {inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto" ? (
-                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300/80">
-                                    🛠️ Insumo/Gasto
-                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setSelectedInvoiceIdForDetail(inv.id)
+                                    }}
+                                    title="Click para ver los artículos de esta factura y reclasificarla"
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-300/80 hover:ring-2 hover:ring-purple-400/50 transition cursor-pointer"
+                                  >
+                                    🛠️ Insumo/Gasto • Ítems
+                                  </button>
                                 ) : (
-                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200">
-                                    📦 Mercadería
-                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setSelectedInvoiceIdForDetail(inv.id)
+                                    }}
+                                    title="Click para ver los artículos de esta factura y reclasificarla"
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 hover:ring-2 hover:ring-blue-400/50 transition cursor-pointer"
+                                  >
+                                    📦 Mercadería • Ítems
+                                  </button>
                                 )}
                                 {hasNC && (
                                   <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300/80 dark:border-amber-800">
@@ -996,13 +1014,24 @@ export default function PaymentsPage() {
                               <span className="text-[10px] text-slate-500 font-bold uppercase">{inv.condicion || "Crédito"}</span>
                             </td>
                             <td className="p-3.5 text-right">
-                              <button
-                                onClick={() => handleOpenIndividualOrderModal(inv)}
-                                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white font-extrabold text-[11px] transition shadow-sm flex items-center gap-1 ml-auto"
-                              >
-                                <Wallet className="w-3.5 h-3.5" />
-                                <span>Pagar / OP</span>
-                              </button>
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedInvoiceIdForDetail(inv.id)}
+                                  title="Ver artículos y reclasificar tipo (Mercadería/Insumo)"
+                                  className="px-2 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-[11px] transition shadow-xs flex items-center gap-1"
+                                >
+                                  <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                                  <span>Ítems</span>
+                                </button>
+                                <button
+                                  onClick={() => handleOpenIndividualOrderModal(inv)}
+                                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-500 hover:to-orange-500 text-white font-extrabold text-[11px] transition shadow-sm flex items-center gap-1"
+                                >
+                                  <Wallet className="w-3.5 h-3.5" />
+                                  <span>Pagar / OP</span>
+                                </button>
+                              </div>
                             </td>
                           </tr>
                           {hasNC && (
@@ -2259,6 +2288,14 @@ export default function PaymentsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {selectedInvoiceIdForDetail && (
+        <SupplierInvoiceDetailModal
+          invoiceId={selectedInvoiceIdForDetail}
+          onClose={() => setSelectedInvoiceIdForDetail(null)}
+          onUpdated={() => loadData()}
+        />
       )}
     </div>
   )

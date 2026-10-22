@@ -2,7 +2,7 @@
 
 from typing import Any, Optional, List, Dict
 
-from sqlalchemy import select, func, and_, or_, text, case, delete
+from sqlalchemy import select, func, and_, or_, text, case, delete, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone, date, timedelta
@@ -16,7 +16,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from api.src.financial.models import (
-    SupplierInvoice, SupplierInvoicePayment,
+    SupplierInvoice, SupplierInvoicePayment, SupplierInvoiceItem,
     BankAccount, BankTransaction,
     BankBalanceCorrectionRequest,
     APPaymentApprovalRequest,
@@ -39,8 +39,10 @@ from api.src.financial.schemas import (
     MultiSupplierPaymentBatchCreate,
     SettleValesAndPayRequest,
     SupplierLegalInvoiceInput,
+    InvoiceClassificationUpdate,
 )
-from api.src.purchases.models import Supplier, PurchaseReceipt, PurchaseOrder
+from api.src.purchases.models import Supplier, PurchaseReceipt, PurchaseReceiptItem, PurchaseOrder, PurchaseOrderItem
+from api.src.products.models import Product
 from api.src.caja.models import VaultEntry, CashRegisterMovement
 from api.src.petty_cash.models import PettyCashFund, PettyCashFundMovement
 from api.src.cheques.models import Cheque, ChequeHistorial
@@ -405,6 +407,278 @@ async def get_invoice_with_payments(db: AsyncSession, invoice_id: str) -> Suppli
             invoice.supplier_ruc = row[1]
         await enrich_invoices_with_nc_and_snc(db, invoice.company_id, [invoice])
     return invoice
+
+
+async def enrich_invoice_items(db: AsyncSession, invoice: SupplierInvoice) -> list[dict]:
+    """Resuelve los ítems que componen la factura a través de la cascada:
+    1. supplier_invoice_items (ítems directos cargados en la factura)
+    2. purchase_receipt_items (a través de receipt_id o AUTO-REC-...)
+    3. purchase_order_items (a través de purchase_order_id)
+    4. Línea sintética basada en el concepto de la factura
+    """
+    if not invoice or not invoice.id:
+        return []
+
+    # 1. Ítems directos de la factura
+    direct_res = await db.execute(
+        select(SupplierInvoiceItem)
+        .where(SupplierInvoiceItem.invoice_id == invoice.id)
+        .order_by(SupplierInvoiceItem.created_at.asc())
+    )
+    direct_items = list(direct_res.scalars().all())
+    if direct_items:
+        p_ids = [it.product_id for it in direct_items if it.product_id]
+        p_map = {}
+        if p_ids:
+            p_res = await db.execute(
+                select(Product.id, Product.sku, Product.codigo_barra, Product.nombre, Product.tipo_producto, Product.iva_tasa)
+                .where(Product.id.in_(p_ids))
+            )
+            p_map = {row.id: row for row in p_res.all()}
+
+        items = []
+        for it in direct_items:
+            prod = p_map.get(it.product_id)
+            items.append({
+                "id": it.id,
+                "invoice_id": it.invoice_id,
+                "product_id": it.product_id,
+                "sku": prod.sku if prod else None,
+                "codigo_barra": prod.codigo_barra if prod else None,
+                "codigo_proveedor": it.codigo_proveedor,
+                "descripcion": it.descripcion or (prod.nombre if prod else "Artículo de factura"),
+                "cantidad": it.cantidad,
+                "precio_unitario": it.precio_unitario,
+                "descuento": it.descuento or Decimal("0"),
+                "iva_tasa": it.iva_tasa or (prod.iva_tasa if prod and prod.iva_tasa is not None else Decimal("10")),
+                "total": it.total,
+                "tipo_producto": prod.tipo_producto if prod else ("insumo" if invoice.tipo_comprobante in ("gasto", "insumo_gasto") else "producto"),
+                "origen": "direct",
+            })
+        return items
+
+    # 2. Recepción vinculada (PurchaseReceipt -> purchase_receipt_items)
+    target_receipt_id = invoice.receipt_id
+    if not target_receipt_id and invoice.numero_factura and invoice.numero_factura.startswith("AUTO-REC-"):
+        rec_num = invoice.numero_factura.replace("AUTO-", "")
+        rec_res = await db.execute(select(PurchaseReceipt.id).where(PurchaseReceipt.numero == rec_num))
+        target_receipt_id = rec_res.scalar_one_or_none()
+
+    if target_receipt_id:
+        r_items_res = await db.execute(
+            select(PurchaseReceiptItem, Product)
+            .outerjoin(Product, Product.id == PurchaseReceiptItem.product_id)
+            .where(PurchaseReceiptItem.receipt_id == target_receipt_id)
+            .order_by(PurchaseReceiptItem.created_at.asc())
+        )
+        r_rows = r_items_res.all()
+        if r_rows:
+            items = []
+            for r_item, prod in r_rows:
+                items.append({
+                    "id": r_item.id,
+                    "invoice_id": invoice.id,
+                    "product_id": r_item.product_id,
+                    "sku": prod.sku if prod else None,
+                    "codigo_barra": prod.codigo_barra if prod else None,
+                    "codigo_proveedor": None,
+                    "descripcion": prod.nombre if prod else f"Producto #{str(r_item.product_id)[:8]}",
+                    "cantidad": r_item.cantidad_recibida or Decimal("1"),
+                    "precio_unitario": r_item.costo_unitario or r_item.precio_unitario or Decimal("0"),
+                    "descuento": Decimal("0"),
+                    "iva_tasa": prod.iva_tasa if prod and prod.iva_tasa is not None else Decimal("10"),
+                    "total": r_item.total or ((r_item.cantidad_recibida or Decimal("1")) * (r_item.costo_unitario or Decimal("0"))),
+                    "tipo_producto": prod.tipo_producto if prod else ("insumo" if invoice.tipo_comprobante in ("gasto", "insumo_gasto") else "producto"),
+                    "origen": "receipt",
+                })
+            return items
+
+    # 3. Orden de compra vinculada (PurchaseOrder -> purchase_order_items)
+    if invoice.purchase_order_id:
+        po_items_res = await db.execute(
+            select(PurchaseOrderItem, Product)
+            .outerjoin(Product, Product.id == PurchaseOrderItem.product_id)
+            .where(PurchaseOrderItem.purchase_order_id == invoice.purchase_order_id)
+            .order_by(PurchaseOrderItem.created_at.asc())
+        )
+        po_rows = po_items_res.all()
+        if po_rows:
+            items = []
+            for po_it, prod in po_rows:
+                items.append({
+                    "id": po_it.id,
+                    "invoice_id": invoice.id,
+                    "product_id": po_it.product_id,
+                    "sku": prod.sku if prod else None,
+                    "codigo_barra": prod.codigo_barra if prod else None,
+                    "codigo_proveedor": None,
+                    "descripcion": prod.nombre if prod else f"Producto #{str(po_it.product_id)[:8]}",
+                    "cantidad": po_it.cantidad or Decimal("1"),
+                    "precio_unitario": po_it.precio_unitario or Decimal("0"),
+                    "descuento": po_it.descuento or Decimal("0"),
+                    "iva_tasa": prod.iva_tasa if prod and prod.iva_tasa is not None else Decimal("10"),
+                    "total": po_it.total or Decimal("0"),
+                    "tipo_producto": prod.tipo_producto if prod else ("insumo" if invoice.tipo_comprobante in ("gasto", "insumo_gasto") else "producto"),
+                    "origen": "order",
+                })
+            return items
+
+    # 4. Línea sintética de concepto o global
+    desc = invoice.concepto or f"Factura #{invoice.numero_factura}"
+    return [{
+        "id": None,
+        "invoice_id": invoice.id,
+        "product_id": None,
+        "sku": None,
+        "codigo_barra": None,
+        "codigo_proveedor": None,
+        "descripcion": desc,
+        "cantidad": Decimal("1"),
+        "precio_unitario": invoice.total,
+        "descuento": Decimal("0"),
+        "iva_tasa": Decimal("10"),
+        "total": invoice.total,
+        "tipo_producto": "insumo" if invoice.tipo_comprobante in ("gasto", "insumo_gasto") else "producto",
+        "origen": "concepto",
+    }]
+
+
+async def get_invoice_detail_with_items(db: AsyncSession, invoice_id: str) -> dict | None:
+    invoice = await get_invoice_with_payments(db, invoice_id)
+    if not invoice:
+        return None
+    items = await enrich_invoice_items(db, invoice)
+
+    po_numero = getattr(invoice, "purchase_order_numero", None)
+    if not po_numero:
+        if invoice.purchase_order_id:
+            po_res = await db.execute(select(PurchaseOrder.numero).where(PurchaseOrder.id == invoice.purchase_order_id))
+            po_numero = po_res.scalar_one_or_none()
+        elif invoice.receipt_id:
+            rec_res = await db.execute(
+                select(PurchaseOrder.numero)
+                .join(PurchaseReceipt, PurchaseReceipt.purchase_order_id == PurchaseOrder.id)
+                .where(PurchaseReceipt.id == invoice.receipt_id)
+            )
+            po_numero = rec_res.scalar_one_or_none()
+
+    data = {
+        "id": invoice.id,
+        "company_id": invoice.company_id,
+        "supplier_id": invoice.supplier_id,
+        "supplier_nombre": getattr(invoice, "supplier_nombre", None),
+        "supplier_ruc": getattr(invoice, "supplier_ruc", None),
+        "numero_factura": invoice.numero_factura,
+        "timbrado": invoice.timbrado,
+        "cdc": invoice.cdc,
+        "fecha_emision": invoice.fecha_emision,
+        "fecha_recepcion": invoice.fecha_recepcion,
+        "fecha_vencimiento": invoice.fecha_vencimiento,
+        "subtotal": invoice.subtotal,
+        "descuento": invoice.descuento,
+        "iva_10": invoice.iva_10,
+        "iva_5": invoice.iva_5,
+        "total": invoice.total,
+        "saldo_pendiente": invoice.saldo_pendiente,
+        "moneda": invoice.moneda,
+        "tipo_cambio": invoice.tipo_cambio,
+        "total_brl": invoice.total_brl,
+        "saldo_pendiente_brl": invoice.saldo_pendiente_brl,
+        "purchase_order_id": invoice.purchase_order_id,
+        "purchase_order_numero": po_numero,
+        "oc_numero": po_numero,
+        "receipt_id": invoice.receipt_id,
+        "condicion": invoice.condicion,
+        "tipo_comprobante": invoice.tipo_comprobante,
+        "estado": invoice.estado,
+        "concepto": invoice.concepto,
+        "notas": invoice.notas,
+        "created_by": invoice.created_by,
+        "approved_by": invoice.approved_by,
+        "notas_credito": getattr(invoice, "notas_credito", []) or [],
+        "solicitudes_nc": getattr(invoice, "solicitudes_nc", []) or [],
+        "created_at": invoice.created_at,
+        "updated_at": invoice.updated_at,
+        "payments": invoice.payments or [],
+        "items": items,
+    }
+    return data
+
+
+async def update_invoice_classification(
+    db: AsyncSession,
+    invoice_id: str,
+    data: InvoiceClassificationUpdate,
+) -> dict | None:
+    inv_uuid = uuid.UUID(invoice_id)
+    invoice = await get_invoice(db, invoice_id)
+    if not invoice:
+        return None
+
+    # 1. Actualizar clasificación general de la factura
+    if data.tipo_comprobante:
+        val = data.tipo_comprobante.strip().lower()
+        if val in ("mercaderia", "insumo_gasto", "gasto", "factura"):
+            invoice.tipo_comprobante = val
+            invoice.updated_at = datetime.now(timezone.utc)
+
+    # 2. Si se solicitó propagar en cascada a todos los productos de la factura
+    if data.cascade_to_products and data.tipo_comprobante:
+        target_prod_type = "insumo" if data.tipo_comprobante in ("insumo_gasto", "gasto") else "producto"
+        items = await enrich_invoice_items(db, invoice)
+        p_ids = [it["product_id"] for it in items if it.get("product_id")]
+        if p_ids:
+            await db.execute(
+                update(Product)
+                .where(Product.id.in_(p_ids))
+                .values(tipo_producto=target_prod_type, updated_at=datetime.now(timezone.utc))
+            )
+
+    # 3. Actualizar productos puntuales si fueron enviados
+    if data.items:
+        for it in data.items:
+            pid = it.get("product_id")
+            ptype = it.get("tipo_producto")
+            if pid and ptype in ("producto", "insumo", "materia_prima", "servicio"):
+                p_uuid = uuid.UUID(str(pid))
+                await db.execute(
+                    update(Product)
+                    .where(Product.id == p_uuid)
+                    .values(tipo_producto=ptype, updated_at=datetime.now(timezone.utc))
+                )
+
+    await db.flush()
+    await db.commit()
+    return await get_invoice_detail_with_items(db, invoice_id)
+
+
+async def update_product_classification_for_invoice(
+    db: AsyncSession,
+    invoice_id: str,
+    product_id: str,
+    tipo_producto: str,
+) -> dict:
+    val = tipo_producto.strip().lower()
+    if val not in ("producto", "insumo", "materia_prima", "servicio"):
+        raise ValueError(f"Tipo de producto inválido: {tipo_producto}")
+
+    p_uuid = uuid.UUID(product_id)
+    result = await db.execute(
+        update(Product)
+        .where(Product.id == p_uuid)
+        .values(tipo_producto=val, updated_at=datetime.now(timezone.utc))
+        .returning(Product.id, Product.nombre, Product.tipo_producto)
+    )
+    row = result.first()
+    if not row:
+        raise ValueError("Producto no encontrado")
+    await db.commit()
+    return {
+        "success": True,
+        "product_id": str(row[0]),
+        "nombre": row[1],
+        "tipo_producto": row[2],
+    }
 
 
 async def approve_invoice(db: AsyncSession, invoice_id: str, user_id: str | None = None) -> SupplierInvoice | None:

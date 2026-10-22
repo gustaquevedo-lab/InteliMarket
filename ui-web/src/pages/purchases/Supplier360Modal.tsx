@@ -16,6 +16,7 @@ import {
 import { api, type Supplier360Response, type SupplierAccountStatementResponse, type SupplierStatementMovement } from "../../api"
 import { formatPYG, formatDate } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
+import SupplierInvoiceDetailModal from "../../components/financial/SupplierInvoiceDetailModal"
 
 type Tab360 =
   | "overview"
@@ -63,6 +64,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
   const [filterVencimiento, setFilterVencimiento] = useState("all")
   const [filterNcFactura, setFilterNcFactura] = useState("all")
   const [filterFaseFactura, setFilterFaseFactura] = useState("all")
+  const [selectedInvoiceIdForItems, setSelectedInvoiceIdForItems] = useState<string | null>(null)
 
   // Sub-vista de Deudas: Facturas estándar vs Extracto Cta. Cte. para Punteo
   const [subVistaDeudas, setSubVistaDeudas] = useState<"facturas" | "extracto">("facturas")
@@ -926,6 +928,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                         <thead className="bg-slate-50 dark:bg-slate-800/70 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200 dark:border-slate-800">
                           <tr>
                             <th className="p-3">N° Factura</th>
+                            <th className="p-3 text-center">Tipo</th>
                             <th className="p-3">Emisión</th>
                             <th className="p-3">Vencimiento</th>
                             <th className="p-3 text-right">Total Factura</th>
@@ -933,12 +936,13 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                             <th className="p-3 text-right">Saldo Neto Real</th>
                             <th className="p-3 text-center">Fase de Pago</th>
                             <th className="p-3 text-center">Condición</th>
+                            <th className="p-3 text-center">Ítems</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
                           {facturasFiltradas.length === 0 ? (
                             <tr>
-                              <td colSpan={8} className="p-8 text-center text-slate-400">
+                              <td colSpan={10} className="p-8 text-center text-slate-400">
                                 No se encontraron facturas con los filtros seleccionados.
                               </td>
                             </tr>
@@ -964,6 +968,17 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                         )}
                                       </div>
                                       {f.timbrado && <span className="block text-[10px] text-slate-400 font-normal">Timb: {f.timbrado}</span>}
+                                    </td>
+                                    <td className="p-3 text-center">
+                                      {(f as any).tipo_comprobante === "insumo_gasto" || (f as any).tipo_comprobante === "gasto" ? (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 whitespace-nowrap">
+                                          🏢 Insumo
+                                        </span>
+                                      ) : (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 whitespace-nowrap">
+                                          📦 Mercadería
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="p-3 font-mono text-slate-600 dark:text-slate-400">{f.fecha_emision}</td>
                                     <td className="p-3 font-mono font-bold">
@@ -1024,10 +1039,21 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                     <td className="p-3 text-center text-slate-500 uppercase text-[10px] font-bold">
                                       {f.condicion}
                                     </td>
+                                    <td className="p-3 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedInvoiceIdForItems(f.id)}
+                                        title="Ver ítems de la factura y reclasificar (Mercadería/Insumo)"
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 transition shadow-2xs whitespace-nowrap"
+                                      >
+                                        <Layers className="w-3.5 h-3.5" />
+                                        <span>Ver Ítems</span>
+                                      </button>
+                                    </td>
                                   </tr>
                                   {hasNc && f.ncs_vinculadas && f.ncs_vinculadas.length > 0 && (
                                     <tr className="bg-amber-50/60 dark:bg-amber-950/20 border-b border-amber-200/60">
-                                      <td colSpan={8} className="py-2 px-6 pl-10">
+                                      <td colSpan={10} className="py-2 px-6 pl-10">
                                         <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
                                           <CornerDownRight className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                                           <span className="text-[11px] font-bold text-amber-800 dark:text-amber-300">Nota de Crédito Vinculada:</span>
@@ -1042,7 +1068,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                   )}
                                   {hasSnc && f.sncs_vinculadas && f.sncs_vinculadas.length > 0 && (
                                     <tr className="bg-purple-50/60 dark:bg-purple-950/20 border-b border-purple-200/60">
-                                      <td colSpan={8} className="py-2 px-6 pl-10">
+                                      <td colSpan={10} className="py-2 px-6 pl-10">
                                         <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
                                           <CornerDownRight className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
                                           <span className="text-[11px] font-bold text-purple-800 dark:text-purple-300">Reclamo / Faltante Muelle (SNC):</span>
@@ -1057,7 +1083,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                   )}
                                   {mRet > 0 && (!f.sncs_vinculadas || f.sncs_vinculadas.length === 0) && (
                                     <tr className="bg-purple-50/40 dark:bg-purple-950/20 border-b border-purple-200/50">
-                                      <td colSpan={8} className="py-2 px-6 pl-10">
+                                      <td colSpan={10} className="py-2 px-6 pl-10">
                                         <div className="flex items-center gap-2 text-xs font-semibold text-purple-800 dark:text-purple-300">
                                           <CornerDownRight className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
                                           <span className="text-[11px] font-bold">Retención Preventiva en Muelle:</span>
@@ -2447,5 +2473,22 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
     </div>
   )
 
-  return createPortal(modalContent, document.body)
+  return createPortal(
+    <>
+      {modalContent}
+      {selectedInvoiceIdForItems && (
+        <SupplierInvoiceDetailModal
+          invoiceId={selectedInvoiceIdForItems}
+          onClose={() => setSelectedInvoiceIdForItems(null)}
+          onUpdated={() => {
+            loadData()
+            if (subVistaDeudas === "extracto") {
+              loadStatement()
+            }
+          }}
+        />
+      )}
+    </>,
+    document.body
+  )
 }

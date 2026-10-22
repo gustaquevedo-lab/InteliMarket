@@ -33,6 +33,8 @@ from api.src.financial.schemas import (
     MultiSupplierPaymentBatchCreate,
     SettleValesAndPayRequest,
     SupplierPaymentAgreementUpdate,
+    InvoiceClassificationUpdate,
+    ProductClassificationItemUpdate,
 )
 from api.src.financial import service
 
@@ -109,10 +111,37 @@ async def list_paid_invoices(
 
 @router.get("/invoices/{invoice_id}", response_model=SupplierInvoiceWithPayments)
 async def get_invoice(invoice_id: str, db: AsyncSession = Depends(get_db)):
-    invoice = await service.get_invoice_with_payments(db, invoice_id)
+    invoice = await service.get_invoice_detail_with_items(db, invoice_id)
     if not invoice:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
     return invoice
+
+
+@router.patch("/invoices/{invoice_id}/classification", response_model=SupplierInvoiceWithPayments)
+async def update_invoice_classification(
+    invoice_id: str,
+    body: InvoiceClassificationUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    inv = await service.update_invoice_classification(db, invoice_id, body)
+    if not inv:
+        raise HTTPException(status_code=404, detail="Factura no encontrada")
+    return inv
+
+
+@router.patch("/invoices/{invoice_id}/items/{product_id}/classification")
+async def update_product_classification_for_invoice(
+    invoice_id: str,
+    product_id: str,
+    body: ProductClassificationItemUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await service.update_product_classification_for_invoice(
+            db, invoice_id, product_id, body.tipo_producto
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/invoices/by-receipt/{receipt_id}", response_model=dict)
