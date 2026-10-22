@@ -149,8 +149,8 @@ def generate_payment_order_receipt_pdf(
     nombre_fantasia = company.get("nombre_fantasia") or "Extra Supermercado Mayorista"
     ruc_empresa = company.get("ruc") or "80150377-9"
     timbrado = company.get("timbrado") or "18545636"
-    direccion = company.get("direccion") or "Av. República de Colombia c/ Calle 4, CDE - Paraguay"
-    telefono = company.get("telefono") or "+595 983 000000"
+    direccion = company.get("direccion") or "Alejo García esq. Carlos Antonio López, Pedro Juan Caballero - Paraguay"
+    telefono = company.get("telefono") or "+595 992 052200"
 
     estado = str(order.get("estado") or "REGISTRADO").upper()
 
@@ -1046,8 +1046,8 @@ def generate_payment_proposal_pdf(
     nombre_fantasia = company.get("nombre_fantasia") or "Extra Supermercado Mayorista"
     ruc_empresa = company.get("ruc") or "80150377-9"
     timbrado = company.get("timbrado") or "18545636"
-    direccion = company.get("direccion") or "Av. República de Colombia c/ Calle 4, CDE - Paraguay"
-    telefono = company.get("telefono") or "+595 983 000000"
+    direccion = company.get("direccion") or "Alejo García esq. Carlos Antonio López, Pedro Juan Caballero - Paraguay"
+    telefono = company.get("telefono") or "+595 992 052200"
 
     logo_img = _logo_flowable(company, max_w=38 * mm, max_h=16 * mm)
     header_left = [
@@ -1130,10 +1130,45 @@ def generate_payment_proposal_pdf(
     story.append(t_kpis)
     story.append(Spacer(1, 3 * mm))
 
-    # 4. DATOS DEL PROVEEDOR
+    # 4. DATOS DEL PROVEEDOR Y ACUERDO DE PAGO PACTADO
     prov_nombre = proposal.get("supplier_nombre") or "PROVEEDOR GENERAL"
     prov_ruc = proposal.get("supplier_ruc") or "—"
     observaciones = proposal.get("observaciones") or "Preparación y verificación previa para emisión de orden de pago."
+
+    # Resolver Acuerdo Comercial de Pago
+    tipo_labels = {
+        "credito_factura": "Crédito contra Factura",
+        "credito_cheque": "Crédito contra Cheque Diferido",
+        "mixto": "Mixto (Factura + Cheque)",
+        "contado": "Contado / Inmediato",
+        "anticipado": "Anticipado",
+    }
+    tipo_raw = str(proposal.get("acuerdo_pago_tipo") or "").strip()
+    tipo_desc = tipo_labels.get(tipo_raw, tipo_raw.capitalize() if tipo_raw else "No definido")
+
+    plazos = []
+    p_fac = proposal.get("plazo_credito_factura_dias")
+    if p_fac is not None and int(p_fac) > 0:
+        plazos.append(f"{p_fac} d. Factura")
+    p_chq = proposal.get("plazo_credito_cheque_dias")
+    if p_chq is not None and int(p_chq) > 0:
+        plazos.append(f"{p_chq} d. Cheque")
+    plazos_str = " · ".join(plazos) if plazos else ("Contado" if tipo_raw == "contado" else "Sin plazo pactado")
+
+    formas_raw = proposal.get("formas_pago_acordadas") or []
+    forma_labels = {
+        "cheque_diferido": "Cheque Diferido",
+        "cheque_al_dia": "Cheque al Día",
+        "transferencia_sipap": "Transferencia SIPAP",
+        "efectivo": "Efectivo",
+        "fondo_fijo": "Fondo Fijo",
+    }
+    formas_str = ", ".join(forma_labels.get(f, f) for f in formas_raw) if formas_raw else "—"
+    notas_acuerdo = (proposal.get("acuerdo_pago_notas") or "").strip()
+
+    acuerdo_p_html = f"<b>ACUERDO DE PAGO PACTADO:</b> {tipo_desc} &nbsp;|&nbsp; <b>Plazo:</b> {plazos_str} &nbsp;|&nbsp; <b>Medio(s):</b> {formas_str}"
+    if notas_acuerdo:
+        acuerdo_p_html += f"<br/><b>Cláusula / Nota Comercial:</b> <i>“{notas_acuerdo}”</i>"
 
     info_data = [
         [
@@ -1141,12 +1176,18 @@ def generate_payment_proposal_pdf(
             Paragraph(f"<b>RUC / DOCUMENTO:</b><br/>{prov_ruc}", styles["CellTProp"]),
             Paragraph("<b>MONEDA:</b><br/>PYG (Guaraníes)", styles["CellTProp"]),
             Paragraph("<b>DESTINO:</b><br/>Tesorería / Pagos", styles["CellTProp"]),
+        ],
+        [
+            Paragraph(acuerdo_p_html, styles["CellTProp"]),
+            "", "", "",
         ]
     ]
     t_info = Table(info_data, colWidths=[70 * mm, 45 * mm, 35 * mm, 30 * mm])
     t_info.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), COLOR_SLATE_50),
         ("BOX", (0, 0), (-1, -1), 0.5, COLOR_SLATE_200),
+        ("SPAN", (0, 1), (3, 1)),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, COLOR_SLATE_200),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),

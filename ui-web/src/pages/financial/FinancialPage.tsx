@@ -1726,6 +1726,11 @@ export default function FinancialPage() {
         observaciones: opObservaciones || undefined,
         invoices: facturasPayload,
         credit_notes: ncPayload,
+        acuerdo_pago_tipo: currentSelectedSupplier.acuerdo_pago_tipo,
+        acuerdo_pago_notas: currentSelectedSupplier.acuerdo_pago_notas,
+        plazo_credito_factura_dias: currentSelectedSupplier.plazo_credito_factura_dias,
+        plazo_credito_cheque_dias: currentSelectedSupplier.plazo_credito_cheque_dias,
+        formas_pago_acordadas: currentSelectedSupplier.formas_pago_acordadas,
       }, `proforma_pago_${currentSelectedSupplier.supplier_nombre.replace(/\s+/g, "_")}_${getTodayAsuncion()}.pdf`)
 
       toast.success("Proforma Descargada", "Reporte PDF oficial generado con cuadro de firmas de autorización")
