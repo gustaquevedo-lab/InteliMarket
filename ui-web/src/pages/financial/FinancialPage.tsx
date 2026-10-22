@@ -1,6 +1,6 @@
 import { Fragment, useState, useEffect, useMemo } from "react"
 import Supplier360Modal from "../purchases/Supplier360Modal"
-import { api, type SupplierInvoice, type Budget, type PaymentRun, type CashFlowProjection, type FinancialDashboard, type BankAccount } from "../../api"
+import { api, type SupplierInvoice, type Budget, type PaymentRun, type CashFlowProjection, type CashFlowDashboard, type FinancialDashboard, type BankAccount } from "../../api"
 import { formatPYG, formatDate, getTodayAsuncion } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
@@ -73,6 +73,9 @@ export default function FinancialPage() {
   const [budgets, setBudgets] = useState<Budget[]>([])
   const [paymentRuns, setPaymentRuns] = useState<PaymentRun[]>([])
   const [cashFlow, setCashFlow] = useState<CashFlowProjection[]>([])
+  const [cashFlowDashboard, setCashFlowDashboard] = useState<CashFlowDashboard | null>(null)
+  const [cashFlowHorizonte, setCashFlowHorizonte] = useState<14 | 30 | 60 | 90>(30)
+  const [cashFlowLoading, setCashFlowLoading] = useState(false)
   const [cashFlowSaldoBancario, setCashFlowSaldoBancario] = useState<number | null>(null)
   const [alertConfig, setAlertConfig] = useState<{ activo: boolean; dias_horizonte: number; telefono: string | null } | null>(null)
   const [savingAlertConfig, setSavingAlertConfig] = useState(false)
@@ -412,6 +415,7 @@ export default function FinancialPage() {
         smerRetData,
         chqsData,
         sncReqData,
+        cfDashData,
       ] = await Promise.allSettled([
         api.financial.apDashboard(),
         api.financial.invoices.list(),
@@ -432,6 +436,7 @@ export default function FinancialPage() {
         }),
         api.cheques.list({ limit: 5000 }).catch(() => []),
         api.purchases.listSupplierNcRequests().catch(() => []),
+        api.financial.cashFlow.dashboard().catch(() => null),
       ])
 
       if (dashData.status === "fulfilled") setDashboard(dashData.value)
@@ -442,6 +447,12 @@ export default function FinancialPage() {
         setPaymentRuns(sortedRuns)
       }
       if (cfData.status === "fulfilled") setCashFlow(cfData.value)
+      if (cfDashData.status === "fulfilled" && cfDashData.value) {
+        setCashFlowDashboard(cfDashData.value)
+        if (Array.isArray(cfDashData.value.proyecciones) && cfDashData.value.proyecciones.length > 0) {
+          setCashFlow(cfDashData.value.proyecciones)
+        }
+      }
       if (budData.status === "fulfilled") setBudgets(budData.value)
       if (cnData.status === "fulfilled") setCreditNotes(cnData.value)
       if (retData.status === "fulfilled") setSupplierReturns(retData.value)
@@ -458,6 +469,23 @@ export default function FinancialPage() {
     } finally {
       setLoading(false)
       setRefreshing(false)
+    }
+  }
+
+  const refreshCashFlow = async () => {
+    setCashFlowLoading(true)
+    try {
+      const [cfRes, dashRes] = await Promise.all([
+        api.financial.cashFlow.list(),
+        api.financial.cashFlow.dashboard(),
+      ])
+      if (Array.isArray(cfRes)) setCashFlow(cfRes)
+      if (dashRes) setCashFlowDashboard(dashRes)
+      toast.success("Flujo de Caja Actualizado", "Pronóstico sincronizado con ventas de salón y compromisos en vivo")
+    } catch {
+      toast.error("Error", "No se pudo actualizar el pronóstico de flujo de caja")
+    } finally {
+      setCashFlowLoading(false)
     }
   }
 
@@ -4279,42 +4307,332 @@ export default function FinancialPage() {
             </div>
           )}
 
-          {/* TAB 4: FLUJO DE CAJA (90 DÍAS) */}
+          {/* TAB 4: FLUJO DE CAJA Y CAPACIDAD DE OBLIGACIÓN (SUPERMERCADO) */}
           {tab === "cashflow" && (
             <div className="space-y-6">
+              {/* Header de Control Ejecutivo */}
+              <div className="card p-6 bg-gradient-to-br from-blue-50/70 via-slate-50 to-indigo-50/50 dark:from-slate-900 dark:via-slate-800 dark:to-indigo-950/30 border border-blue-100 dark:border-blue-900/30 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                      Pronóstico Financiero Real
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                      Retail & Supermercado
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-black text-gray-900 dark:text-white flex items-center gap-2 mt-1">
+                    <TrendingUp className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                    Pronóstico de Flujo de Fondos y Capacidad de Obligación
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 max-w-2xl">
+                    Herramienta de decisión día a día: integra disponibilidades bimonetarias reales (Bancos y Bóveda), recaudación de salón por día de semana, pasivos en mora exigibles y margen libre seguro para nuevas compras o pagos.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Selector de Horizonte */}
+                  <div className="inline-flex rounded-xl bg-white dark:bg-slate-800 p-1 border border-gray-200 dark:border-slate-700 shadow-sm">
+                    {([14, 30, 60, 90] as const).map(d => (
+                      <button
+                        key={d}
+                        onClick={() => setCashFlowHorizonte(d)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          cashFlowHorizonte === d
+                            ? "bg-blue-600 text-white shadow-sm"
+                            : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                        }`}
+                      >
+                        {d} Días
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Botón Refrescar en Vivo */}
+                  <button
+                    onClick={refreshCashFlow}
+                    disabled={cashFlowLoading}
+                    className="px-4 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700 flex items-center gap-2 shadow-sm transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-blue-600 ${cashFlowLoading ? "animate-spin" : ""}`} />
+                    {cashFlowLoading ? "Sincronizando..." : "Actualizar en Vivo"}
+                  </button>
+                </div>
+              </div>
+
+              {/* 4 KPIs de Alta Dirección */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* 1. Disponibilidad Total */}
+                <div className="card p-5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700/80 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between text-gray-500 dark:text-gray-400">
+                    <span className="text-xs font-bold uppercase tracking-wider">Disponibilidad Inmediata</span>
+                    <div className="p-2 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
+                      <Landmark className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-black text-gray-900 dark:text-white">
+                    {formatPYG(cashFlowDashboard?.disponibilidad_total ?? (cashFlow[0]?.saldo_inicial || 0))}
+                  </div>
+                  <div className="text-[11px] text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-2">
+                    <span>Bancos: <b className="text-gray-700 dark:text-gray-300">{formatPYG(cashFlowDashboard?.saldo_bancario ?? 0)}</b></span>
+                    <span>•</span>
+                    <span>Bóveda: <b className="text-gray-700 dark:text-gray-300">{formatPYG(cashFlowDashboard?.disponibilidad_boveda ?? 0)}</b></span>
+                  </div>
+                </div>
+
+                {/* 2. Compromisos en Mora */}
+                <div className="card p-5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700/80 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between text-gray-500 dark:text-gray-400">
+                    <span className="text-xs font-bold uppercase tracking-wider">Compromisos Vencidos (Mora)</span>
+                    <div className="p-2 rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400">
+                      <AlertTriangle className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-black text-amber-600 dark:text-amber-400">
+                    {formatPYG(cashFlowDashboard?.compromisos_vencidos_mora ?? 0)}
+                  </div>
+                  <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                    {(cashFlowDashboard?.compromisos_vencidos_mora ?? 0) > 0 ? (
+                      <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 inline" /> Pasivo vencido exigible acumulado hoy
+                      </span>
+                    ) : (
+                      <span className="text-emerald-600 font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 inline" /> Sin pasivos vencidos en mora
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Recaudación Diaria Retail */}
+                <div className="card p-5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700/80 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between text-gray-500 dark:text-gray-400">
+                    <span className="text-xs font-bold uppercase tracking-wider">Ventas Promedio Diario</span>
+                    <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400">
+                      <TrendingUp className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                    {formatPYG(cashFlowDashboard?.promedio_diario_ventas ?? 0)}
+                  </div>
+                  <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                    Últimos 30 días (Sábados duplican a ~72M)
+                  </div>
+                </div>
+
+                {/* 4. Capacidad de Gasto Hoy */}
+                <div className="card p-5 bg-white dark:bg-slate-800/80 border border-gray-200 dark:border-slate-700/80 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between text-gray-500 dark:text-gray-400">
+                    <span className="text-xs font-bold uppercase tracking-wider">Capacidad de Gasto Hoy</span>
+                    <div className={`p-2 rounded-xl ${
+                      (cashFlowDashboard?.capacidad_gasto_inmediato_hoy ?? 0) > 0
+                        ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400"
+                        : "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
+                    }`}>
+                      <PiggyBank className="w-4 h-4" />
+                    </div>
+                  </div>
+                  <div className={`text-2xl font-black ${
+                    (cashFlowDashboard?.capacidad_gasto_inmediato_hoy ?? 0) > 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400"
+                  }`}>
+                    {formatPYG(cashFlowDashboard?.capacidad_gasto_inmediato_hoy ?? 0)}
+                  </div>
+                  <div className="text-[11px]">
+                    {(cashFlowDashboard?.capacidad_gasto_inmediato_hoy ?? 0) > 0 ? (
+                      <span className="text-emerald-600 font-bold">
+                        Margen seguro para compras contado hoy
+                      </span>
+                    ) : (
+                      <span className="text-rose-600 font-bold">
+                        Restringido: amortizar pasivos vencidos
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Gráfico de Proyección de Saldo */}
               <div className="card p-6 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="font-bold text-base text-gray-900 dark:text-white flex items-center gap-2">
-                      <TrendingUp className="w-5 h-5 text-primary" />
-                      Proyección de Flujo de Caja (Próximos 90 Días)
-                    </h3>
+                    <h4 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-blue-600" />
+                      Curva de Saldo y Umbral de Seguridad de Caja (Próximos {cashFlowHorizonte} Días)
+                    </h4>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Estimación diaria de ingresos por ventas y egresos por pagos a proveedores y costos operativos
+                      Evolución diaria neta considerando la recaudación estacional de fin de semana y el flujo de pagos
                     </p>
                   </div>
                 </div>
 
-                <div className="h-80">
+                <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={cashFlow.map((cf: any) => ({
+                    <AreaChart data={cashFlow.slice(0, cashFlowHorizonte).map((cf: any) => ({
                       ...cf,
                       saldo_proyectado: Number(cf.saldo_final_proyectado ?? cf.saldo_proyectado ?? 0),
                     }))}>
                       <defs>
                         <linearGradient id="colorSaldo" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.02} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.12} />
                       <XAxis dataKey="fecha" fontSize={10} tickFormatter={f => f?.slice ? f.slice(5) : f} />
                       <YAxis tickFormatter={v => `${(v / 1_000_000).toFixed(0)}M`} fontSize={10} />
                       <Tooltip formatter={(v: any) => [formatPYG(Number(v)), "Saldo Proyectado"]} />
-                      <ReferenceLine y={50_000_000} stroke="#ef4444" strokeDasharray="3 3" label="Umbral de Seguridad (50M)" />
-                      <Area type="monotone" dataKey="saldo_proyectado" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorSaldo)" />
+                      <ReferenceLine y={30_000_000} stroke="#ef4444" strokeDasharray="3 3" label="Colchón Mínimo (30M)" />
+                      <Area type="monotone" dataKey="saldo_proyectado" stroke="#2563eb" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSaldo)" />
                     </AreaChart>
                   </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* TABLA DETALLADA DÍA A DÍA: HERRAMIENTA DE DECISIÓN OPERATIVA */}
+              <div className="card overflow-hidden border border-gray-200 dark:border-slate-700 shadow-sm">
+                <div className="p-4 bg-gray-50/80 dark:bg-slate-800/80 border-b border-gray-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-blue-600" />
+                      Planilla Diaria de Pronóstico y Capacidad de Obligación
+                    </h4>
+                    <p className="text-xs text-gray-500">
+                      Evaluación día por día: Disponibilidad inicial, ingresos previstos, compromisos a pagar y cuánto margen queda disponible para obligarse.
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold text-gray-500 dark:text-gray-400">
+                    Mostrando {Math.min(cashFlowHorizonte, cashFlow.length)} de {cashFlow.length} días proyectados
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-300 font-bold uppercase tracking-wider sticky top-0 z-10 border-b border-gray-200 dark:border-slate-700">
+                      <tr>
+                        <th className="px-4 py-3">Fecha / Día</th>
+                        <th className="px-4 py-3 text-right">Disponibilidad Inicio</th>
+                        <th className="px-4 py-3 text-right">(+) Ingresos Est.</th>
+                        <th className="px-4 py-3 text-right">(-) Compromisos</th>
+                        <th className="px-4 py-3 text-right">(=) Saldo al Cierre</th>
+                        <th className="px-4 py-3 text-center">Capacidad de Obligación / Gasto</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-slate-800">
+                      {cashFlow.slice(0, cashFlowHorizonte).map((cf: any, idx: number) => {
+                        const isToday = cf.es_hoy || idx === 0
+                        const isWeekend = cf.dia_semana === "Sábado" || cf.dia_semana === "Domingo"
+                        const capacidad = Number(cf.capacidad_obligarse ?? 0)
+                        const saldoFinal = Number(cf.saldo_final_proyectado ?? 0)
+                        const ingresos = Number(cf.ingresos_estimados ?? 0)
+                        const egresos = Number(cf.egresos_estimados ?? 0)
+                        const moraTotal = Number(cf.compromiso_facturas_mora ?? 0) + Number(cf.compromiso_cheques_mora ?? 0)
+
+                        return (
+                          <tr
+                            key={cf.fecha || idx}
+                            className={`transition-colors ${
+                              isToday
+                                ? "bg-blue-50/60 dark:bg-blue-950/30 font-semibold"
+                                : idx % 2 === 0
+                                ? "bg-white dark:bg-slate-900/40"
+                                : "bg-gray-50/40 dark:bg-slate-900/80"
+                            } hover:bg-blue-50/40 dark:hover:bg-slate-800/60`}
+                          >
+                            {/* Fecha y Día */}
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-gray-900 dark:text-white">
+                                  {cf.dia_nombre || cf.fecha}
+                                </span>
+                                {isToday && (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-black bg-blue-600 text-white uppercase tracking-wider">
+                                    Hoy
+                                  </span>
+                                )}
+                                {isWeekend && !isToday && (
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300">
+                                    Fin de Semana
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Disponibilidad Inicio */}
+                            <td className="px-4 py-3 text-right font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                              {formatPYG(Number(cf.saldo_inicial ?? 0))}
+                            </td>
+
+                            {/* (+) Ingresos Proyectados */}
+                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                              <div className="text-emerald-600 dark:text-emerald-400 font-bold">
+                                + {formatPYG(ingresos)}
+                              </div>
+                              <div className="text-[10px] text-gray-400">
+                                Vta: {formatPYG(Number(cf.ingreso_ventas_retail ?? ingresos))}
+                                {Number(cf.ingreso_cobranzas_ar ?? 0) > 0 && ` | Cob: ${formatPYG(Number(cf.ingreso_cobranzas_ar))}`}
+                              </div>
+                            </td>
+
+                            {/* (-) Compromisos */}
+                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                              <div className="text-rose-600 dark:text-rose-400 font-bold">
+                                - {formatPYG(egresos)}
+                              </div>
+                              <div className="text-[10px] text-gray-400">
+                                Fac: {formatPYG(Number(cf.compromiso_facturas_dia ?? egresos))}
+                                {Number(cf.compromiso_cheques_dia ?? 0) > 0 && ` | Chq: ${formatPYG(Number(cf.compromiso_cheques_dia))}`}
+                              </div>
+                              {moraTotal > 0 && (
+                                <div className="text-[10px] text-amber-600 font-bold">
+                                  Incluye Mora: {formatPYG(moraTotal)}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* (=) Saldo al Cierre */}
+                            <td className="px-4 py-3 text-right whitespace-nowrap">
+                              <span className={`font-black text-sm ${
+                                saldoFinal >= 30_000_000
+                                  ? "text-gray-900 dark:text-white"
+                                  : saldoFinal > 0
+                                  ? "text-amber-600 dark:text-amber-400"
+                                  : "text-rose-600 dark:text-rose-400"
+                              }`}>
+                                {formatPYG(saldoFinal)}
+                              </span>
+                            </td>
+
+                            {/* Capacidad de Obligación / Gasto */}
+                            <td className="px-4 py-3 text-center whitespace-nowrap">
+                              {capacidad >= 0 ? (
+                                <div className="inline-flex flex-col items-center">
+                                  <span className="px-3 py-1 rounded-full text-xs font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 flex items-center gap-1.5 shadow-sm">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    + {formatPYG(capacidad)}
+                                  </span>
+                                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
+                                    Margen libre para asumir compras o pagos
+                                  </span>
+                                </div>
+                              ) : (
+                                <div className="inline-flex flex-col items-center">
+                                  <span className="px-3 py-1 rounded-full text-xs font-black bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 flex items-center gap-1.5 shadow-sm">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                                    Déficit: {formatPYG(capacidad)}
+                                  </span>
+                                  <span className="text-[10px] text-rose-600 dark:text-rose-400 font-medium mt-0.5">
+                                    No asumir nuevos compromisos para esta fecha
+                                  </span>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               </div>
             </div>

@@ -1673,7 +1673,32 @@ export interface SupplierInvoicePayment { id: string; invoice_id?: string; payme
 export interface BankAccount { id: string; company_id?: string; alias?: string | null; banco?: string; tipo?: string; numero_cuenta?: string; moneda?: string; saldo_inicial?: number; saldo_actual?: number; titular?: string; activo?: boolean; saldo_minimo_alerta?: number | null; saldo_verificado_manualmente?: boolean; saldo_verificado_at?: string | null; saldo_verificado_por?: string | null; created_at?: string }
 export interface BankBalanceCorrection { id: string; company_id?: string; bank_account_id: string; origen: string; saldo_actual: number; saldo_propuesto: number; motivo?: string; estado: string; solicitado_por?: string | null; aprobado_supervisor_id?: string | null; aprobado_supervisor_at?: string | null; aprobado_gerente_id?: string | null; aprobado_gerente_at?: string | null; rechazado_por?: string | null; rechazado_motivo?: string | null; created_at?: string }
 export interface BankTransaction { id: string; company_id?: string; bank_account_id?: string; fecha?: string; tipo?: string; monto?: number; moneda?: string; descripcion?: string; referencia?: string; contraparte?: string; conciliado?: boolean; categoria?: string; invoice_id?: string; created_at?: string }
-export interface CashFlowProjection { id: string; company_id?: string; fecha?: string; saldo_inicial?: number; ingresos_estimados?: number; egresos_estimados?: number; saldo_final_proyectado?: number; ingresos_reales?: number; egresos_reales?: number; saldo_final_real?: number; created_at?: string }
+export interface CashFlowProjection {
+  id?: string;
+  company_id?: string;
+  fecha: string;
+  dia_nombre?: string;
+  dia_semana?: string;
+  es_hoy?: boolean;
+  saldo_inicial: number;
+  ingreso_ventas_retail?: number;
+  ingreso_cobranzas_ar?: number;
+  ingresos_estimados: number;
+  compromiso_facturas_mora?: number;
+  compromiso_cheques_mora?: number;
+  compromiso_facturas_dia?: number;
+  compromiso_cheques_dia?: number;
+  egresos_estimados: number;
+  saldo_final_proyectado: number;
+  capacidad_obligarse?: number;
+  estado_dia?: "superavit" | "ajustado" | "deficit";
+  ingresos_reales?: number;
+  egresos_reales?: number;
+  saldo_final_real?: number;
+  fuente?: string;
+  notas?: string;
+  created_at?: string;
+}
 export interface LaborSettlement {
   id: string
   company_id?: string
@@ -1716,7 +1741,21 @@ export interface Budget { id: string; company_id?: string; nombre?: string; peri
 export interface PaymentRun { id: string; company_id?: string; nombre?: string; fecha_programada?: string; total_monto?: number; estado?: string; metodo_pago?: string; bank_account_id?: string; created_by?: string; approved_by?: string; items?: PaymentRunItem[]; created_at?: string }
 export interface PaymentRunItem { id: string; payment_run_id?: string; invoice_id?: string; supplier_id?: string; monto_programado?: number; monto_pagado?: number; estado?: string; created_at?: string }
 export interface APDashboard { total_pendiente: number; total_vencido: number; total_por_vencer: number; facturas_pendientes: number; facturas_vencidas: number; proveedores_con_deuda: number; aging_30: number; aging_60: number; aging_90: number; aging_90_plus: number }
-export interface CashFlowDashboard { saldo_bancario: number; ingresos_hoy: number; egresos_hoy: number; saldo_proyectado_7d: number; saldo_proyectado_30d: number; proyecciones: any[] }
+export interface CashFlowDashboard {
+  saldo_bancario: number;
+  disponibilidad_boveda?: number;
+  disponibilidad_total?: number;
+  compromisos_vencidos_mora?: number;
+  promedio_diario_ventas?: number;
+  capacidad_gasto_inmediato_hoy?: number;
+  ingresos_hoy: number;
+  egresos_hoy: number;
+  saldo_proyectado_7d: number;
+  saldo_proyectado_30d: number;
+  dias_deficit_30d?: number;
+  primer_deficit?: string | null;
+  proyecciones: CashFlowProjection[];
+}
 export interface FinancialDashboard { ap_dashboard?: APDashboard; ar_summary?: any; cash_flow?: CashFlowDashboard; budget_summary?: any[]; liquidity_ratio?: number; rotacion_cartera_dias?: number; rotacion_proveedores_dias?: number }
 export interface FinancialRatios { liquidity_ratio?: number; quick_ratio?: number; rotacion_cartera_dias?: number; rotacion_proveedores_dias?: number; ciclo_efectivo_dias?: number }
 export interface IntelliZappCampaign { id: string; name: string; description?: string; tipo: string; segment_filters?: any; template_id?: string; message_template?: string; scheduled_at?: string; sent_at?: string; completed_at?: string; status: string; total_recipients: number; sent_count: number; delivered_count: number; read_count: number; replied_count: number; created_at: string; updated_at: string }
