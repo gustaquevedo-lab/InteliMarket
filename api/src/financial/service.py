@@ -2950,28 +2950,79 @@ async def reject_balance_correction(db: AsyncSession, request_id: str, user_id: 
 
 # ── Cash Flow ──────────────────────────────────────────────────────────────────
 
-async def _compute_daily_cash_flow(db: AsyncSession, company_id: str, dias: int) -> list[dict]:
-    """Calculo puro dia a dia (sin persistir nada) -- saldo bancario actual
-    + cobros reales de AR menos pagos reales de AP por fecha de vencimiento.
-    Reutilizado tanto por generate_projection (que sí persiste en
-    CashFlowProjection) como por el dashboard (que solo necesita el numero
-    del dia 7 y el dia 30, en vivo, sin depender de que alguien haya
-    apretado 'Generar proyección' antes)."""
+async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias: int) -> tuple[list[dict], dict]:
+    """Cálculo real de pronóstico financiero para Extra Supermercado:
+    1. Disponibilidad real total: Bancos en PYG + Bóveda física central (PYG + BRL/USD convertidos).
+    2. Compromisos exigibles: Facturas y cheques en mora (vencidos antes de hoy) acumulados en Día 0,
+       más vencimientos diarios proyectados de AP y cheques diferidos.
+    3. Ingresos proyectados de supermercado: Ritmo de ventas de salón (últimos 30 días con estacionalidad
+       por día de la semana, capturando el pico de viernes y sábados) + cobranzas de créditos clientes (AR).
+    4. Capacidad de Gasto y de Obligarse: Margen neto libre para asumir compras o pagos en cada fecha sin entrar en descubierto.
+    """
+    from api.src.cheques.models import Cheque
+    from api.src.caja.models import VaultEntry
+    from api.src.currency import service as currency_service
+
     cid = uuid.UUID(company_id)
     today = _today()
 
+    # 1. Disponibilidad Bancos en PYG
     accounts_result = await db.execute(
         select(func.coalesce(func.sum(BankAccount.saldo_actual), 0)).where(
             BankAccount.company_id == cid, BankAccount.activo == True, BankAccount.moneda == "PYG",
         )
     )
-    # Solo cuentas en PYG -- sumar junto con la cuenta en BRL daria un
-    # numero sin sentido (mezcla de unidades). Ver get_cash_position para
-    # el equivalente con conversion real cuando hace falta el detalle.
-    saldo_bancario = Decimal(str(accounts_result.scalar() or "0"))
+    saldo_bancos = Decimal(str(accounts_result.scalar() or "0"))
 
-    # SupplierInvoice.estado real: solo 'pendiente'/'cancelada'/'pagada'
-    # existen ('aprobada'/'parcial' nunca fueron valores reales).
+    # 2. Disponibilidad Bóveda / Caja Física
+    rate_brl = await currency_service.get_exchange_rate(db, company_id, "BRL")
+    tasa_brl = Decimal(str(rate_brl.tasa_compra)) if rate_brl and rate_brl.tasa_compra else Decimal("1130")
+    rate_usd = await currency_service.get_exchange_rate(db, company_id, "USD")
+    tasa_usd = Decimal(str(rate_usd.tasa_compra)) if rate_usd and rate_usd.tasa_compra else Decimal("5840")
+
+    vault_res = await db.execute(
+        select(
+            func.coalesce(func.sum(VaultEntry.monto_pyg), 0),
+            func.coalesce(func.sum(VaultEntry.monto_brl), 0),
+            func.coalesce(func.sum(VaultEntry.monto_usd), 0),
+        ).where(
+            VaultEntry.company_id == cid,
+            VaultEntry.estado.in_(["en_boveda", "disponible", "custodia_supervisor"]),
+        )
+    )
+    v_pyg, v_brl, v_usd = vault_res.first()
+    saldo_boveda = Decimal(str(v_pyg or 0)) + (Decimal(str(v_brl or 0)) * tasa_brl) + (Decimal(str(v_usd or 0)) * tasa_usd)
+    disponibilidad_total = saldo_bancos + saldo_boveda
+
+    # 3. Ventas de Supermercado: promedio histórico de los últimos 30 días por día de la semana
+    sales_dow_res = await db.execute(
+        text("""
+            SELECT 
+                EXTRACT(ISODOW FROM fecha) as dow,
+                SUM(total) / GREATEST(COUNT(DISTINCT DATE(fecha)), 1) as promedio_dia
+            FROM sales
+            WHERE company_id = :cid
+              AND estado NOT IN ('anulada', 'cancelada')
+              AND fecha >= NOW() - INTERVAL '30 days'
+            GROUP BY EXTRACT(ISODOW FROM fecha)
+        """),
+        {"cid": cid},
+    )
+    dow_avg = {int(r.dow): Decimal(str(round(r.promedio_dia, 0))) for r in sales_dow_res.fetchall()}
+
+    sales_tot_res = await db.execute(
+        text("""
+            SELECT SUM(total) / GREATEST(COUNT(DISTINCT DATE(fecha)), 1) as promedio_global
+            FROM sales
+            WHERE company_id = :cid
+              AND estado NOT IN ('anulada', 'cancelada')
+              AND fecha >= NOW() - INTERVAL '30 days'
+        """),
+        {"cid": cid},
+    )
+    promedio_global = Decimal(str(round(sales_tot_res.scalar() or 0, 0)))
+
+    # 4. Proveedores (AP): separar facturas vencidas (mora) de vencimientos del horizonte
     ap_result = await db.execute(
         select(SupplierInvoice).where(
             SupplierInvoice.company_id == cid,
@@ -2979,22 +3030,37 @@ async def _compute_daily_cash_flow(db: AsyncSession, company_id: str, dias: int)
         )
     )
     ap_invoices = list(ap_result.scalars().all())
+    facturas_mora_vencidas = Decimal("0")
     ap_due = {}
     for inv in ap_invoices:
-        fv = inv.fecha_vencimiento
-        if fv not in ap_due:
-            ap_due[fv] = Decimal("0")
-        ap_due[fv] += inv.saldo_pendiente or Decimal("0")
+        saldo = inv.saldo_pendiente or Decimal("0")
+        if not inv.fecha_vencimiento or inv.fecha_vencimiento < today:
+            facturas_mora_vencidas += saldo
+        else:
+            fv = inv.fecha_vencimiento
+            ap_due[fv] = ap_due.get(fv, Decimal("0")) + saldo
 
-    # Ingresos: antes esta funcion consultaba SupplierInvoice (lo que
-    # debemos) para proyectar ingresos (lo que nos deben) -- copiado y
-    # pegado del bloque de arriba -- y el resultado ni siquiera se usaba,
-    # asi que ingresos quedaba fijo en 0 y la proyeccion mostraba el saldo
-    # bancario vaciandose sin ningun cobro entrando, siempre. El modelo ORM
-    # de accounts_receivable (clase Account) esta desalineado con la tabla
-    # real (le faltan fecha_vencimiento/saldo_pendiente/estado reales), asi
-    # que se consulta la tabla real directo por SQL, igual que ya hace
-    # integrated_finance con esta misma tabla.
+    # 5. Cheques Diferidos: separar cheques vencidos no cobrados de cheques futuros
+    chq_rows = await db.execute(
+        select(Cheque.fecha_pago, func.coalesce(func.sum(Cheque.monto), 0))
+        .where(
+            Cheque.company_id == cid,
+            Cheque.estado.in_(["pendiente", "entregado"]),
+            Cheque.fecha_pago.is_not(None),
+        )
+        .group_by(Cheque.fecha_pago)
+    )
+    cheques_mora_vencidos = Decimal("0")
+    chq_due = {}
+    for row in chq_rows.all():
+        fp = row[0]
+        monto = Decimal(str(row[1]))
+        if fp < today:
+            cheques_mora_vencidos += monto
+        else:
+            chq_due[fp] = chq_due.get(fp, Decimal("0")) + monto
+
+    # 6. Cuentas por Cobrar (AR) a vencer
     ar_rows = await db.execute(
         text("""
             SELECT fecha_vencimiento, COALESCE(SUM(saldo_pendiente), 0) as total
@@ -3006,33 +3072,90 @@ async def _compute_daily_cash_flow(db: AsyncSession, company_id: str, dias: int)
     )
     ar_due = {row.fecha_vencimiento: Decimal(str(row.total)) for row in ar_rows}
 
-    # Egresos por Cheques Diferidos girados a proveedores
-    from api.src.cheques.models import Cheque
-    chq_rows = await db.execute(
-        select(Cheque.fecha_pago, func.coalesce(func.sum(Cheque.monto), 0))
-        .where(
-            Cheque.company_id == cid,
-            Cheque.estado.in_(["pendiente", "entregado"]),
-            Cheque.fecha_pago.is_not(None),
-        )
-        .group_by(Cheque.fecha_pago)
-    )
-    chq_due = {row[0]: Decimal(str(row[1])) for row in chq_rows.all()}
+    # Umbral de Seguridad para Extra Supermercado (30M PYG de reserva operativa)
+    umbral_seguridad = Decimal("30000000")
+    dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
     dias_calc = []
-    running_balance = saldo_bancario
+    running_balance = disponibilidad_total
+
     for i in range(dias):
         day = today + timedelta(days=i)
-        ingresos = ar_due.get(day, Decimal("0"))
-        egresos = ap_due.get(day, Decimal("0")) + chq_due.get(day, Decimal("0"))
-        projected = running_balance + ingresos - egresos
+        dow = day.isoweekday()
+        dia_nombre_txt = f"{dias_nombres[dow - 1]} {day.strftime('%d/%m')}"
+
+        # Ingresos
+        v_est = dow_avg.get(dow, promedio_global)
+        ar_est = ar_due.get(day, Decimal("0"))
+        ingresos_totales = v_est + ar_est
+
+        # Egresos (en día 0 se absorbe el pasivo en mora para revelar la verdad exigible de caja)
+        fac_mora = facturas_mora_vencidas if i == 0 else Decimal("0")
+        chq_mora = cheques_mora_vencidos if i == 0 else Decimal("0")
+        fac_dia = ap_due.get(day, Decimal("0"))
+        chq_dia = chq_due.get(day, Decimal("0"))
+
+        egresos_totales = fac_dia + chq_dia + fac_mora + chq_mora
+
+        # Saldos
+        projected = running_balance + ingresos_totales - egresos_totales
+        capacidad_obligarse = projected - umbral_seguridad
+
+        if capacidad_obligarse >= Decimal("10000000"):
+            estado_dia = "superavit"
+        elif capacidad_obligarse >= Decimal("0"):
+            estado_dia = "ajustado"
+        else:
+            estado_dia = "deficit"
+
         dias_calc.append({
-            "fecha": day, "saldo_inicial": running_balance,
-            "ingresos_estimados": ingresos, "egresos_estimados": egresos,
+            "fecha": day,
+            "dia_nombre": dia_nombre_txt,
+            "dia_semana": dias_nombres[dow - 1],
+            "es_hoy": (i == 0),
+            "saldo_inicial": running_balance,
+            "ingreso_ventas_retail": v_est,
+            "ingreso_cobranzas_ar": ar_est,
+            "ingresos_estimados": ingresos_totales,
+            "compromiso_facturas_mora": fac_mora,
+            "compromiso_cheques_mora": chq_mora,
+            "compromiso_facturas_dia": fac_dia,
+            "compromiso_cheques_dia": chq_dia,
+            "egresos_estimados": egresos_totales,
             "saldo_final_proyectado": projected,
+            "capacidad_obligarse": capacidad_obligarse,
+            "estado_dia": estado_dia,
+            "fuente": "automatico",
         })
         running_balance = projected
 
+    # Métricas ejecutivas de síntesis
+    horizonte_analisis = dias_calc[:min(30, len(dias_calc))]
+    min_saldo_30d = min((d["saldo_final_proyectado"] for d in horizonte_analisis), default=disponibilidad_total)
+    capacidad_gasto_hoy = max(Decimal("0"), min_saldo_30d - umbral_seguridad)
+
+    dias_deficit_30d = sum(1 for d in horizonte_analisis if d["capacidad_obligarse"] < Decimal("0"))
+    primer_def = next((d["fecha"].isoformat() for d in horizonte_analisis if d["capacidad_obligarse"] < Decimal("0")), None)
+
+    summary_metrics = {
+        "disponibilidad_bancos": saldo_bancos,
+        "disponibilidad_boveda": saldo_boveda,
+        "disponibilidad_total": disponibilidad_total,
+        "compromisos_vencidos_mora": facturas_mora_vencidas + cheques_mora_vencidos,
+        "promedio_diario_ventas": promedio_global,
+        "capacidad_gasto_inmediato_hoy": capacidad_gasto_hoy,
+        "saldo_proyectado_7d": dias_calc[6]["saldo_final_proyectado"] if len(dias_calc) > 6 else disponibilidad_total,
+        "saldo_proyectado_30d": dias_calc[29]["saldo_final_proyectado"] if len(dias_calc) > 29 else disponibilidad_total,
+        "dias_deficit_30d": dias_deficit_30d,
+        "primer_deficit": primer_def,
+    }
+
+    return dias_calc, summary_metrics
+
+
+async def _compute_daily_cash_flow(db: AsyncSession, company_id: str, dias: int) -> list[dict]:
+    """Adaptador de compatibilidad para llamadas existentes que esperan list[dict]."""
+    dias_calc, _ = await _compute_daily_cash_flow_full(db, company_id, dias)
     return dias_calc
 
 
@@ -3135,7 +3258,7 @@ async def check_negative_cash_flow_alert(db: AsyncSession, company_id: str) -> d
 
 async def generate_projection(db: AsyncSession, company_id: str, dias: int = 90) -> list[CashFlowProjection]:
     cid = uuid.UUID(company_id)
-    dias_calc = await _compute_daily_cash_flow(db, company_id, dias)
+    dias_calc, _ = await _compute_daily_cash_flow_full(db, company_id, dias)
 
     projections = []
     for d in dias_calc:
@@ -3174,15 +3297,20 @@ async def generate_projection(db: AsyncSession, company_id: str, dias: int = 90)
     return projections
 
 
-async def get_projections(db: AsyncSession, company_id: str, desde: date | None = None, hasta: date | None = None) -> list[CashFlowProjection]:
-    query = select(CashFlowProjection).where(CashFlowProjection.company_id == uuid.UUID(company_id))
+async def get_projections(db: AsyncSession, company_id: str, desde: date | None = None, hasta: date | None = None) -> list[dict]:
+    """Retorna las proyecciones en vivo calculadas con la realidad de Extra Supermercado.
+    Si se especifican filtros específicos de fecha, se acota la ventana."""
+    today = _today()
+    target_dias = 90
+    if hasta and hasta > today:
+        target_dias = max(1, min(365, (hasta - today).days + 1))
+
+    dias_calc, _ = await _compute_daily_cash_flow_full(db, company_id, target_dias)
     if desde:
-        query = query.where(CashFlowProjection.fecha >= desde)
+        dias_calc = [d for d in dias_calc if d["fecha"] >= desde]
     if hasta:
-        query = query.where(CashFlowProjection.fecha <= hasta)
-    query = query.order_by(CashFlowProjection.fecha.asc())
-    result = await db.execute(query)
-    return list(result.scalars().all())
+        dias_calc = [d for d in dias_calc if d["fecha"] <= hasta]
+    return dias_calc
 
 
 async def update_projection(db: AsyncSession, projection_id: str, data: CashFlowProjectionUpdate) -> CashFlowProjection | None:
@@ -3200,60 +3328,26 @@ async def update_projection(db: AsyncSession, projection_id: str, data: CashFlow
 
 
 async def get_cash_flow_dashboard(db: AsyncSession, company_id: str) -> dict:
-    cid = uuid.UUID(company_id)
-    today = _today()
+    dias_calc, metrics = await _compute_daily_cash_flow_full(db, company_id, 30)
 
-    accounts_result = await db.execute(
-        select(func.coalesce(func.sum(BankAccount.saldo_actual), 0)).where(
-            BankAccount.company_id == cid, BankAccount.activo == True, BankAccount.moneda == "PYG",
-        )
-    )
-    # Solo cuentas en PYG -- sumar junto con la cuenta en BRL daria un
-    # numero sin sentido (mezcla de unidades). Ver get_cash_position para
-    # el equivalente con conversion real cuando hace falta el detalle.
-    saldo_bancario = Decimal(str(accounts_result.scalar() or "0"))
-
-    proj_result = await db.execute(
-        select(CashFlowProjection).where(
-            CashFlowProjection.company_id == cid,
-            CashFlowProjection.fecha >= today,
-        ).order_by(CashFlowProjection.fecha.asc()).limit(30)
-    )
-    projections = list(proj_result.scalars().all())
-
-    hoy = next((p for p in projections if p.fecha == today), None)
-    ingresos_hoy = hoy.ingresos_estimados if hoy else Decimal("0")
-    egresos_hoy = hoy.egresos_estimados if hoy else Decimal("0")
-
-    proyecciones_list = []
-    for p in projections:
-        proyecciones_list.append({
-            "fecha": str(p.fecha),
-            "saldo_inicial": p.saldo_inicial,
-            "ingresos_estimados": p.ingresos_estimados,
-            "egresos_estimados": p.egresos_estimados,
-            "saldo_final_proyectado": p.saldo_final_proyectado,
-            "fuente": p.fuente,
-        })
-
-    if len(projections) > 6:
-        saldo_7d = projections[6].saldo_final_proyectado
-        saldo_30d = projections[-1].saldo_final_proyectado if projections else saldo_bancario
-    else:
-        # Nadie generó una proyección persistida todavía (tabla vacía) --
-        # en vez de repetir el saldo de hoy con la etiqueta de "proyección",
-        # se calcula en vivo con cobros/pagos reales de AR/AP por vencer.
-        dias_calc = await _compute_daily_cash_flow(db, company_id, 30)
-        saldo_7d = dias_calc[6]["saldo_final_proyectado"] if len(dias_calc) > 6 else saldo_bancario
-        saldo_30d = dias_calc[-1]["saldo_final_proyectado"] if dias_calc else saldo_bancario
+    hoy = dias_calc[0] if dias_calc else None
+    ingresos_hoy = hoy["ingresos_estimados"] if hoy else Decimal("0")
+    egresos_hoy = hoy["egresos_estimados"] if hoy else Decimal("0")
 
     return {
-        "saldo_bancario": saldo_bancario,
+        "saldo_bancario": metrics["disponibilidad_bancos"],
+        "disponibilidad_boveda": metrics["disponibilidad_boveda"],
+        "disponibilidad_total": metrics["disponibilidad_total"],
+        "compromisos_vencidos_mora": metrics["compromisos_vencidos_mora"],
+        "promedio_diario_ventas": metrics["promedio_diario_ventas"],
+        "capacidad_gasto_inmediato_hoy": metrics["capacidad_gasto_inmediato_hoy"],
         "ingresos_hoy": ingresos_hoy,
         "egresos_hoy": egresos_hoy,
-        "saldo_proyectado_7d": saldo_7d,
-        "saldo_proyectado_30d": saldo_30d,
-        "proyecciones": proyecciones_list,
+        "saldo_proyectado_7d": metrics["saldo_proyectado_7d"],
+        "saldo_proyectado_30d": metrics["saldo_proyectado_30d"],
+        "dias_deficit_30d": metrics["dias_deficit_30d"],
+        "primer_deficit": metrics["primer_deficit"],
+        "proyecciones": dias_calc,
     }
 
 
