@@ -55,9 +55,43 @@ router = APIRouter(prefix="/api/v1/financial", tags=["financial"], dependencies=
 
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
-    r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
+    r = await db.execute(
+        text("SELECT razon_social, nombre_fantasia, ruc, direccion, ciudad, departamento, telefono, timbrado_numero, logo_url FROM companies WHERE id = :cid"),
+        {"cid": company_id}
+    )
     row = r.first()
-    return {"razon_social": row.razon_social, "ruc": row.ruc, "logo_url": row.logo_url} if row else {"razon_social": "Empresa", "ruc": "N/A"}
+    if row:
+        dir_base = (row.direccion or "Alejo García esq. Carlos Antonio López").strip()
+        loc_parts = []
+        if row.ciudad and row.ciudad.lower() not in dir_base.lower():
+            loc_parts.append(row.ciudad)
+        if row.departamento and row.departamento.lower() not in dir_base.lower():
+            loc_parts.append(row.departamento)
+        if "paraguay" not in dir_base.lower():
+            loc_parts.append("Paraguay")
+        full_dir = f"{dir_base}, {' - '.join(loc_parts)}" if loc_parts else dir_base
+
+        return {
+            "razon_social": row.razon_social or "GRUPO SANTA TERESA E.A.S.",
+            "nombre_fantasia": row.nombre_fantasia or "Extra Supermercado Mayorista",
+            "ruc": row.ruc or "80150377-9",
+            "timbrado": row.timbrado_numero or "18545636",
+            "direccion": full_dir,
+            "ciudad": row.ciudad or "Pedro Juan Caballero",
+            "departamento": row.departamento or "Amambay",
+            "telefono": row.telefono or "+595 992 052200",
+            "logo_url": row.logo_url,
+        }
+    return {
+        "razon_social": "GRUPO SANTA TERESA E.A.S.",
+        "nombre_fantasia": "Extra Supermercado Mayorista",
+        "ruc": "80150377-9",
+        "timbrado": "18545636",
+        "direccion": "Alejo García esq. Carlos Antonio López, Pedro Juan Caballero - Paraguay",
+        "ciudad": "Pedro Juan Caballero",
+        "departamento": "Amambay",
+        "telefono": "+595 992 052200",
+    }
 
 
 # ── AP: Supplier Invoices ──────────────────────────────────────────────────────
@@ -1046,6 +1080,29 @@ async def get_payment_proposal_proforma_pdf(
 ):
     company = await _get_company_info(db, company_id)
     proposal_dict = body.model_dump()
+
+    # Si no vinieron los datos del acuerdo de pago pactado, enriquecer directamente desde el Supplier
+    if body.supplier_id:
+        from api.src.purchases.models import Supplier
+        import uuid
+        try:
+            sup_uuid = uuid.UUID(str(body.supplier_id))
+            res_sup = await db.execute(select(Supplier).where(Supplier.id == sup_uuid))
+            sup = res_sup.scalar_one_or_none()
+            if sup:
+                if not proposal_dict.get("acuerdo_pago_tipo"):
+                    proposal_dict["acuerdo_pago_tipo"] = sup.acuerdo_pago_tipo
+                if not proposal_dict.get("acuerdo_pago_notas"):
+                    proposal_dict["acuerdo_pago_notas"] = sup.acuerdo_pago_notas
+                if proposal_dict.get("plazo_credito_factura_dias") is None:
+                    proposal_dict["plazo_credito_factura_dias"] = sup.plazo_credito_factura_dias
+                if proposal_dict.get("plazo_credito_cheque_dias") is None:
+                    proposal_dict["plazo_credito_cheque_dias"] = sup.plazo_credito_cheque_dias
+                if not proposal_dict.get("formas_pago_acordadas"):
+                    proposal_dict["formas_pago_acordadas"] = sup.formas_pago_acordadas or []
+        except Exception as e:
+            logger.warning(f"Error cargando acuerdo de pago de proveedor para proforma: {e}")
+
     pdf_bytes = payment_order_pdf.generate_payment_proposal_pdf(
         company=company,
         proposal=proposal_dict,

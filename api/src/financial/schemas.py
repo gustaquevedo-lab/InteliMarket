@@ -727,6 +727,11 @@ class PaymentProposalPdfRequest(BaseModel):
     observaciones: Optional[str] = None
     invoices: list[PaymentProposalItem]
     credit_notes: Optional[list[PaymentProposalCreditNote]] = None
+    acuerdo_pago_tipo: Optional[str] = None
+    acuerdo_pago_notas: Optional[str] = None
+    plazo_credito_factura_dias: Optional[int] = None
+    plazo_credito_cheque_dias: Optional[int] = None
+    formas_pago_acordadas: Optional[list[str]] = None
 
 
 class SupplierPaymentOrderDisburse(BaseModel):
