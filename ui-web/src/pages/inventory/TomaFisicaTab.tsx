@@ -167,6 +167,16 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       setLoadingActiveSession(false)
     }
   }
+  // Impresión directa de sesión desde la tabla principal
+  const directPrintSession = async (session: PhysicalSession) => {
+    try {
+      const full = await api.inventory.physicalSessions.get(session.id)
+      setActiveSession(full)
+      setShowPrintModal(true)
+    } catch (err: any) {
+      toast.error("Error al cargar planilla para impresión", err.message)
+    }
+  }
 
   // Refrescar la sesión activa
   const refreshActiveSession = async () => {
@@ -546,11 +556,11 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
             <button
               onClick={() => setShowPrintModal(true)}
-              className="px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/60 shadow-xs flex items-center gap-1.5 transition"
-              title="Generar o imprimir planilla de conteo físico"
+              className="px-3.5 py-2 text-xs font-black uppercase rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition cursor-pointer"
+              title="Generar o imprimir planilla de conteo físico ciego en A4"
             >
-              <Printer className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Imprimir Planilla</span>
+              <Printer className="w-4 h-4 text-white" />
+              <span>Imprimir Planilla Ciega</span>
             </button>
 
             <button
@@ -1631,6 +1641,21 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
             <RefreshCw className={`w-4 h-4 ${loadingSessions ? "animate-spin" : ""}`} />
           </button>
 
+          {sessions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                const target = sessions[0]
+                if (target) directPrintSession(target)
+              }}
+              className="px-3 py-2.5 text-xs font-bold rounded-xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
+              title={`Imprimir Planilla Ciega de la toma física #${sessions[0]?.codigo}`}
+            >
+              <Printer className="w-4 h-4 text-emerald-600" />
+              <span>Imprimir Planilla #{sessions[0]?.codigo}</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowNewSessionModal(true)}
             className="btn-primary flex items-center gap-2 text-xs px-4 py-2.5 rounded-xl font-extrabold uppercase shadow-sm"
@@ -1797,15 +1822,25 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                         </span>
                       </td>
 
-                      {/* Acción Abrir Planilla */}
+                      {/* Acción Abrir Planilla / Imprimir Directo */}
                       <td className="p-3.5 text-center">
-                        <button
-                          onClick={() => openSessionDetail(session)}
-                          className="btn-primary text-xs px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1.5 mx-auto"
-                        >
-                          <span>{session.estado === "cerrada" ? "Ver Planilla" : "Entrar a Conteo"}</span>
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => directPrintSession(session)}
+                            className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-xl border border-emerald-300 dark:border-emerald-800 transition shadow-2xs hover:scale-105 cursor-pointer"
+                            title="Imprimir directamente esta Planilla de Conteo Ciego (A4)"
+                          >
+                            <Printer className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => openSessionDetail(session)}
+                            className="btn-primary text-xs px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1.5"
+                          >
+                            <span>{session.estado === "cerrada" ? "Ver Planilla" : "Entrar a Conteo"}</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
