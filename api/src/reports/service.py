@@ -935,7 +935,7 @@ async def get_fiscal_rg90_ventas(
         totales["total_gravada_5"] += base_5
         totales["total_iva_5"] += iva_5
         totales["total_exenta"] += exenta
-        totales["total_general"] += total
+        totales["total_general"] += monto_total
 
     return {
         "company": {
