@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.db import get_db
@@ -206,6 +207,49 @@ async def get_product(product_id: str, db: AsyncSession = Depends(get_db)):
     return product
 
 
+async def validate_can_inactivate_product(db: AsyncSession, product_id: str, user: dict) -> None:
+    """Valida que la inactivación de un producto cumpla con las reglas estrictas de negocio:
+    1. Atribución exclusiva de Administración y Gerencia.
+    2. En ningún caso se puede inactivar un producto con stock (positivo o negativo).
+    """
+    user_rol = (user.get("rol") or "").lower()
+    is_admin_or_gerencia = bool(
+        user.get("is_superadmin") or
+        user_rol in ("admin", "administrador", "gerente", "gerencia", "administracion")
+    )
+    if not is_admin_or_gerencia:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactivar un producto es de exclusiva atribución de Administración y Gerencia."
+        )
+
+    try:
+        p_uuid = uuid.UUID(str(product_id))
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de producto inválido")
+
+    # Verificar stock en depósitos (ni positivo ni negativo)
+    stock_check = await db.execute(
+        text("""
+            SELECT COALESCE(SUM(cantidad), 0) AS total_stock,
+                   COALESCE(SUM(ABS(cantidad)), 0) AS abs_stock
+            FROM stock
+            WHERE product_id = :p_id
+        """),
+        {"p_id": p_uuid}
+    )
+    stock_row = stock_check.first()
+    total_stock = int(stock_row.total_stock) if stock_row and stock_row.total_stock is not None else 0
+    abs_stock = int(stock_row.abs_stock) if stock_row and stock_row.abs_stock is not None else 0
+
+    if abs_stock != 0 or total_stock != 0:
+        sign_str = f"+{total_stock}" if total_stock > 0 else str(total_stock)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No se puede inactivar un producto con stock pendiente ({sign_str} unidades). En ningún caso se permite inactivar productos con stock positivo o negativo; el inventario debe estar en cero."
+        )
+
+
 @router.patch("/products/{product_id}", response_model=ProductResponse)
 async def update_product(
     product_id: str,
@@ -216,10 +260,14 @@ async def update_product(
     dump = body.model_dump(exclude_unset=True)
     is_admin = bool(
         user.get("is_superadmin") or
-        (user.get("rol") or "").lower() in ("admin", "administrador", "gerente")
+        (user.get("rol") or "").lower() in ("admin", "administrador", "gerente", "gerencia", "administracion")
     )
     user_id = uuid.UUID(str(user["id"]))
     tenant_id = uuid.UUID(str(user.get("tenant_id") or "00000000-0000-0000-0000-000000000001"))
+
+    # Validación de inactivación de producto
+    if "activo" in dump and dump["activo"] is False:
+        await validate_can_inactivate_product(db, product_id, user)
 
     # Validación de permiso para modificar precios de costo
     cost_fields = {"costo_promedio", "ultimo_costo", "costo_landed"}
@@ -259,7 +307,12 @@ async def update_product(
 
 
 @router.delete("/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_product(product_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_product(
+    product_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    await validate_can_inactivate_product(db, product_id, user)
     deleted = await service.delete_product(db, product_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Producto no encontrado")

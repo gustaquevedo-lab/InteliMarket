@@ -39,11 +39,17 @@ export default function ProductsPage() {
   const confirm = useConfirm()
   const { user } = useAuth()
   const { hasPermission, isAdministrador } = usePermissions()
+  const userRol = (user?.rol || "").toLowerCase()
   const isManagerOrAdmin = Boolean(
     user?.is_superadmin ||
     user?.rol === "admin" ||
     user?.rol === "gerente" ||
     user?.rol === "supervisor"
+  )
+  const canInactivateProduct = Boolean(
+    user?.is_superadmin ||
+    isAdministrador ||
+    ["admin", "administrador", "gerente", "gerencia", "administracion"].includes(userRol)
   )
   const canEditCost = Boolean(
     isAdministrador ||
@@ -644,6 +650,20 @@ export default function ProductsPage() {
 
       let savedProduct: Product
       if (editingProduct) {
+        if (editingProduct.activo !== false && payload.activo === false) {
+          if (!canInactivateProduct) {
+            toast.error("Permiso denegado", "Inactivar un producto es de exclusiva atribución de Administración y Gerencia.")
+            return
+          }
+          const currentStock = Number(editingProduct.stock_actual ?? 0)
+          if (currentStock !== 0) {
+            toast.error(
+              "Stock pendiente",
+              `No se puede inactivar un producto con stock (${currentStock > 0 ? `+${currentStock}` : currentStock} unidades). En ningún caso se permite inactivar productos con stock positivo o negativo.`
+            )
+            return
+          }
+        }
         savedProduct = await api.products.update(editingProduct.id, payload)
         toast.success("Producto Actualizado", `${form.nombre} guardado correctamente.`)
       } else {
@@ -713,6 +733,20 @@ export default function ProductsPage() {
   // Toggle rápido Activo / Inactivo con efecto inmediato en POS y Compras
   const handleToggleActivo = async (p: Product) => {
     const nuevoEstado = !(p.activo !== false)
+    if (!nuevoEstado) {
+      if (!canInactivateProduct) {
+        toast.error("Permiso denegado", "Inactivar un producto es de exclusiva atribución de Administración y Gerencia.")
+        return
+      }
+      const st = Number(p.stock_actual ?? 0)
+      if (st !== 0) {
+        toast.error(
+          "Stock pendiente",
+          `No se puede inactivar un producto con stock (${st > 0 ? `+${st}` : st} unidades). En ningún caso se permite inactivar productos con stock positivo o negativo.`
+        )
+        return
+      }
+    }
     try {
       // Actualización optimista inmediata en UI
       setProducts((prev) => prev.map((item) => item.id === p.id ? { ...item, activo: nuevoEstado } : item))
@@ -851,6 +885,19 @@ export default function ProductsPage() {
   }
 
   const handleDeleteProduct = async (p: Product) => {
+    if (!canInactivateProduct) {
+      toast.error("Permiso denegado", "Inactivar o eliminar un producto es de exclusiva atribución de Administración y Gerencia.")
+      return
+    }
+    const st = Number(p.stock_actual ?? 0)
+    if (st !== 0) {
+      toast.error(
+        "Stock pendiente",
+        `No se puede eliminar/inactivar un producto con stock (${st > 0 ? `+${st}` : st} unidades). En ningún caso se permite inactivar productos con stock positivo o negativo.`
+      )
+      return
+    }
+
     const ok = await confirm({
       title: "Eliminar Producto",
       message: `¿Estás seguro de eliminar "${p.nombre}"? Esta acción no se puede deshacer si tiene historial.`,
@@ -1574,7 +1621,15 @@ export default function ProductsPage() {
                                   ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
                                   : "bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800/60 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200"
                               }`}
-                              title={p.activo !== false ? "Producto ACTIVO. Click para desactivar (bloquear de POS y compras)" : "Producto INACTIVO. Click para activar (habilitar en POS y compras)"}
+                              title={
+                                p.activo !== false
+                                  ? (!canInactivateProduct
+                                      ? "Inactivar es exclusiva atribución de Administración y Gerencia"
+                                      : (Number(p.stock_actual ?? 0) !== 0
+                                          ? `No se puede inactivar: stock pendiente (${Number(p.stock_actual) > 0 ? `+${p.stock_actual}` : p.stock_actual})`
+                                          : "Producto ACTIVO. Click para desactivar (bloquear de POS y compras)"))
+                                  : "Producto INACTIVO. Click para activar (habilitar en POS y compras)"
+                              }
                             >
                               {p.activo !== false ? (
                                 <>
@@ -2617,7 +2672,24 @@ export default function ProductsPage() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => setForm(prev => ({ ...prev, activo: prev.activo === false }))}
+                      onClick={() => {
+                        const targetActivo = form.activo === false
+                        if (!targetActivo) {
+                          if (!canInactivateProduct) {
+                            toast.error("Permiso denegado", "Inactivar un producto es de exclusiva atribución de Administración y Gerencia.")
+                            return
+                          }
+                          const currentStock = Number(editingProduct?.stock_actual ?? 0)
+                          if (currentStock !== 0) {
+                            toast.error(
+                              "Stock pendiente",
+                              `No se puede inactivar un producto con stock (${currentStock > 0 ? `+${currentStock}` : currentStock} unidades). En ningún caso se permite inactivar productos con stock positivo o negativo.`
+                            )
+                            return
+                          }
+                        }
+                        setForm(prev => ({ ...prev, activo: prev.activo === false }))
+                      }}
                       className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                         form.activo !== false ? "bg-emerald-600" : "bg-slate-300 dark:bg-slate-700"
                       }`}
