@@ -3823,7 +3823,7 @@ async def get_custom_cash_flow(
                 SELECT COALESCE(SUM(monto), 0)
                 FROM expenses
                 WHERE company_id = :cid
-                  AND (categoria ILIKE '%nomina%' OR categoria ILIKE '%sueldo%' OR concepto ILIKE '%nomina%')
+                  AND (descripcion ILIKE '%nomina%' OR descripcion ILIKE '%sueldo%')
                   AND fecha_gasto >= NOW() - INTERVAL '30 days'
             """),
             {"cid": cid},
@@ -3837,7 +3837,7 @@ async def get_custom_cash_flow(
             FROM expenses
             WHERE company_id = :cid
               AND (es_pago_proveedor IS FALSE OR es_pago_proveedor IS NULL)
-              AND (categoria NOT ILIKE '%nomina%' AND categoria NOT ILIKE '%sueldo%')
+              AND (descripcion NOT ILIKE '%nomina%' AND descripcion NOT ILIKE '%sueldo%')
               AND fecha_gasto >= NOW() - INTERVAL '30 days'
         """),
         {"cid": cid},
