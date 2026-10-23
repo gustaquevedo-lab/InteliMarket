@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select, and_, or_, desc, asc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.src.purchases.models import Supplier, SupplierNcRequest
+from api.src.purchases.models import Supplier, SupplierNcRequest, PurchaseOrder, PurchaseReceipt
 from api.src.supermer.models import SupplierReturn as SupermerSupplierReturn
 from api.src.financial.models import (
     SupplierInvoice, SupplierInvoicePayment,
