@@ -482,11 +482,15 @@ async def sync_accounts_payable(db: AsyncSession, company_id: str, since: date |
             # (ej. re-sync tras pérdida del mapa), verificar por numero_factura + supplier
             # para evitar duplicados cuando el mismo comprobante ya fue insertado.
             nr_documento = (r["NR_DOCUMENTO"] or "").strip() or f"CP-{r['ID_CONTA_PAGAR']}"
+            from api.src.purchases.utils import normalize_invoice_number
+            norm_doc = normalize_invoice_number(nr_documento)
+            cands = list({c for c in [norm_doc, nr_documento] if c})
             existing_by_numero = await db.execute(
                 select(SupplierInvoice).where(
                     SupplierInvoice.company_id == company_id,
                     SupplierInvoice.supplier_id == supplier_id,
-                    SupplierInvoice.numero_factura == nr_documento,
+                    SupplierInvoice.numero_factura.in_(cands),
+                    SupplierInvoice.estado.not_in(["cancelada", "cancelado", "anulada"])
                 )
             )
             existing_inv_by_numero = existing_by_numero.scalars().first()

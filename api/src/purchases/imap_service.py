@@ -337,14 +337,15 @@ async def ingest_parsed_dte(
 
     # Verificar si ya existe factura con este número para este proveedor
     if supplier and numero_factura:
-        cands = list({c for c in [numero_factura, raw_numero_factura] if c})
+        cands = list({c for c in [numero_factura, raw_numero_factura, (raw_numero_factura or '').strip()] if c})
         ex_q = select(SupplierInvoice).where(
             SupplierInvoice.company_id == company_uuid,
             SupplierInvoice.supplier_id == supplier.id,
-            SupplierInvoice.numero_factura.in_(cands)
-        )
+            SupplierInvoice.numero_factura.in_(cands),
+            SupplierInvoice.estado.not_in(["cancelada", "cancelado", "anulada"])
+        ).order_by(SupplierInvoice.created_at.asc())
         ex_res = await db.execute(ex_q)
-        ex_inv = ex_res.scalar_one_or_none()
+        ex_inv = ex_res.scalars().first()
         if ex_inv:
             # Enriquecer con los datos fiscales oficiales del DTE si no los tenía
             modificado = False

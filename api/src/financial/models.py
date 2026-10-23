@@ -1,6 +1,6 @@
 """Financial models — AP, banking, cash flow, budgets, payment runs"""
 
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, Text, Date, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, Text, Date, ForeignKey, UniqueConstraint, Index, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -9,6 +9,16 @@ from api.src.db import Base
 
 class SupplierInvoice(Base):
     __tablename__ = "supplier_invoices"
+    __table_args__ = (
+        Index(
+            "uq_supplier_invoices_company_supplier_numero",
+            "company_id",
+            "supplier_id",
+            text("trim(numero_factura)"),
+            unique=True,
+            postgresql_where=text("estado NOT IN ('cancelada', 'cancelado', 'anulada')"),
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)

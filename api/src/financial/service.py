@@ -94,10 +94,27 @@ def _doc_numbers_match(num1: str | None, num2: str | None) -> bool:
 # ── AP: Supplier Invoices ──────────────────────────────────────────────────────
 
 async def create_invoice(db: AsyncSession, data: SupplierInvoiceCreate, user_id: str | None = None) -> SupplierInvoice:
+    from api.src.purchases.utils import normalize_invoice_number
+    norm_num = normalize_invoice_number(data.numero_factura) or data.numero_factura.strip()
+    cands = list({c for c in [norm_num, data.numero_factura.strip()] if c})
+
+    ex_q = select(SupplierInvoice).where(
+        SupplierInvoice.company_id == data.company_id,
+        SupplierInvoice.supplier_id == data.supplier_id,
+        SupplierInvoice.numero_factura.in_(cands),
+        SupplierInvoice.estado.not_in(["cancelada", "cancelado", "anulada"])
+    )
+    ex_res = await db.execute(ex_q)
+    if ex_res.scalars().first():
+        raise HTTPException(
+            status_code=409,
+            detail=f"La factura {data.numero_factura} ya se encuentra registrada para este proveedor."
+        )
+
     invoice = SupplierInvoice(
         company_id=data.company_id,
         supplier_id=data.supplier_id,
-        numero_factura=data.numero_factura,
+        numero_factura=norm_num,
         timbrado=data.timbrado,
         cdc=data.cdc,
         fecha_emision=data.fecha_emision,

@@ -949,8 +949,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                     SupplierInvoice.company_id == company_id,
                     SupplierInvoice.supplier_id == supplier_id,
                     SupplierInvoice.numero_factura.in_(cands),
-                    SupplierInvoice.estado.not_in(["pagada", "pagado", "cancelada", "anulada"]),
-                    (SupplierInvoice.receipt_id == None) | (SupplierInvoice.receipt_id == receipt.id)
+                    SupplierInvoice.estado.not_in(["cancelada", "cancelado", "anulada"])
                 )
             )
             existing_inv = ex_res.scalars().first()
@@ -962,15 +961,15 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                     SupplierInvoice.company_id == company_id,
                     SupplierInvoice.supplier_id == supplier_id,
                     SupplierInvoice.purchase_order_id == data.purchase_order_id,
-                    SupplierInvoice.estado.not_in(["pagada", "pagado", "cancelada", "anulada"]),
-                    (SupplierInvoice.receipt_id == None) | (SupplierInvoice.receipt_id == receipt.id)
+                    SupplierInvoice.estado.not_in(["cancelada", "cancelado", "anulada"])
                 ).order_by(SupplierInvoice.created_at.desc())
             )
             existing_inv = ex_po_res.scalars().first()
 
         if existing_inv:
             inv = existing_inv
-            inv.receipt_id = receipt.id
+            if not inv.receipt_id:
+                inv.receipt_id = receipt.id
             if data.purchase_order_id and not inv.purchase_order_id:
                 inv.purchase_order_id = data.purchase_order_id
             if norm_ref and not inv.numero_factura:
