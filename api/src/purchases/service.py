@@ -1071,7 +1071,8 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         if inv.purchase_order_id or inv.receipt_id:
             from api.src.purchases.matching_service import perform_3way_match
             try:
-                await perform_3way_match(db, str(inv.id), str(data.user_id) if data.user_id else None)
+                async with db.begin_nested():
+                    await perform_3way_match(db, str(inv.id), str(data.user_id) if data.user_id else None)
             except Exception as e:
                 logger.warning(f"Error al ejecutar matching post-recepción factura {inv.id}: {e}")
 

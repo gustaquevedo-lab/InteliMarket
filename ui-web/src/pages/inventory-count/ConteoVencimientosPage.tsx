@@ -196,12 +196,20 @@ export default function ConteoVencimientosPage() {
   const [scannedProduct, setScannedProduct] = useState<Product | null>(null)
   const [cantidadSistema, setCantidadSistema] = useState<number>(0)
   const [cantidadContada, setCantidadContada] = useState("")
+  const [alreadyCountedQty, setAlreadyCountedQty] = useState<number | null>(null)
+  const [conteoModoAditivo, setConteoModoAditivo] = useState<boolean>(true)
   const [tieneVencimiento, setTieneVencimiento] = useState(false)
   const [lote, setLote] = useState("")
   const [fechaVencimiento, setFechaVencimiento] = useState("")
   const [fotoFile, setFotoFile] = useState<File | null>(null)
   const [fotoPreview, setFotoPreview] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  // ── Modal de Impresión de Listado Ciego por Proveedor ──
+  const [showBlindPrintModal, setShowBlindPrintModal] = useState(false)
+  const [blindPrintSupplier, setBlindPrintSupplier] = useState<any | null>(null)
+  const [blindPrintProducts, setBlindPrintProducts] = useState<Product[]>([])
+  const [loadingBlindPrint, setLoadingBlindPrint] = useState(false)
 
   // Blindaje anti-loop para la cámara
   const scannedProductRef = useRef<Product | null>(null)
@@ -424,10 +432,12 @@ export default function ConteoVencimientosPage() {
       setFotoFile(null)
       setFotoPreview(null)
 
-      // Si ya fue contado en esta sesión, precargar datos previos
+      // Si ya fue contado en esta sesión, registrar conteo previo para modo aditivo
       const already = items.find((it) => it.producto_id === prod.id)
       if (already && already.cantidad_contada !== null && already.cantidad_contada !== undefined) {
-        setCantidadContada(String(already.cantidad_contada))
+        setAlreadyCountedQty(Number(already.cantidad_contada))
+        setCantidadContada("")
+        setConteoModoAditivo(true)
         if (already.lote) {
           setLote(already.lote)
           setTieneVencimiento(true)
@@ -436,6 +446,10 @@ export default function ConteoVencimientosPage() {
           setFechaVencimiento(already.fecha_vencimiento)
           setTieneVencimiento(true)
         }
+      } else {
+        setAlreadyCountedQty(null)
+        setCantidadContada("")
+        setConteoModoAditivo(true)
       }
 
       try {
@@ -747,6 +761,8 @@ export default function ConteoVencimientosPage() {
   const cancelScanned = () => {
     setScannedProduct(null)
     setCantidadContada("")
+    setAlreadyCountedQty(null)
+    setConteoModoAditivo(true)
     setLote("")
     setFechaVencimiento("")
     setTieneVencimiento(false)
@@ -756,11 +772,15 @@ export default function ConteoVencimientosPage() {
 
   const saveCount = async () => {
     if (!session || !scannedProduct) return
-    const cantidad = parseFloat(cantidadContada.replace(",", "."))
-    if (isNaN(cantidad) || cantidad < 0) {
+    const cantidadIngresada = parseFloat(cantidadContada.replace(",", "."))
+    if (isNaN(cantidadIngresada) || cantidadIngresada < 0) {
       toast.warning("Cantidad inválida", "Ingresá la cantidad contada.")
       return
     }
+    const finalCantidad = (alreadyCountedQty !== null && conteoModoAditivo)
+      ? alreadyCountedQty + cantidadIngresada
+      : cantidadIngresada
+
     if (tieneVencimiento && !fechaVencimiento) {
       toast.warning("Falta la fecha", "Marcaste que tiene vencimiento: ingresá la fecha.")
       return
@@ -776,18 +796,38 @@ export default function ConteoVencimientosPage() {
         producto_id: scannedProduct.id,
         codigo_barra: scannedProduct.codigo_barra || undefined,
         cantidad_sistema: cantidadSistema,
-        cantidad_contada: cantidad,
+        cantidad_contada: finalCantidad,
         lote: tieneVencimiento && lote.trim() ? lote.trim() : undefined,
         fecha_vencimiento: tieneVencimiento ? fechaVencimiento : undefined,
         foto_evidencia_url: fotoUrl,
       })
-      toast.success("Registrado", `${scannedProduct.nombre}: ${cantidad} contadas.`)
+      toast.success(
+        "Registrado",
+        alreadyCountedQty !== null && conteoModoAditivo
+          ? `${scannedProduct.nombre}: +${cantidadIngresada} un. sumadas (Total: ${finalCantidad}).`
+          : `${scannedProduct.nombre}: ${finalCantidad} contadas.`
+      )
       cancelScanned()
       refreshItems(session.id)
     } catch (e: any) {
       toast.error("No se pudo guardar", e?.message || "Reintentá en un momento.")
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleOpenBlindPrint = async (sup: any) => {
+    if (!sup) return
+    setBlindPrintSupplier(sup)
+    setLoadingBlindPrint(true)
+    setShowBlindPrintModal(true)
+    try {
+      const res = await api.products.list({ supplier_id: sup.id, limit: 1000, activo: true })
+      setBlindPrintProducts(Array.isArray(res) ? res : [])
+    } catch (e: any) {
+      toast.error("Error al cargar artículos", e?.message || "No se pudo obtener el catálogo del proveedor.")
+    } finally {
+      setLoadingBlindPrint(false)
     }
   }
 
@@ -1655,22 +1695,47 @@ export default function ConteoVencimientosPage() {
           {loadingSessions ? (
             <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-cyan-400" /></div>
           ) : openSessions.length > 0 ? (
-            <div>
-              <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">Sesiones abiertas — retomar</p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wide">Sesiones en curso</p>
+                <span className="text-[10px] text-cyan-400 font-bold bg-cyan-950/60 px-2 py-0.5 rounded-md border border-cyan-500/30">
+                  {openSessions.length} activa(s)
+                </span>
+              </div>
               <div className="space-y-2">
-                {openSessions.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => resumeSession(s)}
-                    className="w-full flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 text-left active:scale-[0.98] transition hover:border-cyan-500/50"
-                  >
-                    <div>
-                      <div className="font-bold text-sm text-cyan-300">{s.area}</div>
-                      <div className="text-xs text-slate-400">{s.codigo} · {s.total_items_contados} contados</div>
-                    </div>
-                    <ChevronRight className="w-5 h-5 text-slate-500" />
-                  </button>
-                ))}
+                {openSessions.map((s: any) => {
+                  const isMySession = s.contador_principal === user?.id
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => resumeSession(s)}
+                      className={`w-full flex items-center justify-between rounded-2xl px-4 py-3 text-left active:scale-[0.98] transition border ${
+                        isMySession
+                          ? "bg-slate-900 border-cyan-500/60 shadow-md shadow-cyan-950/30 hover:border-cyan-400"
+                          : "bg-slate-950/80 border-slate-800/80 hover:border-slate-700 opacity-80"
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${isMySession ? "bg-cyan-400 animate-pulse" : "bg-slate-500"}`} />
+                          <div className={`font-bold text-sm truncate ${isMySession ? "text-cyan-300" : "text-slate-300"}`}>
+                            {s.area}
+                          </div>
+                          {isMySession && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                              Tu Sesión
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-400 mt-0.5">
+                          {s.codigo} · <strong className="text-white">{s.total_items_contados}</strong> contados
+                          {s.contador_nombre && !isMySession && ` · Contador: ${s.contador_nombre}`}
+                        </div>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-slate-500 shrink-0" />
+                    </button>
+                  )
+                })}
               </div>
             </div>
           ) : null}
@@ -1678,7 +1743,9 @@ export default function ConteoVencimientosPage() {
           {/* Bloque Nueva Sesión con Selector de Sector o Proveedor */}
           <div className="bg-slate-900/60 border border-slate-800/80 rounded-3xl p-4 sm:p-5 space-y-4">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-black text-cyan-400 uppercase tracking-wider">Paso 1: Alcance del Conteo</p>
+              <p className="text-xs font-black text-cyan-400 uppercase tracking-wider">
+                ✨ Iniciar Mi Sesión de Conteo Independiente
+              </p>
               <span className="text-[11px] font-bold text-slate-400 truncate max-w-[200px]">
                 Seleccionado: <span className="text-white">{selectedAreaLabel}</span>
               </span>
@@ -1795,6 +1862,19 @@ export default function ConteoVencimientosPage() {
                         <span>Este proveedor no posee artículos activos asignados en catálogo. La lista precargada iniciará vacía.</span>
                       </div>
                     )}
+
+                    {/* Botón de Impresión de Planilla Ciega Manual */}
+                    <div className="pt-2 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenBlindPrint(selectedSupplierObj)}
+                        className="w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-cyan-500/40 text-cyan-300 hover:text-white text-xs font-black flex items-center justify-center gap-2 active:scale-95 transition cursor-pointer shadow-xs"
+                        title="Imprimir planilla en blanco con casillas para conteo ciego manual"
+                      >
+                        <Printer className="w-4 h-4 text-cyan-400" />
+                        <span>📄 Imprimir Listado Ciego para Conteo Manual (PDF / Papel)</span>
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   /* Selector Interactivo y Buscador de Proveedores */
@@ -2101,25 +2181,59 @@ export default function ConteoVencimientosPage() {
               </div>
             </div>
 
-            {/* Estado de Stock en Sistema */}
-            <div>
-              {cantidadSistema <= 0 ? (
-                <div className="p-2.5 rounded-xl bg-rose-950/40 border border-rose-600/50 text-rose-300 text-xs font-bold flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>Sin stock registrado en sistema (0 unidades)</span>
-                </div>
-              ) : (
-                <div className="p-2.5 rounded-xl bg-blue-950/40 border border-blue-600/50 text-blue-300 text-xs font-bold flex items-center gap-2">
-                  <Package className="w-4 h-4 text-blue-400 shrink-0" />
-                  <span>Stock en sistema: {cantidadSistema} unidades</span>
-                </div>
-              )}
+            {/* Modo Conteo Ciego Oficial */}
+            <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 text-xs font-bold flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <span className="text-base">👁️</span>
+                <span>Conteo Ciego Oficial</span>
+              </span>
+              <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-black">
+                Sin sesgo de stock
+              </span>
             </div>
 
-            {/* Aviso si ya fue contado */}
-            {items.some((it) => it.producto_id === scannedProduct.id) && (
-              <div className="p-2 rounded-xl bg-amber-950/30 border border-amber-600/40 text-amber-300 text-xs font-medium">
-                ℹ️ Este producto ya tenía un conteo registrado en esta sesión. Modificar la cantidad actualizará su valor.
+            {/* Manejo Aditivo si ya fue contado en esta sesión */}
+            {alreadyCountedQty !== null && (
+              <div className="p-3 rounded-2xl bg-gradient-to-br from-cyan-950/60 to-slate-900 border border-cyan-500/40 text-cyan-200 text-xs space-y-2">
+                <div className="flex items-center justify-between font-bold">
+                  <span className="flex items-center gap-1.5 text-cyan-300">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                    <span>Conteo previo registrado:</span>
+                  </span>
+                  <span className="text-sm font-black text-cyan-400 font-mono bg-cyan-950/80 px-2 py-0.5 rounded-lg border border-cyan-500/30">
+                    {alreadyCountedQty} un.
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-tight">
+                  ¿Encontraste más unidades en otro lugar o góndola? Ingresá las nuevas unidades abajo para sumarlas automáticamente.
+                </p>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setConteoModoAditivo(true)}
+                    className={`flex-1 py-1.5 px-2 rounded-xl text-[11px] font-bold border transition flex items-center justify-center gap-1 ${
+                      conteoModoAditivo
+                        ? "bg-cyan-500 text-slate-950 border-cyan-400 font-black shadow-xs"
+                        : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
+                    }`}
+                  >
+                    <span>➕ Sumar</span>
+                    <span className="font-mono text-[10px]">
+                      ({alreadyCountedQty} + {parseFloat(cantidadContada) || 0} = {alreadyCountedQty + (parseFloat(cantidadContada) || 0)})
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConteoModoAditivo(false)}
+                    className={`py-1.5 px-3 rounded-xl text-[11px] font-bold border transition ${
+                      !conteoModoAditivo
+                        ? "bg-amber-500 text-slate-950 border-amber-400 font-black shadow-xs"
+                        : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
+                    }`}
+                  >
+                    <span>✏️ Reemplazar</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -2127,7 +2241,9 @@ export default function ConteoVencimientosPage() {
           {/* Input de Cantidad Contada */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-300 block">
-              Cantidad física contada:
+              {alreadyCountedQty !== null && conteoModoAditivo
+                ? `Nuevas unidades encontradas aquí (se sumarán a las ${alreadyCountedQty} previas):`
+                : "Cantidad física contada:"}
             </label>
             <input
               type="number"
@@ -2234,8 +2350,22 @@ export default function ConteoVencimientosPage() {
               disabled={saving}
               className="flex-2 bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 disabled:opacity-50 rounded-2xl py-3.5 font-black text-xs uppercase flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition shadow-lg shadow-cyan-500/20"
             >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              <span>{saving ? "Guardando..." : "Guardar Conteo"}</span>
+              {saving ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                  <span>Guardando...</span>
+                </>
+              ) : alreadyCountedQty !== null && conteoModoAditivo ? (
+                <>
+                  <Plus className="w-4 h-4 text-slate-950 stroke-[3]" />
+                  <span>Sumar ({alreadyCountedQty + (parseFloat(cantidadContada) || 0)} un.)</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4 text-slate-950 stroke-[3]" />
+                  <span>Guardar Conteo</span>
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -2671,6 +2801,153 @@ export default function ConteoVencimientosPage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL CANÓNICO / PLANILLA DE CONTEO FÍSICO CIEGO POR PROVEEDOR (PRINTABLE A4)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showBlindPrintModal && blindPrintSupplier && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-4xl w-full max-h-[94vh] flex flex-col overflow-hidden">
+            {/* Header no imprimible */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900 print:hidden shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+                  <Printer className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    Planilla de Conteo Físico Ciego
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/10 text-cyan-700 dark:text-cyan-300">
+                      100% Ciego
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Proveedor: <strong>{blindPrintSupplier.razon_social || blindPrintSupplier.nombre}</strong> ({blindPrintProducts.length} artículos)
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-4 py-2 text-xs font-black uppercase rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white flex items-center gap-1.5 shadow-md shadow-cyan-600/20 active:scale-95 transition cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Imprimir / PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowBlindPrintModal(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Hoja Imprimible */}
+            <div className="p-6 overflow-y-auto space-y-4 print:p-0 print:overflow-visible text-slate-900 dark:text-slate-100 bg-white">
+              {/* Membrete Oficial Extra Supermercado */}
+              <div className="border-b-2 border-slate-900 pb-3 flex justify-between items-start text-slate-900">
+                <div>
+                  <h2 className="text-lg font-black uppercase tracking-tight text-slate-950">
+                    EXTRA SUPERMERCADO MAYORISTA
+                  </h2>
+                  <p className="text-xs font-semibold text-slate-700">
+                    GRUPO SANTA TERESA E.A.S. · RUC: 80150377-9
+                  </p>
+                  <p className="text-xs font-black text-cyan-800 mt-1 uppercase tracking-wide">
+                    Planilla de Conteo Ciego · Auditoría Cíclica de Inventario
+                  </p>
+                </div>
+                <div className="text-right text-xs text-slate-700 space-y-0.5">
+                  <p className="font-mono font-bold text-sm text-slate-900">
+                    FECHA: {new Date().toLocaleDateString("es-PY", { timeZone: "America/Asuncion" })}
+                  </p>
+                  <p>HORA: {new Date().toLocaleTimeString("es-PY", { timeZone: "America/Asuncion", hour: "2-digit", minute: "2-digit" })}</p>
+                  <p className="text-[10px] text-slate-500 italic">Procedimiento: Conteo Ciego Sin Sesgo Teórico</p>
+                </div>
+              </div>
+
+              {/* Ficha Proveedor y Responsables */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-slate-50 p-3 rounded-xl border border-slate-300 text-slate-800">
+                <div className="col-span-2">
+                  <span className="text-[10px] text-slate-500 uppercase font-black block">Proveedor:</span>
+                  <strong className="text-sm text-slate-900">{blindPrintSupplier.razon_social || blindPrintSupplier.nombre}</strong>
+                  {blindPrintSupplier.ruc && <span className="text-slate-600 font-mono ml-2">({blindPrintSupplier.ruc})</span>}
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 uppercase font-black block">Contador 1 (Firma):</span>
+                  <span className="text-slate-400 font-mono text-[11px]">_____________________</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-500 uppercase font-black block">Contador 2 (Firma):</span>
+                  <span className="text-slate-400 font-mono text-[11px]">_____________________</span>
+                </div>
+              </div>
+
+              {loadingBlindPrint ? (
+                <div className="py-12 text-center text-slate-500 flex flex-col items-center gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-cyan-600" />
+                  <span className="text-xs">Cargando catálogo de artículos del proveedor...</span>
+                </div>
+              ) : blindPrintProducts.length === 0 ? (
+                <div className="py-10 text-center text-slate-500 text-xs border border-dashed border-slate-300 rounded-xl">
+                  No se encontraron productos activos asociados directamente a este proveedor en el catálogo.
+                </div>
+              ) : (
+                <table className="w-full text-left text-xs border-collapse border border-slate-300 text-slate-900">
+                  <thead className="bg-slate-100 text-slate-900 font-black uppercase text-[10px] tracking-wider border-b-2 border-slate-400">
+                    <tr>
+                      <th className="p-2 border border-slate-300 w-8 text-center">#</th>
+                      <th className="p-2 border border-slate-300 w-32 font-mono">Cód. Barras</th>
+                      <th className="p-2 border border-slate-300">Descripción del Artículo</th>
+                      <th className="p-2 border border-slate-300 w-16 text-center">U.M.</th>
+                      <th className="p-2 border-2 border-slate-900 w-24 text-center bg-cyan-50/50">
+                        Conteo 1
+                      </th>
+                      <th className="p-2 border-2 border-slate-900 w-24 text-center bg-cyan-50/50">
+                        Conteo 2
+                      </th>
+                      <th className="p-2 border border-slate-300 w-36 text-center">
+                        Lote / Vto. / Obs.
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-300">
+                    {blindPrintProducts.map((p, idx) => (
+                      <tr key={p.id} className="hover:bg-slate-50 text-[11px]">
+                        <td className="p-2 border border-slate-300 text-center font-mono text-slate-500">
+                          {idx + 1}
+                        </td>
+                        <td className="p-2 border border-slate-300 font-mono font-bold text-slate-800">
+                          {p.codigo_barra || p.sku || "-"}
+                        </td>
+                        <td className="p-2 border border-slate-300 font-medium text-slate-950">
+                          {p.nombre}
+                        </td>
+                        <td className="p-2 border border-slate-300 text-center font-mono text-slate-600">
+                          {p.unidad_medida || "UN"}
+                        </td>
+                        <td className="p-2 border-2 border-slate-900 text-center font-mono h-9 bg-white"></td>
+                        <td className="p-2 border-2 border-slate-900 text-center font-mono h-9 bg-white"></td>
+                        <td className="p-2 border border-slate-300 text-slate-400"></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              <div className="pt-4 border-t border-slate-300 flex justify-between items-center text-[10px] text-slate-600">
+                <span>Total artículos en listado: <strong>{blindPrintProducts.length}</strong></span>
+                <span>Nota: El contador no debe consultar ni acceder al stock teórico del sistema antes de contar.</span>
+                <span>Página 1 de 1</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

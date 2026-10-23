@@ -414,10 +414,34 @@ async def perform_3way_match(
         # Buscar si ya existe una solicitud de NC pendiente
         active_snc = next((s for s in all_inv_sncs if s.estado in ("pendiente_entrega", "entregada_parcial")), None)
         if not active_snc:
-            count_q = select(func.count(SupplierNcRequest.id)).where(SupplierNcRequest.company_id == invoice.company_id)
-            c_res = await db.execute(count_q)
-            seq = (c_res.scalar() or 0) + 1
+            # Obtener el número correlativo más alto existente para evitar colisiones por huecos o eliminaciones
+            all_sncs_res = await db.execute(
+                select(SupplierNcRequest.numero_solicitud)
+                .where(SupplierNcRequest.company_id == invoice.company_id)
+            )
+            existing_codes = [r[0] for r in all_sncs_res.fetchall() if r[0]]
+            highest_num = 0
+            for code in existing_codes:
+                if code.startswith("SNC-"):
+                    try:
+                        val = int(code.replace("SNC-", "").strip())
+                        if val > highest_num:
+                            highest_num = val
+                    except ValueError:
+                        pass
+
+            seq = max(highest_num + 1, 1)
             num_snc = f"SNC-{seq:05d}"
+            while True:
+                exists_check = await db.execute(
+                    select(SupplierNcRequest.id).where(
+                        SupplierNcRequest.numero_solicitud == num_snc
+                    )
+                )
+                if not exists_check.scalars().first():
+                    break
+                seq += 1
+                num_snc = f"SNC-{seq:05d}"
 
             motivos_resumen = [line["motivo"] for line in discrepancias_lines if line["diferencia_monto"] > 0]
             detalle_motivos = " | ".join(motivos_resumen)[:1000]

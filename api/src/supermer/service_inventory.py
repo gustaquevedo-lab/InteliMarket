@@ -132,15 +132,31 @@ async def list_count_items(session_id: UUID, db: AsyncSession, requiere_ajuste: 
 
 
 async def create_count_item(session_id: UUID, data, db: AsyncSession, user: Optional[dict] = None):
-    item = PhysicalCountItem(session_id=session_id, **data.model_dump(exclude_none=True))
+    # Consolidación aditiva: si el producto ya existe en esta sesión, actualizar sus valores
+    result = await db.execute(
+        select(PhysicalCountItem).where(
+            PhysicalCountItem.session_id == session_id,
+            PhysicalCountItem.producto_id == data.producto_id
+        )
+    )
+    existing_item = result.scalar_one_or_none()
+
+    if existing_item:
+        item = existing_item
+        for k, v in data.model_dump(exclude_none=True).items():
+            setattr(item, k, v)
+    else:
+        item = PhysicalCountItem(session_id=session_id, **data.model_dump(exclude_none=True))
+        db.add(item)
+
     if item.cantidad_contada is not None and item.cantidad_sistema is not None:
         item.diferencia = item.cantidad_contada - item.cantidad_sistema
     if item.costo_promedio and item.diferencia:
         item.valor_diferencia = item.diferencia * item.costo_promedio
     if user and item.contado_por is None:
         item.contado_por = user.get("id")
+    if user:
         item.contado_at = datetime.now(timezone.utc)
-    db.add(item)
     await db.flush()
     if user:
         s = await get_count_session(session_id, db)
