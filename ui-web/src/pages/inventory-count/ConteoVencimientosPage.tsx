@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle2, Search, Download, RefreshCcw, RefreshCw, Zap,
   LogIn, LogOut, User as UserIcon, Lock, Eye, EyeOff, ShieldCheck,
   Building2, Tag, Layers, Barcode, DollarSign, AlertCircle, Filter, ArrowLeft,
-  Clock, Sparkles, History
+  Clock, Sparkles, History, Printer
 } from "lucide-react"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
