@@ -101,6 +101,47 @@ async def perform_3way_match(
     total_recibido_val = Decimal("0")
     inv_product_keys = set()
 
+    # 3.5 Auto-resolución de product_id para renglones de factura sin mapear (ej. importados por SIFEN XML o carga manual)
+    unmapped_inv_items = [it for it in invoice.items if not it.product_id]
+    if unmapped_inv_items:
+        if len(invoice.items) == 1:
+            target_prod_id = None
+            if po and len(po.items) == 1:
+                target_prod_id = po.items[0].product_id
+            elif receipt and len(receipt.items) == 1:
+                target_prod_id = receipt.items[0].product_id
+            if target_prod_id:
+                invoice.items[0].product_id = target_prod_id
+        else:
+            available_po_items = list(po.items) if po else []
+            assigned_prod_ids = {str(it.product_id) for it in invoice.items if it.product_id}
+
+            for inv_it in unmapped_inv_items:
+                matched_poi = None
+                if inv_it.codigo_proveedor:
+                    code_clean = inv_it.codigo_proveedor.strip().upper()
+                    for poi in available_po_items:
+                        if str(poi.product_id) not in assigned_prod_ids:
+                            if poi.descripcion and code_clean in poi.descripcion.upper():
+                                matched_poi = poi
+                                break
+                if not matched_poi and inv_it.descripcion:
+                    desc_words = [w for w in inv_it.descripcion.upper().split() if len(w) > 3]
+                    for poi in available_po_items:
+                        if str(poi.product_id) not in assigned_prod_ids and poi.descripcion:
+                            poi_upper = poi.descripcion.upper()
+                            if any(w in poi_upper for w in desc_words):
+                                matched_poi = poi
+                                break
+                if matched_poi:
+                    inv_it.product_id = matched_poi.product_id
+                    assigned_prod_ids.add(str(matched_poi.product_id))
+
+            rem_inv = [it for it in invoice.items if not it.product_id]
+            rem_po = [poi for poi in available_po_items if str(poi.product_id) not in assigned_prod_ids]
+            if len(rem_inv) == 1 and len(rem_po) == 1:
+                rem_inv[0].product_id = rem_po[0].product_id
+
     # Recolectar todos los product_id para resolver sus nombres de forma masiva
     prod_ids_to_resolve = set()
     for it in invoice.items:
@@ -462,6 +503,10 @@ async def perform_3way_match(
             db.add(nc_request_obj)
         else:
             active_snc.monto_reclamado = discrepancia_neta_pendiente
+            motivos_resumen = [line["motivo"] for line in discrepancias_lines if line["diferencia_monto"] > 0]
+            if motivos_resumen:
+                detalle_motivos = " | ".join(motivos_resumen)[:1000]
+                active_snc.observaciones = f"Generado automáticamente por Order Matching. Motivos: {detalle_motivos}"
             nc_request_obj = active_snc
     elif po and not receipt:
         # Match con el Pedido, pero pendiente de ingreso físico en muelle
