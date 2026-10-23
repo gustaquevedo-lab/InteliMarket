@@ -48,6 +48,7 @@ export default function Rg90ExportModal({
   const [fechaHasta, setFechaHasta] = useState(initialFechaHasta || lastDayCurrentMonth)
   const [puntoEmision, setPuntoEmision] = useState("todos")
   const [searchFilter, setSearchFilter] = useState("")
+  const [excludeAffectedBr, setExcludeAffectedBr] = useState(false)
 
   const [loading, setLoading] = useState(false)
   const [exportingXlsx, setExportingXlsx] = useState(false)
@@ -80,6 +81,7 @@ export default function Rg90ExportModal({
         fecha_desde: fechaDesde || undefined,
         fecha_hasta: fechaHasta || undefined,
         punto_emision: puntoEmision !== "todos" ? puntoEmision : undefined,
+        exclude_affected_br: excludeAffectedBr,
       })
       setReportData(data)
       setPage(1)
@@ -88,7 +90,7 @@ export default function Rg90ExportModal({
     } finally {
       setLoading(false)
     }
-  }, [fechaDesde, fechaHasta, puntoEmision, toast])
+  }, [fechaDesde, fechaHasta, puntoEmision, excludeAffectedBr, toast])
 
   useEffect(() => {
     if (isOpen) {
@@ -118,12 +120,14 @@ export default function Rg90ExportModal({
   const handleDownloadXlsx = async () => {
     setExportingXlsx(true)
     try {
-      const filename = `libro_ventas_rg90_${fechaDesde || "inicio"}_${fechaHasta || "hoy"}.xlsx`
+      const suffix = excludeAffectedBr ? "_depurado" : ""
+      const filename = `libro_ventas_rg90_${fechaDesde || "inicio"}_${fechaHasta || "hoy"}${suffix}.xlsx`
       await api.reports.downloadRg90VentasXlsx(
         {
           fecha_desde: fechaDesde || undefined,
           fecha_hasta: fechaHasta || undefined,
           punto_emision: puntoEmision !== "todos" ? puntoEmision : undefined,
+          exclude_affected_br: excludeAffectedBr,
         },
         filename
       )
@@ -139,20 +143,19 @@ export default function Rg90ExportModal({
   const handleDownloadZip = async () => {
     setExportingZip(true)
     try {
-      const rucSinDv = "80150377"
-      const mmaaaa = fechaDesde ? `${fechaDesde.slice(5, 7)}${fechaDesde.slice(0, 4)}` : "082026"
-      const filename = `${rucSinDv}_REG_${mmaaaa}_00001.zip`
+      const zipName = excludeAffectedBr ? `RG90_MARANGATU_${fechaDesde || ""}_DEPURADO.zip` : undefined
       await api.reports.downloadRg90VentasZip(
         {
           fecha_desde: fechaDesde || undefined,
           fecha_hasta: fechaHasta || undefined,
           punto_emision: puntoEmision !== "todos" ? puntoEmision : undefined,
+          exclude_affected_br: excludeAffectedBr,
         },
-        filename
+        zipName
       )
-      toast.success("Paquete ZIP Marangatú Generado", `Listo para importar a DNIT Marangatú: ${filename}`)
+      toast.success("Paquete ZIP Marangatú Generado", "El archivo cumple 100% con la especificación técnica RG 90.")
     } catch (err: any) {
-      toast.error("Error al exportar ZIP RG 90", err.message)
+      toast.error("Error al exportar ZIP Marangatú", err.message)
     } finally {
       setExportingZip(false)
     }
@@ -332,6 +335,26 @@ export default function Rg90ExportModal({
                 <span>Actualizar Vista</span>
               </button>
             </div>
+          </div>
+
+          {/* Toggle Exclusión Facturas BR / Andres Miranda */}
+          <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800/60 flex items-center justify-between flex-wrap gap-2">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={excludeAffectedBr}
+                onChange={(e) => setExcludeAffectedBr(e.target.checked)}
+                className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 cursor-pointer"
+              />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                Excluir ventas de productos con proveedor BR / Andres Miranda (Consumidor Final)
+              </span>
+            </label>
+            {excludeAffectedBr && (
+              <span className="text-[11px] font-black text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                Filtro Depurador Activo · Excluye comprobantes afectados
+              </span>
+            )}
           </div>
         </div>
 

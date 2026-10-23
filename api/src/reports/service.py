@@ -721,11 +721,12 @@ async def get_fiscal_rg90_ventas(
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     punto_emision: Optional[str] = None,
+    exclude_affected_br: bool = False,
 ) -> dict:
     """Libro de Ventas bajo la Resolución General Nº 90/2021 (DNIT / SET Paraguay).
 
-    Genera la estructura reglamentaria de comprobantes para su posterior auditoría
-    y carga/importación masiva al sistema Marangatú.
+    Genera la estructura reglamentaria oficial de 19 campos para importación masiva
+    al Sistema Marangatú y auditoría contable.
     Zona horaria inmutable: America/Asuncion.
     """
     comp_row = (await db.execute(
@@ -750,6 +751,33 @@ async def get_fiscal_rg90_ventas(
     if punto_emision and punto_emision != "todos":
         where += " AND v.numero LIKE :punto_emision"
         params["punto_emision"] = f"{punto_emision}%"
+
+    if exclude_affected_br:
+        where += """ AND v.id NOT IN (
+            SELECT DISTINCT vi.sale_id
+            FROM sale_items vi
+            JOIN sales v_sub ON v_sub.id = vi.sale_id
+            JOIN products p ON p.id = vi.product_id
+            JOIN suppliers sup ON sup.id = p.supplier_id
+            LEFT JOIN customers c_sub ON c_sub.id = v_sub.customer_id
+            WHERE (
+                c_sub.id IS NULL
+                OR UPPER(TRIM(c_sub.razon_social)) IN ('CONSUMIDOR FINAL', 'CLIENTE OCASIONAL', 'SIN NOMBRE', 'CLIENTE')
+                OR c_sub.ruc IN ('4444444-3', '44444401-5', '4444444', '44444401')
+            )
+            AND (
+                LOWER(COALESCE(sup.tipo_proveedor, '')) IN ('brasilero', 'br')
+                OR LOWER(COALESCE(sup.pais, '')) LIKE '%brasil%'
+                OR UPPER(COALESCE(sup.moneda_default, '')) = 'BRL'
+                OR sup.razon_social ILIKE '%ANDRES%'
+                OR sup.razon_social ILIKE '%LOPES COSMETICOS%'
+                OR sup.razon_social ILIKE '%BOCCHI ATACADO%'
+                OR (
+                    (sup.ruc IS NULL OR TRIM(sup.ruc) IN ('', 'N/A', '0', '—', 'None') OR LENGTH(TRIM(sup.ruc)) < 5)
+                    AND (sup.pais = 'Paraguay' OR sup.tipo_proveedor = 'nacional')
+                )
+            )
+        )"""
 
     query = f"""
         SELECT
@@ -798,23 +826,23 @@ async def get_fiscal_rg90_ventas(
 
         tipo_ident = 15
         num_ident = "44444401"
-        dv = "7"
+        clean_nombre = ""
 
         if raw_ruc and raw_ruc not in ("44444401-7", "44444401", "XXX"):
             tipo_ident = 11
-            if "-" in raw_ruc:
-                parts = raw_ruc.split("-", 1)
-                num_ident = re.sub(r"\D", "", parts[0])
-                dv = parts[1].strip()[:1]
-            else:
-                num_ident = re.sub(r"\D", "", raw_ruc)
-                dv = ""
+            # RUC sin dígito verificador para el estándar RG 90
+            num_ident = re.sub(r"\D", "", raw_ruc.split("-")[0])
+            clean_nombre = re.sub(r"[\r\n\t;]", " ", raw_nombre).strip()[:250]
         elif raw_ci:
             clean_ci = re.sub(r"\D", "", raw_ci)
             if clean_ci:
                 tipo_ident = 12
                 num_ident = clean_ci
-                dv = ""
+                clean_nombre = re.sub(r"[\r\n\t;]", " ", raw_nombre).strip()[:250]
+        else:
+            tipo_ident = 15
+            num_ident = "44444401"
+            clean_nombre = ""
 
         raw_num = str(r["nro_comprobante"] or "").strip()
         if "-" not in raw_num and len(raw_num) <= 7:
@@ -830,37 +858,70 @@ async def get_fiscal_rg90_ventas(
         base_5 = round(float(r["base_5"] or 0))
         iva_5 = round(float(r["iva_5"] or 0))
         exenta = round(float(r["base_exenta"] or 0))
-        total = round(float(r["total"] or 0))
+        total_real = round(float(r["total"] or 0))
+
+        # Estándar oficial DNIT (pág 7): montos con IVA INCLUIDO
+        # Campo 9: MONTO GRAVADO AL 10% (IVA INCLUIDO)
+        monto_gravado_10 = base_10 + iva_10
+        # Campo 10: MONTO GRAVADO AL 5% (IVA INCLUIDO)
+        monto_gravado_5 = base_5 + iva_5
+        # Campo 11: MONTO NO GRAVADO O EXENTO
+        monto_exento = exenta
+        # Campo 12: MONTO TOTAL = (9) + (10) + (11)
+        monto_total_calc = monto_gravado_10 + monto_gravado_5 + monto_exento
+        monto_total = monto_total_calc if monto_total_calc > 0 else total_real
 
         condicion = str(r["condicion"] or "").lower()
         condicion_cod = 2 if condicion in ("credito", "credito_extra_club") else 1
 
         registro = {
+            # 1: CÓDIGO TIPO DE REGISTRO (1 = Ventas)
             "tipo_registro": 1,
+            # 2: CÓDIGO TIPO DE IDENTIFICACIÓN DEL COMPRADOR (11=RUC, 12=CI, 15=Sin Nombre)
             "tipo_identificacion": tipo_ident,
+            # 3: NÚMERO DE IDENTIFICACIÓN DEL COMPRADOR (Sin DV)
             "numero_identificacion": num_ident,
-            "dv": dv,
-            "nombre_comprador": raw_nombre,
+            # 4: NOMBRE O RAZÓN SOCIAL DEL COMPRADOR
+            "nombre_comprador": clean_nombre,
+            # 5: CÓDIGO TIPO DE COMPROBANTE (109 = Factura, 110 = Nota de Crédito)
             "tipo_comprobante": tipo_comprobante_cod,
             "tipo_comprobante_label": "Nota de Crédito" if es_nc else "Factura",
+            # 6: FECHA DE EMISIÓN DEL COMPROBANTE (dd/mm/aaaa)
             "fecha_emision": r["fecha_emision_str"],
             "fecha_asuncion": r["fecha_asuncion_full"],
+            # 7: NÚMERO DE TIMBRADO (8 dígitos)
             "timbrado": company_timbrado,
+            # 8: NÚMERO DEL COMPROBANTE (###-###-#######)
             "numero_comprobante": formatted_num,
+            # 9: MONTO GRAVADO AL 10% (IVA INCLUIDO)
+            "monto_gravado_10": monto_gravado_10,
             "gravada_10": base_10,
             "iva_10": iva_10,
+            # 10: MONTO GRAVADO AL 5% (IVA INCLUIDO)
+            "monto_gravado_5": monto_gravado_5,
             "gravada_5": base_5,
             "iva_5": iva_5,
+            # 11: MONTO NO GRAVADO O EXENTO
+            "monto_exento": monto_exento,
             "exenta": exenta,
-            "total": total,
+            # 12: MONTO TOTAL DEL COMPROBANTE
+            "monto_total": monto_total,
+            "total": monto_total,
+            # 13: CÓDIGO CONDICIÓN DE VENTA (1 = Contado, 2 = Crédito)
             "condicion": condicion_cod,
             "condicion_label": "Crédito" if condicion_cod == 2 else "Contado",
+            # 14: OPERACIÓN EN MONEDA EXTRANJERA (N / S)
             "moneda_extranjera": "N",
+            # 15: IMPUTA AL IVA (S / N)
             "imputa_iva": "S",
+            # 16: IMPUTA AL IRE (S / N)
             "imputa_ire": "S",
+            # 17: IMPUTA AL IRP-RSP (S / N)
             "imputa_irp": "N",
-            "comprobante_asociado_timbrado": company_timbrado if es_nc else "",
+            # 18: NÚMERO DEL COMPROBANTE DE VENTA ASOCIADO
             "comprobante_asociado_numero": formatted_num if es_nc else "",
+            # 19: TIMBRADO DEL COMPROBANTE DE VENTA ASOCIADO
+            "comprobante_asociado_timbrado": company_timbrado if es_nc else "",
         }
         registros.append(registro)
 

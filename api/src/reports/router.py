@@ -165,10 +165,13 @@ async def fiscal_rg90_ventas(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     punto_emision: str | None = Query(None),
+    exclude_affected_br: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    return await service.get_fiscal_rg90_ventas(db, user["company_id"], fecha_desde, fecha_hasta, punto_emision)
+    return await service.get_fiscal_rg90_ventas(
+        db, user["company_id"], fecha_desde, fecha_hasta, punto_emision, exclude_affected_br=exclude_affected_br
+    )
 
 
 
@@ -429,14 +432,18 @@ async def export_rg90_ventas_xlsx(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     punto_emision: str | None = Query(None),
+    exclude_affected_br: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    data = await service.get_fiscal_rg90_ventas(db, user["company_id"], fecha_desde, fecha_hasta, punto_emision)
+    data = await service.get_fiscal_rg90_ventas(
+        db, user["company_id"], fecha_desde, fecha_hasta, punto_emision, exclude_affected_br=exclude_affected_br
+    )
     xlsx = export_service.export_fiscal_rg90_ventas_xlsx(data)
     desde_str = str(fecha_desde or "inicio")
     hasta_str = str(fecha_hasta or "hoy")
-    filename = f"libro_ventas_rg90_{desde_str}_{hasta_str}.xlsx"
+    suffix = "_depurado" if exclude_affected_br else ""
+    filename = f"libro_ventas_rg90_{desde_str}_{hasta_str}{suffix}.xlsx"
     return _excel_response(xlsx, filename)
 
 
@@ -445,10 +452,13 @@ async def export_rg90_ventas_zip(
     fecha_desde: date | None = Query(None),
     fecha_hasta: date | None = Query(None),
     punto_emision: str | None = Query(None),
+    exclude_affected_br: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    data = await service.get_fiscal_rg90_ventas(db, user["company_id"], fecha_desde, fecha_hasta, punto_emision)
+    data = await service.get_fiscal_rg90_ventas(
+        db, user["company_id"], fecha_desde, fecha_hasta, punto_emision, exclude_affected_br=exclude_affected_br
+    )
     zip_bytes, zip_filename = export_service.export_fiscal_rg90_ventas_zip(data)
     return _zip_response(zip_bytes, zip_filename)
 
