@@ -866,7 +866,9 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                 prod_obj.supplier_id = supplier_id
             if cost > Decimal("0"):
                 prod_obj.ultimo_costo = cost
-                if not prod_obj.costo_promedio or prod_obj.costo_promedio == Decimal("0"):
+                if stock_obj and stock_obj.costo_unitario and stock_obj.costo_unitario > Decimal("0"):
+                    prod_obj.costo_promedio = stock_obj.costo_unitario
+                elif not prod_obj.costo_promedio or prod_obj.costo_promedio == Decimal("0"):
                     prod_obj.costo_promedio = cost
 
         mov_tipo = "entrada_consignacion" if receipt.tipo_recepcion == "consignacion_remision" else "entrada_compra"
