@@ -163,6 +163,7 @@ export default function ProductsPage() {
   }
   const [productTiers, setProductTiers] = useState<LocalProductTier[]>([])
   const [loadingTiers, setLoadingTiers] = useState(false)
+  const [barcodeConflict, setBarcodeConflict] = useState<{ id: string; sku: string; nombre: string; activo: boolean } | null>(null)
   const [form, setForm] = useState({
     sku: "",
     nombre: "",
@@ -621,6 +622,22 @@ export default function ProductsPage() {
       toast.error("Datos incompletos", "El SKU y Nombre del producto son obligatorios.")
       return
     }
+    if (form.codigo_barra && form.codigo_barra.trim()) {
+      const bc = form.codigo_barra.trim()
+      try {
+        const res = await api.products.checkBarcode(bc, editingProduct?.id)
+        if (res.exists && res.product) {
+          setBarcodeConflict(res.product)
+          toast.error(
+            "Código de barras duplicado",
+            `El código '${bc}' ya pertenece a SKU ${res.product.sku} - "${res.product.nombre}" (${res.product.activo ? "Activo" : "Inactivo"}). No está permitido duplicar códigos de barra.`
+          )
+          return
+        }
+      } catch (err) {
+        console.warn("Error validando código de barras:", err)
+      }
+    }
     setSaving(true)
     try {
       const isPeso = form.tipo_venta === "peso"
@@ -765,6 +782,7 @@ export default function ProductsPage() {
   const handleEditClick = (p: Product) => {
     setEditingProduct(p)
     setCostoUnlocked(false)
+    setBarcodeConflict(null)
     const nombreUpper = (p.nombre || "").toUpperCase()
     const bc = (p.codigo_barra || "").trim()
     const esNombreKg = nombreUpper.endsWith(" KG") || nombreUpper.includes(" KG ") || nombreUpper.includes("/KG")
@@ -842,6 +860,7 @@ export default function ProductsPage() {
     setEditingProduct(null)
     setCostoUnlocked(true)
     setProductTiers([])
+    setBarcodeConflict(null)
     let nextSku = "126595"
     try {
       const skuRes = await api.products.getNextSku()
@@ -2817,10 +2836,45 @@ export default function ProductsPage() {
                     <input
                       type="text"
                       value={form.codigo_barra}
-                      onChange={(e) => setForm({ ...form, codigo_barra: e.target.value })}
-                      className="input-field w-full text-xs font-mono"
+                      onChange={(e) => {
+                        setForm({ ...form, codigo_barra: e.target.value })
+                        if (barcodeConflict) setBarcodeConflict(null)
+                      }}
+                      onBlur={async () => {
+                        const bc = form.codigo_barra?.trim()
+                        if (!bc) {
+                          setBarcodeConflict(null)
+                          return
+                        }
+                        try {
+                          const res = await api.products.checkBarcode(bc, editingProduct?.id)
+                          if (res.exists && res.product) {
+                            setBarcodeConflict(res.product)
+                            toast.warning(
+                              "Código de barras ya registrado",
+                              `Ya existe el producto SKU ${res.product.sku} - "${res.product.nombre}" (${res.product.activo ? "Activo" : "Inactivo"}). No se permite duplicar códigos de barra.`
+                            )
+                          } else {
+                            setBarcodeConflict(null)
+                          }
+                        } catch {
+                          setBarcodeConflict(null)
+                        }
+                      }}
+                      className={`input-field w-full text-xs font-mono ${
+                        barcodeConflict ? "border-rose-500 focus:border-rose-500 ring-1 ring-rose-500" : ""
+                      }`}
                       placeholder="Ej. 7840001002345"
                     />
+                    {barcodeConflict && (
+                      <div className="mt-1.5 p-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-[11px] text-rose-700 dark:text-rose-300 flex items-start gap-1.5 font-medium">
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
+                        <div>
+                          <span className="font-bold">Código de barras ya registrado:</span> Pertenece al producto{" "}
+                          <strong>SKU {barcodeConflict.sku}</strong> — <em>"{barcodeConflict.nombre}"</em> ({barcodeConflict.activo ? "Activo" : "Inactivo"}). No se permite crear ni guardar productos con códigos duplicados.
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 

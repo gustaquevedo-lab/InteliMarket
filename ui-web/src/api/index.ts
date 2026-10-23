@@ -2286,6 +2286,12 @@ export const api = {
     getStats: () => client.get<ProductsStatsResponse>(`/v1/companies/${COMPANY_ID}/products/stats`),
     get360: (id: string) => client.get<Product360Response>(`/v1/products/${id}/360`),
     getNextSku: () => client.get<{ next_sku: string }>("/v1/products/next-sku", { company_id: COMPANY_ID }),
+    checkBarcode: (barcode: string, excludeProductId?: string) =>
+      client.get<{ exists: boolean; product?: { id: string; sku: string; nombre: string; activo: boolean } }>("/v1/products/check-barcode", {
+        barcode,
+        exclude_product_id: excludeProductId,
+        company_id: COMPANY_ID,
+      }),
     create: (data: Partial<Product> & { sku?: string; nombre: string }) => client.post<Product>("/v1/products", { ...data, company_id: COMPANY_ID }),
     update: (id: string, data: Partial<Product>) => client.patch<Product>(`/v1/products/${id}`, data),
     uploadImage: (file: File, productId?: string, sku?: string) => {

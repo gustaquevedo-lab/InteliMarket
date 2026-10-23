@@ -107,12 +107,47 @@ async def get_next_sku(
     return {"next_sku": next_sku}
 
 
+@router.get("/products/check-barcode")
+async def check_barcode(
+    barcode: str = Query(...),
+    exclude_product_id: str | None = Query(None),
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+):
+    clean = barcode.strip()
+    if not clean:
+        return {"exists": False}
+    existing = await service.get_product_by_barcode(db, company_id, clean)
+    if existing and (not exclude_product_id or str(existing.id) != exclude_product_id):
+        return {
+            "exists": True,
+            "product": {
+                "id": str(existing.id),
+                "sku": existing.sku,
+                "nombre": existing.nombre,
+                "activo": bool(existing.activo),
+            }
+        }
+    return {"exists": False}
+
+
 @router.post("/products", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
 async def create_product(body: ProductCreate, db: AsyncSession = Depends(get_db)):
     if body.sku and body.sku.strip().upper() not in ("", "AUTO"):
         existing = await service.get_product_by_sku(db, str(body.company_id), body.sku)
         if existing:
             raise HTTPException(status_code=400, detail="Ya existe un producto con ese SKU")
+
+    if body.codigo_barra and body.codigo_barra.strip():
+        clean_bc = body.codigo_barra.strip()
+        existing_bc = await service.get_product_by_barcode(db, str(body.company_id), clean_bc)
+        if existing_bc:
+            estado_txt = "Activo" if existing_bc.activo else "Inactivo"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ya existe un producto con el código de barras '{clean_bc}': SKU {existing_bc.sku} - \"{existing_bc.nombre}\" ({estado_txt}). No está permitido crear productos con códigos de barra duplicados."
+            )
+
     return await service.create_product(db, body)
 
 

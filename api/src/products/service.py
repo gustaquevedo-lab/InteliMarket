@@ -139,10 +139,19 @@ async def update_product(db: AsyncSession, product_id: str, data: ProductUpdate)
             raise HTTPException(status_code=400, detail="Ya existe otro producto con ese SKU")
         update_dict["sku"] = clean_sku
 
-    # Normalizar código de barras si viene en el payload
+    # Normalizar y validar código de barras si viene en el payload
     if "codigo_barra" in update_dict:
         cb = update_dict["codigo_barra"]
-        update_dict["codigo_barra"] = cb.strip() if isinstance(cb, str) and cb.strip() else None
+        clean_cb = cb.strip() if isinstance(cb, str) and cb.strip() else None
+        update_dict["codigo_barra"] = clean_cb
+        if clean_cb and clean_cb != product.codigo_barra:
+            existing_cb = await get_product_by_barcode(db, str(product.company_id), clean_cb)
+            if existing_cb and existing_cb.id != product.id:
+                estado_txt = "Activo" if existing_cb.activo else "Inactivo"
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Ya existe otro producto con el código de barras '{clean_cb}': SKU {existing_cb.sku} - \"{existing_cb.nombre}\" ({estado_txt}). No está permitido duplicar códigos de barra."
+                )
 
     for f in ("precio_venta", "costo_promedio", "ultimo_costo"):
         if f in update_dict and update_dict[f] is not None:
