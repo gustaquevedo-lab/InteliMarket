@@ -4854,6 +4854,7 @@ export const api = {
       generate: () => client.post<CashFlowProjection[]>(`/v1/financial/cash-flow/generate?company_id=${COMPANY_ID}`),
       update: (id: string, data: any) => client.post<CashFlowProjection>(`/v1/financial/cash-flow/${id}`, data),
       dashboard: () => client.get<CashFlowDashboard>("/v1/financial/cash-flow/dashboard", { company_id: COMPANY_ID } as any),
+      custom: (params?: { dias?: number; colchon?: number }) => client.get<any>("/v1/financial/cash-flow/custom", { company_id: COMPANY_ID, ...params } as any),
       alertConfig: {
         get: () => client.get<{ activo: boolean; dias_horizonte: number; telefono: string | null }>("/v1/financial/cash-flow/alert-config", { company_id: COMPANY_ID } as any),
         update: (data: { activo: boolean; dias_horizonte: number; telefono?: string | null }) =>

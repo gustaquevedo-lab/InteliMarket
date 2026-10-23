@@ -3601,6 +3601,362 @@ async def get_cash_flow_dashboard(db: AsyncSession, company_id: str) -> dict:
     }
 
 
+def _add_business_days(start_date: date, n_days: int) -> date:
+    cur = start_date
+    added = 0
+    while added < n_days:
+        cur += timedelta(days=1)
+        if cur.weekday() < 5:  # Lunes a Viernes
+            added += 1
+    return cur
+
+
+async def get_custom_cash_flow(
+    db: AsyncSession,
+    company_id: str,
+    dias: int = 30,
+    colchon: float = 50000000.0,
+) -> dict:
+    """Flujo de caja personalizado y liquidez diaria operativa para Extra Supermercado:
+    1. Saldo Inicial: Saldo consolidado al corte (Bancos PYG + Bóveda bimonetaria real).
+    2. Ingresos:
+       - Contado inmediato (Efectivo, Débito, QR, Transferencias en fecha T).
+       - Acreditaciones diferidas (+48h hábiles para Tarjetas de Crédito y PIX).
+       - NC por acciones comerciales / acuerdos (excluyendo mermas/faltantes/devoluciones).
+    3. Egresos:
+       - Proveedores en 'Fila de Pago' (con OP creada/aprobada o en PaymentRun).
+       - Cartera de Cheques emitidos con fecha de cobro asignada al día.
+       - Salarios / Nómina quincenal y mensual (Sueldok).
+       - Impuestos y tasas con vencimiento calendario.
+       - OPEX / gastos operativos basales.
+    4. Determinación de Liquidez Diaria y Capacidad de Compromiso Libre.
+    """
+    from api.src.cheques.models import Cheque
+    from api.src.caja.models import VaultEntry
+    from api.src.currency import service as currency_service
+    from collections import defaultdict
+
+    cid = uuid.UUID(company_id)
+    today = _today()
+    colchon_dec = Decimal(str(colchon))
+
+    # 1. Saldo Inicial Consolidado (Bancos + Bóveda)
+    accounts_res = await db.execute(
+        select(func.coalesce(func.sum(BankAccount.saldo_actual), 0)).where(
+            BankAccount.company_id == cid, BankAccount.activo == True, BankAccount.moneda == "PYG",
+        )
+    )
+    saldo_bancos = Decimal(str(accounts_res.scalar() or "0"))
+
+    rate_brl = await currency_service.get_exchange_rate(db, company_id, "BRL")
+    tasa_brl = Decimal(str(rate_brl.tasa_compra)) if rate_brl and rate_brl.tasa_compra else Decimal("1130")
+    rate_usd = await currency_service.get_exchange_rate(db, company_id, "USD")
+    tasa_usd = Decimal(str(rate_usd.tasa_compra)) if rate_usd and rate_usd.tasa_compra else Decimal("5840")
+
+    vault_res = await db.execute(
+        select(
+            func.coalesce(func.sum(VaultEntry.monto_pyg), 0),
+            func.coalesce(func.sum(VaultEntry.monto_brl), 0),
+            func.coalesce(func.sum(VaultEntry.monto_usd), 0),
+        ).where(
+            VaultEntry.company_id == cid,
+            VaultEntry.estado.in_(["en_boveda", "disponible", "custodia_supervisor"]),
+        )
+    )
+    v_pyg, v_brl, v_usd = vault_res.first()
+    saldo_boveda = Decimal(str(v_pyg or 0)) + (Decimal(str(v_brl or 0)) * tasa_brl) + (Decimal(str(v_usd or 0)) * tasa_usd)
+    disponibilidad_total = saldo_bancos + saldo_boveda
+
+    # 2. Análisis del Mix de Ventas de los últimos 30 días
+    mix_res = await db.execute(
+        text("""
+            SELECT 
+                forma_pago,
+                COALESCE(SUM(COALESCE(monto_pyg, monto)), 0) as total
+            FROM sale_payments
+            WHERE company_id = :cid
+              AND fecha >= NOW() - INTERVAL '30 days'
+            GROUP BY forma_pago
+        """),
+        {"cid": cid},
+    )
+    mix_data = {r.forma_pago: Decimal(str(r.total)) for r in mix_res.fetchall()}
+    total_mix = sum(mix_data.values())
+
+    contado_keys = ["EFECTIVO", "TARJETA DEBITO", "QR", "TRANF. BANCARIA", "TARJETA_DINELCO", "TARJETA_BANCARD"]
+    total_contado = sum(mix_data.get(k, Decimal("0")) for k in contado_keys)
+    total_credito = mix_data.get("TARJETA CREDITO", Decimal("0"))
+    total_pix = mix_data.get("PIX", Decimal("0"))
+
+    if total_mix > 0:
+        ratio_contado = total_contado / total_mix
+        ratio_credito = total_credito / total_mix
+        ratio_pix = total_pix / total_mix
+    else:
+        ratio_contado = Decimal("0.70")
+        ratio_credito = Decimal("0.20")
+        ratio_pix = Decimal("0.10")
+
+    # 3. Ventas por día de la semana (estacionalidad de retail)
+    dow_res = await db.execute(
+        text("""
+            SELECT 
+                EXTRACT(ISODOW FROM fecha) as dow,
+                SUM(total) / GREATEST(COUNT(DISTINCT DATE(fecha)), 1) as promedio_dia
+            FROM sales
+            WHERE company_id = :cid
+              AND estado NOT IN ('anulada', 'cancelada')
+              AND fecha >= NOW() - INTERVAL '30 days'
+            GROUP BY EXTRACT(ISODOW FROM fecha)
+        """),
+        {"cid": cid},
+    )
+    dow_avg = {int(r.dow): Decimal(str(round(r.promedio_dia, 0))) for r in dow_res.fetchall()}
+    promedio_global = Decimal(str(round(sum(dow_avg.values()) / Decimal(len(dow_avg) or 1), 0))) if dow_avg else Decimal("30000000")
+
+    # 4. Acreditaciones diferidas pendientes de ventas pasadas (+48h hábiles)
+    past_sales_res = await db.execute(
+        text("""
+            SELECT 
+                DATE(fecha) as fecha_venta,
+                forma_pago,
+                COALESCE(SUM(COALESCE(monto_pyg, monto)), 0) as total
+            FROM sale_payments
+            WHERE company_id = :cid
+              AND fecha >= NOW() - INTERVAL '6 days'
+              AND forma_pago IN ('TARJETA CREDITO', 'PIX')
+            GROUP BY DATE(fecha), forma_pago
+        """),
+        {"cid": cid},
+    )
+    acreditaciones_por_dia = defaultdict(lambda: {"credito": Decimal("0"), "pix": Decimal("0")})
+    for r in past_sales_res.fetchall():
+        f_acred = _add_business_days(r.fecha_venta, 2)
+        if f_acred >= today:
+            val = Decimal(str(r.total))
+            if r.forma_pago == "TARJETA CREDITO":
+                acreditaciones_por_dia[f_acred]["credito"] += val
+            else:
+                acreditaciones_por_dia[f_acred]["pix"] += val
+
+    # 5. Notas de Crédito de Acuerdos Comerciales / Bonificaciones disponibles
+    ncs_res = await db.execute(
+        text("""
+            SELECT 
+                COALESCE(SUM(saldo_disponible), 0) as total_nc,
+                COUNT(*) as qty_nc
+            FROM supplier_credit_notes
+            WHERE company_id = :cid
+              AND cancelado IS FALSE
+              AND saldo_disponible > 0
+              AND (motivo_categoria IS NULL OR motivo_categoria NOT IN ('faltante_recepcion', 'devolucion_rotura', 'devolucion_vencimiento'))
+        """),
+        {"cid": cid},
+    )
+    nc_row = ncs_res.fetchone()
+    total_nc_acuerdos = Decimal(str(nc_row.total_nc or 0)) if nc_row else Decimal("0")
+    qty_nc_acuerdos = int(nc_row.qty_nc or 0) if nc_row else 0
+
+    # 6. Proveedores en Fila de Pago (SupplierPaymentOrder en borrador/aprobada)
+    ops_res = await db.execute(
+        text("""
+            SELECT 
+                COALESCE(fecha_pago, created_at::date) as fecha_efectiva,
+                COALESCE(SUM(total_a_pagar), 0) as total_op
+            FROM supplier_payment_orders
+            WHERE company_id = :cid
+              AND estado IN ('borrador', 'aprobada', 'pendiente')
+            GROUP BY COALESCE(fecha_pago, created_at::date)
+        """),
+        {"cid": cid},
+    )
+    ops_por_dia = defaultdict(Decimal)
+    for r in ops_res.fetchall():
+        f_ef = r.fecha_efectiva if r.fecha_efectiva and r.fecha_efectiva >= today else today
+        ops_por_dia[f_ef] += Decimal(str(r.total_op))
+
+    pr_res = await db.execute(
+        text("""
+            SELECT 
+                pr.fecha_pago,
+                COALESCE(SUM(pri.monto_programado), 0) as total_pr
+            FROM payment_run_items pri
+            JOIN payment_runs pr ON pr.id = pri.payment_run_id
+            WHERE pr.company_id = :cid
+              AND pr.estado IN ('borrador', 'pendiente', 'en_revision')
+              AND pri.estado = 'pendiente'
+            GROUP BY pr.fecha_pago
+        """),
+        {"cid": cid},
+    )
+    for r in pr_res.fetchall():
+        f_pr = r.fecha_pago if r.fecha_pago and r.fecha_pago >= today else today
+        ops_por_dia[f_pr] += Decimal(str(r.total_pr))
+
+    # 7. Cartera de Cheques Emitidos al Cobro
+    cheques_res = await db.execute(
+        select(Cheque.fecha_pago, func.coalesce(func.sum(Cheque.monto), 0)).where(
+            Cheque.company_id == cid,
+            Cheque.tipo_cheque == "emitido",
+            Cheque.estado == "pendiente",
+        ).group_by(Cheque.fecha_pago)
+    )
+    cheques_por_dia = defaultdict(Decimal)
+    for r in cheques_res.fetchall():
+        f_ch = r[0] if r[0] and r[0] >= today else today
+        cheques_por_dia[f_ch] += Decimal(str(r[1]))
+
+    # 8. Nómina / Sueldok (estimación quincenal y fin de mes)
+    nomina_res = await db.execute(
+        text("""
+            SELECT COALESCE(SUM(salario_neto), 0)
+            FROM labor_settlements
+            WHERE company_id = :cid
+              AND created_at >= NOW() - INTERVAL '45 days'
+        """),
+        {"cid": cid},
+    )
+    nomina_mensual_base = Decimal(str(nomina_res.scalar() or "0"))
+    if nomina_mensual_base < Decimal("20000000"):
+        exp_nom_res = await db.execute(
+            text("""
+                SELECT COALESCE(SUM(monto), 0)
+                FROM expenses
+                WHERE company_id = :cid
+                  AND (categoria ILIKE '%nomina%' OR categoria ILIKE '%sueldo%' OR concepto ILIKE '%nomina%')
+                  AND fecha_gasto >= NOW() - INTERVAL '30 days'
+            """),
+            {"cid": cid},
+        )
+        nomina_mensual_base = Decimal(str(exp_nom_res.scalar() or "45000000"))
+
+    # 9. OPEX Basal Diario
+    opex_res = await db.execute(
+        text("""
+            SELECT COALESCE(SUM(monto), 0) / 30.0
+            FROM expenses
+            WHERE company_id = :cid
+              AND (es_pago_proveedor IS FALSE OR es_pago_proveedor IS NULL)
+              AND (categoria NOT ILIKE '%nomina%' AND categoria NOT ILIKE '%sueldo%')
+              AND fecha_gasto >= NOW() - INTERVAL '30 days'
+        """),
+        {"cid": cid},
+    )
+    opex_diario_estimado = Decimal(str(round(opex_res.scalar() or Decimal("2000000"), 0)))
+
+    # 10. Proyección día a día
+    proyecciones = []
+    saldo_acumulado = disponibilidad_total
+    dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    nc_restante = total_nc_acuerdos
+
+    for i in range(dias):
+        fecha_i = today + timedelta(days=i)
+        dow = fecha_i.isoweekday()
+        nombre_dow = dias_nombres[dow - 1]
+        es_habil = (dow <= 5)
+
+        # Ventas Contado
+        venta_base = dow_avg.get(dow, promedio_global)
+        ingreso_contado = (venta_base * ratio_contado).quantize(Decimal("1"))
+
+        # Acreditaciones Diferidas que caen en este día (+48h hábiles)
+        credito_proy = (venta_base * ratio_credito).quantize(Decimal("1"))
+        pix_proy = (venta_base * ratio_pix).quantize(Decimal("1"))
+        f_acred_futura = _add_business_days(fecha_i, 2)
+        acreditaciones_por_dia[f_acred_futura]["credito"] += credito_proy
+        acreditaciones_por_dia[f_acred_futura]["pix"] += pix_proy
+
+        acred_hoy_credito = acreditaciones_por_dia[fecha_i]["credito"]
+        acred_hoy_pix = acreditaciones_por_dia[fecha_i]["pix"]
+        total_acreditaciones_diferidas = acred_hoy_credito + acred_hoy_pix
+
+        # Egresos
+        egreso_fila_proveedores = ops_por_dia[fecha_i]
+        egreso_cheques = cheques_por_dia[fecha_i]
+
+        nc_aplicada_hoy = Decimal("0")
+        if egreso_fila_proveedores > 0 and nc_restante > 0:
+            nc_aplicada_hoy = min(egreso_fila_proveedores, nc_restante)
+            nc_restante -= nc_aplicada_hoy
+
+        egreso_nomina = Decimal("0")
+        if fecha_i.day in (15, 16) and es_habil:
+            egreso_nomina = (nomina_mensual_base * Decimal("0.40")).quantize(Decimal("1"))
+        elif (fecha_i + timedelta(days=1)).month != fecha_i.month and es_habil:
+            egreso_nomina = (nomina_mensual_base * Decimal("0.60")).quantize(Decimal("1"))
+
+        egreso_impuestos = Decimal("0")
+        if fecha_i.day in (20, 21) and es_habil:
+            egreso_impuestos = Decimal("15000000")
+
+        egreso_opex = opex_diario_estimado
+
+        total_ingresos = ingreso_contado + total_acreditaciones_diferidas + nc_aplicada_hoy
+        total_egresos = egreso_fila_proveedores + egreso_cheques + egreso_nomina + egreso_impuestos + egreso_opex - nc_aplicada_hoy
+        flujo_neto = total_ingresos - total_egresos
+        saldo_final = saldo_acumulado + flujo_neto
+        disponible_libre = max(Decimal("0"), saldo_final - colchon_dec)
+
+        proyecciones.append({
+            "fecha": fecha_i.isoformat(),
+            "dia_semana": nombre_dow,
+            "es_habil": es_habil,
+            "saldo_inicial": float(saldo_acumulado),
+            "ingresos": {
+                "ventas_contado": float(ingreso_contado),
+                "acreditaciones_credito_48h": float(acred_hoy_credito),
+                "acreditaciones_pix_48h": float(acred_hoy_pix),
+                "total_diferido_48h": float(total_acreditaciones_diferidas),
+                "nc_acuerdos_aplicadas": float(nc_aplicada_hoy),
+                "total_ingresos": float(total_ingresos),
+            },
+            "egresos": {
+                "proveedores_fila_pago": float(egreso_fila_proveedores),
+                "cheques_al_cobro": float(egreso_cheques),
+                "salarios_nomina": float(egreso_nomina),
+                "impuestos_tasas": float(egreso_impuestos),
+                "opex_gastos_basales": float(egreso_opex),
+                "total_egresos": float(total_egresos),
+            },
+            "flujo_neto": float(flujo_neto),
+            "saldo_final_proyectado": float(saldo_final),
+            "colchon_minimo": float(colchon_dec),
+            "disponible_libre_para_compromisos": float(disponible_libre),
+        })
+
+        saldo_acumulado = saldo_final
+
+    dias_count = len(proyecciones) or 1
+    prom_ingresos = sum(d["ingresos"]["total_ingresos"] for d in proyecciones) / dias_count
+    prom_egresos = sum(d["egresos"]["total_egresos"] for d in proyecciones) / dias_count
+    prom_disponible = sum(d["disponible_libre_para_compromisos"] for d in proyecciones) / dias_count
+
+    dia_critico = min(proyecciones, key=lambda x: x["saldo_final_proyectado"]) if proyecciones else None
+
+    return {
+        "resumen": {
+            "disponibilidad_total_hoy": float(disponibilidad_total),
+            "saldo_bancos_pyg": float(saldo_bancos),
+            "saldo_boveda_pyg": float(saldo_boveda),
+            "promedio_diario_ventas_contado": round(prom_ingresos * float(ratio_contado), 0),
+            "promedio_diario_acreditaciones_48h": round(prom_ingresos * float(ratio_credito + ratio_pix), 0),
+            "promedio_diario_egresos_comprometidos": round(prom_egresos, 0),
+            "promedio_diario_disponible_libre": round(prom_disponible, 0),
+            "colchon_seguridad": float(colchon_dec),
+            "total_nc_acuerdos_disponible": float(total_nc_acuerdos),
+            "qty_nc_acuerdos": qty_nc_acuerdos,
+            "dia_critico": {
+                "fecha": dia_critico["fecha"] if dia_critico else None,
+                "dia_semana": dia_critico["dia_semana"] if dia_critico else None,
+                "saldo_proyectado": dia_critico["saldo_final_proyectado"] if dia_critico else 0,
+                "disponible_libre": dia_critico["disponible_libre_para_compromisos"] if dia_critico else 0,
+            } if dia_critico else None,
+        },
+        "dias": proyecciones,
+    }
+
+
 # ── Budgets ────────────────────────────────────────────────────────────────────
 
 async def create_budget(db: AsyncSession, data: BudgetCreate) -> Budget:

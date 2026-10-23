@@ -747,6 +747,16 @@ async def update_projection(projection_id: str, body: CashFlowProjectionUpdate, 
     return result
 
 
+@router.get("/cash-flow/custom", response_model=dict)
+async def get_custom_cash_flow(
+    company_id: str = Query(),
+    dias: int = Query(30, ge=1, le=120),
+    colchon: float = Query(50000000.0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.get_custom_cash_flow(db, company_id, dias, colchon)
+
+
 @router.get("/cash-flow/dashboard", response_model=dict)
 async def get_cash_flow_dashboard(company_id: str = Query(), db: AsyncSession = Depends(get_db)):
     return await service.get_cash_flow_dashboard(db, company_id)

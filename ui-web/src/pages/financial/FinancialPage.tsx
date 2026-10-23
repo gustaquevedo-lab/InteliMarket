@@ -1,5 +1,6 @@
 import { Fragment, useState, useEffect, useMemo } from "react"
 import Supplier360Modal from "../purchases/Supplier360Modal"
+import CustomCashFlowView from "./CustomCashFlowView"
 import { api, type SupplierInvoice, type Budget, type PaymentRun, type CashFlowProjection, type CashFlowDashboard, type FinancialDashboard, type BankAccount } from "../../api"
 import { formatPYG, formatDate, getTodayAsuncion } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
@@ -77,6 +78,13 @@ export default function FinancialPage() {
   const [cashFlowHorizonte, setCashFlowHorizonte] = useState<14 | 30 | 60 | 90>(30)
   const [cashFlowLoading, setCashFlowLoading] = useState(false)
   const [cashFlowSaldoBancario, setCashFlowSaldoBancario] = useState<number | null>(null)
+  const [cashflowSubTab, setCashflowSubTab] = useState<"personalizado" | "estandar">("personalizado")
+  const [customCashFlow, setCustomCashFlow] = useState<any>(null)
+  const [customCashFlowLoading, setCustomCashFlowLoading] = useState(false)
+  const [customDias, setCustomDias] = useState<number>(30)
+  const [customColchon, setCustomColchon] = useState<number>(50_000_000)
+  const [colchonModalOpen, setColchonModalOpen] = useState(false)
+  const [colchonInputVal, setColchonInputVal] = useState<number>(50_000_000)
   const [alertConfig, setAlertConfig] = useState<{ activo: boolean; dias_horizonte: number; telefono: string | null } | null>(null)
   const [savingAlertConfig, setSavingAlertConfig] = useState(false)
   const [aging, setAging] = useState<any[]>([])
@@ -432,6 +440,7 @@ export default function FinancialPage() {
         chqsData,
         sncReqData,
         cfDashData,
+        customCfData,
       ] = await Promise.allSettled([
         api.financial.apDashboard(),
         api.financial.invoices.list(),
@@ -453,6 +462,7 @@ export default function FinancialPage() {
         api.cheques.list({ limit: 5000 }).catch(() => []),
         api.purchases.listSupplierNcRequests().catch(() => []),
         api.financial.cashFlow.dashboard().catch(() => null),
+        api.financial.cashFlow.custom({ dias: 30, colchon: 50000000 }).catch(() => null),
       ])
 
       if (dashData.status === "fulfilled") setDashboard(dashData.value)
@@ -469,6 +479,7 @@ export default function FinancialPage() {
           setCashFlow(cfDashData.value.proyecciones)
         }
       }
+      if (customCfData.status === "fulfilled" && customCfData.value) setCustomCashFlow(customCfData.value)
       if (budData.status === "fulfilled") setBudgets(budData.value)
       if (cnData.status === "fulfilled") setCreditNotes(cnData.value)
       if (retData.status === "fulfilled") setSupplierReturns(retData.value)
@@ -502,6 +513,19 @@ export default function FinancialPage() {
       toast.error("Error", "No se pudo actualizar el pronóstico de flujo de caja")
     } finally {
       setCashFlowLoading(false)
+    }
+  }
+
+  const fetchCustomCashFlow = async (dias = customDias, colchon = customColchon) => {
+    setCustomCashFlowLoading(true)
+    try {
+      const res = await api.financial.cashFlow.custom({ dias, colchon })
+      setCustomCashFlow(res)
+      toast.success("Flujo Personalizado Actualizado", "Sincronizado con ventas, OPs en fila y acreditaciones 48h")
+    } catch {
+      toast.error("Error", "No se pudo actualizar el flujo de caja personalizado")
+    } finally {
+      setCustomCashFlowLoading(false)
     }
   }
 
@@ -1971,7 +1995,7 @@ export default function FinancialPage() {
           { key: "dashboard", label: "Torre de Control AP", icon: BarChart3 },
           { key: "ap", label: "Cuentas por Pagar (Facturas)", icon: Receipt, count: cantFacturasPendientes },
           { key: "credit_notes", label: "Notas de Crédito Proveedores", icon: FileText, count: creditNotes.length },
-          { key: "cashflow", label: "Flujo de Caja (90 Días)", icon: TrendingUp },
+          { key: "cashflow", label: "Flujo de Caja (Personalizado & 90D)", icon: TrendingUp },
           { key: "presupuestos", label: "Presupuestos por Sector", icon: PiggyBank, count: budgets.length },
         ].map((t) => {
           const Icon = t.icon
@@ -4335,13 +4359,62 @@ export default function FinancialPage() {
           {/* TAB 4: FLUJO DE CAJA Y CAPACIDAD DE OBLIGACIÓN (SUPERMERCADO) */}
           {tab === "cashflow" && (
             <div className="space-y-6">
-              {/* Header de Control Ejecutivo */}
-              <div className="card p-6 bg-gradient-to-br from-blue-50/70 via-slate-50 to-indigo-50/50 dark:from-slate-900 dark:via-slate-800 dark:to-indigo-950/30 border border-blue-100 dark:border-blue-900/30 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-                      Pronóstico Financiero Real
-                    </span>
+              {/* SUB-PESTAÑAS DE FLUJO DE CAJA */}
+              <div className="flex items-center gap-2 border-b border-gray-200 dark:border-slate-800 pb-3">
+                <button
+                  type="button"
+                  onClick={() => setCashflowSubTab("personalizado")}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 ${
+                    cashflowSubTab === "personalizado"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-500/20"
+                      : "bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700"
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Flujo Personalizado (Diario Operativo)</span>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-400 text-slate-950">
+                    Recomendado
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCashflowSubTab("estandar")}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                    cashflowSubTab === "estandar"
+                      ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                      : "bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-700 border border-gray-200 dark:border-slate-700"
+                  }`}
+                >
+                  <TrendingUp className="w-3.5 h-3.5 text-blue-500" />
+                  <span>Flujo Estándar (90 Días)</span>
+                </button>
+              </div>
+
+              {cashflowSubTab === "personalizado" ? (
+                <CustomCashFlowView
+                  data={customCashFlow}
+                  loading={customCashFlowLoading}
+                  dias={customDias}
+                  colchon={customColchon}
+                  onRefresh={() => fetchCustomCashFlow(customDias, customColchon)}
+                  onChangeDias={(d) => {
+                    setCustomDias(d)
+                    fetchCustomCashFlow(d, customColchon)
+                  }}
+                  onChangeColchon={(c) => {
+                    setCustomColchon(c)
+                    fetchCustomCashFlow(customDias, c)
+                  }}
+                />
+              ) : (
+                <div className="space-y-6">
+                  {/* Header de Control Ejecutivo */}
+                  <div className="card p-6 bg-gradient-to-br from-blue-50/70 via-slate-50 to-indigo-50/50 dark:from-slate-900 dark:via-slate-800 dark:to-indigo-950/30 border border-blue-100 dark:border-blue-900/30 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                          Pronóstico Financiero Real
+                        </span>
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
                       Retail & Supermercado
                     </span>
@@ -4728,6 +4801,8 @@ export default function FinancialPage() {
                   </table>
                 </div>
               </div>
+            </div>
+          )}
 
               {/* Modal Detalle de Cartera de Cheques por Día */}
               {selectedDayCheques && (
