@@ -3757,16 +3757,16 @@ async def get_custom_cash_flow(
     total_nc_acuerdos = Decimal(str(nc_row.total_nc or 0)) if nc_row else Decimal("0")
     qty_nc_acuerdos = int(nc_row.qty_nc or 0) if nc_row else 0
 
-    # 6. Proveedores en Fila de Pago (SupplierPaymentOrder en borrador/aprobada)
+    # 6. Proveedores en Fila de Pago (SupplierPaymentOrder en borrador/registrado/aprobada)
     ops_res = await db.execute(
         text("""
             SELECT 
-                COALESCE(fecha_pago, created_at::date) as fecha_efectiva,
-                COALESCE(SUM(total_a_pagar), 0) as total_op
+                COALESCE(fecha_pago, fecha_emision, created_at::date) as fecha_efectiva,
+                COALESCE(SUM(COALESCE(monto_neto, monto_total)), 0) as total_op
             FROM supplier_payment_orders
             WHERE company_id = :cid
-              AND estado IN ('borrador', 'aprobada', 'pendiente')
-            GROUP BY COALESCE(fecha_pago, created_at::date)
+              AND estado IN ('registrado', 'borrador', 'aprobada', 'pendiente')
+            GROUP BY COALESCE(fecha_pago, fecha_emision, created_at::date)
         """),
         {"cid": cid},
     )
@@ -3778,19 +3778,19 @@ async def get_custom_cash_flow(
     pr_res = await db.execute(
         text("""
             SELECT 
-                pr.fecha_pago,
+                pr.fecha_programada as fecha_efectiva,
                 COALESCE(SUM(pri.monto_programado), 0) as total_pr
             FROM payment_run_items pri
             JOIN payment_runs pr ON pr.id = pri.payment_run_id
             WHERE pr.company_id = :cid
               AND pr.estado IN ('borrador', 'pendiente', 'en_revision')
               AND pri.estado = 'pendiente'
-            GROUP BY pr.fecha_pago
+            GROUP BY pr.fecha_programada
         """),
         {"cid": cid},
     )
     for r in pr_res.fetchall():
-        f_pr = r.fecha_pago if r.fecha_pago and r.fecha_pago >= today else today
+        f_pr = r.fecha_efectiva if r.fecha_efectiva and r.fecha_efectiva >= today else today
         ops_por_dia[f_pr] += Decimal(str(r.total_pr))
 
     # 7. Cartera de Cheques Emitidos al Cobro
