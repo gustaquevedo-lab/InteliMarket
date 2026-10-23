@@ -3,6 +3,7 @@
 import io
 import csv
 import zipfile
+import re
 from datetime import date
 from typing import Optional
 
