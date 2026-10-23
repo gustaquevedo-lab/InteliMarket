@@ -1166,11 +1166,12 @@ async def dismiss_supplier_nc_request(
     # Si la factura asociada estaba bloqueada por esta SNC, liberarla
     if snc.invoice_id:
         inv = (await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == snc.invoice_id))).scalar_one_or_none()
-        if inv and inv.bloqueada_para_pago:
+        if inv and (inv.bloqueada_para_pago or inv.estado == "retenida_discrepancia"):
             inv.bloqueada_para_pago = False
             inv.motivo_bloqueo = None
             inv.monto_retenido_nc = Decimal("0")
             inv.requiere_nc = False
+            inv.estado = "aprobada" if (inv.saldo_pendiente or 0) > 0 else "pagada"
             
     await db.commit()
     return {"success": True, "message": f"SNC {snc.numero_solicitud} archivada en histórico."}

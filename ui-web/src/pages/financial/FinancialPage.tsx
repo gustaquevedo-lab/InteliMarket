@@ -1421,6 +1421,9 @@ export default function FinancialPage() {
 
     // 1. Facturas Pendientes
     currentSelectedSupplier.pendingInvoices.forEach(inv => {
+      const saldo = Number(inv.saldo_pendiente ?? inv.total ?? 0)
+      const retenido = Number(inv.monto_retenido_nc || 0)
+      const neto = Math.max(0, saldo - retenido)
       docs.push({
         id: inv.id,
         docType: "factura",
@@ -1429,7 +1432,7 @@ export default function FinancialPage() {
         fechaEmision: inv.fecha_emision ? String(inv.fecha_emision) : null,
         fechaVencimiento: inv.fecha_vencimiento ? String(inv.fecha_vencimiento) : null,
         montoOriginal: Number(inv.total || 0),
-        saldoEfectivo: Number(inv.saldo_pendiente ?? inv.total ?? 0),
+        saldoEfectivo: neto > 0 && retenido > 0 ? neto : saldo,
         estado: inv.estado || "pendiente",
         isSelected: selectedOpInvoiceIds.has(inv.id),
         raw: inv,
@@ -1581,7 +1584,13 @@ export default function FinancialPage() {
 
   const handleSelectAllOpInvoices = () => {
     if (!currentSelectedSupplier) return
-    const payableInvoices = currentSelectedSupplier.pendingInvoices.filter(i => !i.bloqueada_para_pago && i.estado !== "retenida_discrepancia")
+    const payableInvoices = currentSelectedSupplier.pendingInvoices.filter(i => {
+      const saldo = Number(i.saldo_pendiente ?? i.total ?? 0)
+      const ret = Number(i.monto_retenido_nc || 0)
+      const neto = Math.max(0, saldo - ret)
+      const isBloqTotal = (i.bloqueada_para_pago || i.estado === "retenida_discrepancia") && neto <= 0
+      return !isBloqTotal && saldo > 0
+    })
     if (selectedOpInvoiceIds.size === payableInvoices.length) {
       setSelectedOpInvoiceIds(new Set())
     } else {
@@ -1679,7 +1688,11 @@ export default function FinancialPage() {
     if (!currentSelectedSupplier) return 0
     return currentSelectedSupplier.pendingInvoices
       .filter(i => selectedOpInvoiceIds.has(i.id))
-      .reduce((sum, i) => sum + Number(i.saldo_pendiente ?? i.total ?? 0), 0)
+      .reduce((sum, i) => {
+        const saldo = Number(i.saldo_pendiente ?? i.total ?? 0)
+        const retenido = Number(i.monto_retenido_nc || 0)
+        return sum + Math.max(0, saldo - retenido)
+      }, 0)
   }, [currentSelectedSupplier, selectedOpInvoiceIds])
 
   const selectedNcTotal = useMemo(() => {
@@ -1797,11 +1810,16 @@ export default function FinancialPage() {
     try {
       const allocations = currentSelectedSupplier.pendingInvoices
         .filter(i => selectedOpInvoiceIds.has(i.id))
-        .map(i => ({
-          invoice_id: i.id,
-          monto_aplicado: Number(i.saldo_pendiente ?? i.total ?? 0),
-          monto_retencion: 0,
-        }))
+        .map(i => {
+          const saldo = Number(i.saldo_pendiente ?? i.total ?? 0)
+          const retenido = Number(i.monto_retenido_nc || 0)
+          const payable = Math.max(0, saldo - retenido)
+          return {
+            invoice_id: i.id,
+            monto_aplicado: payable > 0 ? payable : saldo,
+            monto_retencion: 0,
+          }
+        })
 
       // Distribuir el saldo de las NCs seleccionadas hasta cubrir como máximo el total de las facturas
       let restanteACubrir = selectedFacturasTotal
@@ -2723,7 +2741,7 @@ export default function FinancialPage() {
                                       : "text-gray-500 hover:text-amber-600 dark:hover:text-amber-300"
                                   }`}
                                 >
-                                  Devoluciones ({currentSelectedSupplier.devolucionesPendientes.length})
+                                  Reclamos SNC / Devoluciones ({currentSelectedSupplier.devolucionesPendientes.length})
                                 </button>
                                 {pendingSncs.length > 0 && (
                                   <span className="px-2 py-1 rounded-md bg-amber-500/20 text-amber-400 font-bold border border-amber-500/40 text-[11px] flex items-center gap-1">
@@ -2830,7 +2848,16 @@ export default function FinancialPage() {
                               ) : (
                                 <Ban className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
                               )}
-                              <span>Anular / Archivar Devoluciones ({selectedOpReturnIds.size})</span>
+                              <span>
+                                {(() => {
+                                  const selectedReturns = currentSelectedSupplier.devolucionesPendientes.filter(r => selectedOpReturnIds.has(r.id))
+                                  const hasSnc = selectedReturns.some(r => r.tipo_origen === "solicitud_nc" || (r.codigo || "").startsWith("SNC-"))
+                                  const hasDev = selectedReturns.some(r => r.tipo_origen !== "solicitud_nc" && !(r.codigo || "").startsWith("SNC-"))
+                                  if (hasSnc && !hasDev) return `Archivar Solicitud NC (${selectedOpReturnIds.size})`
+                                  if (hasDev && !hasSnc) return `Anular Devolución Física (${selectedOpReturnIds.size})`
+                                  return `Anular / Archivar Reclamos y Devoluciones (${selectedOpReturnIds.size})`
+                                })()}
+                              </span>
                             </button>
                           )}
                         </div>
@@ -2903,12 +2930,21 @@ export default function FinancialPage() {
                               const isVencida = isFactura && doc.fechaVencimiento && doc.fechaVencimiento < today
                               const vtoText = (isFactura || isCheque) ? getDaysDiffText(doc.fechaVencimiento) : null
 
-                              const isBloqueada = isFactura && (doc.raw?.bloqueada_para_pago || doc.raw?.estado === "retenida_discrepancia")
+                              const saldo = Number(doc.raw?.saldo_pendiente ?? doc.raw?.total ?? 0)
+                              const retenido = Number(doc.raw?.monto_retenido_nc || 0)
+                              const netoPayable = Math.max(0, saldo - retenido)
+
+                              const isBloqueadaTotal = isFactura && (
+                                Boolean(doc.raw?.bloqueada_para_pago) ||
+                                (doc.raw?.estado === "retenida_discrepancia" && netoPayable <= 0)
+                              )
+                              const isRetenidaParcial = isFactura && !isBloqueadaTotal && retenido > 0
+
                               const motivoBloqueo = doc.raw?.motivo_bloqueo || "Bloqueada por discrepancia física o precio (3-Way Match)"
 
                               const handleToggle = () => {
                                 if (isFactura) {
-                                  if (isBloqueada) {
+                                  if (isBloqueadaTotal) {
                                     toast.error("Factura Bloqueada", motivoBloqueo)
                                     return
                                   }
@@ -2918,10 +2954,12 @@ export default function FinancialPage() {
                                 if (isDev) handleToggleOpReturn(doc.id)
                               }
 
+                              const isSnc = isDev && (doc.raw?.tipo_origen === "solicitud_nc" || doc.numero?.startsWith("SNC-"))
+
                               return (
                                 <Fragment key={`${doc.docType}-${doc.id}`}>
                                   <tr
-                                    className={`transition-colors ${isBloqueada ? "opacity-75 bg-amber-50/20 dark:bg-amber-950/10 cursor-not-allowed" : "cursor-pointer"} ${
+                                    className={`transition-colors ${isBloqueadaTotal ? "opacity-75 bg-amber-50/20 dark:bg-amber-950/10 cursor-not-allowed" : "cursor-pointer"} ${
                                     doc.isSelected
                                       ? isFactura
                                         ? "bg-indigo-50/60 dark:bg-indigo-950/30 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
@@ -2930,8 +2968,10 @@ export default function FinancialPage() {
                                         : "bg-amber-50/60 dark:bg-amber-950/30 hover:bg-amber-50 dark:hover:bg-amber-950/40"
                                       : isCheque
                                       ? "bg-blue-50/30 dark:bg-blue-950/10 hover:bg-blue-50/60 dark:hover:bg-blue-950/30"
-                                      : isBloqueada
+                                      : isBloqueadaTotal
                                       ? ""
+                                      : isRetenidaParcial
+                                      ? "bg-amber-50/15 dark:bg-amber-950/10 hover:bg-amber-50/40 dark:hover:bg-amber-950/30"
                                       : "hover:bg-gray-50 dark:hover:bg-slate-800/40"
                                   }`}
                                   onClick={isCheque ? () => setViewingChequesSupplier(currentSelectedSupplier) : handleToggle}
@@ -2944,7 +2984,7 @@ export default function FinancialPage() {
                                           <Banknote className="w-4 h-4" />
                                         </span>
                                       </div>
-                                    ) : isBloqueada ? (
+                                    ) : isBloqueadaTotal ? (
                                       <div className="flex items-center justify-center" title={`BLOQUEADA PARA PAGO: ${motivoBloqueo}`}>
                                         <span className="p-1 rounded bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400">
                                           <Lock className="w-4 h-4" />
@@ -2955,7 +2995,13 @@ export default function FinancialPage() {
                                         type="button"
                                         onClick={handleToggle}
                                         className="hover:scale-110 transition"
-                                        title={doc.isSelected ? "Deseleccionar de la OP" : "Incluir en la OP"}
+                                        title={
+                                          doc.isSelected
+                                            ? "Deseleccionar de la OP"
+                                            : isRetenidaParcial
+                                            ? `Incluir en la OP (Neto a pagar: ₲ ${formatPYG(netoPayable)}, Retención NC: ₲ ${formatPYG(retenido)})`
+                                            : "Incluir en la OP"
+                                        }
                                       >
                                         {doc.isSelected ? (
                                           <CheckSquare className={`w-5 h-5 ${
@@ -2993,10 +3039,17 @@ export default function FinancialPage() {
                                       </span>
                                     )}
                                     {isDev && (
-                                      <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-900/40">
-                                        <PackageMinus className="w-3.5 h-3.5" />
-                                        DEVOLUCIÓN PEND.
-                                      </span>
+                                      isSnc ? (
+                                        <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold px-2.5 py-1 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-800/60">
+                                          <FileText className="w-3.5 h-3.5 text-amber-600" />
+                                          SOLICITUD NC (SNC)
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1.5 text-[11px] font-extrabold px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-900/40">
+                                          <PackageMinus className="w-3.5 h-3.5" />
+                                          DEVOLUCIÓN FÍSICA
+                                        </span>
+                                      )
                                     )}
                                   </td>
 
@@ -3086,7 +3139,20 @@ export default function FinancialPage() {
                                   <td className={`p-3.5 font-mono font-bold text-right whitespace-nowrap ${
                                     isFactura ? "text-gray-900 dark:text-white" : isCheque ? "text-blue-700 dark:text-blue-300" : isNC ? "text-purple-600 dark:text-purple-300" : "text-amber-600 dark:text-amber-300"
                                   }`}>
-                                    {isFactura || isCheque ? formatPYG(doc.saldoEfectivo) : `-${formatPYG(Math.abs(doc.saldoEfectivo))}`}
+                                    {isFactura ? (
+                                      <div>
+                                        <span>{formatPYG(isRetenidaParcial ? netoPayable : saldo)}</span>
+                                        {isRetenidaParcial && (
+                                          <span className="block text-[10px] font-normal text-amber-600 dark:text-amber-400">
+                                            (Retenido NC: ₲ {formatPYG(retenido)})
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : isCheque ? (
+                                      formatPYG(doc.saldoEfectivo)
+                                    ) : (
+                                      `-${formatPYG(Math.abs(doc.saldoEfectivo))}`
+                                    )}
                                   </td>
 
                                   {/* 9. Estado */}
@@ -3096,9 +3162,13 @@ export default function FinancialPage() {
                                         En Tránsito
                                       </span>
                                     ) : isFactura ? (
-                                      isBloqueada ? (
+                                      isBloqueadaTotal ? (
                                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border border-rose-300 dark:border-rose-800 inline-flex items-center gap-1" title={motivoBloqueo}>
-                                          <Lock className="w-3 h-3" /> Retenida 3-Way
+                                          <Lock className="w-3 h-3" /> Bloqueada 3-Way
+                                        </span>
+                                      ) : isRetenidaParcial ? (
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300 border border-amber-300 dark:border-amber-800 inline-flex items-center gap-1" title={motivoBloqueo}>
+                                          <AlertCircle className="w-3 h-3 text-amber-600" /> Retención NC: ₲ {formatPYG(retenido)}
                                         </span>
                                       ) : (
                                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -3119,7 +3189,9 @@ export default function FinancialPage() {
                                           ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200"
                                           : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200"
                                       }`}>
-                                        {doc.raw?.estado === "acreditado_parcial" ? "Acreditado Parcial" : "Reclamo Físico"}
+                                        {isSnc
+                                          ? "SNC Pendiente Proveedor"
+                                          : doc.raw?.estado === "acreditado_parcial" ? "Acreditado Parcial" : "Reclamo Físico"}
                                       </span>
                                     )}
                                   </td>
@@ -3127,7 +3199,7 @@ export default function FinancialPage() {
                                   {/* 10. Acción */}
                                   <td className="p-3.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
                                     {isFactura && (
-                                      isBloqueada ? (
+                                      isBloqueadaTotal ? (
                                         <button
                                           type="button"
                                           disabled
@@ -3143,7 +3215,7 @@ export default function FinancialPage() {
                                           className="btn-ghost text-xs py-1 px-2.5 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400"
                                           title="Pagar individualmente esta factura"
                                         >
-                                          Pagar
+                                          {isRetenidaParcial ? `Pagar Neto (₲ ${formatPYG(netoPayable)})` : "Pagar"}
                                         </button>
                                       )
                                     )}
