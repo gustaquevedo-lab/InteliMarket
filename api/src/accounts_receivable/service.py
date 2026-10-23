@@ -2409,6 +2409,87 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
     nuevo_saldo = saldo_actual - monto_pago
     nuevo_estado = "PAGADO" if nuevo_saldo <= Decimal("0") else "PAGADO_PARCIAL"
 
+    # Resolver customer_id de la empresa o comprobantes
+    cust_id = getattr(rem, "empresa_customer_id", None)
+    if not cust_id:
+        q_c = text("SELECT id FROM customers WHERE company_id = :cid AND (razon_social = :nom OR ruc = :ruc) LIMIT 1")
+        r_c = await db.execute(q_c, {"cid": company_id, "nom": rem.empresa_vinculada_nombre, "ruc": getattr(rem, "empresa_vinculada_ruc", "")})
+        cust_id = r_c.scalar()
+    if not cust_id:
+        q_c2 = text("SELECT customer_id FROM accounts_receivable WHERE corporate_remission_id = :rem_id LIMIT 1")
+        r_c2 = await db.execute(q_c2, {"rem_id": remission_id})
+        cust_id = r_c2.scalar()
+
+    p_id = uuid.uuid4()
+    p_date = getattr(data, "fecha_pago", None) or date.today()
+    seq_res = await db.execute(
+        text("SELECT count(*) FROM receivable_payments WHERE company_id = :cid AND fecha = :fec"),
+        {"cid": company_id, "fec": p_date}
+    )
+    daily_seq = (seq_res.scalar() or 0) + 1
+    p_date_str = p_date.strftime("%Y%m%d") if hasattr(p_date, "strftime") else str(p_date).replace("-", "")
+    numero_recibo = f"REC-{p_date_str}-{daily_seq:04d}"
+
+    if cust_id:
+        uid = uuid.UUID(str(user_id)) if user_id else None
+        await db.execute(
+            text("""
+                INSERT INTO receivable_payments
+                    (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo,
+                     bank_account_id, cheque_id, destino_fondos, monto_pyg, monto_facturas_canceladas,
+                     monto_transferencia, monto_cheque, referencia_transferencia, created_at)
+                VALUES
+                    (:id, :company_id, :customer_id, :monto_total, 'PYG', :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo,
+                     :bank_account_id, :cheque_id, :destino_fondos, :monto_pyg, :monto_facturas_canceladas,
+                     :monto_transferencia, :monto_cheque, :referencia_transferencia, NOW())
+            """),
+            {
+                "id": p_id,
+                "company_id": company_id,
+                "customer_id": str(cust_id),
+                "monto_total": float(monto_pago),
+                "forma_pago": forma_pago,
+                "referencia": getattr(data, "referencia", None) or f"Remisión {rem.numero_remision}",
+                "fecha": p_date,
+                "observaciones": f"Cobro Remisión {rem.numero_remision} - {empresa_nombre} (Período: {rem.periodo_mes})",
+                "registrado_por": uid,
+                "numero_recibo": numero_recibo,
+                "bank_account_id": getattr(data, "bank_account_id", None),
+                "cheque_id": cheque_id if forma_pago == "cheque" else None,
+                "destino_fondos": "banco" if forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr") else ("boveda" if forma_pago == "efectivo" else "cartera"),
+                "monto_pyg": float(monto_pago),
+                "monto_facturas_canceladas": float(monto_pago),
+                "monto_transferencia": float(monto_pago) if forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr") else 0,
+                "monto_cheque": float(monto_pago) if forma_pago == "cheque" else 0,
+                "referencia_transferencia": getattr(data, "referencia", None),
+            }
+        )
+
+        q_ars = text("""
+            SELECT id, saldo_pendiente, monto_original 
+            FROM accounts_receivable 
+            WHERE corporate_remission_id = :rem_id 
+            ORDER BY fecha_emision ASC
+        """)
+        ars_res = await db.execute(q_ars, {"rem_id": remission_id})
+        remanente = Decimal(str(monto_pago))
+        for ar_row in ars_res.fetchall():
+            if remanente <= Decimal("0"):
+                break
+            m_orig = Decimal(str(ar_row.monto_original or 0))
+            m_ap = min(remanente, m_orig)
+            if m_ap > 0:
+                await db.execute(
+                    text("""
+                        INSERT INTO receivable_payment_allocations
+                            (id, receivable_payment_id, accounts_receivable_id, monto, created_at)
+                        VALUES
+                            (gen_random_uuid(), :pid, :arid, :monto, NOW())
+                    """),
+                    {"pid": p_id, "arid": ar_row.id, "monto": float(m_ap)}
+                )
+                remanente -= m_ap
+
     await db.execute(
         text("""
             UPDATE ar_corporate_remissions
@@ -2434,10 +2515,88 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
     await db.flush()
     return {
         "remission_id": str(remission_id),
+        "payment_id": str(p_id),
+        "numero_recibo": numero_recibo,
         "numero_remision": rem.numero_remision,
         "monto_pagado": float(monto_pago),
         "saldo_pendiente": float(nuevo_saldo),
         "estado": nuevo_estado,
+    }
+
+
+async def get_corporate_remission_receipt_data(db: AsyncSession, company_id: str, remission_id: str) -> dict | None:
+    """Obtiene los datos estructurados del Recibo Oficial de Cobranza (A6 Horizontal) para una remisión corporativa cobrada.
+    Si la remisión ya tiene un pago formal en receivable_payments, lo estira.
+    Si fue cobrada previamente antes de registrar receivable_payments, sintetiza fielmente el recibo a partir de la remisión."""
+    q_p = text("""
+        SELECT rp.id 
+        FROM receivable_payments rp
+        JOIN receivable_payment_allocations rpa ON rpa.receivable_payment_id = rp.id
+        JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
+        WHERE ar.corporate_remission_id = :rem_id
+        ORDER BY rp.created_at DESC
+        LIMIT 1
+    """)
+    p_res = await db.execute(q_p, {"rem_id": remission_id})
+    p_id = p_res.scalar()
+    if p_id:
+        data = await get_payment_receipt_data(db, str(p_id))
+        if data:
+            return data
+
+    q_rem = text("SELECT * FROM ar_corporate_remissions WHERE id = :id AND company_id = :cid")
+    rem_res = await db.execute(q_rem, {"id": remission_id, "cid": company_id})
+    rem = rem_res.fetchone()
+    if not rem:
+        return None
+
+    monto_total = float(rem.monto_total or 0)
+    saldo_pend = float(rem.saldo_pendiente or 0)
+    monto_cobrado = max(0.0, monto_total - saldo_pend)
+    if monto_cobrado <= 0 and rem.estado == "PAGADO":
+        monto_cobrado = monto_total
+
+    f_pago = rem.fecha_recepcion or (rem.updated_at.date() if rem.updated_at else date.today())
+    num_recibo = f"REC-CORP-{rem.numero_remision}"
+
+    q_docs = text("""
+        SELECT ar.id as accounts_receivable_id, ar.numero_documento, ar.fecha_emision,
+               ar.fecha_vencimiento, ar.monto_original, ar.saldo_pendiente, ar.monto_original as monto,
+               ar.monto_original as monto_aplicado, ar.sale_id, c.razon_social as titular_nombre
+        FROM accounts_receivable ar
+        LEFT JOIN customers c ON c.id = ar.customer_id
+        WHERE ar.corporate_remission_id = :rem_id
+        ORDER BY ar.fecha_emision ASC
+    """)
+    docs_res = await db.execute(q_docs, {"rem_id": remission_id})
+    allocs = [dict(r._mapping) for r in docs_res.fetchall()]
+
+    return {
+        "id": str(rem.id),
+        "company_id": str(rem.company_id),
+        "numero_recibo": num_recibo,
+        "fecha": f_pago,
+        "monto_total": monto_cobrado,
+        "moneda": "PYG",
+        "customer_name": rem.empresa_vinculada_nombre,
+        "customer_ruc": rem.empresa_vinculada_ruc or "—",
+        "customer_telefono": "",
+        "empresa_vinculada_nombre": rem.empresa_vinculada_nombre,
+        "observaciones": f"Cancelación Deuda Corporativa Extra Club - Remisión {rem.numero_remision} (Período: {rem.periodo_mes})",
+        "allocations": allocs,
+        "notas_credito": [],
+        "total_notas_credito": 0,
+        "total_facturas_original": sum(float(a.get("monto_original") or 0) for a in allocs),
+        "cheques": [],
+        "formas_pago_detalle": [
+            {
+                "tipo": "transferencia",
+                "descripcion": f"Cobro Remisión {rem.numero_remision}",
+                "moneda": "PYG",
+                "monto": monto_cobrado,
+                "monto_gs": monto_cobrado,
+            }
+        ],
     }
 
 

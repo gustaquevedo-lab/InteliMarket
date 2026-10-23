@@ -899,10 +899,27 @@ export default function AccountsReceivablePage() {
         toast.success("Pago de empresa registrado", `Se canceló ${formatPYG(monto)} del saldo adeudado por la empresa (${res.estado})`)
       }
 
+      const remId = showPayRemissionModal.id
+      const remNum = res.numero_recibo || res.numero_remision || showPayRemissionModal.numero_remision
+      const docsCount = showPayRemissionModal.funcionarios_count || 1
+
       setShowPayRemissionModal(null)
       fetchRemissions()
       fetchAgreements()
       fetchData()
+
+      // Descarga automática del Recibo Oficial de Cobranza (A6) y apertura del modal de confirmación
+      if (remId) {
+        api.accountsReceivable.downloadRemisionReciboPdf(remId, remNum)
+      }
+      if (res.payment_id) {
+        setCompletedReceipt({
+          id: res.payment_id,
+          numero_recibo: res.numero_recibo || `REC-${remNum}`,
+          monto_total: monto,
+          documentos_afectados: docsCount,
+        })
+      }
     } catch (e: any) {
       toast.error("Error al registrar pago", e.message || "No se pudo registrar el pago de la remisión")
     } finally {
@@ -2979,6 +2996,17 @@ export default function AccountsReceivablePage() {
                                   <FileDown className="w-3.5 h-3.5 text-slate-500" />
                                   <span>Extractos</span>
                                 </button>
+
+                                {(r.estado === "PAGADO" || r.estado === "PAGADO_PARCIAL") && (
+                                  <button
+                                    onClick={() => api.accountsReceivable.downloadRemisionReciboPdf(r.id, r.numero_remision)}
+                                    className="p-1.5 px-2 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 inline-flex items-center gap-1 text-[11px] font-bold shadow-2xs transition"
+                                    title="Descargar / Reimprimir Recibo Oficial de Cobranza (A6 Horizontal con QR)"
+                                  >
+                                    <FileCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                    <span>Recibo</span>
+                                  </button>
+                                )}
 
                                 {r.estado !== "PAGADO" && r.estado !== "ANULADO" && (
                                   <button

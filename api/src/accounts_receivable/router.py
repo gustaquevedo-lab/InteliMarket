@@ -622,6 +622,41 @@ async def export_corporate_remission_extractos_pdf(
     )
 
 
+@router.get("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/receipt.pdf")
+async def export_corporate_remission_receipt_pdf(
+    company_id: str,
+    remission_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera el Recibo Oficial de Cobranza en A6 horizontal con QR para una remisión cobrada a empresa vinculada."""
+    receipt_data = await service.get_corporate_remission_receipt_data(db, company_id, remission_id)
+    if not receipt_data:
+        raise HTTPException(status_code=404, detail="Recibo de remisión corporativa no encontrado")
+
+    company = await _get_company_info(db, company_id)
+
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+    if forwarded_host and "superextra.com.py" in forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host}"
+    else:
+        base_url = os.getenv("PUBLIC_APP_URL", "https://intelimarket.superextra.com.py")
+
+    pdf_bytes = ar_pdf_reports.generate_recibo_a6_pdf(company, receipt_data, verification_base_url=base_url)
+
+    safe_num = (receipt_data.get("numero_recibo") or remission_id[:8]).replace("/", "_")
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=recibo_{safe_num}.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
 @router.post("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/pay")
 async def pay_corporate_remission_endpoint(
     company_id: str,
