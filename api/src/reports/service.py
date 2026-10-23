@@ -745,7 +745,7 @@ async def get_fiscal_rg90_ventas(
         company_timbrado = comp_row.timbrado_numero or config_dict.get("timbrado_dnit") or company_timbrado
 
     params = {"company_id": company_id}
-    where = "v.company_id = :company_id AND v.estado <> 'borrador'"
+    where = "v.company_id = :company_id AND v.estado IN ('confirmado', 'completada')"
     where += _build_tz_filter(fecha_desde, fecha_hasta, params, "v.fecha")
 
     if punto_emision and punto_emision != "todos":
@@ -817,7 +817,7 @@ async def get_fiscal_rg90_ventas(
     }
 
     for r in rows:
-        es_nc = (r["estado"] == "cancelado" or r["tipo_comprobante"] in ("nota_credito", "nc"))
+        es_nc = (r["tipo_comprobante"] in ("nota_credito", "nc"))
         tipo_comprobante_cod = 110 if es_nc else 109  # 109 = Factura, 110 = Nota de Crédito
 
         raw_ruc = (r["cliente_ruc"] or "").strip()
