@@ -22,8 +22,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem, SupplierCreditNote
-from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseInboxConfig, PurchaseReceipt
+from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem, SupplierCreditNote, SupplierCreditNoteApplication
+from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseInboxConfig, PurchaseReceipt, SupplierNcRequest
 from api.src.purchases.sifen_xml_parser import parse_sifen_xml, map_sifen_items_to_catalog
 from api.src.purchases.utils import normalize_invoice_number, invoice_numbers_match
 
@@ -322,6 +322,55 @@ async def ingest_parsed_dte(
         )
         db.add(nc)
         await db.flush()
+
+        # AUTO-CONCILIACIÓN INTELIGENTE: Si el proveedor tiene una SNC pendiente que calza con esta NC, vincularla de inmediato
+        try:
+            snc_q = select(SupplierNcRequest).where(
+                SupplierNcRequest.company_id == company_uuid,
+                SupplierNcRequest.supplier_id == supplier.id,
+                SupplierNcRequest.estado.in_(("pendiente_entrega", "entregada_parcial"))
+            ).order_by(SupplierNcRequest.created_at.asc())
+            open_sncs = (await db.execute(snc_q)).scalars().all()
+            
+            matched_snc = None
+            for s in open_sncs:
+                if abs((s.monto_reclamado or Decimal("0")) - total_nc) <= Decimal("10"):
+                    matched_snc = s
+                    break
+            
+            if matched_snc:
+                matched_snc.estado = "resuelta"
+                matched_snc.resolved_at = datetime.now(timezone.utc)
+                matched_snc.nc_recibida_numero = nc.numero
+                matched_snc.nc_recibida_timbrado = nc.timbrado
+                matched_snc.nc_recibida_monto = total_nc
+                matched_snc.nc_recibida_fecha = nc.fecha
+                matched_snc.observaciones = f"{(matched_snc.observaciones or '').strip()} [Auto-conciliada con NC SIFEN {nc.numero}]".strip()
+                
+                if matched_snc.invoice_id:
+                    inv_match = (await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == matched_snc.invoice_id))).scalar_one_or_none()
+                    if inv_match:
+                        nc.numero_factura_origen = inv_match.numero_factura
+                        inv_match.monto_retenido_nc = max(Decimal("0"), (inv_match.monto_retenido_nc or Decimal("0")) - total_nc)
+                        if inv_match.monto_retenido_nc <= Decimal("10"):
+                            inv_match.monto_retenido_nc = Decimal("0")
+                            inv_match.requiere_nc = False
+                            inv_match.bloqueada_para_pago = False
+                            inv_match.estado = "aprobada" if (inv_match.saldo_pendiente or Decimal("0")) > Decimal("0") else "pagada"
+                            inv_match.motivo_bloqueo = None
+                        
+                        db.add(SupplierCreditNoteApplication(
+                            company_id=company_uuid,
+                            credit_note_id=nc.id,
+                            invoice_id=inv_match.id,
+                            monto_aplicado=total_nc,
+                            observaciones=f"Auto-conciliación SIFEN contra {matched_snc.numero_solicitud}"
+                        ))
+                        # Si quedó vinculada directamente a la factura, no duplicar saldo en monedero libre
+                        nc.saldo_disponible = Decimal("0")
+                        logger.info(f"SNC {matched_snc.numero_solicitud} auto-conciliada exitosamente con NC SIFEN {nc.numero} para factura {inv_match.numero_factura}")
+        except Exception as e_snc:
+            logger.warning(f"Error menor en auto-conciliación SNC de NC {nc.numero}: {e_snc}")
         return {
             "created": True,
             "id": str(nc.id),

@@ -53,6 +53,35 @@ async def perform_3way_match(
     if not invoice:
         raise ValueError("Factura de proveedor no encontrada.")
 
+    # GUARD CLAUSE: Si la factura ya fue pagada, cancelada o no tiene saldo pendiente exigible,
+    # JAMÁS correr matching ni generar nuevas SNCs o retenciones
+    if invoice.estado in ("pagada", "cancelada") or (invoice.saldo_pendiente or Decimal("0")) <= Decimal("0"):
+        # Auto-resolver limpiamente cualquier SNC previa huérfana de esta factura
+        sncs_q = select(SupplierNcRequest).where(
+            SupplierNcRequest.invoice_id == invoice.id,
+            SupplierNcRequest.estado.in_(("pendiente_entrega", "entregada_parcial"))
+        )
+        orphan_sncs = (await db.execute(sncs_q)).scalars().all()
+        for osnc in orphan_sncs:
+            osnc.estado = "resuelta"
+            osnc.resolved_at = datetime.now(timezone.utc)
+            osnc.observaciones = f"{(osnc.observaciones or '').strip()} [Auto-resuelta: Factura origen ya pagada o cancelada]".strip()
+        
+        return {
+            "invoice_id": str(invoice.id),
+            "numero_factura": invoice.numero_factura,
+            "estado_match": "factura_ya_saldada",
+            "bloqueada_para_pago": False,
+            "monto_retenido_nc": 0.0,
+            "requiere_nc": False,
+            "total_factura": float(invoice.total or 0),
+            "total_recibido": float(invoice.total or 0),
+            "discrepancia_neta": 0.0,
+            "lineas": [],
+            "snc_generada": None,
+            "motivo_bloqueo": None,
+        }
+
     # 2. Buscar Orden de Compra asociada
     po: Optional[PurchaseOrder] = None
     po_items_map: dict[str, PurchaseOrderItem] = {}
@@ -443,17 +472,36 @@ async def perform_3way_match(
 
     elif discrepancia_neta_pendiente > TOLERANCIA_PRECIO_GS:
         estado_match = "discrepancia_detectada"
-        invoice.bloqueada_para_pago = True
-        invoice.estado = "retenida_discrepancia"
-        invoice.monto_retenido_nc = discrepancia_neta_pendiente
+        invoice.monto_retenido_nc = min(invoice.saldo_pendiente or invoice.total, discrepancia_neta_pendiente)
         invoice.requiere_nc = True
-        invoice.motivo_bloqueo = (
-            f"BLOQUEADA PARA PAGO: Discrepancia neta de {discrepancia_neta_pendiente:,.0f} Gs. con el Pedido/Muelle. "
-            f"Sin entrega de la Nota de Crédito correspondiente, no se liberará el pago."
-        )
+
+        neto_disponible = (invoice.saldo_pendiente or Decimal("0")) - invoice.monto_retenido_nc
+        if neto_disponible > Decimal("0"):
+            invoice.bloqueada_para_pago = False
+            invoice.estado = "retenida_discrepancia"
+            invoice.motivo_bloqueo = (
+                f"Retención parcial de {invoice.monto_retenido_nc:,.0f} Gs. por discrepancia física/precio (3-Way Match). "
+                f"Neto a pagar autorizado: {neto_disponible:,.0f} Gs."
+            )
+        else:
+            invoice.bloqueada_para_pago = True
+            invoice.estado = "retenida_discrepancia"
+            invoice.motivo_bloqueo = (
+                f"BLOQUEADA PARA PAGO: Discrepancia neta de {discrepancia_neta_pendiente:,.0f} Gs. con el Pedido/Muelle. "
+                f"Sin entrega de la Nota de Crédito correspondiente, no se liberará el pago."
+            )
 
         # Buscar si ya existe una solicitud de NC pendiente
         active_snc = next((s for s in all_inv_sncs if s.estado in ("pendiente_entrega", "entregada_parcial")), None)
+        if not active_snc:
+            existing_snc_db = (await db.execute(
+                select(SupplierNcRequest).where(
+                    SupplierNcRequest.invoice_id == invoice.id,
+                    SupplierNcRequest.estado.in_(("pendiente_entrega", "entregada_parcial"))
+                )
+            )).scalar_one_or_none()
+            if existing_snc_db:
+                active_snc = existing_snc_db
         if not active_snc:
             # Obtener el número correlativo más alto existente para evitar colisiones por huecos o eliminaciones
             all_sncs_res = await db.execute(
