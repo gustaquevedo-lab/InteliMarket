@@ -92,6 +92,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
 
   // Modal Planilla Imprimible de Conteo Físico
   const [showPrintModal, setShowPrintModal] = useState(false)
+  const [printBlindMode, setPrintBlindMode] = useState(true)
 
   // Modal Reconciliación de Ítem
   const [reconcileTarget, setReconcileTarget] = useState<PhysicalSessionItem | null>(null)
@@ -1344,7 +1345,17 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-700 px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 shadow-xs">
+                      <input
+                        type="checkbox"
+                        checked={printBlindMode}
+                        onChange={(e) => setPrintBlindMode(e.target.checked)}
+                        className="rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>Modo Ciego (Ocultar Stock Teórico)</span>
+                    </label>
+
                     <button
                       type="button"
                       onClick={() => window.print()}
@@ -1374,8 +1385,8 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                       <p className="text-xs text-slate-600 font-medium">
                         GRUPO SANTA TERESA E.A.S. • RUC: 80150377-9
                       </p>
-                      <p className="text-xs font-bold text-emerald-700 mt-1">
-                        PLANILLA DE CONTEO FÍSICO Y AUDITORÍA DE STOCK
+                      <p className="text-xs font-bold text-emerald-700 mt-1 uppercase">
+                        {printBlindMode ? "Planilla de Conteo Físico Ciego (Auditoría de Stock)" : "Planilla de Conteo Físico y Auditoría de Stock"}
                       </p>
                     </div>
                     <div className="text-right text-xs text-slate-600 space-y-0.5">
@@ -1428,7 +1439,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                         <th className="p-2 w-10 text-center">#</th>
                         <th className="p-2 w-32 font-mono">Cód. Barras</th>
                         <th className="p-2">Descripción de Producto</th>
-                        <th className="p-2 w-24 text-right">Stock Sist.</th>
+                        {!printBlindMode && <th className="p-2 w-24 text-right">Stock Sist.</th>}
                         <th className="p-2 w-24 text-center border-l border-slate-200">Conteo 1</th>
                         <th className="p-2 w-24 text-center border-l border-slate-200">Conteo 2</th>
                         <th className="p-2 w-32 border-l border-slate-200">Obs / Vto.</th>
@@ -1440,9 +1451,11 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                           <td className="p-2 text-center text-slate-400">{idx + 1}</td>
                           <td className="p-2 font-mono text-slate-600">{item.product_codigo_barra || "-"}</td>
                           <td className="p-2 font-medium text-slate-900">{item.product_nombre}</td>
-                          <td className="p-2 text-right font-mono font-bold text-slate-600">
-                            {Number(item.cantidad_sistema).toLocaleString("es-PY")}
-                          </td>
+                          {!printBlindMode && (
+                            <td className="p-2 text-right font-mono font-bold text-slate-600">
+                              {Number(item.cantidad_sistema).toLocaleString("es-PY")}
+                            </td>
+                          )}
                           <td className="p-2 text-center border-l border-slate-200 font-mono font-black text-blue-700 bg-slate-50/50">
                             {item.cantidad_conteo_1 !== null && item.cantidad_conteo_1 !== undefined
                               ? Number(item.cantidad_conteo_1).toLocaleString("es-PY")
