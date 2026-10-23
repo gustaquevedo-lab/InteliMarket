@@ -4686,6 +4686,15 @@ export const api = {
           `/v1/financial/invoices/batch-revert-payments?company_id=${COMPANY_ID}`,
           data
         ),
+      void: (id: string, motivo?: string) => {
+        const query = new URLSearchParams({ company_id: COMPANY_ID, ...(motivo ? { motivo } : {}) }).toString()
+        return client.delete<{ success: boolean; message: string; invoice_id: string }>(`/v1/financial/invoices/${id}?${query}`)
+      },
+      batchVoid: (data: { invoice_ids: string[]; motivo?: string }) =>
+        client.post<{ success: boolean; voided_count: number; voided_ids: string[]; errors: any[] }>(
+          `/v1/financial/invoices/batch-void?company_id=${COMPANY_ID}`,
+          data
+        ),
       listPaid: (params?: { supplier_id?: string; search?: string; desde?: string; hasta?: string; limit?: number; offset?: number }) =>
         client.get<{
           items: Array<SupplierInvoice & { supplier_nombre?: string; supplier_ruc?: string; ultimo_pago_fecha?: string; ultimo_pago_metodo?: string; pagos_count?: number }>

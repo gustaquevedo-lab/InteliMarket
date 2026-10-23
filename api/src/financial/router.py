@@ -16,7 +16,7 @@ from api.src.auth.middleware import require_auth
 from api.src.financial.schemas import (
     SupplierInvoiceCreate, SupplierInvoiceResponse, SupplierInvoiceWithPayments,
     SupplierInvoicePaymentCreate, SupplierInvoicePaymentResponse,
-    PaidInvoicesListResponse, SupplierInvoiceBatchRevertRequest,
+    PaidInvoicesListResponse, SupplierInvoiceBatchRevertRequest, SupplierInvoiceBatchVoidRequest,
     BankAccountCreate, BankAccountUpdate, BankAccountResponse,
     BankTransactionCreate, BankTransferCreate, BankTransactionImport, BankTransactionResponse,
     ReconcileRequest,
@@ -49,6 +49,21 @@ def _resolve_company_id(company_id: str | None = None, user: dict | None = None)
     if user and isinstance(user, dict):
         return user.get("company_id") or DEFAULT_COMPANY_ID
     return DEFAULT_COMPANY_ID
+
+
+def _check_admin_permission(user: dict | None) -> None:
+    if not user or not isinstance(user, dict):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Autenticación requerida."
+        )
+    role = str(user.get("rol") or user.get("role") or "").lower()
+    is_superadmin = bool(user.get("is_superadmin", False))
+    if role not in ("admin", "administrador", "superadmin") and not is_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operación restringida: Solo los usuarios con rol Administrador pueden anular o eliminar facturas de la base de datos."
+        )
 
 
 router = APIRouter(prefix="/api/v1/financial", tags=["financial"], dependencies=[Depends(require_auth)])
@@ -237,6 +252,51 @@ async def batch_revert_supplier_invoices(
         company_id=cid,
         invoice_ids=body.invoice_ids,
         user_id=user.get("id"),
+        motivo=body.motivo,
+    )
+
+
+@router.delete("/invoices/{invoice_id}")
+async def void_supplier_invoice(
+    invoice_id: str,
+    motivo: str | None = Query(None),
+    company_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Anula/elimina completamente de la base de datos una factura de proveedor sin OC vinculada.
+
+    Operación restringida exclusivamente a administradores.
+    """
+    _check_admin_permission(user)
+    cid = _resolve_company_id(company_id, user)
+    return await service.void_supplier_invoice(
+        db=db,
+        company_id=cid,
+        invoice_id=invoice_id,
+        user=user,
+        motivo=motivo,
+    )
+
+
+@router.post("/invoices/batch-void")
+async def batch_void_supplier_invoices(
+    body: SupplierInvoiceBatchVoidRequest,
+    company_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Anula/elimina completamente de la base de datos múltiples facturas de proveedor en bloque sin OC.
+
+    Operación restringida exclusivamente a administradores.
+    """
+    _check_admin_permission(user)
+    cid = _resolve_company_id(company_id, user)
+    return await service.batch_void_supplier_invoices(
+        db=db,
+        company_id=cid,
+        invoice_ids=body.invoice_ids,
+        user=user,
         motivo=body.motivo,
     )
 

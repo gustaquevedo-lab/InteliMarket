@@ -372,6 +372,26 @@ export default function PurchasesPage() {
   }>>([])
   const [resolvingNc, setResolvingNc] = useState(false)
 
+  // Rol y Permisos de Administrador para anulación de facturas
+  const isAdmin = useMemo(() => {
+    if (!user) return false
+    if (user.is_superadmin) return true
+    const role = (user.rol || "").toLowerCase()
+    return role === "admin" || role === "administrador" || role === "superadmin"
+  }, [user])
+
+  // Estados para Anulación Definitiva de Facturas sin OC (Solo Admin)
+  const [showVoidInvoiceModal, setShowVoidInvoiceModal] = useState(false)
+  const [invoiceToVoid, setInvoiceToVoid] = useState<any | null>(null)
+  const [voidInvoiceMotivo, setVoidInvoiceMotivo] = useState("")
+  const [voidingInvoice, setVoidingInvoice] = useState(false)
+
+  // Selección múltiple para anulación en bloque de facturas sin OC
+  const [selectedVoidInvoiceIds, setSelectedVoidInvoiceIds] = useState<string[]>([])
+  const [showBatchVoidModal, setShowBatchVoidModal] = useState(false)
+  const [batchVoidMotivo, setBatchVoidMotivo] = useState("")
+  const [batchVoiding, setBatchVoiding] = useState(false)
+
   // Estados para Recepción de Factura y Matching contra Pedido
   const [showReceiveInvoiceModal, setShowReceiveInvoiceModal] = useState(false)
   const [selectedPoForInvoiceReceipt, setSelectedPoForInvoiceReceipt] = useState<PurchaseOrder | null>(null)
@@ -1826,6 +1846,54 @@ export default function PurchasesPage() {
     }
   }
 
+  const handleOpenVoidInvoiceModal = (inv: any) => {
+    setInvoiceToVoid(inv)
+    const isEmail = (inv.notas || "").toLowerCase().includes("imap") || Boolean(inv.xml_sifen_url)
+    setVoidInvoiceMotivo(isEmail ? "Factura recibida por correo electrónico sin Orden de Compra asociada" : "Factura cargada sin Orden de Compra asociada")
+    setShowVoidInvoiceModal(true)
+  }
+
+  const handleConfirmVoidInvoice = async () => {
+    if (!invoiceToVoid) return
+    setVoidingInvoice(true)
+    try {
+      await api.financial.invoices.void(invoiceToVoid.id, voidInvoiceMotivo || "Anulación administrativa por falta de OC")
+      toast.success("Factura anulada de la BD", `La factura N° ${invoiceToVoid.numero_factura || invoiceToVoid.id} fue eliminada definitivamente.`)
+      setShowVoidInvoiceModal(false)
+      setInvoiceToVoid(null)
+      setVoidInvoiceMotivo("")
+      setAllSupplierInvoices(prev => prev.filter(i => i.id !== invoiceToVoid.id))
+      setInvoices(prev => prev.filter(i => i.id !== invoiceToVoid.id))
+      setSelectedVoidInvoiceIds(prev => prev.filter(id => id !== invoiceToVoid.id))
+    } catch (err: any) {
+      toast.error("Error al anular factura", err.message || "No se pudo anular la factura de la base de datos")
+    } finally {
+      setVoidingInvoice(false)
+    }
+  }
+
+  const handleConfirmBatchVoid = async () => {
+    if (selectedVoidInvoiceIds.length === 0) return
+    setBatchVoiding(true)
+    try {
+      const res = await api.financial.invoices.batchVoid({
+        invoice_ids: selectedVoidInvoiceIds,
+        motivo: batchVoidMotivo || "Anulación en bloque de facturas sin OC por Administrador"
+      })
+      toast.success("Anulación en bloque completada", `Se eliminaron ${res.voided_count} factura(s) de la base de datos.`)
+      const voidedSet = new Set(res.voided_ids)
+      setAllSupplierInvoices(prev => prev.filter(i => !voidedSet.has(i.id)))
+      setInvoices(prev => prev.filter(i => !voidedSet.has(i.id)))
+      setSelectedVoidInvoiceIds([])
+      setShowBatchVoidModal(false)
+      setBatchVoidMotivo("")
+    } catch (err: any) {
+      toast.error("Error en anulación en lote", err.message || "No se pudo procesar la anulación en bloque")
+    } finally {
+      setBatchVoiding(false)
+    }
+  }
+
   const handleOpenResolveNc = (ncReq: any) => {
     setSelectedNcRequestForResolve(ncReq)
     const montoReclamado = Number(ncReq.monto_reclamado || 0)
@@ -2472,7 +2540,11 @@ export default function PurchasesPage() {
         (inv.numero_factura?.toLowerCase().includes(searchInvoices.toLowerCase())) ||
         (inv.supplier_nombre?.toLowerCase().includes(searchInvoices.toLowerCase())) ||
         (inv.concepto?.toLowerCase().includes(searchInvoices.toLowerCase()))
-      const matchStatus = filterInvoiceStatus === "todos" || inv.estado === filterInvoiceStatus
+      const matchStatus = filterInvoiceStatus === "todos"
+        ? true
+        : filterInvoiceStatus === "sin_oc"
+        ? !inv.purchase_order_id
+        : inv.estado === filterInvoiceStatus
       return matchSearch && matchStatus
     })
     return [...list].sort((a: any, b: any) => {
@@ -5458,11 +5530,27 @@ export default function PurchasesPage() {
                 className="input-field text-xs font-semibold"
               >
                 <option value="todos">Todos los Estados</option>
+                <option value="sin_oc">⚠️ Sin OC vinculada (Ingreso Email / Directo)</option>
                 <option value="aprobada">Aprobadas para Pago</option>
                 <option value="retenida_discrepancia">Retenidas por Discrepancia</option>
                 <option value="pendiente">Pendientes de Conciliación</option>
                 <option value="pagada">Pagadas</option>
               </select>
+
+              {isAdmin && filterInvoiceStatus === "sin_oc" && selectedVoidInvoiceIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBatchVoidMotivo("Anulación en bloque de facturas recibidas por correo electrónico sin OC vinculada")
+                    setShowBatchVoidModal(true)
+                  }}
+                  className="btn-danger text-xs px-3 py-1.5 flex items-center gap-1.5 font-bold rounded-xl bg-red-600 hover:bg-red-700 text-white shadow-sm"
+                  title="Anular definitivamente de la BD las facturas seleccionadas"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Anular {selectedVoidInvoiceIds.length} de la BD</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -5478,6 +5566,28 @@ export default function PurchasesPage() {
                 <table className="w-full text-left text-xs min-w-[950px]">
                   <thead className="bg-slate-50 dark:bg-slate-900/60 text-gray-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200 dark:border-slate-700/60">
                     <tr>
+                      {isAdmin && filterInvoiceStatus === "sin_oc" && (
+                        <th className="p-3 w-8 text-center">
+                          <input
+                            type="checkbox"
+                            checked={
+                              paginatedInvoicesP2P.length > 0 &&
+                              paginatedInvoicesP2P.every((i: any) => selectedVoidInvoiceIds.includes(i.id))
+                            }
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                const idsToAdd = paginatedInvoicesP2P.filter((i: any) => !i.purchase_order_id).map((i: any) => i.id)
+                                setSelectedVoidInvoiceIds(prev => Array.from(new Set([...prev, ...idsToAdd])))
+                              } else {
+                                const idsToRemove = new Set(paginatedInvoicesP2P.map((i: any) => i.id))
+                                setSelectedVoidInvoiceIds(prev => prev.filter(id => !idsToRemove.has(id)))
+                              }
+                            }}
+                            className="rounded border-slate-300 text-red-600 focus:ring-red-500 cursor-pointer"
+                            title="Seleccionar todas las visibles para anular"
+                          />
+                        </th>
+                      )}
                       <th className="p-3">N° Factura Fiscal</th>
                       <th className="p-3">Proveedor</th>
                       <th className="p-3">Pedido / OC</th>
@@ -5493,6 +5603,24 @@ export default function PurchasesPage() {
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
                     {paginatedInvoicesP2P.map((inv: any) => (
                       <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                        {isAdmin && filterInvoiceStatus === "sin_oc" && (
+                          <td className="p-3 text-center">
+                            {!inv.purchase_order_id ? (
+                              <input
+                                type="checkbox"
+                                checked={selectedVoidInvoiceIds.includes(inv.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedVoidInvoiceIds(prev => [...prev, inv.id])
+                                  } else {
+                                    setSelectedVoidInvoiceIds(prev => prev.filter(id => id !== inv.id))
+                                  }
+                                }}
+                                className="rounded border-slate-300 text-red-600 focus:ring-red-500 cursor-pointer"
+                              />
+                            ) : null}
+                          </td>
+                        )}
                         <td className="p-3">
                           <div className="font-mono font-bold text-gray-900 dark:text-white">
                             {inv.numero_factura || "S/N"}
@@ -5606,6 +5734,17 @@ export default function PurchasesPage() {
                               >
                                 <RotateCcw className={`w-3 h-3 text-amber-600 ${revertingInvoiceId === inv.id ? "animate-spin" : ""}`} />
                                 <span>Revertir</span>
+                              </button>
+                            )}
+                            {isAdmin && !inv.purchase_order_id && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenVoidInvoiceModal(inv)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-red-600 hover:text-white bg-red-50 hover:bg-red-600 border border-red-200 hover:border-red-600 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800/60 rounded-md transition-all shadow-xs"
+                                title="Anular completamente de la base de datos (Solo Administradores - Factura sin OC)"
+                              >
+                                <Trash2 className="w-3 h-3 shrink-0" />
+                                <span>Anular BD</span>
                               </button>
                             )}
                           </div>
@@ -12527,6 +12666,226 @@ export default function PurchasesPage() {
             fetchAll()
           }}
         />
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL CANÓNICO (RULE 14): ANULACIÓN DEFINITIVA DE FACTURA SIN OC (SOLO ADMIN)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showVoidInvoiceModal && invoiceToVoid && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-lg w-full border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Header shrink-0 */}
+            <div className="shrink-0 px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 dark:bg-red-950/60 dark:text-red-400 flex items-center justify-center shrink-0 shadow-xs">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    Anular Factura de la BD
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300">
+                      Solo Administrador
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Eliminación completa e irreversible del comprobante sin OC.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!voidingInvoice) {
+                    setShowVoidInvoiceModal(false)
+                    setInvoiceToVoid(null)
+                  }
+                }}
+                disabled={voidingInvoice}
+                className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-gray-400 hover:text-gray-600 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body flex-1 overflow-y-auto */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 font-medium">N° Factura:</span>
+                  <span className="font-mono font-bold text-gray-900 dark:text-white">
+                    {invoiceToVoid.numero_factura || "S/N"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 font-medium">Proveedor:</span>
+                  <span className="font-bold text-gray-800 dark:text-gray-200 truncate max-w-[240px]">
+                    {invoiceToVoid.supplier_nombre || invoiceToVoid.proveedor_nombre || "Proveedor"}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-500 font-medium">Total Comprobante:</span>
+                  <span className="font-mono font-extrabold text-gray-900 dark:text-white">
+                    {formatPYG(invoiceToVoid.total || 0)}
+                    {Number(invoiceToVoid.total_brl || 0) > 0 && (
+                      <span className="text-emerald-600 dark:text-emerald-400 ml-1.5">
+                        (R$ {Number(invoiceToVoid.total_brl).toLocaleString("pt-BR", { minimumFractionDigits: 2 })})
+                      </span>
+                    )}
+                  </span>
+                </div>
+                {invoiceToVoid.fecha_emision && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-500 font-medium">Fecha Emisión:</span>
+                    <span className="font-mono text-gray-700 dark:text-gray-300">
+                      {formatDate(invoiceToVoid.fecha_emision)}
+                    </span>
+                  </div>
+                )}
+                {((invoiceToVoid.notas || "").toLowerCase().includes("imap") || invoiceToVoid.xml_sifen_url) && (
+                  <div className="mt-1 pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-semibold">
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Ingreso automático vía Correo Electrónico (XML SIFEN)</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-200">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold">Advertencia de Eliminación:</p>
+                  <p className="leading-relaxed">
+                    Esta acción eliminará de forma irreversible el comprobante fiscal, sus líneas de artículos y asientos contables asociados. Se verificará que no posea una Orden de Compra ni pagos activos.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">
+                  Motivo de Anulación *
+                </label>
+                <textarea
+                  rows={2}
+                  value={voidInvoiceMotivo}
+                  onChange={(e) => setVoidInvoiceMotivo(e.target.value)}
+                  placeholder="Explique el motivo de la anulación (ej. Factura descartada por compras, sin OC vinculada)..."
+                  className="input-field w-full text-xs"
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Footer shrink-0 */}
+            <div className="shrink-0 px-6 py-3.5 bg-slate-50 dark:bg-slate-900/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowVoidInvoiceModal(false)
+                  setInvoiceToVoid(null)
+                }}
+                disabled={voidingInvoice}
+                className="btn-secondary text-xs px-4 py-2 font-bold rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmVoidInvoice}
+                disabled={voidingInvoice}
+                className="btn-danger text-xs px-4 py-2 flex items-center gap-2 font-bold rounded-xl bg-red-600 hover:bg-red-700 text-white shadow-xs disabled:opacity-50"
+              >
+                {voidingInvoice ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                <span>{voidingInvoice ? "Anulando de BD..." : "Confirmar Anulación de BD"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          MODAL CANÓNICO (RULE 14): ANULACIÓN EN BLOQUE DE FACTURAS SIN OC (SOLO ADMIN)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {showBatchVoidModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-lg w-full border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Header shrink-0 */}
+            <div className="shrink-0 px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-100 text-red-600 dark:bg-red-950/60 dark:text-red-400 flex items-center justify-center shrink-0 shadow-xs">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    Anular en Bloque de la BD
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300">
+                      {selectedVoidInvoiceIds.length} Facturas
+                    </span>
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Purga masiva de facturas recibidas sin Orden de Compra asociada.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!batchVoiding) setShowBatchVoidModal(false)
+                }}
+                disabled={batchVoiding}
+                className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-gray-400 hover:text-gray-600 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body flex-1 overflow-y-auto */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl flex items-start gap-2.5 text-xs text-red-800 dark:text-red-200">
+                <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold">Acción Masiva Irreversible:</p>
+                  <p className="leading-relaxed">
+                    Se eliminarán definitivamente <strong>{selectedVoidInvoiceIds.length}</strong> facturas seleccionadas de la base de datos junto con sus ítems y asientos contables. Cada factura será validada individualmente para asegurar que no posea OC ni pagos activos.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">
+                  Motivo de Anulación en Bloque *
+                </label>
+                <textarea
+                  rows={2}
+                  value={batchVoidMotivo}
+                  onChange={(e) => setBatchVoidMotivo(e.target.value)}
+                  placeholder="Motivo de la anulación masiva..."
+                  className="input-field w-full text-xs"
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Footer shrink-0 */}
+            <div className="shrink-0 px-6 py-3.5 bg-slate-50 dark:bg-slate-900/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowBatchVoidModal(false)}
+                disabled={batchVoiding}
+                className="btn-secondary text-xs px-4 py-2 font-bold rounded-xl"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBatchVoid}
+                disabled={batchVoiding}
+                className="btn-danger text-xs px-4 py-2 flex items-center gap-2 font-bold rounded-xl bg-red-600 hover:bg-red-700 text-white shadow-xs disabled:opacity-50"
+              >
+                {batchVoiding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                <span>{batchVoiding ? "Procesando Lote..." : `Anular ${selectedVoidInvoiceIds.length} Facturas`}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -129,6 +129,11 @@ class SupplierInvoiceBatchRevertRequest(BaseModel):
     motivo: Optional[str] = None
 
 
+class SupplierInvoiceBatchVoidRequest(BaseModel):
+    invoice_ids: list[str]
+    motivo: Optional[str] = None
+
+
 class PaidInvoiceItem(BaseModel):
     id: UUID
     numero_factura: str

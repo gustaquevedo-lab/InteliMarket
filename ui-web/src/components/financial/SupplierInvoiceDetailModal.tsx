@@ -18,12 +18,16 @@ import {
   Clock,
   ShieldCheck,
   Check,
+  Trash2,
+  AlertTriangle,
+  Loader2,
 } from "lucide-react"
 import {
   api,
   type SupplierInvoiceWithPayments,
   type SupplierInvoiceItem,
 } from "../../api"
+import { useAuth } from "../../context/AuthContext"
 import { formatPYG, formatDate } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
 
@@ -38,6 +42,7 @@ export default function SupplierInvoiceDetailModal({
   onClose,
   onUpdated,
 }: Props) {
+  const { user } = useAuth()
   const toast = useToast()
   const [loading, setLoading] = useState(true)
   const [invoice, setInvoice] = useState<SupplierInvoiceWithPayments | null>(null)
@@ -45,6 +50,17 @@ export default function SupplierInvoiceDetailModal({
   const [filterTipoItem, setFilterTipoItem] = useState<"todos" | "producto" | "insumo">("todos")
   const [savingInvoiceType, setSavingInvoiceType] = useState(false)
   const [updatingItemIds, setUpdatingItemIds] = useState<Record<string, boolean>>({})
+
+  // Permiso de administrador y anulación
+  const isAdmin = useMemo(() => {
+    if (!user) return false
+    if (user.is_superadmin) return true
+    const role = (user.rol || "").toLowerCase()
+    return role === "admin" || role === "administrador" || role === "superadmin"
+  }, [user])
+  const [showVoidConfirm, setShowVoidConfirm] = useState(false)
+  const [voidMotivo, setVoidMotivo] = useState("")
+  const [voiding, setVoiding] = useState(false)
 
   // Cargar detalle completo de factura con ítems
   const loadInvoice = async () => {
@@ -582,15 +598,117 @@ export default function SupplierInvoiceDetailModal({
             <span>Insumos: <strong className="font-mono text-amber-600 dark:text-amber-400">{countInsumos}</strong></span>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-5 py-2 rounded-xl text-xs font-bold bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition"
-          >
-            Cerrar
-          </button>
+          <div className="flex items-center gap-3">
+            {isAdmin && !invoice?.purchase_order_id && (
+              <button
+                type="button"
+                onClick={() => {
+                  const isEmail = (invoice?.notas || "").toLowerCase().includes("imap") || Boolean((invoice as any)?.xml_sifen_url)
+                  setVoidMotivo(isEmail ? "Factura recibida por correo electrónico sin Orden de Compra asociada" : "Factura cargada sin Orden de Compra asociada")
+                  setShowVoidConfirm(true)
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 transition shadow-xs"
+                title="Eliminar completamente esta factura de la base de datos (Solo Administrador - Sin OC)"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Anular Factura de la BD</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-5 py-2 rounded-xl text-xs font-bold bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition"
+            >
+              Cerrar
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Submodal Canónico (Rule 14) de Confirmación de Anulación */}
+      {showVoidConfirm && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="shrink-0 px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2.5 text-red-600">
+                <Trash2 className="w-5 h-5" />
+                <h4 className="text-sm font-bold text-gray-900 dark:text-white">
+                  Confirmar Anulación Definitiva
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowVoidConfirm(false)}
+                disabled={voiding}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-3.5 text-xs">
+              <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl flex items-start gap-2.5 text-red-800 dark:text-red-200">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Acción Irreversible (Solo Administradores):</p>
+                  <p className="mt-1 leading-relaxed">
+                    Se eliminará permanentemente la factura <strong>{invoice?.numero_factura}</strong> de <strong>{invoice?.supplier_nombre}</strong> por valor de <strong>{formatPYG(invoice?.total || 0)}</strong>.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">
+                  Motivo de Anulación *
+                </label>
+                <textarea
+                  rows={2}
+                  value={voidMotivo}
+                  onChange={(e) => setVoidMotivo(e.target.value)}
+                  className="input-field w-full text-xs"
+                  placeholder="Ingrese el motivo de la anulación..."
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="shrink-0 px-6 py-3 bg-slate-50 dark:bg-slate-900/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={voiding}
+                onClick={() => setShowVoidConfirm(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 text-slate-800 dark:text-slate-200"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={voiding}
+                onClick={async () => {
+                  if (!invoice) return
+                  setVoiding(true)
+                  try {
+                    await api.financial.invoices.void(invoice.id, voidMotivo || "Anulación manual por Administrador (Sin OC)")
+                    toast.success("Factura anulada", `La factura N° ${invoice.numero_factura || invoice.id} fue eliminada de la base de datos.`)
+                    setShowVoidConfirm(false)
+                    if (onUpdated) onUpdated()
+                    onClose()
+                  } catch (err: any) {
+                    toast.error("Error al anular factura", err.message || "No se pudo anular la factura")
+                  } finally {
+                    setVoiding(false)
+                  }
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+              >
+                {voiding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                <span>{voiding ? "Anulando..." : "Confirmar Anulación de BD"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   )

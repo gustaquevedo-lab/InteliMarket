@@ -815,6 +815,205 @@ async def batch_revert_supplier_invoices(
     }
 
 
+async def void_supplier_invoice(
+    db: AsyncSession,
+    company_id: str | uuid.UUID,
+    invoice_id: str | uuid.UUID,
+    user: dict,
+    motivo: str | None = None,
+) -> dict:
+    """Anula y elimina físicamente de la base de datos una factura de proveedor que no tenga OC vinculada.
+    Operación exclusiva para usuarios con rol Administrador."""
+    from fastapi import HTTPException
+    cid = uuid.UUID(str(company_id))
+    inv_id = uuid.UUID(str(invoice_id))
+
+    inv = await db.get(SupplierInvoice, inv_id)
+    if not inv or inv.company_id != cid:
+        raise HTTPException(status_code=404, detail="Factura de proveedor no encontrada.")
+
+    # 1. Validación estricta: NO debe tener Orden de Compra vinculada
+    if inv.purchase_order_id:
+        po = await db.get(PurchaseOrder, inv.purchase_order_id)
+        po_num = po.numero if po else str(inv.purchase_order_id)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Operación denegada: La factura {inv.numero_factura} está vinculada a la Orden de Compra '{po_num}'. Solo se permite anular y eliminar facturas que no tengan OC asociada."
+        )
+
+    # 2. Si tiene recepción vinculada, verificar si esa recepción tiene OC
+    if inv.receipt_id:
+        rec = await db.get(PurchaseReceipt, inv.receipt_id)
+        if rec and rec.purchase_order_id:
+            po = await db.get(PurchaseOrder, rec.purchase_order_id)
+            po_num = po.numero if po else str(rec.purchase_order_id)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Operación denegada: La factura {inv.numero_factura} está vinculada a la recepción de muelle '{rec.numero}', la cual pertenece a la Orden de Compra '{po_num}'."
+            )
+        # Si la recepción no tiene OC (es compra directa o recepción manual), desvincularla
+        if rec:
+            rec.supplier_invoice_id = None
+
+    # 3. Validar pagos activos
+    p_q = select(SupplierInvoicePayment).where(
+        SupplierInvoicePayment.invoice_id == inv_id,
+        SupplierInvoicePayment.estado.not_in(["cancelado", "cancelada", "anulado", "anulada"])
+    )
+    p_res = await db.execute(p_q)
+    active_payments = p_res.scalars().all()
+    if active_payments:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede anular la factura {inv.numero_factura} porque registra {len(active_payments)} pago(s) activo(s). Revierta o cancele los pagos antes de proceder."
+        )
+
+    # 4. Validar órdenes de pago (allocations)
+    poa_q = select(SupplierPaymentOrderAllocation).where(SupplierPaymentOrderAllocation.invoice_id == inv_id)
+    poa_res = await db.execute(poa_q)
+    active_poa = poa_res.scalars().all()
+    if active_poa:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede anular la factura {inv.numero_factura} porque está asignada a una Orden de Pago activa. Revierta la asignación primero."
+        )
+
+    # 5. Validar Notas de Crédito aplicadas
+    cna_q = select(SupplierCreditNoteApplication).where(SupplierCreditNoteApplication.invoice_id == inv_id)
+    cna_res = await db.execute(cna_q)
+    if cna_res.scalars().first():
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede anular la factura {inv.numero_factura} porque tiene Notas de Crédito aplicadas. Desaplique la NC primero."
+        )
+
+    # 6. Validar Retenciones fiscales
+    try:
+        from api.src.financial.models import SupplierRetencion
+        ret_q = select(SupplierRetencion).where(SupplierRetencion.invoice_id == inv_id)
+        ret_res = await db.execute(ret_q)
+        if ret_res.scalars().first():
+            raise HTTPException(
+                status_code=400,
+                detail=f"No se puede anular la factura {inv.numero_factura} porque tiene Retenciones fiscales asociadas."
+            )
+    except Exception:
+        pass
+
+    # 7. Limpiar discrepancias de stock si estuvieran vinculadas
+    try:
+        from api.src.supermer.models import DiscrepanciaStock
+        await db.execute(
+            update(DiscrepanciaStock).where(DiscrepanciaStock.factura_id == inv_id).values(factura_id=None)
+        )
+    except Exception:
+        pass
+
+    # 8. Limpiar gastos de fondo fijo si estuvieran vinculados
+    try:
+        from api.src.petty_cash.models import Expense, SupplierInvoicePaymentOrderAllocation as PettyCashAllocation
+        await db.execute(
+            update(Expense).where(Expense.supplier_invoice_id == inv_id).values(supplier_invoice_id=None)
+        )
+        await db.execute(
+            delete(PettyCashAllocation).where(PettyCashAllocation.supplier_invoice_id == inv_id)
+        )
+    except Exception:
+        pass
+
+    # 9. Limpiar solicitudes de NC en compras
+    try:
+        from api.src.purchases.models import SupplierCreditNoteRequest
+        await db.execute(
+            delete(SupplierCreditNoteRequest).where(SupplierCreditNoteRequest.invoice_id == inv_id)
+        )
+    except Exception:
+        pass
+
+    # 10. Limpiar asientos contables automáticos (AccountingEntry) si se hubieran generado
+    try:
+        from api.src.integrated_finance.models import AccountingEntry, AccountingEntryLine
+        ae_res = await db.execute(
+            select(AccountingEntry).where(
+                AccountingEntry.company_id == cid,
+                AccountingEntry.referencia_tipo == "supplier_invoice",
+                AccountingEntry.referencia_id == inv_id,
+            )
+        )
+        for ae in ae_res.scalars().all():
+            await db.execute(delete(AccountingEntryLine).where(AccountingEntryLine.entry_id == ae.id))
+            await db.delete(ae)
+    except Exception:
+        pass
+
+    # 11. Eliminar pagos cancelados huérfanos e ítems
+    await db.execute(delete(SupplierInvoicePayment).where(SupplierInvoicePayment.invoice_id == inv_id))
+    await db.execute(delete(SupplierInvoiceItem).where(SupplierInvoiceItem.invoice_id == inv_id))
+
+    # 12. Eliminar completamente la factura de la base de datos
+    num_factura = inv.numero_factura
+    sup_id = str(inv.supplier_id)
+    cdc_val = inv.cdc
+    total_val = float(inv.total or 0)
+    notas_val = inv.notas or ""
+
+    await db.delete(inv)
+    await db.flush()
+
+    user_name = user.get("nombre") or user.get("user_nombre") or user.get("email") or "Admin"
+    user_email = user.get("email") or user.get("user_email") or ""
+    logger.warning(
+        "FACTURA ANULADA Y ELIMINADA DE BD: Factura %s (ID %s, CDC %s, Total %s) de proveedor %s eliminada completamente por admin %s (%s). Motivo: %s. Notas orig: %s",
+        num_factura, inv_id, cdc_val, total_val, sup_id, user_name, user_email, motivo or "Sin motivo especificado", notas_val
+    )
+
+    return {
+        "success": True,
+        "message": f"Factura {num_factura} anulada y eliminada completamente de la base de datos.",
+        "invoice_id": str(inv_id),
+        "numero_factura": num_factura,
+        "cdc": cdc_val,
+        "total": total_val,
+    }
+
+
+async def batch_void_supplier_invoices(
+    db: AsyncSession,
+    company_id: str | uuid.UUID,
+    invoice_ids: list[str],
+    user: dict,
+    motivo: str | None = None,
+) -> dict:
+    from fastapi import HTTPException
+    voided = []
+    errors = []
+    for iid in invoice_ids:
+        try:
+            async with db.begin_nested():
+                res = await void_supplier_invoice(
+                    db=db,
+                    company_id=company_id,
+                    invoice_id=iid,
+                    user=user,
+                    motivo=motivo,
+                )
+                voided.append(res)
+        except HTTPException as he:
+            errors.append({"invoice_id": iid, "error": he.detail})
+        except Exception as err:
+            errors.append({"invoice_id": iid, "error": str(err)})
+
+    await db.commit()
+    return {
+        "success": True,
+        "total_solicitadas": len(invoice_ids),
+        "anuladas_count": len(voided),
+        "anuladas": voided,
+        "errores_count": len(errors),
+        "errores": errors,
+    }
+
+
 async def list_paid_invoices(
     db: AsyncSession,
     company_id: str,
