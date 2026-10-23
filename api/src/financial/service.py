@@ -3809,10 +3809,10 @@ async def get_custom_cash_flow(
     # 8. Nómina / Sueldok (estimación quincenal y fin de mes)
     nomina_res = await db.execute(
         text("""
-            SELECT COALESCE(SUM(salario_neto), 0)
-            FROM labor_settlements
+            SELECT COALESCE(MAX(total_neto), 0)
+            FROM payroll_dossiers
             WHERE company_id = :cid
-              AND created_at >= NOW() - INTERVAL '45 days'
+              AND estado != 'anulado'
         """),
         {"cid": cid},
     )
