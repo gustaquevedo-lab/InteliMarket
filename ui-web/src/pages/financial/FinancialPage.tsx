@@ -1230,8 +1230,8 @@ export default function FinancialPage() {
       const supId = String(ret.supplier_id || ret.proveedor_id || "")
       if (!supId) return
 
-      // Si fue consolidado en otra devolución (ej. DEV-...), no duplicar
-      if (ret.observaciones && ret.observaciones.includes("[CONSOLIDADO EN")) return
+      // Si fue consolidado en otra devolución (ej. DEV-...) o anulado/archivado, no duplicar ni mostrar
+      if (ret.observaciones && (ret.observaciones.includes("[CONSOLIDADO EN") || ret.observaciones.includes("[ANULADO]") || ret.observaciones.includes("[ARCHIVADO]"))) return
 
       const estadoLower = (ret.estado || "").toLowerCase()
       const isExcluded = ["completado", "anulado", "cancelado", "archivado", "rechazado"].includes(estadoLower)

@@ -4278,6 +4278,7 @@ async def list_supplier_returns(db: AsyncSession, company_id: str, supplier_id: 
             "monto": float(r.monto),
             "moneda": r.moneda,
             "observaciones": r.observaciones,
+            "estado": "anulado" if (r.observaciones and ("[ANULADO]" in r.observaciones or "[ARCHIVADO]" in r.observaciones)) else "pendiente",
         }
         for r, razon_social in result.all()
     ]
