@@ -57,12 +57,12 @@ import re
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
 
-def _now():
-    return datetime.now(timezone.utc)
+def _now() -> datetime:
+    return datetime.now(TZ_ASUNCION)
 
 
-def _today():
-    return date.today()
+def _today() -> date:
+    return datetime.now(TZ_ASUNCION).date()
 
 
 def _clean_doc_number(num: str | None) -> str:
@@ -532,7 +532,7 @@ async def enrich_invoice_items(db: AsyncSession, invoice: SupplierInvoice) -> li
                     "descripcion": prod.nombre if prod else f"Producto #{str(po_it.product_id)[:8]}",
                     "cantidad": po_it.cantidad or Decimal("1"),
                     "precio_unitario": po_it.precio_unitario or Decimal("0"),
-                    "descuento": po_it.descuento or Decimal("0"),
+                    "descuento": getattr(po_it, "descuento", getattr(po_it, "descuento_pct", Decimal("0"))),
                     "iva_tasa": prod.iva_tasa if prod and prod.iva_tasa is not None else Decimal("10"),
                     "total": po_it.total or Decimal("0"),
                     "tipo_producto": prod.tipo_producto if prod else ("insumo" if invoice.tipo_comprobante in ("gasto", "insumo_gasto") else "producto"),
@@ -853,7 +853,9 @@ async def void_supplier_invoice(
             )
         # Si la recepción no tiene OC (es compra directa o recepción manual), desvincularla
         if rec:
-            rec.supplier_invoice_id = None
+            if hasattr(rec, "supplier_invoice_id"):
+                setattr(rec, "supplier_invoice_id", None)
+            inv.receipt_id = None
 
     # 3. Validar pagos activos
     p_q = select(SupplierInvoicePayment).where(
@@ -3119,6 +3121,8 @@ async def approve_balance_correction(db: AsyncSession, request_id: str, user_id:
         completo = True
 
         account = await get_bank_account(db, str(request.bank_account_id))
+        if not account:
+            raise HTTPException(status_code=404, detail="Cuenta bancaria no encontrada")
         account.saldo_actual = request.saldo_propuesto
         account.saldo_verificado_manualmente = True
         account.saldo_verificado_at = _now()
@@ -3845,7 +3849,7 @@ async def get_custom_cash_flow(
     opex_diario_estimado = Decimal(str(round(opex_res.scalar() or Decimal("2000000"), 0)))
 
     # 10. Proyección día a día
-    proyecciones = []
+    proyecciones: list[dict[str, Any]] = []
     saldo_acumulado = disponibilidad_total
     dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
     nc_restante = total_nc_acuerdos
@@ -5819,6 +5823,8 @@ async def _execute_disbursements_internal(
         elif fp == "nota_credito":
             if not d.credit_note_id:
                 raise HTTPException(status_code=400, detail="Debe seleccionar la Nota de Crédito a aplicar.")
+            if not supplier:
+                raise HTTPException(status_code=400, detail="Se requiere un proveedor válido para compensar Notas de Crédito.")
 
             cn_res = await db.execute(
                 select(SupplierCreditNote).where(
@@ -6455,7 +6461,7 @@ async def get_supplier_payment_order_detail(
             "created_at": c_at.isoformat() if c_at else None,
         })
 
-    fps = list(dict.fromkeys([d["forma_pago"].replace("_", " ").title() for d in disbursements_data]))
+    fps = list(dict.fromkeys([str(d["forma_pago"]).replace("_", " ").title() for d in disbursements_data if d.get("forma_pago")]))
 
     foreign_disbs = [d for d in disbursements_data if d.get("moneda") and d.get("moneda") != "PYG" and float(d.get("monto") or 0) > 0]
     moneda_desembolso = foreign_disbs[0]["moneda"] if foreign_disbs else (o.moneda if o.moneda != "PYG" else None)
