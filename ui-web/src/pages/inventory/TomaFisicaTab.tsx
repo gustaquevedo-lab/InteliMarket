@@ -5,7 +5,7 @@ import {
   Filter, RefreshCw, Eye, UserCheck, ShieldAlert, ArrowRight,
   TrendingDown, TrendingUp, Scale, Check, Layers, ChevronRight, AlertCircle, Sparkles,
   ClipboardList, Users, Shield, ShieldCheck, ArrowLeft, Send,
-  Printer, Building2, Tag, FileSpreadsheet, Loader2, Trash2
+  Printer, Building2, Tag, FileSpreadsheet, Loader2, Trash2, Package
 } from "lucide-react"
 import {
   api,
@@ -18,6 +18,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDateTime } from "../../utils/format"
 import SupplierSearchInput from "../../components/SupplierSearchInput"
+import ProductSearchPicker from "../products/ProductSearchPicker"
 import PlanillaConteoA4Modal from "./PlanillaConteoA4Modal"
 
 interface TomaFisicaTabProps {
@@ -279,9 +280,10 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
   // Modal Nueva Toma Física (Wizard)
   const [showNewSessionModal, setShowNewSessionModal] = useState(false)
   const [newWhId, setNewWhId] = useState("")
-  const [newTipo, setNewTipo] = useState<"proveedor" | "sector" | "total" | "parcial" | "ciclico">("proveedor")
+  const [newTipo, setNewTipo] = useState<"proveedor" | "sector" | "producto" | "total" | "parcial" | "ciclico">("proveedor")
   const [newSupplierId, setNewSupplierId] = useState("")
   const [newCategoriaId, setNewCategoriaId] = useState("")
+  const [selectedProducts, setSelectedProducts] = useState<Product[]>([])
   const [newPasillo, setNewPasillo] = useState("")
   const [newDescripcion, setNewDescripcion] = useState("")
   const [newContador1, setNewContador1] = useState("")
@@ -459,6 +461,11 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       return
     }
 
+    if (newTipo === "producto" && selectedProducts.length === 0) {
+      toast.error("Seleccione al menos un producto para la toma física")
+      return
+    }
+
     const selectedSup = suppliers.find((s) => s.id === newSupplierId)
     const selectedCat = categories.find((c) => c.id === newCategoriaId)
 
@@ -492,6 +499,11 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       alcanceDesc = `Sector: ${selectedCat?.nombre || "Seleccionado"}`
       catNombreParaSesion = selectedCat?.nombre
       catIdParaSesion = newCategoriaId
+    } else if (newTipo === "producto") {
+      const pNames = selectedProducts.map((p) => p.nombre)
+      const preview = pNames.slice(0, 2).join(", ")
+      const extra = pNames.length > 2 ? ` (+${pNames.length - 2} más)` : ""
+      alcanceDesc = `Productos: ${preview}${extra} (${selectedProducts.length} seleccionados)`
     } else {
       alcanceDesc = newDescripcion.trim() || undefined
     }
@@ -506,6 +518,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
         categoria_id: newTipo === "sector" ? newCategoriaId : catIdParaSesion,
         categoria_ids: isFilteredCats ? selectedCategoryIds : undefined,
         categoria_nombre: newTipo === "sector" ? selectedCat?.nombre : catNombreParaSesion,
+        product_ids: newTipo === "producto" ? selectedProducts.map((p) => p.id) : undefined,
         pasillo: newPasillo.trim() || undefined,
         descripcion_alcance: alcanceDesc,
         contador_1_nombre: newContador1.trim() || undefined,
@@ -522,6 +535,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       setNewTipo("proveedor")
       setNewSupplierId("")
       setNewCategoriaId("")
+      setSelectedProducts([])
       setSelectedCategoryIds([])
       setSupplierCategories([])
       setCategoryFilterSearch("")
@@ -2058,6 +2072,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {[
                       { id: "proveedor", label: "Por Proveedor", icon: Building2 },
+                      { id: "producto", label: "Por Producto", icon: Package },
                       { id: "sector", label: "Por Sector / Categoría", icon: Tag },
                       { id: "total", label: "Inventario Total", icon: Layers },
                       { id: "parcial", label: "Por Pasillo / Góndola", icon: Filter },
@@ -2083,6 +2098,86 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                     })}
                   </div>
                 </div>
+
+                {/* Selector específico: Por Producto */}
+                {newTipo === "producto" && (
+                  <div className="p-3.5 bg-blue-500/10 border border-blue-500/20 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          Buscar y Seleccionar Productos a Contar
+                        </span>
+                      </div>
+                      {selectedProducts.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-600 text-white">
+                            {selectedProducts.length} producto{selectedProducts.length > 1 ? "s" : ""}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedProducts([])}
+                            className="text-[11px] text-red-500 hover:text-red-700 underline font-medium cursor-pointer"
+                          >
+                            Limpiar
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <ProductSearchPicker
+                      selectedProduct={null}
+                      placeholder="Escanear código de barras, SKU o escribir nombre de producto..."
+                      onSelect={(prod) => {
+                        if (!selectedProducts.some((p) => p.id === prod.id)) {
+                          setSelectedProducts((prev) => [...prev, prod])
+                          toast.success(`Añadido: ${prod.nombre}`)
+                        } else {
+                          toast.info("El producto ya está en la lista")
+                        }
+                      }}
+                    />
+
+                    {/* Lista de productos seleccionados */}
+                    {selectedProducts.length > 0 ? (
+                      <div className="max-h-48 overflow-y-auto divide-y divide-slate-200 dark:divide-slate-700 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-900">
+                        {selectedProducts.map((p, idx) => (
+                          <div
+                            key={p.id}
+                            className="p-2 flex items-center justify-between gap-2 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition text-xs"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-[10px] font-bold text-slate-400">
+                                  #{idx + 1}
+                                </span>
+                                <span className="font-bold text-slate-900 dark:text-white truncate">
+                                  {p.nombre}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500 font-mono">
+                                {p.codigo_barra && <span>Cód: {p.codigo_barra}</span>}
+                                {p.sku && <span>SKU: {p.sku}</span>}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedProducts((prev) => prev.filter((it) => it.id !== p.id))}
+                              className="p-1 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition cursor-pointer"
+                              title="Quitar producto"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+                        Usa el buscador arriba para ir agregando uno o varios productos a la toma física.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Selector específico: Proveedor */}
                 {newTipo === "proveedor" && (

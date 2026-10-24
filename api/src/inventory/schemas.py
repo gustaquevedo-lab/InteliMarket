@@ -287,10 +287,11 @@ class RejectAdjustmentBody(BaseModel):
 class PhysicalSessionCreate(BaseModel):
     company_id: UUID
     warehouse_id: UUID
-    tipo: str = Field(default="total", description="total | parcial | ciclico | proveedor | sector")
+    tipo: str = Field(default="total", description="total | parcial | ciclico | proveedor | sector | producto")
     categoria_id: Optional[UUID] = None
     categoria_nombre: Optional[str] = None
     categoria_ids: Optional[list[str]] = Field(default=None, description="Lista opcional de IDs de categorías para filtrar productos del proveedor")
+    product_ids: Optional[list[str]] = Field(default=None, description="Lista opcional de IDs de productos específicos a inventariar")
     supplier_id: Optional[UUID] = None
     supplier_nombre: Optional[str] = None
     pasillo: Optional[str] = None

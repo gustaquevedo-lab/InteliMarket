@@ -2415,6 +2415,7 @@ export const api = {
         categoria_id?: string;
         categoria_ids?: string[];
         categoria_nombre?: string;
+        product_ids?: string[];
         supplier_id?: string;
         supplier_nombre?: string;
         pasillo?: string;
