@@ -524,7 +524,6 @@ async def record_quick_merma(
 # ---------------------------------------------------------------------------
 
 @router.get("/inventory/suppliers/{supplier_id}/categories")
-@router.get("/companies/{company_id}/inventory/suppliers/{supplier_id}/categories")
 async def get_supplier_categories_for_inventory(
     supplier_id: UUID,
     company_id: str = Query("00000000-0000-0000-0000-000000000010"),
@@ -533,6 +532,18 @@ async def get_supplier_categories_for_inventory(
 ):
     """Retorna las categorías con productos activos asociados a un proveedor específico para toma física."""
     cid = UUID(user.get("company_id") or company_id) if isinstance(company_id, str) else company_id
+    return await service.get_supplier_categories(db, cid, supplier_id)
+
+
+@router.get("/companies/{company_id}/inventory/suppliers/{supplier_id}/categories")
+async def get_company_supplier_categories_for_inventory(
+    company_id: str,
+    supplier_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Retorna las categorías con productos activos asociados a un proveedor específico para toma física."""
+    cid = UUID(company_id)
     return await service.get_supplier_categories(db, cid, supplier_id)
 
 
