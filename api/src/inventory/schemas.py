@@ -288,6 +288,7 @@ class PhysicalSessionCreate(BaseModel):
     tipo: str = Field(default="total", description="total | parcial | ciclico | proveedor | sector")
     categoria_id: Optional[UUID] = None
     categoria_nombre: Optional[str] = None
+    categoria_ids: Optional[list[str]] = Field(default=None, description="Lista opcional de IDs de categorías para filtrar productos del proveedor")
     supplier_id: Optional[UUID] = None
     supplier_nombre: Optional[str] = None
     pasillo: Optional[str] = None

@@ -1564,6 +1564,41 @@ async def get_kardex_summary(
 # Toma Física de Inventario
 # ---------------------------------------------------------------------------
 
+async def get_supplier_categories(
+    db: AsyncSession,
+    company_id: uuid.UUID,
+    supplier_id: uuid.UUID,
+) -> list[dict]:
+    """Retorna las categorías con productos activos asociados a un proveedor específico para toma física."""
+    from sqlalchemy import text as sqtext
+
+    query = """
+        SELECT 
+            COALESCE(c.id::text, 'sin_categoria') as id,
+            COALESCE(c.nombre, 'Sin Categoría') as nombre,
+            c.codigo,
+            COUNT(p.id) as total_productos
+        FROM products p
+        LEFT JOIN product_categories c ON c.id = p.categoria_id
+        WHERE p.company_id = :comp_id 
+          AND p.supplier_id = :sup_id 
+          AND p.activo = true
+        GROUP BY c.id, c.nombre, c.codigo
+        ORDER BY total_productos DESC, c.nombre ASC
+    """
+    res = await db.execute(sqtext(query), {"comp_id": company_id, "sup_id": supplier_id})
+    rows = res.fetchall()
+    return [
+        {
+            "id": row.id,
+            "nombre": (row.nombre or "Sin Categoría").strip(),
+            "codigo": row.codigo,
+            "total_productos": int(row.total_productos or 0),
+        }
+        for row in rows
+    ]
+
+
 async def create_physical_session(
     db: AsyncSession,
     data: PhysicalSessionCreate,
@@ -1586,11 +1621,39 @@ async def create_physical_session(
             supplier_nom = sup_row[0]
 
     categoria_nom = data.categoria_nombre
+    cat_id_to_store = data.categoria_id
     if data.categoria_id and not categoria_nom:
         cat_r = await db.execute(sqtext("SELECT nombre FROM product_categories WHERE id = :cid"), {"cid": data.categoria_id})
         cat_row = cat_r.fetchone()
         if cat_row:
             categoria_nom = cat_row[0]
+    elif data.categoria_ids and not categoria_nom:
+        if len(data.categoria_ids) == 1:
+            cid0 = data.categoria_ids[0]
+            if cid0 == "sin_categoria":
+                categoria_nom = "Sin Categoría"
+            else:
+                try:
+                    cat_uuid = uuid.UUID(str(cid0))
+                    cat_id_to_store = cat_uuid
+                    cat_r = await db.execute(sqtext("SELECT nombre FROM product_categories WHERE id = :cid"), {"cid": cat_uuid})
+                    cat_row = cat_r.fetchone()
+                    if cat_row:
+                        categoria_nom = cat_row[0]
+                except (ValueError, TypeError):
+                    pass
+        elif len(data.categoria_ids) > 1:
+            categoria_nom = f"{len(data.categoria_ids)} categorías"
+
+    alcance_desc = data.descripcion_alcance
+    if not alcance_desc:
+        if data.tipo == "proveedor" or data.supplier_id:
+            if categoria_nom:
+                alcance_desc = f"Proveedor: {supplier_nom or 'Seleccionado'} ({categoria_nom})"
+            else:
+                alcance_desc = f"Proveedor: {supplier_nom or 'Seleccionado'}"
+        elif data.tipo == "sector" or data.categoria_id:
+            alcance_desc = f"Sector: {categoria_nom or 'Seleccionado'}"
 
     session_code = f"TF-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid.uuid4().hex[:4].upper()}"
     session = PhysicalInventorySession(
@@ -1598,12 +1661,12 @@ async def create_physical_session(
         warehouse_id=data.warehouse_id,
         codigo=session_code,
         tipo=data.tipo,
-        categoria_id=data.categoria_id,
-        categoria_nombre=categoria_nom,
+        categoria_id=cat_id_to_store,
+        categoria_nombre=categoria_nom[:150] if categoria_nom else None,
         supplier_id=data.supplier_id,
-        supplier_nombre=supplier_nom,
+        supplier_nombre=supplier_nom[:150] if supplier_nom else None,
         pasillo=data.pasillo,
-        descripcion_alcance=data.descripcion_alcance,
+        descripcion_alcance=alcance_desc,
         notas=data.notas,
         estado="abierta",
         creado_por=user_id,
@@ -1634,6 +1697,30 @@ async def create_physical_session(
             WHERE p.company_id = :comp_id AND p.activo = true AND p.supplier_id = :sup_id
         """
         query_params["sup_id"] = data.supplier_id
+
+        if data.categoria_ids and len(data.categoria_ids) > 0:
+            uuid_cats = []
+            has_sin_cat = False
+            for cid in data.categoria_ids:
+                if str(cid).lower() in ("sin_categoria", "__none__", "null", "none"):
+                    has_sin_cat = True
+                else:
+                    try:
+                        uuid_cats.append(uuid.UUID(str(cid)))
+                    except (ValueError, TypeError):
+                        pass
+
+            if uuid_cats and has_sin_cat:
+                items_query += " AND (p.categoria_id = ANY(:cat_ids) OR p.categoria_id IS NULL)"
+                query_params["cat_ids"] = uuid_cats
+            elif uuid_cats:
+                items_query += " AND p.categoria_id = ANY(:cat_ids)"
+                query_params["cat_ids"] = uuid_cats
+            elif has_sin_cat:
+                items_query += " AND p.categoria_id IS NULL"
+        elif data.categoria_id:
+            items_query += " AND p.categoria_id = :cat_id"
+            query_params["cat_id"] = data.categoria_id
     elif data.tipo == "sector" or data.categoria_id:
         items_query = """
             SELECT

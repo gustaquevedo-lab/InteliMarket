@@ -18,6 +18,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDateTime } from "../../utils/format"
 import SupplierSearchInput from "../../components/SupplierSearchInput"
+import PlanillaConteoA4Modal from "./PlanillaConteoA4Modal"
 
 interface TomaFisicaTabProps {
   warehouses: WarehouseType[]
@@ -90,9 +91,8 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
   const [newNotas, setNewNotas] = useState("")
   const [submittingNew, setSubmittingNew] = useState(false)
 
-  // Modal Planilla Imprimible de Conteo Físico
-  const [showPrintModal, setShowPrintModal] = useState(false)
-  const [printBlindMode, setPrintBlindMode] = useState(true)
+  // Modal Planilla Imprimible de Conteo Físico A4
+  const [printModalSession, setPrintModalSession] = useState<PhysicalSession | null>(null)
 
   // Modal Reconciliación de Ítem
   const [reconcileTarget, setReconcileTarget] = useState<PhysicalSessionItem | null>(null)
@@ -167,12 +167,11 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       setLoadingActiveSession(false)
     }
   }
-  // Impresión directa de sesión desde la tabla principal
+  // Impresión directa de sesión desde la tabla principal (A4)
   const directPrintSession = async (session: PhysicalSession) => {
     try {
       const full = await api.inventory.physicalSessions.get(session.id)
-      setActiveSession(full)
-      setShowPrintModal(true)
+      setPrintModalSession(full)
     } catch (err: any) {
       toast.error("Error al cargar planilla para impresión", err.message)
     }
@@ -555,12 +554,12 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
             <button
-              onClick={() => setShowPrintModal(true)}
+              onClick={() => setPrintModalSession(activeSession)}
               className="px-3.5 py-2 text-xs font-black uppercase rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition cursor-pointer"
-              title="Generar o imprimir planilla de conteo físico ciego en A4"
+              title="Generar o imprimir planilla oficial de conteo físico en A4"
             >
               <Printer className="w-4 h-4 text-white" />
-              <span>Imprimir Planilla Ciega</span>
+              <span>Imprimir Planilla A4</span>
             </button>
 
             <button
@@ -1332,176 +1331,13 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
             document.body
           )}
 
-        {/* ── MODAL / PLANILLA DE CONTEO FÍSICO IMPRIMIBLE ───────────────────── */}
-        {showPrintModal &&
-          createPortal(
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-              <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-                {/* Header de la ventana (no imprimible) */}
-                <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-800/50 print:hidden">
-                  <div className="flex items-center gap-2">
-                    <Printer className="w-5 h-5 text-emerald-600" />
-                    <div>
-                      <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                        Planilla de Conteo Físico #{activeSession.codigo}
-                      </h3>
-                      <p className="text-[11px] text-slate-500">
-                        {activeSession.warehouse_nombre} •{" "}
-                        {activeSession.tipo === "proveedor"
-                          ? `Proveedor: ${activeSession.supplier_nombre || "Específico"}`
-                          : activeSession.tipo === "sector"
-                          ? `Sector: ${activeSession.categoria_nombre || "Específico"}`
-                          : `Modalidad: ${activeSession.tipo}`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-700 px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-600 shadow-xs">
-                      <input
-                        type="checkbox"
-                        checked={printBlindMode}
-                        onChange={(e) => setPrintBlindMode(e.target.checked)}
-                        className="rounded text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <span>Modo Ciego (Ocultar Stock Teórico)</span>
-                    </label>
-
-                    <button
-                      type="button"
-                      onClick={() => window.print()}
-                      className="btn-primary px-4 py-1.5 text-xs font-bold uppercase rounded-xl bg-emerald-600 hover:bg-emerald-700 flex items-center gap-1.5 shadow-sm"
-                    >
-                      <Printer className="w-3.5 h-3.5" />
-                      <span>Imprimir / PDF</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowPrintModal(false)}
-                      className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Hoja Imprimible */}
-                <div className="p-6 overflow-y-auto space-y-4 print:p-0 print:overflow-visible text-slate-900 dark:text-slate-100">
-                  {/* Membrete Supermercado */}
-                  <div className="border-b pb-3 mb-3 border-slate-200 flex justify-between items-start">
-                    <div>
-                      <h2 className="text-base font-black uppercase tracking-tight text-slate-900">
-                        EXTRA SUPERMERCADO MAYORISTA
-                      </h2>
-                      <p className="text-xs text-slate-600 font-medium">
-                        GRUPO SANTA TERESA E.A.S. • RUC: 80150377-9
-                      </p>
-                      <p className="text-xs font-bold text-emerald-700 mt-1 uppercase">
-                        {printBlindMode ? "Planilla de Conteo Físico Ciego (Auditoría de Stock)" : "Planilla de Conteo Físico y Auditoría de Stock"}
-                      </p>
-                    </div>
-                    <div className="text-right text-xs text-slate-600 space-y-0.5">
-                      <p className="font-mono font-bold text-sm text-slate-900">TOMA #{activeSession.codigo}</p>
-                      <p>Fecha: {formatDateTime(activeSession.created_at)}</p>
-                      <p>
-                        Depósito: <strong className="text-slate-900">{activeSession.warehouse_nombre}</strong>
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Metadatos del alcance de inventario */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-slate-700">
-                    <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Alcance / Tipo:</span>
-                      <strong className="capitalize">{activeSession.tipo}</strong>
-                    </div>
-                    {activeSession.supplier_nombre && (
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Proveedor:</span>
-                        <strong className="text-blue-700">{activeSession.supplier_nombre}</strong>
-                      </div>
-                    )}
-                    {activeSession.categoria_nombre && (
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Sector / Categoría:</span>
-                        <strong className="text-purple-700">{activeSession.categoria_nombre}</strong>
-                      </div>
-                    )}
-                    {activeSession.pasillo && (
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase font-bold block">Pasillo / Góndola:</span>
-                        <strong>{activeSession.pasillo}</strong>
-                      </div>
-                    )}
-                    <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Contador 1:</span>
-                      <strong>{activeSession.contador_1_nombre || "Operador 1"}</strong>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Contador 2 (Ciego):</span>
-                      <strong>{activeSession.contador_2_nombre || "Operador 2"}</strong>
-                    </div>
-                  </div>
-
-                  {/* Tabla de Artículos a Contar */}
-                  <table className="w-full text-left text-xs border border-slate-200 rounded-lg overflow-hidden">
-                    <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
-                      <tr>
-                        <th className="p-2 w-10 text-center">#</th>
-                        <th className="p-2 w-32 font-mono">Cód. Barras</th>
-                        <th className="p-2">Descripción de Producto</th>
-                        {!printBlindMode && <th className="p-2 w-24 text-right">Stock Sist.</th>}
-                        <th className="p-2 w-24 text-center border-l border-slate-200">Conteo 1</th>
-                        <th className="p-2 w-24 text-center border-l border-slate-200">Conteo 2</th>
-                        <th className="p-2 w-32 border-l border-slate-200">Obs / Vto.</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {(activeSession.items || []).map((item, idx) => (
-                        <tr key={item.id} className="hover:bg-slate-50">
-                          <td className="p-2 text-center text-slate-400">{idx + 1}</td>
-                          <td className="p-2 font-mono text-slate-600">{item.product_codigo_barra || "-"}</td>
-                          <td className="p-2 font-medium text-slate-900">{item.product_nombre}</td>
-                          {!printBlindMode && (
-                            <td className="p-2 text-right font-mono font-bold text-slate-600">
-                              {Number(item.cantidad_sistema).toLocaleString("es-PY")}
-                            </td>
-                          )}
-                          <td className="p-2 text-center border-l border-slate-200 font-mono font-black text-blue-700 bg-slate-50/50">
-                            {item.cantidad_conteo_1 !== null && item.cantidad_conteo_1 !== undefined
-                              ? Number(item.cantidad_conteo_1).toLocaleString("es-PY")
-                              : ""}
-                          </td>
-                          <td className="p-2 text-center border-l border-slate-200 font-mono font-black text-purple-700 bg-slate-50/50">
-                            {item.cantidad_conteo_2 !== null && item.cantidad_conteo_2 !== undefined
-                              ? Number(item.cantidad_conteo_2).toLocaleString("es-PY")
-                              : ""}
-                          </td>
-                          <td className="p-2 border-l border-slate-200 text-[11px] text-slate-500"></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-
-                  {/* Firmas de Control de Inventario */}
-                  <div className="grid grid-cols-3 gap-6 pt-10 text-center text-xs text-slate-600 border-t border-slate-200 mt-6">
-                    <div className="border-t border-dashed border-slate-400 pt-2">
-                      <p className="font-bold text-slate-800">{activeSession.contador_1_nombre || "Contador 1"}</p>
-                      <p className="text-[10px] text-slate-400">Primer Conteo Físico</p>
-                    </div>
-                    <div className="border-t border-dashed border-slate-400 pt-2">
-                      <p className="font-bold text-slate-800">{activeSession.contador_2_nombre || "Contador 2"}</p>
-                      <p className="text-[10px] text-slate-400">Segundo Conteo Ciego</p>
-                    </div>
-                    <div className="border-t border-dashed border-slate-400 pt-2">
-                      <p className="font-bold text-slate-800">Encargado de Stock / Auditor</p>
-                      <p className="text-[10px] text-slate-400">Aprobación & Firma</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>,
-            document.body
-          )}
+        {/* ── MODAL / PLANILLA DE CONTEO FÍSICO IMPRIMIBLE A4 ───────────────── */}
+        {printModalSession && (
+          <PlanillaConteoA4Modal
+            session={printModalSession}
+            onClose={() => setPrintModalSession(null)}
+          />
+        )}
       </div>
     )
   }
@@ -2070,6 +1906,14 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
           </div>,
           document.body
         )}
+
+      {/* ── MODAL / PLANILLA DE CONTEO FÍSICO IMPRIMIBLE A4 ───────────────── */}
+      {printModalSession && (
+        <PlanillaConteoA4Modal
+          session={printModalSession}
+          onClose={() => setPrintModalSession(null)}
+        />
+      )}
     </div>
   )
 }
