@@ -2405,7 +2405,24 @@ export const api = {
       list: (params?: { warehouse_id?: string; estado?: string; supplier_id?: string; categoria_id?: string; limit?: number; offset?: number }) =>
         client.get<PhysicalSession[]>(`/v1/companies/${COMPANY_ID}/inventory/physical-sessions`, params as any),
       get: (id: string) => client.get<PhysicalSession>(`/v1/inventory/physical-sessions/${id}`),
-      create: (data: { warehouse_id: string; tipo: string; categoria_id?: string; categoria_nombre?: string; supplier_id?: string; supplier_nombre?: string; pasillo?: string; descripcion_alcance?: string; notas?: string; contador_1_nombre?: string; contador_2_nombre?: string }) =>
+      getSupplierCategories: (supplierId: string) =>
+        client.get<{ id: string; nombre: string; codigo?: string | null; total_productos: number }[]>(
+          `/v1/inventory/suppliers/${supplierId}/categories`
+        ),
+      create: (data: {
+        warehouse_id: string;
+        tipo: string;
+        categoria_id?: string;
+        categoria_ids?: string[];
+        categoria_nombre?: string;
+        supplier_id?: string;
+        supplier_nombre?: string;
+        pasillo?: string;
+        descripcion_alcance?: string;
+        notas?: string;
+        contador_1_nombre?: string;
+        contador_2_nombre?: string;
+      }) =>
         client.post<any>(`/v1/inventory/physical-sessions`, { ...data, company_id: COMPANY_ID }),
       registerCount: (sessionId: string, itemId: string, data: { cantidad: number; numero_conteo: 1 | 2 }) =>
         client.put<PhysicalSessionItem>(`/v1/inventory/physical-sessions/${sessionId}/items/${itemId}/count`, data),
