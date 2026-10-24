@@ -109,11 +109,28 @@ tsconfig.tsbuildinfo
 
 # Datos locales / extractos bancarios / zips temporales
 /Bancos/
+Datos/*.pdf
+Datos/*.json
+Datos/*.txt
+Datos/audit_logs/
+.wrangler/
+workspace/
 *.xlsx
 *.zip
 .claude/
 BALANZA_ELECTRON_DIAGNOSTICO.md
 
-
 # Certificados/claves de firma (QZ Tray, etc.) -- nunca al repo
 secrets/
+
+# Knowledge graph outputs y cache de Graphify
+graphify-out/
+**/graphify-out/
+
+# Stitch MCP exports y landing temporales
+stitch_intelimarket_design_system_landing/
+
+# Test artifacts y screenshots de Playwright
+tests-pos/screenshots/
+tests-pos/tests-pos/
+
