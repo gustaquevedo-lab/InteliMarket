@@ -102,7 +102,7 @@ class WeightLogFilter(BaseModel):
 # ─── PLU Sync ─────────────────────────────────────────────────
 
 class PLUSyncInput(BaseModel):
-    scale_id: str
+    scale_id: Optional[str] = None
     producto_ids: list[str] = Field(default_factory=list, description="empty = all products with price")
     modo: str = "incremental"
 

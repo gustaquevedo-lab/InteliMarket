@@ -158,7 +158,7 @@ export default function ScalesPage() {
     setSyncingPlu(true)
     try {
       const resultados = await Promise.all(
-        objetivo.map((s) => api.scales.syncPLU(s.id, { producto_ids: [], modo: "completo" }).catch((err: any) => ({
+        objetivo.map((s) => api.scales.syncPLU(s.id, { scale_id: s.id, producto_ids: [], modo: "completo" }).catch((err: any) => ({
           scale_nombre: s.nombre, exitosos: 0, fallidos: 0, total_productos: 0, error: err?.message,
         })))
       )

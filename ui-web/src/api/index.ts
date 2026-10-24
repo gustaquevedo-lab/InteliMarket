@@ -1210,7 +1210,7 @@ export interface GerencialAlertasNegocio {
   dias_cobro_promedio: number | null
   dias_pago_promedio: number | null
 }
-export interface ScalePLUSyncInput { producto_ids?: string[]; modo?: string }
+export interface ScalePLUSyncInput { scale_id?: string; producto_ids?: string[]; modo?: string }
 export interface ScalePLUSyncResult { sync_id: string; scale_nombre: string; total_productos: number; exitosos: number; fallidos: number; archivo_generado?: string; errores?: any[] }
 export interface ScaleLabelTemplate { id: string; nombre: string; ancho_mm: number; alto_mm: number; campos: any[]; incluir_barcode: boolean; incluir_precio: boolean; incluir_peso: boolean; activo: boolean; created_at: string }
 export interface ProtocolDetectInput { conexion?: string; puerto_com?: string; host?: string; puerto_tcp?: number; baudrate?: number; timeout?: number }

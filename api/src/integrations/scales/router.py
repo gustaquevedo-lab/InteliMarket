@@ -202,7 +202,8 @@ async def sync_plu(
     user=Depends(require_auth),
 ):
     try:
-        return await service.sync_plu(db, user["company_id"], scale_id, data.producto_ids, data.modo)
+        target_scale_id = scale_id or data.scale_id
+        return await service.sync_plu(db, user["company_id"], target_scale_id, data.producto_ids, data.modo)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
