@@ -112,6 +112,7 @@ export default function PlanillaConteoA4Modal({
           endIdx: 0,
           isFirstPage: true,
           isLastPage: true,
+          targetRows: 30,
         },
       ]
     }
