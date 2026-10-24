@@ -2126,6 +2126,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                     </div>
 
                     <ProductSearchPicker
+                      autoFocus
                       selectedProduct={null}
                       placeholder="Escanear código de barras, SKU o escribir nombre de producto..."
                       onSelect={(prod) => {

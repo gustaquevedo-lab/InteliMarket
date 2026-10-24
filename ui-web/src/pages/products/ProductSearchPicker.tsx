@@ -35,7 +35,21 @@ export default function ProductSearchPicker({
   const [selectedIndex, setSelectedIndex] = useState<number>(-1)
 
   const inputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const searchTimeoutRef = useRef<any>(null)
+
+  // Cerrar resultados al hacer click fuera
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick)
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick)
+    }
+  }, [])
 
   const selectProduct = useCallback(
     (p: Product) => {
@@ -46,6 +60,10 @@ export default function ProductSearchPicker({
       setSelectedIndex(-1)
       onSelect(p)
       onAfterSelect?.(p)
+      // Mantener el foco en el input para carga continua de productos
+      setTimeout(() => {
+        inputRef.current?.focus()
+      }, 50)
     },
     [onSelect, onAfterSelect]
   )
@@ -121,7 +139,8 @@ export default function ProductSearchPicker({
 
   // Debounce para búsqueda interactiva por tipeo normal
   useEffect(() => {
-    if (!open || query.trim().length < 2) {
+    const clean = query.trim()
+    if (clean.length < 2) {
       setResults([])
       setSelectedIndex(-1)
       return
@@ -130,15 +149,19 @@ export default function ProductSearchPicker({
     setLoading(true)
     const timer = setTimeout(() => {
       api.products
-        .list({ search: query.trim(), limit: 20 })
+        .list({ search: clean, limit: 20 })
         .then((res) => {
           if (!cancelled) {
             setResults(res || [])
             setSelectedIndex(-1)
+            setOpen(true)
           }
         })
-        .catch(() => {
-          if (!cancelled) setResults([])
+        .catch((err) => {
+          if (!cancelled) {
+            console.error("Error buscando productos:", err)
+            setResults([])
+          }
         })
         .finally(() => {
           if (!cancelled) setLoading(false)
@@ -149,7 +172,7 @@ export default function ProductSearchPicker({
       cancelled = true
       clearTimeout(timer)
     }
-  }, [query, open])
+  }, [query])
 
   // Manejador de teclado para lector de código de barras (Enter) y navegación con flechas
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -158,6 +181,10 @@ export default function ProductSearchPicker({
       e.stopPropagation()
       if (selectedIndex >= 0 && results[selectedIndex]) {
         selectProduct(results[selectedIndex])
+        return
+      }
+      if (results.length === 1) {
+        selectProduct(results[0])
         return
       }
       executeSearchAndSelect(query)
@@ -191,7 +218,7 @@ export default function ProductSearchPicker({
   }
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       {selectedProduct && !open ? (
         <button
           type="button"
@@ -233,11 +260,23 @@ export default function ProductSearchPicker({
               disabled={disabled}
               value={query}
               onChange={(e) => {
-                setQuery(e.target.value)
+                const val = e.target.value
+                setQuery(val)
+                if (val.trim().length >= 2) {
+                  setOpen(true)
+                }
                 if (errorMessage) setErrorMessage(null)
               }}
-              onFocus={() => setOpen(true)}
-              onBlur={() => setTimeout(() => setOpen(false), 200)}
+              onFocus={() => {
+                if (query.trim().length >= 2 || results.length > 0) {
+                  setOpen(true)
+                }
+              }}
+              onClick={() => {
+                if (query.trim().length >= 2 || results.length > 0) {
+                  setOpen(true)
+                }
+              }}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               className={`input-field w-full text-xs font-bold pl-8 pr-8 ${
@@ -246,9 +285,24 @@ export default function ProductSearchPicker({
                   : ""
               }`}
             />
-            {loading && (
+            {loading ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-600 absolute right-2.5 top-1/2 -translate-y-1/2" />
-            )}
+            ) : query ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery("")
+                  setResults([])
+                  setOpen(false)
+                  setErrorMessage(null)
+                  inputRef.current?.focus()
+                }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                title="Limpiar búsqueda"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            ) : null}
           </div>
 
           {errorMessage && (
