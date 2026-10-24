@@ -5,7 +5,7 @@ import {
   Filter, RefreshCw, Eye, UserCheck, ShieldAlert, ArrowRight,
   TrendingDown, TrendingUp, Scale, Check, Layers, ChevronRight, AlertCircle, Sparkles,
   ClipboardList, Users, Shield, ShieldCheck, ArrowLeft, Send,
-  Printer, Building2, Tag, FileSpreadsheet
+  Printer, Building2, Tag, FileSpreadsheet, Loader2
 } from "lucide-react"
 import {
   api,
@@ -90,6 +90,52 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
   const [newContador2, setNewContador2] = useState("")
   const [newNotas, setNewNotas] = useState("")
   const [submittingNew, setSubmittingNew] = useState(false)
+
+  // Categorías del proveedor seleccionado para Toma Física
+  const [supplierCategories, setSupplierCategories] = useState<{
+    id: string
+    nombre: string
+    codigo?: string | null
+    total_productos: number
+  }[]>([])
+  const [loadingSupplierCategories, setLoadingSupplierCategories] = useState(false)
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([])
+  const [categoryFilterSearch, setCategoryFilterSearch] = useState("")
+
+  // Carga reactiva de categorías cuando se selecciona un proveedor
+  useEffect(() => {
+    if (!newSupplierId || newTipo !== "proveedor") {
+      setSupplierCategories([])
+      setSelectedCategoryIds([])
+      setCategoryFilterSearch("")
+      return
+    }
+
+    let active = true
+    setLoadingSupplierCategories(true)
+    api.inventory.physicalSessions
+      .getSupplierCategories(newSupplierId)
+      .then((cats) => {
+        if (!active) return
+        const list = Array.isArray(cats) ? cats : []
+        setSupplierCategories(list)
+        // Por defecto, todas seleccionadas para conveniencia del conteo
+        setSelectedCategoryIds(list.map((c) => c.id))
+      })
+      .catch((err) => {
+        if (!active) return
+        console.error("Error al cargar categorías del proveedor:", err)
+        setSupplierCategories([])
+        setSelectedCategoryIds([])
+      })
+      .finally(() => {
+        if (active) setLoadingSupplierCategories(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [newSupplierId, newTipo])
 
   // Modal Planilla Imprimible de Conteo Físico A4
   const [printModalSession, setPrintModalSession] = useState<PhysicalSession | null>(null)
@@ -198,9 +244,15 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       return
     }
 
-    if (newTipo === "proveedor" && !newSupplierId) {
-      toast.error("Seleccione el proveedor a inventariar")
-      return
+    if (newTipo === "proveedor") {
+      if (!newSupplierId) {
+        toast.error("Seleccione el proveedor a inventariar")
+        return
+      }
+      if (supplierCategories.length > 0 && selectedCategoryIds.length === 0) {
+        toast.error("Debe seleccionar al menos una categoría del proveedor o pulsar 'Todas'")
+        return
+      }
     }
 
     if (newTipo === "sector" && !newCategoriaId) {
@@ -211,6 +263,40 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
     const selectedSup = suppliers.find((s) => s.id === newSupplierId)
     const selectedCat = categories.find((c) => c.id === newCategoriaId)
 
+    // Construir alcance descriptivo
+    let alcanceDesc: string | undefined = undefined
+    let catNombreParaSesion: string | undefined = undefined
+    let catIdParaSesion: string | undefined = undefined
+    const isFilteredCats =
+      newTipo === "proveedor" &&
+      supplierCategories.length > 0 &&
+      selectedCategoryIds.length < supplierCategories.length
+
+    if (newTipo === "proveedor") {
+      const supNom = selectedSup?.razon_social || selectedSup?.nombre || "Seleccionado"
+      const totalCats = supplierCategories.length
+      const selCount = selectedCategoryIds.length
+
+      if (totalCats > 0 && selCount > 0 && selCount < totalCats) {
+        const selCatObjs = supplierCategories.filter((c) => selectedCategoryIds.includes(c.id))
+        const catNames = selCatObjs.map((c) => c.nombre)
+        const preview = catNames.slice(0, 3).join(", ")
+        const extra = catNames.length > 3 ? ` (+${catNames.length - 3} más)` : ""
+        alcanceDesc = `Proveedor: ${supNom} — Categorías: ${preview}${extra} (${selCount}/${totalCats})`
+        catNombreParaSesion = selCount === 1 ? selCatObjs[0].nombre : `${selCount} categorías`
+        catIdParaSesion = selCount === 1 && selCatObjs[0].id !== "sin_categoria" ? selCatObjs[0].id : undefined
+      } else {
+        alcanceDesc = `Proveedor: ${supNom} (Catálogo completo)`
+        catNombreParaSesion = "Todas las categorías"
+      }
+    } else if (newTipo === "sector") {
+      alcanceDesc = `Sector: ${selectedCat?.nombre || "Seleccionado"}`
+      catNombreParaSesion = selectedCat?.nombre
+      catIdParaSesion = newCategoriaId
+    } else {
+      alcanceDesc = newDescripcion.trim() || undefined
+    }
+
     setSubmittingNew(true)
     try {
       const res = await api.inventory.physicalSessions.create({
@@ -218,15 +304,11 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
         tipo: newTipo,
         supplier_id: newTipo === "proveedor" ? newSupplierId : undefined,
         supplier_nombre: newTipo === "proveedor" ? (selectedSup?.razon_social || selectedSup?.nombre) : undefined,
-        categoria_id: newTipo === "sector" ? newCategoriaId : undefined,
-        categoria_nombre: newTipo === "sector" ? selectedCat?.nombre : undefined,
+        categoria_id: newTipo === "sector" ? newCategoriaId : catIdParaSesion,
+        categoria_ids: isFilteredCats ? selectedCategoryIds : undefined,
+        categoria_nombre: newTipo === "sector" ? selectedCat?.nombre : catNombreParaSesion,
         pasillo: newPasillo.trim() || undefined,
-        descripcion_alcance:
-          newTipo === "proveedor"
-            ? `Proveedor: ${selectedSup?.razon_social || selectedSup?.nombre || "Seleccionado"}`
-            : newTipo === "sector"
-            ? `Sector: ${selectedCat?.nombre || "Seleccionado"}`
-            : newDescripcion.trim() || undefined,
+        descripcion_alcance: alcanceDesc,
         contador_1_nombre: newContador1.trim() || undefined,
         contador_2_nombre: newContador2.trim() || undefined,
         notas: newNotas.trim() || undefined,
@@ -241,6 +323,9 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       setNewTipo("proveedor")
       setNewSupplierId("")
       setNewCategoriaId("")
+      setSelectedCategoryIds([])
+      setSupplierCategories([])
+      setCategoryFilterSearch("")
       setNewPasillo("")
       setNewDescripcion("")
       setNewContador1("")
@@ -1690,9 +1775,10 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
       {/* ── MODAL WIZARD NUEVA TOMA FÍSICA ───────────────────────────────────── */}
       {showNewSessionModal &&
         createPortal(
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden my-8">
-              <div className="p-5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center justify-between">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+              {/* Cabecera (shrink-0) */}
+              <div className="shrink-0 p-5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center justify-between border-b border-emerald-800">
                 <div>
                   <h3 className="font-extrabold text-base flex items-center gap-2">
                     <Barcode className="w-5 h-5" />
@@ -1703,14 +1789,20 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                   </p>
                 </div>
                 <button
+                  type="button"
                   onClick={() => setShowNewSessionModal(false)}
-                  className="p-1.5 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition"
+                  className="p-1.5 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <form onSubmit={handleCreateSession} className="p-6 space-y-4">
+              {/* Cuerpo Central Scrolleable (flex-1 overflow-y-auto) */}
+              <form
+                id="form-nueva-toma-fisica"
+                onSubmit={handleCreateSession}
+                className="flex-1 overflow-y-auto p-6 space-y-4"
+              >
                 {/* Depósito */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -1767,7 +1859,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
 
                 {/* Selector específico: Proveedor */}
                 {newTipo === "proveedor" && (
-                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-2">
+                  <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-3">
                     <SupplierSearchInput
                       label="Seleccionar Proveedor a Inventariar"
                       placeholder="Buscar por Razón Social o RUC..."
@@ -1782,15 +1874,138 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                       onSelectSupplier={(res) => {
                         setNewSupplierId(res.id || "")
                       }}
-                      onClear={() => setNewSupplierId("")}
+                      onClear={() => {
+                        setNewSupplierId("")
+                        setSupplierCategories([])
+                        setSelectedCategoryIds([])
+                      }}
                     />
+
                     {newSupplierId && (
-                      <p className="text-[11px] font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1 pt-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>
-                          {products.filter((p) => p.supplier_id === newSupplierId).length || suppliers.find((s) => s.id === newSupplierId)?.total_productos || 0} productos asociados en catálogo listos para ser precargados.
-                        </span>
-                      </p>
+                      <div className="pt-2 border-t border-amber-500/20 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-black text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                            <Tag className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                            <span>Categorías del Proveedor a Inventariar:</span>
+                          </label>
+                          {!loadingSupplierCategories && supplierCategories.length > 0 && (
+                            <div className="flex items-center gap-1.5 text-[11px]">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedCategoryIds(supplierCategories.map((c) => c.id))}
+                                className="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-900 dark:text-amber-200 hover:bg-amber-500/30 font-bold transition cursor-pointer"
+                              >
+                                Todas ({supplierCategories.length})
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedCategoryIds([])}
+                                className="px-2 py-0.5 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 font-bold transition cursor-pointer"
+                              >
+                                Ninguna
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {loadingSupplierCategories ? (
+                          <div className="flex items-center justify-center gap-2 py-4 text-xs text-amber-700 font-medium">
+                            <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+                            <span>Cargando categorías y productos del proveedor...</span>
+                          </div>
+                        ) : supplierCategories.length === 0 ? (
+                          <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-900/40 text-xs text-amber-800 dark:text-amber-300">
+                            No se encontraron productos activos asociados a este proveedor en el catálogo.
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {supplierCategories.length > 5 && (
+                              <div className="relative">
+                                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                                <input
+                                  type="text"
+                                  placeholder="Filtrar categorías..."
+                                  value={categoryFilterSearch}
+                                  onChange={(e) => setCategoryFilterSearch(e.target.value)}
+                                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-900/50 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500"
+                                />
+                              </div>
+                            )}
+
+                            <div className="max-h-48 overflow-y-auto space-y-1 pr-1 bg-white/80 dark:bg-slate-900/80 p-2 rounded-xl border border-amber-500/20 shadow-inner">
+                              {supplierCategories
+                                .filter((c) =>
+                                  !categoryFilterSearch.trim() ||
+                                  c.nombre.toLowerCase().includes(categoryFilterSearch.toLowerCase()) ||
+                                  (c.codigo && c.codigo.toLowerCase().includes(categoryFilterSearch.toLowerCase()))
+                                )
+                                .map((c) => {
+                                  const isChecked = selectedCategoryIds.includes(c.id)
+                                  const toggle = () => {
+                                    if (isChecked) {
+                                      setSelectedCategoryIds((prev) => prev.filter((id) => id !== c.id))
+                                    } else {
+                                      setSelectedCategoryIds((prev) => [...prev, c.id])
+                                    }
+                                  }
+                                  return (
+                                    <div
+                                      key={c.id}
+                                      onClick={toggle}
+                                      className={`flex items-center justify-between gap-2 p-2 rounded-lg cursor-pointer transition select-none text-xs ${
+                                        isChecked
+                                          ? "bg-amber-100/90 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-100 font-bold shadow-2xs"
+                                          : "hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-transparent opacity-75"
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0 pr-2">
+                                        <input
+                                          type="checkbox"
+                                          checked={isChecked}
+                                          onChange={(e) => {
+                                            e.stopPropagation()
+                                            toggle()
+                                          }}
+                                          className="rounded text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                                        />
+                                        <span className="truncate">{c.nombre}</span>
+                                        {c.codigo && (
+                                          <span className="text-[10px] text-slate-500 dark:text-slate-400 shrink-0 font-normal">
+                                            ({c.codigo})
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span
+                                        className={`px-2 py-0.5 text-[10px] rounded-md font-extrabold shrink-0 ${
+                                          isChecked
+                                            ? "bg-amber-500 text-white shadow-2xs"
+                                            : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                                        }`}
+                                      >
+                                        {c.total_productos} {c.total_productos === 1 ? "prod." : "prods."}
+                                      </span>
+                                    </div>
+                                  )
+                                })}
+                            </div>
+
+                            <div className="flex items-center justify-between text-[11px] pt-1">
+                              <span className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
+                                {selectedCategoryIds.length === supplierCategories.length
+                                  ? `Todas las categorías seleccionadas (${supplierCategories.length})`
+                                  : `${selectedCategoryIds.length} de ${supplierCategories.length} categorías seleccionadas`}
+                              </span>
+                              <span className="font-extrabold text-amber-900 dark:text-amber-200">
+                                Total: {supplierCategories
+                                  .filter((c) => selectedCategoryIds.includes(c.id))
+                                  .reduce((acc, c) => acc + c.total_productos, 0)}{" "}
+                                productos a inventariar
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -1883,25 +2098,36 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                     className="input-field text-xs py-2 w-full resize-none"
                   />
                 </div>
-
-                {/* Footer Modal */}
-                <div className="flex items-center justify-end gap-2 pt-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowNewSessionModal(false)}
-                    className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submittingNew}
-                    className="btn-primary px-6 py-2 text-xs font-extrabold uppercase rounded-xl bg-emerald-600 hover:bg-emerald-700 shadow-sm"
-                  >
-                    {submittingNew ? "Iniciando..." : "Crear e Iniciar Toma Física"}
-                  </button>
-                </div>
               </form>
+
+              {/* Pie de Acciones Fijo (shrink-0) */}
+              <div className="shrink-0 px-6 py-3.5 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewSessionModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  form="form-nueva-toma-fisica"
+                  type="submit"
+                  disabled={submittingNew}
+                  className="btn-primary px-6 py-2.5 text-xs font-extrabold uppercase rounded-xl bg-emerald-600 hover:bg-emerald-700 shadow-sm flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {submittingNew ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Iniciando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Barcode className="w-4 h-4" />
+                      <span>Crear e Iniciar Toma Física</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>,
           document.body
