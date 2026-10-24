@@ -83,7 +83,7 @@ async def process_payroll_compensations(
         p_type = p.phase_type
 
         if "extra_club" in p_type:
-            # Vincular formalmente con la remisión corporativa de vales existente
+            # Vincular formalmente con la remisión corporativa de vales existente y cancelarla
             rem_query = (
                 select(CorporateRemission)
                 .where(
@@ -98,7 +98,69 @@ async def process_payroll_compensations(
             if rem:
                 meta["remision_corporativa_vinculada"] = rem.numero_remision
                 meta["remision_id"] = str(rem.id)
-            meta["nota"] = "Compensación de vales consolidada vía Remisión Corporativa oficial (sin afectación individual de cuentas abiertas)"
+
+                # 1. Cancelar formalmente la Remisión Corporativa (saldo 0, PAGADO)
+                rem.saldo_pendiente = Decimal("0")
+                rem.estado = "PAGADO"
+                rem.fecha_recepcion = datetime.now(timezone.utc).date()
+                rem.recibido_por = "COMPENSACION_NOMINA"
+                rem_notas_prev = rem.notas or ""
+                rem.notas = f"{rem_notas_prev}\n[Compensado en Nómina {dossier.periodo} - Dossier {dossier.id}]".strip()
+
+                # 2. Cancelar todos los documentos individuales en accounts_receivable
+                from sqlalchemy import text as sa_text
+                await db.execute(
+                    sa_text("""
+                        UPDATE accounts_receivable
+                        SET estado = 'pagado', saldo_pendiente = 0, ultimo_pago = NOW(), updated_at = NOW()
+                        WHERE corporate_remission_id = :rem_id AND estado != 'pagado'
+                    """),
+                    {"rem_id": str(rem.id)}
+                )
+
+                # 3. Buscar customer de la empresa o asignar uno por defecto
+                cust_query = select(Customer).where(
+                    Customer.company_id == cid,
+                    Customer.ruc.ilike("%80150377%")
+                )
+                cust_res = await db.execute(cust_query)
+                empresa_cust = cust_res.scalars().first()
+                target_cust_id = empresa_cust.id if empresa_cust else (rem.empresa_customer_id or rem.id)
+
+                # 4. Generar Recibo de Pago Oficial por compensación interna
+                r_num = f"REC-NOMINA-{clean_periodo}-EXTRA_CLUB"
+                rec_payment = ReceivablePayment(
+                    company_id=cid,
+                    customer_id=target_cust_id,
+                    monto_total=rem.monto_total,
+                    moneda="PYG",
+                    forma_pago="RETENCION_NOMINA",
+                    referencia=f"Compensación Nómina {dossier.periodo} - Remisión {rem.numero_remision}",
+                    fecha=date.today(),
+                    destino_fondos="compensacion_interna",
+                    numero_recibo=r_num,
+                    observaciones=f"Compensación consolidada de compras Extra Club por retención de salarios período {dossier.periodo}.",
+                    registrado_por=uid
+                )
+                db.add(rec_payment)
+                await db.flush()
+
+                p.collection_receipt_id = rec_payment.id
+                meta["recibo_pago_id"] = str(rec_payment.id)
+                meta["numero_recibo"] = r_num
+                meta["remision_estado"] = "PAGADO"
+                meta["remision_saldo_pendiente"] = 0
+                meta["documentos_cancelados"] = int(rem.cantidad_documentos or 0)
+
+                receipts_generated.append({
+                    "numero_recibo": r_num,
+                    "empresa_nombre": rem.empresa_vinculada_nombre,
+                    "monto": float(rem.monto_total),
+                    "remision": rem.numero_remision,
+                    "concepto": "EXTRA_CLUB"
+                })
+
+            meta["nota"] = "Compensación de vales consolidada vía Remisión Corporativa oficial y cancelada formalmente en AR"
             p.phase_metadata = meta
             p.estado = "ejecutado"
             p.executed_at = datetime.now(timezone.utc)
