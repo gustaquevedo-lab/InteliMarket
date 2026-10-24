@@ -1265,6 +1265,21 @@ async def reopen_sale_customer(
     fp = payment.forma_pago if payment else ("EXTRA_CLUB" if sale.condicion == "credito" else "EFECTIVO")
     setattr(sale, "forma_pago", fp)
 
+    # Candado: Sincronizar accounts_receivable con el nuevo titular de la venta
+    if sale.customer_id:
+        from api.src.accounts_receivable.models import AccountsReceivable
+        ar_res = await db.execute(select(AccountsReceivable).where(AccountsReceivable.sale_id == sale.id))
+        ar = ar_res.scalar_one_or_none()
+        if ar:
+            ar.customer_id = sale.customer_id
+        elif sale.condicion == "credito" or fp in ("EXTRA_CLUB", "CREDITO"):
+            from api.src.accounts_receivable.service import create_accounts_receivable_for_sale
+            await create_accounts_receivable_for_sale(
+                db, str(sale.company_id), str(sale.customer_id), str(sale.id),
+                sale.total, sale.numero, fecha_emision=sale.created_at,
+            )
+        await db.commit()
+
     return sale
 
 
