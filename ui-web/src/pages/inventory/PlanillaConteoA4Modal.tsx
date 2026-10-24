@@ -734,8 +734,8 @@ export default function PlanillaConteoA4Modal({
                         })}
 
                         {/* Relleno de líneas vacías si la página tiene menos ítems para preservar altura */}
-                        {page.items.length < (page.targetRows || rowsPerPage) &&
-                          Array.from({ length: (page.targetRows || rowsPerPage) - page.items.length }).map((_, fIdx) => (
+                        {page.items.length < ((page as any).targetRows || rowsPerPage) &&
+                          Array.from({ length: ((page as any).targetRows || rowsPerPage) - page.items.length }).map((_, fIdx) => (
                             <tr
                               key={`fill-${fIdx}`}
                               className="bg-white"
