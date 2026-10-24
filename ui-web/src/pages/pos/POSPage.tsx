@@ -2215,7 +2215,7 @@ export default function POSPage() {
         await logDinelcoTxn({
           tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
           exitosa: false, verificado_automaticamente: true, error_message: res1.desc || res1.error,
-          monto: montoDinelco, terminal_ip: ip, raw_response: res1,
+          monto: montoDinelco, terminal_ip: ip, raw_response: res1, requiere_conciliacion: Boolean(res1.error),
         })
         return
       }
@@ -2240,7 +2240,7 @@ export default function POSPage() {
         await logDinelcoTxn({
           tipo_operacion: dinelcoCardType === "credito" && dinelcoCuotas > 1 ? `dinelco_venta_credito_${dinelcoCuotas}cuotas` : `dinelco_venta_${dinelcoCardType}`,
           exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
-          monto: montoDinelco, terminal_ip: ip, raw_response: res2,
+          monto: montoDinelco, terminal_ip: ip, raw_response: res2, requiere_conciliacion: Boolean(res2.error),
         })
         // Avisarle al terminal que la sesion abierta por el RBIN anterior queda
         // cancelada -- sin esto se queda "esperando informacion de caja" y
@@ -2322,10 +2322,11 @@ export default function POSPage() {
 
       if (!res.ok) {
         setDinelcoQrState(res.error ? "error_conexion" : "error_rechazo")
-        setDinelcoQrError(res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."))
+        setDinelcoQrError(res.error ? `El terminal no respondió (${res.error}). Si el cliente YA pagó y el terminal imprimió el voucher, NO generes otro cobro: cargá el voucher a mano abajo (podrías cobrarle dos veces).` : (res.desc || "El terminal rechazó la operación."))
+        if (res.error) setShowDinelcoManualFallback(true)
         await logDinelcoTxn({
           tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
-          error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
+          error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res, requiere_conciliacion: Boolean(res.error),
         })
         return
       }
@@ -2339,6 +2340,7 @@ export default function POSPage() {
     }, (e) => {
       setDinelcoQrState("error_conexion")
       setDinelcoQrError(mensajeFallaTerminal(e, true))
+      setShowDinelcoManualFallback(true)
       void logDinelcoTxn({
         tipo_operacion: tipoOperacionQr, exitosa: false, requiere_conciliacion: true, monto: montoQrDinelco, terminal_ip: ip,
         error_message: `Excepcion del terminal durante el QR/PIX: ${String((e as any)?.message || e)}`,
@@ -2379,7 +2381,7 @@ export default function POSPage() {
         })
         await logDinelcoTxn({
           tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res1.desc || res1.error,
-          monto: montoDinelco, terminal_ip: ip, raw_response: res1,
+          monto: montoDinelco, terminal_ip: ip, raw_response: res1, requiere_conciliacion: Boolean(res1.error),
         })
         return
       }
@@ -2397,7 +2399,7 @@ export default function POSPage() {
         })
         await logDinelcoTxn({
           tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true, error_message: res2.desc || res2.error,
-          monto: montoDinelco, terminal_ip: ip, raw_response: res2,
+          monto: montoDinelco, terminal_ip: ip, raw_response: res2, requiere_conciliacion: Boolean(res2.error),
         })
         electronAPI.dinelcoCancel?.(res1.sessionId).catch(() => {})
         return
@@ -2464,11 +2466,12 @@ export default function POSPage() {
       if (!res.ok) {
         updateExtraLeg(leg.id, {
           txnState: res.error ? "error_conexion" : "error_rechazo",
-          txnError: res.error ? `No se pudo conectar con el terminal (${res.error}).` : (res.desc || "El terminal rechazó la operación."),
+          txnError: res.error ? `El terminal no respondió (${res.error}). Si el cliente YA pagó y el terminal imprimió el voucher, NO generes otro cobro: cargá el voucher a mano (podrías cobrarle dos veces).` : (res.desc || "El terminal rechazó la operación."),
+          showManualFallback: !!res.error,
         })
         await logDinelcoTxn({
           tipo_operacion: tipoOperacion, exitosa: false, verificado_automaticamente: true,
-          error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res,
+          error_message: res.desc || res.error, monto: montoQrDinelco, terminal_ip: ip, raw_response: res, requiere_conciliacion: Boolean(res.error),
         })
         return
       }
@@ -2480,7 +2483,7 @@ export default function POSPage() {
       })
       updateExtraLeg(leg.id, { logId: (logged as any)?.id || null })
     }, (e) => {
-      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: mensajeFallaTerminal(e, true) })
+      updateExtraLeg(leg.id, { txnState: "error_conexion", txnError: mensajeFallaTerminal(e, true), showManualFallback: true })
       void logDinelcoTxn({
         tipo_operacion: leg.dinelcoQrMode === "pix" ? "dinelco_pix" : "dinelco_qr", exitosa: false, requiere_conciliacion: true,
         monto: montoQrDinelco, terminal_ip: ip,
@@ -13376,7 +13379,37 @@ export default function POSPage() {
                             {dinelcoQrState === "error_conexion" && (
                               <div className="w-full max-w-md p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 text-xs text-amber-600 dark:text-amber-300 space-y-1.5 text-left">
                                 <div className="font-black">⚠ {dinelcoQrError}</div>
-                                <button type="button" onClick={handleDinelcoQR} disabled={dinelcoBusy} className="text-xs font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
+                                {!dinelcoCupon.trim() && (
+                                  <button type="button" onClick={handleDinelcoQR} disabled={dinelcoBusy} className="text-xs font-bold underline cursor-pointer disabled:opacity-50">Volver a generar (solo si el cliente NO pagó)</button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Respaldo manual del QR/PIX: el terminal cobró pero la respuesta no llegó al POS */}
+                            {dinelcoQrState !== "aprobada" && (
+                              <div className="w-full max-w-md pt-1 border-t border-slate-200 dark:border-slate-800 text-left">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowDinelcoManualFallback((v) => !v)}
+                                  className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                                >
+                                  {showDinelcoManualFallback ? "▾ Ocultar carga manual" : (dinelcoCupon.trim() ? `✓ Voucher: ${dinelcoCupon} (editar)` : "▸ El terminal cobró pero no respondió: cargar voucher manualmente")}
+                                </button>
+                                {(showDinelcoManualFallback || Boolean(dinelcoCupon.trim())) && (
+                                  <div className="mt-2 space-y-1.5">
+                                    <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase block">Nº de autorización o voucher (del comprobante impreso por el terminal):</label>
+                                    <input
+                                      type="text"
+                                      value={dinelcoCupon}
+                                      onChange={(e) => setDinelcoCupon(e.target.value)}
+                                      placeholder="575849"
+                                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-2 font-posMono tabular-nums text-xs text-purple-600 dark:text-purple-400 font-bold outline-none"
+                                    />
+                                    {dinelcoCupon.trim() && (
+                                      <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">✓ Cobro {dinelcoSubMethod === "pix" ? "PIX" : "QR"} registrado con el voucher cargado a mano. No vuelvas a generar el cobro.</div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             )}
 
@@ -13447,6 +13480,26 @@ export default function POSPage() {
                                         <div className="font-black">⚠ {leg.txnError}</div>
                                         <button type="button" onClick={() => handleDinelcoQRForLeg(leg)} disabled={dinelcoBusy} className="text-[10px] font-bold underline cursor-pointer disabled:opacity-50">Reintentar conexión</button>
                                         <button type="button" onClick={() => updateExtraLeg(leg.id, { txnState: "idle", txnError: "" })} className="ml-3 text-[10px] font-bold underline cursor-pointer">Cancelar</button>
+                                      </div>
+                                    )}
+                                    {leg.txnState !== "aprobada" && leg.txnState !== "esperando" && leg.txnState !== "idle" && (
+                                      <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                                        <button
+                                          type="button"
+                                          onClick={() => updateExtraLeg(leg.id, { showManualFallback: !leg.showManualFallback })}
+                                          className="text-[10px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+                                        >
+                                          {leg.showManualFallback ? "▾ Ocultar carga manual" : (leg.manualCupon ? `✓ Voucher: ${leg.manualCupon} (editar)` : "▸ El terminal cobró pero no respondió: cargar voucher manualmente")}
+                                        </button>
+                                        {(leg.showManualFallback || Boolean(leg.manualCupon)) && (
+                                          <input
+                                            type="text"
+                                            value={leg.manualCupon}
+                                            onChange={(e) => updateExtraLeg(leg.id, { manualCupon: e.target.value })}
+                                            placeholder="Nº autorización / voucher"
+                                            className="mt-1 w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg p-1.5 font-posMono tabular-nums text-[11px] text-emerald-600 dark:text-emerald-400 font-bold outline-none"
+                                          />
+                                        )}
                                       </div>
                                     )}
                                   </div>
