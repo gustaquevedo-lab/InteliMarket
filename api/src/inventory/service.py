@@ -1660,8 +1660,8 @@ async def create_physical_session(
                 alcance_desc = f"Proveedor: {supplier_nom or 'Seleccionado'}"
         elif data.tipo == "sector" or data.categoria_id:
             alcance_desc = f"Sector: {categoria_nom or 'Seleccionado'}"
-        elif data.tipo == "producto" or data.product_ids:
-            cnt = len(data.product_ids or [])
+        elif data.tipo == "producto" or getattr(data, "product_ids", None):
+            cnt = len(getattr(data, "product_ids", None) or [])
             alcance_desc = f"Por Producto ({cnt} seleccionado{'s' if cnt != 1 else ''})"
 
     session_code = f"TF-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid.uuid4().hex[:4].upper()}"
@@ -1692,9 +1692,10 @@ async def create_physical_session(
     # Pre-cargar ítems con stock actual del depósito
     query_params: dict = {"wh_id": data.warehouse_id, "comp_id": data.company_id}
 
-    if (data.tipo == "producto" or data.product_ids) and data.product_ids:
+    pids_list = getattr(data, "product_ids", None)
+    if (data.tipo == "producto" or pids_list) and pids_list:
         uuid_prods = []
-        for pid in data.product_ids:
+        for pid in pids_list:
             try:
                 uuid_prods.append(uuid.UUID(str(pid)))
             except (ValueError, TypeError):
