@@ -2379,6 +2379,8 @@ export const api = {
     listAdjustments: (params?: { warehouse_id?: string; estado?: string; riesgo?: string; limit?: number; offset?: number }) =>
       client.get<InventoryAdjustmentRecord[]>(`/v1/companies/${COMPANY_ID}/adjustments`, params as any),
     getAdjustmentDetail: (id: string) => client.get<InventoryAdjustmentRecord>(`/v1/inventory/adjustments/${id}`),
+    updateAdjustmentItem: (adjId: string, itemId: string, data: { cantidad_fisica: number; motivo_modificacion?: string }) =>
+      client.patch<InventoryAdjustmentRecord>(`/v1/inventory/adjustments/${adjId}/items/${itemId}`, data),
     createAdjustment: (data: AdjustmentCreatePayload) => client.post<any>(`/v1/inventory/adjustments`, { ...data, company_id: COMPANY_ID }),
     approveAdjustmentGerencia: (id: string, body?: { comentario?: string }) =>
       client.post<{ ok: boolean; estado: string; mensaje: string }>(`/v1/inventory/adjustments/${id}/approve-gerencia`, body || {}),

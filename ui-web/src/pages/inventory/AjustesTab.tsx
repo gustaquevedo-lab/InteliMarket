@@ -5,7 +5,7 @@ import {
   Plus, Search, Filter, RefreshCw, FileText, UploadCloud, Trash2,
   ExternalLink, Eye, ChevronRight, Check, AlertTriangle, ArrowRight,
   TrendingDown, TrendingUp, Scale, Layers, HelpCircle, UserCheck, Shield,
-  Barcode
+  Barcode, History, Pencil
 } from "lucide-react"
 import {
   api,
@@ -18,6 +18,7 @@ import {
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDateTime } from "../../utils/format"
+import KardexProductoDetalleModal, { type KardexProductoInfo } from "./KardexProductoDetalleModal"
 
 interface AjustesTabProps {
   warehouses: WarehouseType[]
@@ -97,6 +98,17 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
   } | null>(null)
   const [actionComment, setActionComment] = useState("")
   const [submittingAction, setSubmittingAction] = useState(false)
+
+  // Modal Kardex de Producto
+  const [kardexProducto, setKardexProducto] = useState<KardexProductoInfo | null>(null)
+  const [kardexMovimientos, setKardexMovimientos] = useState<any[]>([])
+  const [loadingKardex, setLoadingKardex] = useState(false)
+
+  // Edición de conteo en detalle
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
+  const [editQty, setEditQty] = useState<string>("")
+  const [editMotivo, setEditMotivo] = useState<string>("")
+  const [savingItem, setSavingItem] = useState(false)
 
   // Formulario de Creación
   const [createWarehouseId, setCreateWarehouseId] = useState("")
@@ -462,6 +474,47 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
       toast.error("Error al cargar auditoría del ajuste", e.message)
     } finally {
       setLoadingDetail(false)
+    }
+  }
+
+  // Abrir Kardex de un producto específico
+  const openKardexProducto = async (productId: string, nombre?: string, sku?: string) => {
+    setKardexProducto({ id: productId, nombre: nombre || "Producto", sku })
+    setLoadingKardex(true)
+    try {
+      const m = await api.inventory.listMovements({ product_id: productId, limit: 500 })
+      setKardexMovimientos(m as any)
+    } catch (e: any) {
+      toast.error("Error al cargar historial Kardex", e.message)
+    } finally {
+      setLoadingKardex(false)
+    }
+  }
+
+  // Guardar edición de conteo físico en un ítem del ajuste
+  const handleSaveEditItem = async (itemId: string) => {
+    if (!detailAdjustment) return
+    const qtyNum = parseFloat(editQty)
+    if (isNaN(qtyNum) || qtyNum < 0) {
+      toast.warning("Cantidad inválida", "Ingrese un valor numérico mayor o igual a 0")
+      return
+    }
+    setSavingItem(true)
+    try {
+      const updated = await api.inventory.updateAdjustmentItem(detailAdjustment.id, itemId, {
+        cantidad_fisica: qtyNum,
+        motivo_modificacion: editMotivo.trim() || undefined,
+      })
+      setDetailAdjustment(updated)
+      setEditingItemId(null)
+      setEditQty("")
+      setEditMotivo("")
+      toast.success("Conteo físico modificado", "Se recalculó la diferencia, el impacto y se registró la auditoría.")
+      loadAdjustments()
+    } catch (e: any) {
+      toast.error("Error al actualizar conteo", e.message)
+    } finally {
+      setSavingItem(false)
     }
   }
 
@@ -931,7 +984,8 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                   return (
                     <tr
                       key={adj.id}
-                      className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition group"
+                      onClick={() => openDetail(adj)}
+                      className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50 transition group cursor-pointer"
                     >
                       {/* Código & Fecha */}
                       <td className="p-3.5 space-y-0.5 whitespace-nowrap">
@@ -1131,7 +1185,10 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                       <td className="p-3.5 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
                           <button
-                            onClick={() => openDetail(adj)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openDetail(adj)
+                            }}
                             className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition"
                             title="Ver Detalle & Auditoría Inmutable"
                           >
@@ -1141,9 +1198,10 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                           {/* Botón Gerencia (Paso 1) */}
                           {adj.estado === "pendiente_gerencia" && (
                             <button
-                              onClick={() =>
+                              onClick={(e) => {
+                                e.stopPropagation()
                                 setActionTarget({ adjustment: adj, type: "gerencia" })
-                              }
+                              }}
                               className="px-2 py-1 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-lg shadow-xs transition flex items-center gap-1 whitespace-nowrap"
                               title="Firmar como Gerencia (Paso 1)"
                             >
@@ -1155,9 +1213,10 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                           {/* Botón Administración (Paso 2) */}
                           {adj.estado === "pendiente_administracion" && (
                             <button
-                              onClick={() =>
+                              onClick={(e) => {
+                                e.stopPropagation()
                                 setActionTarget({ adjustment: adj, type: "administracion" })
-                              }
+                              }}
                               className="px-2 py-1 text-[11px] font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg shadow-xs transition flex items-center gap-1 whitespace-nowrap"
                               title="Firmar como Administración y Aplicar Stock (Paso 2)"
                             >
@@ -1170,9 +1229,10 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                           {(adj.estado === "pendiente_gerencia" ||
                             adj.estado === "pendiente_administracion") && (
                             <button
-                              onClick={() =>
+                              onClick={(e) => {
+                                e.stopPropagation()
                                 setActionTarget({ adjustment: adj, type: "rechazar" })
-                              }
+                              }}
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition"
                               title="Rechazar Ajuste"
                             >
@@ -1455,9 +1515,22 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                                   SKU: {p.sku || "—"} | CB: {p.codigo_barra || "—"}
                                 </p>
                               </div>
-                              <span className="btn-primary text-[10px] px-2 py-1 rounded-lg">
-                                + Agregar
-                              </span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    openKardexProducto(p.id, p.nombre, p.sku)
+                                  }}
+                                  className="px-2 py-1 rounded-lg text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 transition"
+                                  title="Consultar Kardex de este producto"
+                                >
+                                  <History className="w-3 h-3" /> Kardex
+                                </button>
+                                <span className="btn-primary text-[10px] px-2 py-1 rounded-lg">
+                                  + Agregar
+                                </span>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -1492,12 +1565,25 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                           {createItems.map((item, idx) => (
                             <tr key={item.product.id} className="hover:bg-slate-50/50">
                               <td className="p-2.5">
-                                <p className="font-extrabold text-slate-900 dark:text-white truncate max-w-xs">
-                                  {item.product.nombre}
-                                </p>
-                                <p className="text-[10px] font-mono text-slate-400">
-                                  {item.product.sku}
-                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => openKardexProducto(item.product.id, item.product.nombre, item.product.sku)}
+                                  className="text-left group/p flex flex-col hover:opacity-85 transition cursor-pointer"
+                                  title="Ver historial completo en Kardex"
+                                >
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-extrabold text-slate-900 dark:text-white truncate max-w-xs group-hover/p:text-indigo-600 dark:group-hover/p:text-indigo-400">
+                                      {item.product.nombre}
+                                    </span>
+                                    <span className="inline-flex items-center gap-0.5 px-1 py-0.2 rounded text-[8px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 shrink-0">
+                                      <History className="w-2.5 h-2.5" />
+                                      Kardex
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] font-mono text-slate-400">
+                                    {item.product.sku}
+                                  </p>
+                                </button>
                               </td>
                               <td className="p-2.5 text-right font-mono text-slate-500">
                                 {item.cantidad_sistema}
@@ -1887,85 +1973,169 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                        {(detailAdjustment.items || []).map((it) => (
-                          <tr key={it.id} className="hover:bg-slate-50/50">
-                            <td className="p-3">
-                              <p className="font-extrabold text-slate-900 dark:text-white">
-                                {it.product_nombre}
-                              </p>
-                              <p className="text-[10px] font-mono text-slate-400">
-                                {it.product_sku}
-                              </p>
-                            </td>
-                            <td className="p-3 text-right font-mono text-slate-500">
-                              {it.cantidad_sistema}
-                            </td>
-                            <td className="p-3 text-right font-mono font-bold text-slate-900 dark:text-white">
-                              {it.cantidad_fisica}
-                            </td>
-                            <td className="p-3 text-right font-mono font-black">
-                              {Number(it.diferencia) > 0 ? (
-                                <span className="inline-flex items-center gap-1 text-emerald-600">
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 font-bold uppercase">
-                                    Sob
-                                  </span>
-                                  +{it.diferencia}
-                                </span>
-                              ) : Number(it.diferencia) < 0 ? (
-                                <span className="inline-flex items-center gap-1 text-rose-600">
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400 font-bold uppercase">
-                                    Falt
-                                  </span>
-                                  {it.diferencia}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400">0</span>
-                              )}
-                            </td>
-                            <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
-                              {formatPYG(it.costo_unitario)}
-                            </td>
-                            <td className="p-3 text-right font-mono font-black whitespace-nowrap w-40 min-w-[140px]">
-                              {Number(it.diferencia) > 0 ? (
-                                <div className="flex flex-col items-end">
-                                  <span className="text-emerald-600 dark:text-emerald-400 font-black text-sm whitespace-nowrap">
-                                    +{formatPYG(
-                                      Math.abs(
-                                        Number(
-                                          it.impacto_gs != null
-                                            ? it.impacto_gs
-                                            : Number(it.diferencia) * Number(it.costo_unitario || 0)
-                                        )
-                                      )
+                        {(detailAdjustment.items || []).map((it) => {
+                          const isEditable =
+                            detailAdjustment.estado !== "aprobado" &&
+                            detailAdjustment.estado !== "rechazado"
+                          const isEditing = editingItemId === it.id
+
+                          return (
+                            <tr key={it.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/40 transition">
+                              <td className="p-3">
+                                <button
+                                  type="button"
+                                  onClick={() => openKardexProducto(it.product_id, it.product_nombre, it.product_sku)}
+                                  className="text-left group/p flex flex-col hover:opacity-85 transition cursor-pointer"
+                                  title="Ver historial completo en Kardex"
+                                >
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-extrabold text-slate-900 dark:text-white group-hover/p:text-indigo-600 dark:group-hover/p:text-indigo-400">
+                                      {it.product_nombre}
+                                    </span>
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 shrink-0">
+                                      <History className="w-2.5 h-2.5" />
+                                      Kardex
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] font-mono text-slate-400">
+                                    SKU: {it.product_sku}
+                                  </p>
+                                </button>
+                              </td>
+                              <td className="p-3 text-right font-mono text-slate-500">
+                                {it.cantidad_sistema}
+                              </td>
+                              <td className="p-3 text-right font-mono">
+                                {isEditing ? (
+                                  <div className="flex flex-col items-end gap-1 p-1 bg-amber-50/70 dark:bg-amber-950/50 rounded-lg border border-amber-300 dark:border-amber-700 animate-in fade-in">
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        min="0"
+                                        value={editQty}
+                                        onChange={(e) => setEditQty(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") handleSaveEditItem(it.id)
+                                          if (e.key === "Escape") setEditingItemId(null)
+                                        }}
+                                        className="w-20 px-1.5 py-0.5 text-xs font-mono font-bold text-right bg-white dark:bg-slate-800 border rounded focus:ring-1 focus:ring-amber-500"
+                                        placeholder="Cant."
+                                        autoFocus
+                                      />
+                                      <button
+                                        type="button"
+                                        disabled={savingItem}
+                                        onClick={() => handleSaveEditItem(it.id)}
+                                        className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition cursor-pointer"
+                                        title="Guardar nuevo conteo"
+                                      >
+                                        {savingItem ? "..." : "✓"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={savingItem}
+                                        onClick={() => setEditingItemId(null)}
+                                        className="px-1.5 py-0.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded text-xs transition cursor-pointer"
+                                        title="Cancelar"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                    <input
+                                      type="text"
+                                      value={editMotivo}
+                                      onChange={(e) => setEditMotivo(e.target.value)}
+                                      placeholder="Justificación del cambio (opcional)..."
+                                      className="w-48 px-1.5 py-0.5 text-[10px] bg-white dark:bg-slate-800 border rounded text-slate-700 dark:text-slate-200"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <span className="font-bold text-slate-900 dark:text-white">
+                                      {it.cantidad_fisica}
+                                    </span>
+                                    {isEditable && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingItemId(it.id)
+                                          setEditQty(String(it.cantidad_fisica))
+                                          setEditMotivo("")
+                                        }}
+                                        className="p-1 text-slate-400 hover:text-amber-600 rounded hover:bg-amber-50 dark:hover:bg-amber-950/40 transition cursor-pointer"
+                                        title="Modificar conteo físico con registro de auditoría"
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                      </button>
                                     )}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-3 text-right font-mono font-black">
+                                {Number(it.diferencia) > 0 ? (
+                                  <span className="inline-flex items-center gap-1 text-emerald-600">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-400 font-bold uppercase">
+                                      Sob
+                                    </span>
+                                    +{it.diferencia}
                                   </span>
-                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold uppercase text-emerald-700 bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm whitespace-nowrap">
-                                    🟢 Ganancia
+                                ) : Number(it.diferencia) < 0 ? (
+                                  <span className="inline-flex items-center gap-1 text-rose-600">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-400 font-bold uppercase">
+                                      Falt
+                                    </span>
+                                    {it.diferencia}
                                   </span>
-                                </div>
-                              ) : Number(it.diferencia) < 0 ? (
-                                <div className="flex flex-col items-end">
-                                  <span className="text-rose-600 dark:text-rose-400 font-black text-sm whitespace-nowrap">
-                                    -{formatPYG(
-                                      Math.abs(
-                                        Number(
-                                          it.impacto_gs != null
-                                            ? it.impacto_gs
-                                            : Number(it.diferencia) * Number(it.costo_unitario || 0)
+                                ) : (
+                                  <span className="text-slate-400">0</span>
+                                )}
+                              </td>
+                              <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">
+                                {formatPYG(it.costo_unitario)}
+                              </td>
+                              <td className="p-3 text-right font-mono font-black whitespace-nowrap w-40 min-w-[140px]">
+                                {Number(it.diferencia) > 0 ? (
+                                  <div className="flex flex-col items-end">
+                                    <span className="text-emerald-600 dark:text-emerald-400 font-black text-sm whitespace-nowrap">
+                                      +{formatPYG(
+                                        Math.abs(
+                                          Number(
+                                            it.impacto_gs != null
+                                              ? it.impacto_gs
+                                              : Number(it.diferencia) * Number(it.costo_unitario || 0)
+                                          )
                                         )
-                                      )
-                                    )}
-                                  </span>
-                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold uppercase text-rose-700 bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 px-1.5 py-0.5 rounded-sm whitespace-nowrap">
-                                    🔴 Pérdida
-                                  </span>
-                                </div>
-                              ) : (
-                                <span className="text-slate-400 font-medium text-xs">₲ 0</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                                      )}
+                                    </span>
+                                    <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold uppercase text-emerald-700 bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 px-1.5 py-0.5 rounded-sm whitespace-nowrap">
+                                      🟢 Ganancia
+                                    </span>
+                                  </div>
+                                ) : Number(it.diferencia) < 0 ? (
+                                  <div className="flex flex-col items-end">
+                                    <span className="text-rose-600 dark:text-rose-400 font-black text-sm whitespace-nowrap">
+                                      -{formatPYG(
+                                        Math.abs(
+                                          Number(
+                                            it.impacto_gs != null
+                                              ? it.impacto_gs
+                                              : Number(it.diferencia) * Number(it.costo_unitario || 0)
+                                          )
+                                        )
+                                      )}
+                                    </span>
+                                    <span className="inline-flex items-center gap-0.5 text-[9px] font-extrabold uppercase text-rose-700 bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 px-1.5 py-0.5 rounded-sm whitespace-nowrap">
+                                      🔴 Pérdida
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 font-medium text-xs">₲ 0</span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -2151,6 +2321,14 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
           </div>,
           document.body
         )}
+
+      {/* ── MODAL KARDEX DETALLADO DEL PRODUCTO ───────────────────────────── */}
+      <KardexProductoDetalleModal
+        producto={kardexProducto}
+        movimientos={kardexMovimientos}
+        loading={loadingKardex}
+        onClose={() => setKardexProducto(null)}
+      />
     </div>
   )
 }
