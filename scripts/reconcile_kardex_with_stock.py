@@ -69,6 +69,9 @@ async def run(dry_run: bool = True):
         log.info("Productos que requieren calibración Kardex: %d", len(discrepancies))
 
         if not dry_run:
+            from datetime import timedelta, datetime, timezone
+            fallback_dt = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+
             insert_sql = text("""
                 INSERT INTO inventory_movements (
                     id, company_id, warehouse_id, product_id, tipo,
@@ -77,19 +80,21 @@ async def run(dry_run: bool = True):
                     gen_random_uuid(), :comp_id, :wh_id, :prod_id, 'saldo_inicial',
                     :diff, :costo_u, 'calibracion_apertura',
                     'Alineación autoritativa de Kardex con Stock real (Apertura/Corte)',
-                    COALESCE(:earliest_date - interval '1 second', '2025-01-01 00:00:00+00'::timestamptz)
+                    :created_at
                 );
             """)
 
             batch_count = 0
             for row in discrepancies:
+                earliest = row["earliest_created"]
+                calib_dt = (earliest - timedelta(seconds=1)) if earliest else fallback_dt
                 await db.execute(insert_sql, {
                     "comp_id": row["company_id"],
                     "wh_id": row["warehouse_id"],
                     "prod_id": row["product_id"],
                     "diff": row["diff"],
                     "costo_u": row["costo_u"],
-                    "earliest_date": row["earliest_created"],
+                    "created_at": calib_dt,
                 })
                 batch_count += 1
 
