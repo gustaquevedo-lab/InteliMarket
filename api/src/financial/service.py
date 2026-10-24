@@ -1688,7 +1688,7 @@ async def get_payment_queue(db: AsyncSession, company_id: str) -> dict:
         sup_result = await db.execute(select(Supplier).where(Supplier.id.in_(supplier_ids)))
         sup_map = {s.id: s.razon_social for s in sup_result.scalars().all()}
 
-    def _dias_vencido(inv):
+    def _dias_vencido(inv: Any) -> int:
         return (today - inv.fecha_vencimiento).days if inv.fecha_vencimiento < today else 0
 
     # vencidas primero (mas dias vencido primero), despues por vencer por
@@ -2692,7 +2692,7 @@ async def get_cheques_en_transito(
     company_id: uuid.UUID | str,
     bank_account_id: uuid.UUID | str | None = None,
     hasta: date | None = None,
-):
+) -> list[Any]:
     """Partidas en tránsito canónicas: Cheques emitidos pendientes de cobro cuya fecha de pago/vencimiento
     ya operó o está dentro del período de corte (no diferidos a meses futuros)."""
     from api.src.cheques.models import Cheque
@@ -2865,7 +2865,7 @@ async def get_reconciliation_report(db: AsyncSession, company_id: str, bank_acco
 SYSTEM_RUN_MODEL_BANCOS = "system:bancos-controles-automaticos"
 
 
-async def _get_or_create_bancos_system_run(db: AsyncSession, company_id: str):
+async def _get_or_create_bancos_system_run(db: AsyncSession, company_id: str) -> Any:
     from api.src.finance_agent.models import FinanceAgentRun
 
     result = await db.execute(
@@ -3252,8 +3252,8 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
     ap_invoices = list(ap_result.scalars().all())
     facturas_mora_vencidas = Decimal("0")
     facturas_mora_cantidad = 0
-    ap_due = {}
-    ap_cnt = {}
+    ap_due: dict[date, Decimal] = {}
+    ap_cnt: dict[date, int] = {}
     for inv in ap_invoices:
         saldo = inv.saldo_pendiente or Decimal("0")
         if not inv.fecha_vencimiento or inv.fecha_vencimiento < today:
@@ -3276,8 +3276,8 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
     )
     cheques_mora_vencidos = Decimal("0")
     cheques_mora_cantidad = 0
-    chq_due = {}
-    chq_cnt = {}
+    chq_due: dict[date, Decimal] = {}
+    chq_cnt: dict[date, int] = {}
     for row in chq_rows.all():
         fp = row[0]
         monto = Decimal(str(row[1]))
@@ -3305,7 +3305,7 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
     umbral_seguridad = Decimal("30000000")
     dias_nombres = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
 
-    dias_calc = []
+    dias_calc: list[dict[str, Any]] = []
     running_balance = disponibilidad_total
 
     for i in range(dias):
@@ -3374,14 +3374,14 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
 
     # Métricas ejecutivas de síntesis
     horizonte_analisis = dias_calc[:min(30, len(dias_calc))]
-    min_saldo_30d = min((d["saldo_final_proyectado"] for d in horizonte_analisis), default=disponibilidad_total)
+    min_saldo_30d: Decimal = min((Decimal(str(d["saldo_final_proyectado"])) for d in horizonte_analisis), default=disponibilidad_total)
     capacidad_gasto_hoy = max(Decimal("0"), min_saldo_30d - umbral_seguridad)
 
-    tot_fac_30d = sum((d["compromiso_facturas_total"] for d in horizonte_analisis), Decimal("0"))
-    tot_chq_30d = sum((d["compromiso_cheques_total"] for d in horizonte_analisis), Decimal("0"))
+    tot_fac_30d = sum((Decimal(str(d["compromiso_facturas_total"])) for d in horizonte_analisis), Decimal("0"))
+    tot_chq_30d = sum((Decimal(str(d["compromiso_cheques_total"])) for d in horizonte_analisis), Decimal("0"))
 
-    dias_deficit_30d = sum(1 for d in horizonte_analisis if d["capacidad_obligarse"] < Decimal("0"))
-    primer_def = next((d["fecha"].isoformat() for d in horizonte_analisis if d["capacidad_obligarse"] < Decimal("0")), None)
+    dias_deficit_30d = sum(1 for d in horizonte_analisis if Decimal(str(d["capacidad_obligarse"])) < Decimal("0"))
+    primer_def = next((d["fecha"].isoformat() for d in horizonte_analisis if Decimal(str(d["capacidad_obligarse"])) < Decimal("0")), None)
 
     summary_metrics = {
         "disponibilidad_bancos": saldo_bancos,
@@ -5991,7 +5991,7 @@ async def _execute_disbursements_internal(
                 "paymentMethod": forma_pago_disp,
                 "disbursedAt": int(datetime.now(timezone.utc).timestamp() * 1000),
             }
-            async def _notify_sueldok(ep_url, ep_body):
+            async def _notify_sueldok(ep_url: str, ep_body: dict[str, Any]) -> None:
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as cl:
                         headers = {"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
