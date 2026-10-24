@@ -49,6 +49,204 @@ const ESTADO_SESSION_CONFIG: Record<string, { label: string; bg: string; icon: a
   },
 }
 
+interface AdditiveCountCellProps {
+  currentValue: number | null | undefined
+  disabled?: boolean
+  colorScheme: "emerald" | "purple"
+  onSave: (newTotal: number) => Promise<void> | void
+}
+
+function AdditiveCountCell({
+  currentValue,
+  disabled,
+  colorScheme,
+  onSave,
+}: AdditiveCountCellProps) {
+  const [val, setVal] = useState("")
+  const [saving, setSaving] = useState(false)
+  const currentNum = currentValue != null ? Number(currentValue) : null
+
+  // Cálculo en vivo del nuevo valor según lo tipeado
+  const preview = useMemo(() => {
+    const raw = val.trim().replace(",", ".")
+    if (!raw) return null
+    const base = currentNum ?? 0
+
+    if (raw.startsWith("+")) {
+      const added = parseFloat(raw.slice(1))
+      if (isNaN(added)) return null
+      return {
+        type: "add" as const,
+        newTotal: base + added,
+        text: `${base} + ${added}`,
+      }
+    }
+    if (raw.startsWith("-")) {
+      const sub = parseFloat(raw.slice(1))
+      if (isNaN(sub)) return null
+      const res = Math.max(0, base - sub)
+      return {
+        type: "sub" as const,
+        newTotal: res,
+        text: `${base} - ${sub}`,
+      }
+    }
+    // Soporte para sumas tipo "10+5"
+    if (raw.includes("+")) {
+      const parts = raw.split("+").map((p) => parseFloat(p.trim())).filter((p) => !isNaN(p))
+      if (parts.length > 0) {
+        const sum = parts.reduce((a, b) => a + b, 0)
+        return {
+          type: "expr" as const,
+          newTotal: sum,
+          text: `Suma: ${sum}`,
+        }
+      }
+    }
+    // Número plano directo: fija el total
+    const num = parseFloat(raw)
+    if (!isNaN(num)) {
+      return {
+        type: "set" as const,
+        newTotal: num,
+        text: `Fijar total`,
+      }
+    }
+    return null
+  }, [val, currentNum])
+
+  const commitValue = async (targetTotal: number) => {
+    if (disabled || saving) return
+    setSaving(true)
+    try {
+      await onSave(targetTotal)
+      setVal("")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleApply = () => {
+    if (!preview) return
+    commitValue(preview.newTotal)
+  }
+
+  const handleQuickAdd = (increment: number) => {
+    const base = currentNum ?? 0
+    commitValue(base + increment)
+  }
+
+  const themeColors = colorScheme === "emerald"
+    ? {
+        badge: "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800",
+        btn: "hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/50",
+        preview: "text-emerald-600 dark:text-emerald-400",
+      }
+    : {
+        badge: "bg-purple-50 text-purple-700 border-purple-300 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800",
+        btn: "hover:bg-purple-100 text-purple-700 dark:text-purple-300 dark:hover:bg-purple-900/50",
+        preview: "text-purple-600 dark:text-purple-400",
+      }
+
+  return (
+    <div className="flex flex-col items-end gap-1 min-w-[210px]">
+      {/* Fila superior: Badge de Acumulado Actual + Input Aditivo */}
+      <div className="flex items-center gap-1.5 w-full justify-end">
+        {/* Badge acumulado en vivo */}
+        <div
+          className={`px-2 py-1 rounded-lg border text-[11px] font-mono font-black shrink-0 transition-all ${
+            currentNum != null
+              ? themeColors.badge
+              : "bg-slate-100 text-slate-400 border-slate-200 dark:bg-slate-800 dark:text-slate-500 dark:border-slate-700"
+          }`}
+          title="Cantidad acumulada actualmente para este contador"
+        >
+          {currentNum != null ? (
+            <span className="flex items-center gap-1">
+              <span className="text-[9px] font-bold uppercase tracking-wider opacity-70">Total:</span>
+              <span className="text-xs">{currentNum}</span>
+            </span>
+          ) : (
+            <span className="text-[10px] italic">0 un</span>
+          )}
+        </div>
+
+        {/* Input aditivo */}
+        <div className="relative">
+          <input
+            type="text"
+            disabled={disabled || saving}
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault()
+                handleApply()
+              }
+            }}
+            placeholder="+10 o total"
+            className="input-field text-xs font-mono font-bold text-right py-1 px-2 w-24 pr-6 focus:ring-2 focus:ring-emerald-500"
+          />
+          {val && (
+            <button
+              type="button"
+              onClick={handleApply}
+              disabled={disabled || saving}
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-emerald-600 hover:text-emerald-700 font-black text-xs p-0.5"
+              title="Guardar nuevo total (Enter)"
+            >
+              ✓
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Fila inferior: Vista previa en vivo o botones de suma rápida */}
+      <div className="flex items-center justify-between w-full text-[10px]">
+        {preview ? (
+          <span className={`font-mono font-bold ${themeColors.preview} animate-pulse pl-1`}>
+            {preview.text} ➔ <strong>{preview.newTotal}</strong>
+          </span>
+        ) : (
+          <span className="text-[9px] text-slate-400 pl-1">
+            {currentNum != null ? "Escribí +N para sumar" : "Sin conteo"}
+          </span>
+        )}
+
+        {/* Botones de incremento rápido */}
+        {!disabled && (
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleQuickAdd(1)}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-black border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 ${themeColors.btn}`}
+              title="Sumar +1 unidad al acumulado"
+            >
+              +1
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAdd(6)}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-black border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 ${themeColors.btn}`}
+              title="Sumar +6 unidades (medio fardo)"
+            >
+              +6
+            </button>
+            <button
+              type="button"
+              onClick={() => handleQuickAdd(12)}
+              className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-black border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 ${themeColors.btn}`}
+              title="Sumar +12 unidades (fardo/caja)"
+            >
+              +12
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments }: TomaFisicaTabProps) {
   const { user } = useAuth()
   const toast = useToast()
@@ -1010,12 +1208,12 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
 
                   {/* Modo Contador 1 */}
                   {countMode === "contador1" && (
-                    <th className="p-3.5 text-right w-40 whitespace-nowrap">Conteo 1 (Físico)</th>
+                    <th className="p-3.5 text-right w-64 whitespace-nowrap">Conteo 1 (Físico Aditivo)</th>
                   )}
 
                   {/* Modo Contador 2 */}
                   {countMode === "contador2" && (
-                    <th className="p-3.5 text-right w-40 whitespace-nowrap">Conteo 2 (Físico Ciego)</th>
+                    <th className="p-3.5 text-right w-64 whitespace-nowrap">Conteo 2 (Físico Ciego Aditivo)</th>
                   )}
 
                   {/* Modo Supervisor muestra ambos */}
@@ -1072,27 +1270,11 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                       {/* Input Contador 1 */}
                       {countMode === "contador1" && (
                         <td className="p-3.5 text-right">
-                          <input
-                            type="number"
-                            step="any"
+                          <AdditiveCountCell
+                            currentValue={item.cantidad_conteo_1}
                             disabled={isClosed}
-                            defaultValue={item.cantidad_conteo_1 ?? ""}
-                            onBlur={(e) => {
-                              const val = e.target.value
-                              if (val !== "") {
-                                handleRegisterCount(item, 1, parseFloat(val))
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                const val = (e.target as HTMLInputElement).value
-                                if (val !== "") {
-                                  handleRegisterCount(item, 1, parseFloat(val))
-                                }
-                              }
-                            }}
-                            placeholder="Ingrese cant..."
-                            className="input-field text-xs font-mono font-bold text-right py-1.5 px-2 w-32"
+                            colorScheme="emerald"
+                            onSave={(newTotal) => handleRegisterCount(item, 1, newTotal)}
                           />
                         </td>
                       )}
@@ -1100,27 +1282,11 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                       {/* Input Contador 2 */}
                       {countMode === "contador2" && (
                         <td className="p-3.5 text-right">
-                          <input
-                            type="number"
-                            step="any"
+                          <AdditiveCountCell
+                            currentValue={item.cantidad_conteo_2}
                             disabled={isClosed}
-                            defaultValue={item.cantidad_conteo_2 ?? ""}
-                            onBlur={(e) => {
-                              const val = e.target.value
-                              if (val !== "") {
-                                handleRegisterCount(item, 2, parseFloat(val))
-                              }
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                const val = (e.target as HTMLInputElement).value
-                                if (val !== "") {
-                                  handleRegisterCount(item, 2, parseFloat(val))
-                                }
-                              }
-                            }}
-                            placeholder="Ingrese cant..."
-                            className="input-field text-xs font-mono font-bold text-right py-1.5 px-2 w-32"
+                            colorScheme="purple"
+                            onSave={(newTotal) => handleRegisterCount(item, 2, newTotal)}
                           />
                         </td>
                       )}
