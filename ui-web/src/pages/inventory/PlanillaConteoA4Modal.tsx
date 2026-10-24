@@ -43,7 +43,7 @@ export default function PlanillaConteoA4Modal({
   // Configuración de la planilla
   const [printBlindMode, setPrintBlindMode] = useState<boolean>(true) // Por defecto ciego (sin stock sistema)
   const [blankMode, setBlankMode] = useState<boolean>(true) // Por defecto en blanco para escribir a mano
-  const [rowsPerPage, setRowsPerPage] = useState<number>(25) // 25 filas: equilibrio óptimo entre espacio de escritura y aprovechamiento de hoja A4
+  const [rowsPerPage, setRowsPerPage] = useState<number>(20) // 20 filas: altura exacta para entrar con firmas y footer sin desbordar a página 2
   const [sortBy, setSortBy] = useState<"pasillo" | "nombre" | "codigo">("pasillo")
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
 
@@ -195,7 +195,7 @@ export default function PlanillaConteoA4Modal({
           <style>
             @page {
               size: A4 portrait;
-              margin: 5mm 6mm;
+              margin: 0 !important;
             }
             * {
               box-sizing: border-box !important;
@@ -208,7 +208,7 @@ export default function PlanillaConteoA4Modal({
               padding: 0 !important;
               background: #fff !important;
               color: #000 !important;
-              font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
               -webkit-font-smoothing: antialiased !important;
             }
             .font-mono {
@@ -217,14 +217,15 @@ export default function PlanillaConteoA4Modal({
             }
             #conteo-print-container {
               display: block !important;
-              width: 100% !important;
-              margin: 0 !important;
+              width: 210mm !important;
+              margin: 0 auto !important;
               padding: 0 !important;
             }
             .conteo-a4-page {
-              width: 100% !important;
-              height: 286mm !important;
-              max-height: 286mm !important;
+              width: 210mm !important;
+              height: 297mm !important;
+              max-height: 297mm !important;
+              min-height: 297mm !important;
               page-break-before: auto !important;
               page-break-after: always !important;
               break-after: page !important;
@@ -233,8 +234,8 @@ export default function PlanillaConteoA4Modal({
               display: flex !important;
               flex-direction: column !important;
               justify-content: space-between !important;
-              padding: 0 !important;
-              margin: 0 auto !important;
+              padding: 6mm 8mm !important;
+              margin: 0 !important;
               box-sizing: border-box !important;
               overflow: hidden !important;
               background: #ffffff !important;
@@ -298,12 +299,11 @@ export default function PlanillaConteoA4Modal({
       for (let i = 0; i < pageElements.length; i++) {
         const el = pageElements[i]
         const canvas = await html2canvas(el, {
-          scale: 2.5,
+          scale: 2,
           useCORS: true,
           allowTaint: true,
           backgroundColor: "#ffffff",
           logging: false,
-          windowWidth: 1024,
         })
 
         const imgData = canvas.toDataURL("image/jpeg", 0.98)
@@ -335,14 +335,14 @@ export default function PlanillaConteoA4Modal({
         @media print {
           @page {
             size: A4 portrait;
-            margin: 5mm 6mm;
+            margin: 0 !important;
           }
           * {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
             color-adjust: exact !important;
           }
-          body {
+          html, body {
             background: #fff !important;
             margin: 0 !important;
             padding: 0 !important;
@@ -351,8 +351,8 @@ export default function PlanillaConteoA4Modal({
             display: none !important;
           }
           #conteo-print-container {
-            width: 100% !important;
-            margin: 0 !important;
+            width: 210mm !important;
+            margin: 0 auto !important;
             padding: 0 !important;
           }
           .conteo-a4-page {
@@ -360,13 +360,15 @@ export default function PlanillaConteoA4Modal({
             break-after: page !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
-            width: 100% !important;
-            height: 286mm !important;
-            max-height: 286mm !important;
+            width: 210mm !important;
+            height: 297mm !important;
+            min-height: 297mm !important;
+            max-height: 297mm !important;
             box-shadow: none !important;
             border: none !important;
-            margin: 0 auto !important;
-            padding: 0 !important;
+            margin: 0 !important;
+            padding: 6mm 8mm !important;
+            box-sizing: border-box !important;
             overflow: hidden !important;
           }
           .conteo-a4-page:last-child {
@@ -509,10 +511,9 @@ export default function PlanillaConteoA4Modal({
                 onChange={(e) => setRowsPerPage(Number(e.target.value))}
                 className="bg-transparent font-bold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
               >
-                <option value={20}>20 filas (Amplio)</option>
-                <option value={25}>25 filas (Estándar Recomendado)</option>
-                <option value={28}>28 filas (Compacto)</option>
-                <option value={32}>32 filas (Máxima Capacidad A4)</option>
+                <option value={18}>18 filas (Muy Amplio)</option>
+                <option value={20}>20 filas (Recomendado A4)</option>
+                <option value={22}>22 filas (Ajustado)</option>
               </select>
             </div>
           </div>
@@ -526,18 +527,20 @@ export default function PlanillaConteoA4Modal({
         <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-200/70 dark:bg-slate-900/90 flex flex-col items-center gap-6">
           <div ref={printContainerRef} id="conteo-print-container" className="w-full flex flex-col items-center gap-6">
             {pagesData.map((page) => {
-              const rowHeight = rowsPerPage >= 30 ? "23px" : rowsPerPage >= 26 ? "25px" : rowsPerPage >= 24 ? "27px" : "30px"
-              const boxHeight = rowsPerPage >= 30 ? "h-5" : rowsPerPage >= 26 ? "h-5.5" : "h-6"
+              const rowHeight = rowsPerPage <= 18 ? "36px" : rowsPerPage <= 20 ? "33px" : "29px"
+              const boxHeight = rowsPerPage <= 20 ? "h-7" : "h-6"
 
               return (
               <div
                 key={`page-${page.pageNumber}`}
-                className="conteo-a4-page bg-white text-black w-[210mm] min-h-[297mm] max-h-[297mm] p-[5mm_6mm] shadow-2xl border border-slate-300 font-sans text-xs flex flex-col justify-between"
+                className="conteo-a4-page bg-white text-black shadow-2xl border border-slate-300 font-sans text-xs flex flex-col justify-between"
                 style={{
                   boxSizing: "border-box",
                   width: "210mm",
                   height: "297mm",
+                  minHeight: "297mm",
                   maxHeight: "297mm",
+                  padding: "6mm 8mm",
                   overflow: "hidden",
                 }}
               >
@@ -669,11 +672,13 @@ export default function PlanillaConteoA4Modal({
                                 {item.product_codigo_barra || item.product_sku || "—"}
                               </td>
 
-                              {/* Descripción de Producto */}
-                              <td className="p-0.5 text-black font-semibold border-r border-black/80 truncate max-w-[220px] leading-tight">
-                                <div className="truncate font-bold text-[10px]">{item.product_nombre}</div>
+                              {/* Descripción de Producto (Sin recorte horizontal de fuentes) */}
+                              <td className="px-1.5 py-1 text-black font-semibold border-r border-black/80 max-w-[260px] align-middle">
+                                <div className="font-bold text-[10.5px] leading-snug break-words text-black">
+                                  {item.product_nombre}
+                                </div>
                                 {item.product_sku && item.product_codigo_barra && (
-                                  <div className="text-[8px] font-mono text-slate-500 leading-none">
+                                  <div className="text-[8px] font-mono text-slate-600 leading-normal mt-0.5">
                                     SKU: {item.product_sku}
                                   </div>
                                 )}
@@ -693,7 +698,7 @@ export default function PlanillaConteoA4Modal({
 
                               {/* Casilla 1° Conteo */}
                               <td className="p-0.5 text-center border-r border-black/80 bg-slate-50/40">
-                                <div className={`border border-black rounded-xs ${boxHeight} w-full flex items-center justify-center font-mono font-black text-black text-[11px] bg-white`}>
+                                <div className={`border border-black rounded-xs ${boxHeight} w-full flex items-center justify-center font-mono font-black text-black text-[12px] bg-white`}>
                                   {showRecordedC1
                                     ? Number(item.cantidad_conteo_1).toLocaleString("es-PY")
                                     : ""}
@@ -702,7 +707,7 @@ export default function PlanillaConteoA4Modal({
 
                               {/* Casilla 2° Conteo */}
                               <td className="p-0.5 text-center border-r border-black/80 bg-slate-50/40">
-                                <div className={`border border-black rounded-xs ${boxHeight} w-full flex items-center justify-center font-mono font-black text-black text-[11px] bg-white`}>
+                                <div className={`border border-black rounded-xs ${boxHeight} w-full flex items-center justify-center font-mono font-black text-black text-[12px] bg-white`}>
                                   {showRecordedC2
                                     ? Number(item.cantidad_conteo_2).toLocaleString("es-PY")
                                     : ""}
