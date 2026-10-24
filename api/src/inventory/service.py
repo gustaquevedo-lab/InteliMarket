@@ -1193,6 +1193,80 @@ async def get_adjustment_detail(db: AsyncSession, adjustment_id: str) -> dict | 
     }
 
 
+async def update_adjustment_item(
+    db: AsyncSession,
+    adjustment_id: str,
+    item_id: str,
+    cantidad_fisica: float,
+    motivo_modificacion: str | None = None,
+    user_id: uuid.UUID | None = None,
+    user_nombre: str | None = None,
+    ip_address: str | None = None,
+) -> dict:
+    """Permite modificar el conteo físico de un ítem en un ajuste pendiente de aprobación con audit log."""
+    adj_uuid = uuid.UUID(adjustment_id) if isinstance(adjustment_id, str) else adjustment_id
+    item_uuid = uuid.UUID(item_id) if isinstance(item_id, str) else item_id
+
+    adj = await db.get(InventoryAdjustment, adj_uuid)
+    if not adj:
+        raise ValueError("Ajuste no encontrado")
+    if adj.estado in ("aprobado", "rechazado"):
+        raise ValueError(f"No se puede modificar un ajuste en estado '{adj.estado}'")
+
+    item = await db.get(InventoryAdjustmentItem, item_uuid)
+    if not item or item.adjustment_id != adj_uuid:
+        raise ValueError("Ítem no encontrado en este ajuste")
+
+    old_fisica = float(item.cantidad_fisica)
+    new_fisica = float(cantidad_fisica)
+    diff = new_fisica - float(item.cantidad_sistema)
+    costo = float(item.costo_unitario or 0)
+    impacto_item = diff * costo
+
+    item.cantidad_fisica = new_fisica
+    item.diferencia = diff
+    item.impacto_gs = int(impacto_item)
+
+    await db.flush()
+
+    # Recalcular impacto total del ajuste
+    all_items_res = await db.execute(
+        select(InventoryAdjustmentItem).where(InventoryAdjustmentItem.adjustment_id == adj_uuid)
+    )
+    all_items = all_items_res.scalars().all()
+    impacto_total = sum(float(i.impacto_gs or 0) for i in all_items)
+    adj.impacto_financiero_gs = int(impacto_total)
+
+    nombre = user_nombre or (await _get_user_nombre(db, user_id)) or "Auditor"
+
+    comentario = (
+        f"Conteo físico de {item.product_nombre} (SKU: {item.product_sku}) modificado de {old_fisica} a {new_fisica}."
+    )
+    if motivo_modificacion and motivo_modificacion.strip():
+        comentario += f" Justificación: {motivo_modificacion.strip()}"
+
+    await _write_audit_log(
+        db,
+        adjustment_id=adj.id,
+        accion="edicion_conteo",
+        user_id=user_id or uuid.UUID(int=0),
+        user_nombre=nombre,
+        rol_firmante="auditor",
+        comentario=comentario,
+        ip_address=ip_address,
+        metadata_extra={
+            "item_id": str(item.id),
+            "product_id": str(item.product_id),
+            "cantidad_anterior": old_fisica,
+            "cantidad_nueva": new_fisica,
+            "justificacion": motivo_modificacion,
+        },
+    )
+
+    await db.commit()
+    return await get_adjustment_detail(db, str(adj.id))
+
+
 async def get_adjustment_motivos() -> list[dict]:
     """Retorna el catálogo de motivos con su nivel de riesgo."""
     return [

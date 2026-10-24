@@ -212,7 +212,7 @@ export default function PlanillaConteoA4Modal({
               padding: 0 !important;
               background: #fff !important;
               color: #000 !important;
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+              font-family: Arial, Helvetica, sans-serif !important;
               -webkit-font-smoothing: antialiased !important;
             }
             .font-mono {
@@ -227,9 +227,9 @@ export default function PlanillaConteoA4Modal({
             }
             .conteo-a4-page {
               width: 210mm !important;
-              height: 297mm !important;
-              max-height: 297mm !important;
-              min-height: 297mm !important;
+              height: 290mm !important;
+              max-height: 290mm !important;
+              min-height: 290mm !important;
               page-break-before: auto !important;
               page-break-after: always !important;
               break-after: page !important;
@@ -238,8 +238,8 @@ export default function PlanillaConteoA4Modal({
               display: flex !important;
               flex-direction: column !important;
               justify-content: space-between !important;
-              padding: 6mm 8mm !important;
-              margin: 0 !important;
+              padding: 5mm 7mm !important;
+              margin: 0 auto !important;
               box-sizing: border-box !important;
               overflow: hidden !important;
               background: #ffffff !important;
@@ -275,7 +275,7 @@ export default function PlanillaConteoA4Modal({
         "Impresión enviada",
         `Planilla de Conteo A4 (${pagesData.length} hoja${pagesData.length > 1 ? "s" : ""}) lista en diálogo de impresión.`
       )
-    }, 350)
+    }, 400)
   }
 
   // Descarga directa de PDF (1:1 con fidelidad milimétrica)
@@ -303,11 +303,25 @@ export default function PlanillaConteoA4Modal({
       for (let i = 0; i < pageElements.length; i++) {
         const el = pageElements[i]
         const canvas = await html2canvas(el, {
-          scale: 2,
+          scale: 2.5,
           useCORS: true,
           allowTaint: true,
           backgroundColor: "#ffffff",
           logging: false,
+          windowWidth: 1024,
+          onclone: (clonedDoc) => {
+            const pages = clonedDoc.querySelectorAll(".conteo-a4-page")
+            pages.forEach((p) => {
+              const htmlEl = p as HTMLElement
+              htmlEl.style.width = "210mm"
+              htmlEl.style.height = "297mm"
+              htmlEl.style.minHeight = "297mm"
+              htmlEl.style.maxHeight = "297mm"
+              htmlEl.style.margin = "0"
+              htmlEl.style.border = "none"
+              htmlEl.style.boxShadow = "none"
+            })
+          },
         })
 
         const imgData = canvas.toDataURL("image/jpeg", 0.98)
@@ -540,18 +554,18 @@ export default function PlanillaConteoA4Modal({
                 style={{
                   boxSizing: "border-box",
                   width: "210mm",
-                  height: "297mm",
-                  minHeight: "297mm",
-                  maxHeight: "297mm",
-                  padding: "6mm 8mm",
+                  height: "290mm",
+                  minHeight: "290mm",
+                  maxHeight: "290mm",
+                  padding: "5mm 7mm",
                   overflow: "hidden",
                   fontFamily: "Arial, Helvetica, sans-serif",
                 }}
               >
                 {/* ── PARTE SUPERIOR DE LA HOJA: ENCABEZADO ULTRA-COMPACTO Y TABLA ── */}
                 <div className="flex-1 flex flex-col">
-                  {/* 1. ENCABEZADO ULTRA-COMPACTO Y ELEGANTE (SIN CSS GRID NI COLAPSO) */}
-                  <div className="border border-black rounded-sm p-2 mb-2 bg-slate-50/50 shrink-0">
+                  {/* 1. ENCABEZADO ULTRA-COMPACTO Y ELEGANTE */}
+                  <div className="border border-black rounded-xs p-2 mb-1.5 bg-slate-50/50 shrink-0">
                     <div className="flex justify-between items-center pb-1.5 mb-1.5 border-b border-black/30">
                       <div className="flex items-center gap-2">
                         <img
@@ -583,27 +597,45 @@ export default function PlanillaConteoA4Modal({
                       </div>
                     </div>
 
-                    {/* Metadatos operativos en tira horizontal clara */}
-                    <div className="flex justify-between items-center text-[9px] leading-normal">
-                      <div className="flex items-center gap-2 truncate">
-                        <span><strong className="text-slate-500 uppercase">Alcance:</strong> <span className="font-bold text-black uppercase">{session.tipo} {session.descripcion_alcance ? `— ${session.descripcion_alcance}` : ""}</span></span>
+                    {/* Metadatos operativos estructurados */}
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9px] leading-normal font-sans">
+                      <div className="truncate">
+                        <strong className="text-slate-500 uppercase">Alcance:</strong>{" "}
+                        <span className="font-bold text-black uppercase">
+                          {session.tipo} {session.descripcion_alcance ? `— ${session.descripcion_alcance}` : ""}
+                        </span>
                         {session.supplier_nombre && (
-                          <span>• <strong className="text-slate-500 uppercase">Prov:</strong> <span className="font-bold text-black">{session.supplier_nombre}</span></span>
+                          <span className="ml-1.5">
+                            • <strong className="text-slate-500 uppercase">Prov:</strong>{" "}
+                            <span className="font-bold text-black">{session.supplier_nombre}</span>
+                          </span>
                         )}
                         {session.categoria_nombre && (
-                          <span>• <strong className="text-slate-500 uppercase">Rubro:</strong> <span className="font-bold text-black">{session.categoria_nombre}</span></span>
+                          <span className="ml-1.5">
+                            • <strong className="text-slate-500 uppercase">Rubro:</strong>{" "}
+                            <span className="font-bold text-black">{session.categoria_nombre}</span>
+                          </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-3 shrink-0 font-mono text-[9px]">
-                        <span><strong className="text-slate-500 uppercase">C1:</strong> <span className="font-bold text-black">{session.contador_1_nombre || "Titular"}</span></span>
-                        <span><strong className="text-slate-500 uppercase">C2:</strong> <span className="font-bold text-black">{session.contador_2_nombre || "Doble Ciego"}</span></span>
-                        <span><strong className="text-slate-500 uppercase">Emisión:</strong> <span className="font-bold text-black">{formatFechaParaguay(session.created_at)}</span></span>
+                      <div className="flex items-center justify-end gap-3 font-mono text-[9px]">
+                        <span>
+                          <strong className="text-slate-500 uppercase font-sans">C1:</strong>{" "}
+                          <span className="font-bold text-black">{session.contador_1_nombre || "Titular"}</span>
+                        </span>
+                        <span>
+                          <strong className="text-slate-500 uppercase font-sans">C2:</strong>{" "}
+                          <span className="font-bold text-black">{session.contador_2_nombre || "Doble Ciego"}</span>
+                        </span>
+                        <span>
+                          <strong className="text-slate-500 uppercase font-sans">Emisión:</strong>{" "}
+                          <span className="font-bold text-black">{formatFechaParaguay(session.created_at)}</span>
+                        </span>
                       </div>
                     </div>
                   </div>
 
                   {/* 2. TABLA OFICIAL DE ARTÍCULOS PARA CONTEO */}
-                  <div className="border border-black rounded-sm overflow-hidden flex-1">
+                  <div className="border border-black rounded-xs overflow-hidden flex-1">
                     <table className="w-full text-left border-collapse table-fixed">
                       <thead>
                         <tr className="bg-black text-white font-black uppercase text-[8.5px] tracking-wider border-b border-black">
@@ -633,7 +665,7 @@ export default function PlanillaConteoA4Modal({
                             <tr
                               key={item.id || `item-${idx}`}
                               className={idx % 2 === 1 ? "bg-slate-50/70" : "bg-white"}
-                              style={{ height: "24px" }}
+                              style={{ height: "26px" }}
                             >
                               {/* # Nro secuencial */}
                               <td className="p-0.5 text-center font-mono font-bold text-black border-r border-black/80 text-[10px]">
@@ -645,28 +677,44 @@ export default function PlanillaConteoA4Modal({
                                 {item.product_codigo_barra || item.product_sku || "—"}
                               </td>
 
-                              {/* Descripción de Producto (En 1 línea sin truncar letras, SKU abajo) */}
-                              <td className="px-2 py-0.5 text-black border-r border-black/80 align-middle overflow-hidden">
-                                <div className="font-bold text-[10px] leading-tight text-black truncate" title={item.product_nombre}>
+                              {/* Descripción de Producto (Multi-línea limpia sin truncar ni cortar letras) */}
+                              <td className="px-2 py-0.5 text-black border-r border-black/80 align-middle">
+                                <div
+                                  className="font-bold text-[9.5px] leading-tight text-black uppercase"
+                                  title={item.product_nombre}
+                                  style={{
+                                    display: "-webkit-box",
+                                    WebkitLineClamp: 2,
+                                    WebkitBoxOrient: "vertical",
+                                    overflow: "hidden",
+                                    wordBreak: "break-word",
+                                  }}
+                                >
                                   {item.product_nombre}
                                 </div>
-                                <div className="text-[8px] font-mono text-slate-500 leading-none mt-0.5">
+                                <div className="text-[7.5px] font-mono text-slate-500 leading-none mt-0.5">
                                   SKU: {item.product_sku || "—"}
                                 </div>
                               </td>
 
-                              {/* Casilla 1° Conteo */}
+                              {/* Casilla 1° Conteo (Caja rectangular abierta, nunca una línea) */}
                               <td className="p-0.5 text-center border-r border-black/80 bg-slate-50/40">
-                                <div className="border border-black rounded-xs h-5.5 w-full flex items-center justify-center font-mono font-black text-black text-[11px] bg-white">
+                                <div
+                                  className="border border-black rounded-none w-full flex items-center justify-center font-mono font-black text-black text-[11px] bg-white"
+                                  style={{ height: "22px", minHeight: "22px" }}
+                                >
                                   {showRecordedC1
                                     ? Number(item.cantidad_conteo_1).toLocaleString("es-PY")
                                     : ""}
                                 </div>
                               </td>
 
-                              {/* Casilla 2° Conteo */}
+                              {/* Casilla 2° Conteo (Caja rectangular abierta, nunca una línea) */}
                               <td className="p-0.5 text-center border-r border-black/80 bg-slate-50/40">
-                                <div className="border border-black rounded-xs h-5.5 w-full flex items-center justify-center font-mono font-black text-black text-[11px] bg-white">
+                                <div
+                                  className="border border-black rounded-none w-full flex items-center justify-center font-mono font-black text-black text-[11px] bg-white"
+                                  style={{ height: "22px", minHeight: "22px" }}
+                                >
                                   {showRecordedC2
                                     ? Number(item.cantidad_conteo_2).toLocaleString("es-PY")
                                     : ""}
@@ -675,7 +723,10 @@ export default function PlanillaConteoA4Modal({
 
                               {/* Casilla Observaciones */}
                               <td className="p-0.5 text-center">
-                                <div className="h-5.5 w-full border border-dashed border-slate-300 rounded-xs"></div>
+                                <div
+                                  className="w-full border border-dashed border-slate-400 rounded-none bg-white"
+                                  style={{ height: "22px", minHeight: "22px" }}
+                                ></div>
                               </td>
                             </tr>
                           )

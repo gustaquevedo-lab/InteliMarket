@@ -15,6 +15,7 @@ from api.src.inventory.schemas import (
     TransferCreate, TransferResponse,
     AdjustmentCreate, AdjustmentResponse,
     ApproveAdjustmentBody, RejectAdjustmentBody,
+    UpdateAdjustmentItemBody,
     PhysicalSessionCreate, PhysicalSessionResponse,
     PhysicalSessionItemCountBody, PhysicalSessionItemReconcileBody,
     PhysicalSessionItemResponse,
@@ -419,6 +420,35 @@ async def get_adjustment_detail(
             for l in result["audit_logs"]
         ],
     }
+
+
+@router.patch("/inventory/adjustments/{adjustment_id}/items/{item_id}")
+async def update_adjustment_item(
+    adjustment_id: str,
+    item_id: str,
+    body: UpdateAdjustmentItemBody,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Permite a supervisores o auditores modificar el conteo físico de un ítem con audit log inmutable."""
+    ip = request.client.host if request and request.client else None
+    try:
+        user_id = UUID(user["id"]) if user.get("id") else None
+        user_nombre = user.get("user_nombre") or user.get("nombre")
+        result = await service.update_adjustment_item(
+            db,
+            adjustment_id=adjustment_id,
+            item_id=item_id,
+            cantidad_fisica=float(body.cantidad_fisica),
+            motivo_modificacion=body.motivo_modificacion,
+            user_id=user_id,
+            user_nombre=user_nombre,
+            ip_address=ip,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/inventory/adjustments/{adjustment_id}/approve-gerencia")

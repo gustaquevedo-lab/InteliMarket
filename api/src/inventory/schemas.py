@@ -202,6 +202,11 @@ class AdjustmentCreate(BaseModel):
         return v
 
 
+class UpdateAdjustmentItemBody(BaseModel):
+    cantidad_fisica: Decimal = Field(..., ge=0, description="Nuevo conteo físico")
+    motivo_modificacion: Optional[str] = Field(None, description="Motivo o justificación de la modificación del conteo")
+
+
 class AdjustmentItemResponse(BaseModel):
     id: UUID
     product_id: UUID
