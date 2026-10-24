@@ -1895,26 +1895,52 @@ async def register_item_count(
         raise ValueError("Ítem no encontrado en la sesión")
 
     now = datetime.now(timezone.utc)
+    qty = float(body.cantidad)
     if body.numero_conteo == 1:
-        item.cantidad_conteo_1 = float(body.cantidad)
+        item.cantidad_conteo_1 = qty
         item.contado_1_at = now
         item.contado_1_by = user_id
-        item.estado = "conteo_1"
+
+        # Si ya existía conteo 2, evaluar si coinciden
+        if item.cantidad_conteo_2 is not None:
+            if abs(qty - float(item.cantidad_conteo_2)) < 0.001:
+                item.cantidad_final = qty
+                item.diferencia = qty - float(item.cantidad_sistema)
+                item.impacto_gs = int(item.diferencia * float(item.costo_unitario or 0))
+                item.estado = "reconciliado"
+            else:
+                item.cantidad_final = None
+                item.diferencia = None
+                item.impacto_gs = None
+                item.estado = "conteo_2"  # Discrepancia activa entre conteo 1 y 2
+        else:
+            # Conteo simple / preliminar: la cantidad contada es la base de diferencia
+            item.cantidad_final = qty
+            item.diferencia = qty - float(item.cantidad_sistema)
+            item.impacto_gs = int(item.diferencia * float(item.costo_unitario or 0))
+            item.estado = "conteo_1"
     else:
-        if item.cantidad_conteo_1 is None:
-            raise ValueError("Debe completarse el primer conteo antes del segundo")
-        item.cantidad_conteo_2 = float(body.cantidad)
+        item.cantidad_conteo_2 = qty
         item.contado_2_at = now
         item.contado_2_by = user_id
 
-        # Si ambos conteos son iguales, auto-reconciliar
-        if abs(float(body.cantidad) - float(item.cantidad_conteo_1)) < 0.001:
-            item.cantidad_final = float(body.cantidad)
-            item.diferencia = float(body.cantidad) - float(item.cantidad_sistema)
-            item.impacto_gs = int(item.diferencia * float(item.costo_unitario or 0))
-            item.estado = "reconciliado"
+        # Si ya existía conteo 1, evaluar coincidencia
+        if item.cantidad_conteo_1 is not None:
+            if abs(qty - float(item.cantidad_conteo_1)) < 0.001:
+                item.cantidad_final = qty
+                item.diferencia = qty - float(item.cantidad_sistema)
+                item.impacto_gs = int(item.diferencia * float(item.costo_unitario or 0))
+                item.estado = "reconciliado"
+            else:
+                item.cantidad_final = None
+                item.diferencia = None
+                item.impacto_gs = None
+                item.estado = "conteo_2"  # Discrepancia
         else:
-            item.estado = "conteo_2"  # Discrepancia — requiere reconciliación manual
+            item.cantidad_final = qty
+            item.diferencia = qty - float(item.cantidad_sistema)
+            item.impacto_gs = int(item.diferencia * float(item.costo_unitario or 0))
+            item.estado = "conteo_2"
 
     await db.flush()
     await db.refresh(item)
@@ -1928,7 +1954,7 @@ async def reconcile_item(
     body: PhysicalSessionItemReconcileBody,
     user_id: uuid.UUID | None = None,
 ) -> PhysicalInventorySessionItem:
-    """Supervisor reconcilia diferencia entre conteo 1 y 2."""
+    """Supervisor reconcilia o define la cantidad física final de un ítem."""
     sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
     iid = uuid.UUID(item_id) if isinstance(item_id, str) else item_id
 
@@ -1940,12 +1966,11 @@ async def reconcile_item(
     )
     item = item_res.scalar_one_or_none()
     if not item:
-        raise ValueError("Ítem no encontrado")
-    if item.estado not in ("conteo_2", "conteo_1"):
-        raise ValueError(f"El ítem no requiere reconciliación (estado: {item.estado})")
+        raise ValueError("Ítem no encontrado en la sesión")
 
-    item.cantidad_final = float(body.cantidad_final)
-    item.diferencia = float(body.cantidad_final) - float(item.cantidad_sistema)
+    final_qty = float(body.cantidad_final)
+    item.cantidad_final = final_qty
+    item.diferencia = final_qty - float(item.cantidad_sistema)
     item.impacto_gs = int(item.diferencia * float(item.costo_unitario or 0))
     item.reconciliado_by = user_id
     item.nota_reconciliacion = body.nota_reconciliacion
@@ -1979,7 +2004,7 @@ async def close_physical_session(
     if session.estado not in ("en_conteo", "abierta"):
         raise ValueError(f"La sesión no puede cerrarse (estado: {session.estado})")
 
-    # Verificar que todos los ítems estén reconciliados
+    # Verificar que no haya discrepancias activas no resueltas entre conteo 1 y 2
     items_result = await db.execute(
         select(PhysicalInventorySessionItem).where(
             PhysicalInventorySessionItem.session_id == sid
@@ -1987,15 +2012,29 @@ async def close_physical_session(
     )
     items = items_result.scalars().all()
 
-    pendientes = [i for i in items if i.estado in ("pendiente", "conteo_2") and i.cantidad_conteo_1 is not None]
-    if pendientes:
+    discrepancias = [i for i in items if i.estado == "conteo_2"]
+    if discrepancias:
         raise ValueError(
-            f"Hay {len(pendientes)} ítem(s) con discrepancias sin reconciliar. "
+            f"Hay {len(discrepancias)} ítem(s) con discrepancia entre conteo 1 y 2 sin reconciliar. "
             "Reconcílielos antes de cerrar la sesión."
         )
 
-    # Calcular totales
-    items_con_diff = [i for i in items if i.diferencia and abs(float(i.diferencia)) > 0.001]
+    # Asegurar que cada ítem que fue contado tenga su cantidad_final y diferencia calculada
+    for it in items:
+        if it.cantidad_final is None:
+            if it.cantidad_conteo_2 is not None:
+                it.cantidad_final = float(it.cantidad_conteo_2)
+            elif it.cantidad_conteo_1 is not None:
+                it.cantidad_final = float(it.cantidad_conteo_1)
+
+        if it.cantidad_final is not None:
+            it.diferencia = float(it.cantidad_final) - float(it.cantidad_sistema)
+            it.impacto_gs = int(it.diferencia * float(it.costo_unitario or 0))
+            if it.estado == "pendiente":
+                it.estado = "reconciliado"
+
+    # Calcular totales sobre todos los ítems con diferencia
+    items_con_diff = [i for i in items if i.diferencia is not None and abs(float(i.diferencia)) > 0.001]
     diferencia_total_unidades = sum(float(i.diferencia or 0) for i in items_con_diff)
     diferencia_total_gs = sum(float(i.impacto_gs or 0) for i in items_con_diff)
 

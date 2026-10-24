@@ -179,25 +179,31 @@ function AdditiveCountCell({
             disabled={disabled || saving}
             value={val}
             onChange={(e) => setVal(e.target.value)}
+            onBlur={handleApply}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault()
                 handleApply()
               }
             }}
-            placeholder="+10 o total"
+            placeholder={saving ? "..." : "+10 o total"}
             className="input-field text-xs font-mono font-bold text-right py-1 px-2 w-24 pr-6 focus:ring-2 focus:ring-emerald-500"
           />
-          {val && (
+          {val && !saving && (
             <button
               type="button"
               onClick={handleApply}
               disabled={disabled || saving}
               className="absolute right-1 top-1/2 -translate-y-1/2 text-emerald-600 hover:text-emerald-700 font-black text-xs p-0.5"
-              title="Guardar nuevo total (Enter)"
+              title="Guardar nuevo total (Enter o salir)"
             >
               ✓
             </button>
+          )}
+          {saving && (
+            <span className="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] text-blue-500 font-bold animate-pulse">
+              ...
+            </span>
           )}
         </div>
       </div>
@@ -1317,9 +1323,14 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
 
                           {/* Cotejo Ciego */}
                           <td className="p-3.5 text-center">
-                            {!hasC1 || !hasC2 ? (
+                            {!hasC1 && !hasC2 ? (
                               <span className="text-[10px] text-slate-400 italic">
-                                Incompleto
+                                Sin conteo
+                              </span>
+                            ) : hasC1 && !hasC2 ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>Conteo 1 ({item.cantidad_conteo_1})</span>
                               </span>
                             ) : isMatch ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
@@ -1336,7 +1347,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
 
                           {/* Cantidad Final */}
                           <td className="p-3.5 text-right font-mono font-black text-slate-900 dark:text-white">
-                            {item.cantidad_final != null ? item.cantidad_final : "—"}
+                            {item.cantidad_final != null ? item.cantidad_final : item.cantidad_conteo_1 != null ? item.cantidad_conteo_1 : "—"}
                           </td>
 
                           {/* Diferencia */}
@@ -1419,17 +1430,19 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                             )}
                           </td>
 
-                          {/* Acción Reconciliar */}
+                          {/* Acción Reconciliar / Ajustar */}
                           <td className="p-3.5 text-center">
-                            {!isClosed && isDiscrepancy && (
+                            {!isClosed && (hasC1 || hasC2 || item.cantidad_final != null) && (
                               <button
                                 onClick={() => {
                                   setReconcileTarget(item)
-                                  setReconcileQty(Number(item.cantidad_conteo_1 || 0))
+                                  setReconcileQty(Number(item.cantidad_final ?? item.cantidad_conteo_1 ?? item.cantidad_sistema))
                                 }}
-                                className="px-2 py-1 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-lg shadow-xs transition"
+                                className={`px-2 py-1 text-[11px] font-bold text-white rounded-lg shadow-xs transition cursor-pointer ${
+                                  isDiscrepancy ? "bg-rose-500 hover:bg-rose-600" : "bg-amber-500 hover:bg-amber-600"
+                                }`}
                               >
-                                Reconciliar
+                                {isDiscrepancy ? "Reconciliar" : "Ajustar"}
                               </button>
                             )}
                             {item.nota_reconciliacion && (
