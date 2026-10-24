@@ -43,7 +43,7 @@ export default function PlanillaConteoA4Modal({
   // Configuración de la planilla
   const [printBlindMode, setPrintBlindMode] = useState<boolean>(true) // Por defecto ciego (sin stock sistema)
   const [blankMode, setBlankMode] = useState<boolean>(true) // Por defecto en blanco para escribir a mano
-  const [rowsPerPage, setRowsPerPage] = useState<number>(20) // 20 filas: altura exacta para entrar con firmas y footer sin desbordar a página 2
+  const [rowsPerPage, setRowsPerPage] = useState<number>(30) // 30 filas por hoja: caben hasta 30-32 items en 1 sola pagina A4
   const [sortBy, setSortBy] = useState<"pasillo" | "nombre" | "codigo">("pasillo")
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
 
@@ -511,9 +511,9 @@ export default function PlanillaConteoA4Modal({
                 onChange={(e) => setRowsPerPage(Number(e.target.value))}
                 className="bg-transparent font-bold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
               >
-                <option value={18}>18 filas (Muy Amplio)</option>
-                <option value={20}>20 filas (Recomendado A4)</option>
-                <option value={22}>22 filas (Ajustado)</option>
+                <option value={25}>25 filas (Holgado)</option>
+                <option value={30}>30 filas (Recomendado - 1 sola hoja)</option>
+                <option value={35}>35 filas (Máxima Capacidad)</option>
               </select>
             </div>
           </div>
@@ -527,13 +527,13 @@ export default function PlanillaConteoA4Modal({
         <div className="flex-1 overflow-y-auto p-3 sm:p-6 bg-slate-200/70 dark:bg-slate-900/90 flex flex-col items-center gap-6">
           <div ref={printContainerRef} id="conteo-print-container" className="w-full flex flex-col items-center gap-6">
             {pagesData.map((page) => {
-              const rowHeight = rowsPerPage <= 18 ? "36px" : rowsPerPage <= 20 ? "33px" : "29px"
-              const boxHeight = rowsPerPage <= 20 ? "h-7" : "h-6"
+              const rowHeight = rowsPerPage <= 25 ? "28px" : rowsPerPage <= 30 ? "24px" : "21px"
+              const boxHeight = rowsPerPage <= 25 ? "h-6" : rowsPerPage <= 30 ? "h-5" : "h-4.5"
 
               return (
               <div
                 key={`page-${page.pageNumber}`}
-                className="conteo-a4-page bg-white text-black shadow-2xl border border-slate-300 font-sans text-xs flex flex-col justify-between"
+                className="conteo-a4-page bg-white text-black shadow-2xl border border-slate-300 text-xs flex flex-col justify-between"
                 style={{
                   boxSizing: "border-box",
                   width: "210mm",
@@ -542,6 +542,7 @@ export default function PlanillaConteoA4Modal({
                   maxHeight: "297mm",
                   padding: "6mm 8mm",
                   overflow: "hidden",
+                  fontFamily: "Arial, Helvetica, sans-serif",
                 }}
               >
                 {/* ── PARTE SUPERIOR DE LA HOJA: ENCABEZADO ULTRA-COMPACTO Y TABLA ── */}
