@@ -310,17 +310,31 @@ export default function PlanillaConteoA4Modal({
           logging: false,
           windowWidth: 1024,
           onclone: (clonedDoc) => {
-            const pages = clonedDoc.querySelectorAll(".conteo-a4-page")
-            pages.forEach((p) => {
-              const htmlEl = p as HTMLElement
-              htmlEl.style.width = "210mm"
-              htmlEl.style.height = "297mm"
-              htmlEl.style.minHeight = "297mm"
-              htmlEl.style.maxHeight = "297mm"
-              htmlEl.style.margin = "0"
-              htmlEl.style.border = "none"
-              htmlEl.style.boxShadow = "none"
-            })
+            const style = clonedDoc.createElement("style")
+            style.innerHTML = `
+              * {
+                overflow: visible !important;
+                text-overflow: clip !important;
+                line-height: 1.35 !important;
+                box-sizing: border-box !important;
+              }
+              .conteo-a4-page {
+                width: 210mm !important;
+                height: 297mm !important;
+                min-height: 297mm !important;
+                max-height: 297mm !important;
+                padding: 6mm 8mm !important;
+                margin: 0 auto !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: #ffffff !important;
+                overflow: hidden !important;
+              }
+              table {
+                border-collapse: collapse !important;
+              }
+            `
+            clonedDoc.head.appendChild(style)
           },
         })
 
@@ -577,14 +591,17 @@ export default function PlanillaConteoA4Modal({
                           }}
                         />
                         <div>
-                          <span className="text-xs font-black uppercase text-black tracking-tight leading-none block">
+                          <span className="text-xs font-black uppercase text-black tracking-tight block" style={{ lineHeight: "1.25" }}>
                             {emisor.nombreFantasia}
                           </span>
-                          <span className="text-[8.5px] text-slate-600 font-bold leading-none">
+                          <span className="text-[8.5px] text-slate-600 font-bold block" style={{ lineHeight: "1.25" }}>
                             RUC: {emisor.ruc}
                           </span>
                         </div>
-                        <span className="text-[8.5px] font-black uppercase px-2 py-0.5 rounded-xs bg-black text-white ml-2 leading-none">
+                        <span
+                          className="text-[8.5px] font-black uppercase px-2.5 py-1 rounded-xs bg-black text-white ml-2 inline-block tracking-wider"
+                          style={{ lineHeight: "1.25" }}
+                        >
                           {printBlindMode ? "Planilla de Conteo Físico Ciego" : "Control de Conteo y Stock Sistema"}
                         </span>
                       </div>
@@ -599,7 +616,7 @@ export default function PlanillaConteoA4Modal({
 
                     {/* Metadatos operativos estructurados */}
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9px] leading-normal font-sans">
-                      <div className="truncate">
+                      <div className="overflow-visible" style={{ lineHeight: "1.3" }}>
                         <strong className="text-slate-500 uppercase">Alcance:</strong>{" "}
                         <span className="font-bold text-black uppercase">
                           {session.tipo} {session.descripcion_alcance ? `— ${session.descripcion_alcance}` : ""}
@@ -677,22 +694,19 @@ export default function PlanillaConteoA4Modal({
                                 {item.product_codigo_barra || item.product_sku || "—"}
                               </td>
 
-                              {/* Descripción de Producto (Multi-línea limpia sin truncar ni cortar letras) */}
-                              <td className="px-2 py-0.5 text-black border-r border-black/80 align-middle">
+                              {/* Descripción de Producto */}
+                              <td className="px-2 py-1 text-black border-r border-black/80 align-middle">
                                 <div
-                                  className="font-bold text-[9.5px] leading-tight text-black uppercase"
+                                  className="font-bold text-[9px] uppercase text-black"
                                   title={item.product_nombre}
                                   style={{
-                                    display: "-webkit-box",
-                                    WebkitLineClamp: 2,
-                                    WebkitBoxOrient: "vertical",
-                                    overflow: "hidden",
+                                    lineHeight: "1.3",
                                     wordBreak: "break-word",
                                   }}
                                 >
                                   {item.product_nombre}
                                 </div>
-                                <div className="text-[7.5px] font-mono text-slate-500 leading-none mt-0.5">
+                                <div className="text-[7.5px] font-mono text-slate-500 mt-0.5" style={{ lineHeight: "1.2" }}>
                                   SKU: {item.product_sku || "—"}
                                 </div>
                               </td>
