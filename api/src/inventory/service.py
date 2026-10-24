@@ -1660,6 +1660,9 @@ async def create_physical_session(
                 alcance_desc = f"Proveedor: {supplier_nom or 'Seleccionado'}"
         elif data.tipo == "sector" or data.categoria_id:
             alcance_desc = f"Sector: {categoria_nom or 'Seleccionado'}"
+        elif data.tipo == "producto" or data.product_ids:
+            cnt = len(data.product_ids or [])
+            alcance_desc = f"Por Producto ({cnt} seleccionado{'s' if cnt != 1 else ''})"
 
     session_code = f"TF-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{uuid.uuid4().hex[:4].upper()}"
     session = PhysicalInventorySession(
@@ -1689,7 +1692,27 @@ async def create_physical_session(
     # Pre-cargar ítems con stock actual del depósito
     query_params: dict = {"wh_id": data.warehouse_id, "comp_id": data.company_id}
 
-    if data.tipo == "proveedor" or data.supplier_id:
+    if (data.tipo == "producto" or data.product_ids) and data.product_ids:
+        uuid_prods = []
+        for pid in data.product_ids:
+            try:
+                uuid_prods.append(uuid.UUID(str(pid)))
+            except (ValueError, TypeError):
+                pass
+        items_query = """
+            SELECT
+                p.id as product_id,
+                p.nombre as product_nombre,
+                p.sku as product_sku,
+                COALESCE(p.codigo_barra, '') as product_codigo_barra,
+                COALESCE(s.cantidad, 0) as cantidad_sistema,
+                COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0) as costo_unitario
+            FROM products p
+            LEFT JOIN stock s ON s.product_id = p.id AND s.warehouse_id = :wh_id
+            WHERE p.company_id = :comp_id AND p.activo = true AND p.id = ANY(:prod_ids)
+        """
+        query_params["prod_ids"] = uuid_prods
+    elif data.tipo == "proveedor" or data.supplier_id:
         items_query = """
             SELECT
                 p.id as product_id,
