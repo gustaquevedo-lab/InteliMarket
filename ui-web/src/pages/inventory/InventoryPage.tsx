@@ -450,8 +450,10 @@ export default function InventoryPage() {
       const itemAny = item as any
       const name = item.nombre || itemAny.product_nombre || item.product?.nombre || ""
       const sku = item.sku || itemAny.product_sku || item.product?.sku || ""
+      const barcode = itemAny.product_codigo_barra || item.product?.codigo_barra || ""
       const nameMatch = !searchStock || name.toLowerCase().includes(searchStock.toLowerCase()) ||
-        sku.toLowerCase().includes(searchStock.toLowerCase())
+        sku.toLowerCase().includes(searchStock.toLowerCase()) ||
+        barcode.toLowerCase().includes(searchStock.toLowerCase())
 
       if (!nameMatch) return false
 
@@ -854,13 +856,17 @@ export default function InventoryPage() {
                     const totalVal = cant * costo
                     const nombre = s.nombre || sAny.product_nombre || s.product?.nombre || "Producto"
                     const sku = s.sku || sAny.product_sku || s.product?.sku || "S/SKU"
-                    const cat = sAny.product_categoria_nombre || "General"
+                    const barcode = sAny.product_codigo_barra || s.product?.codigo_barra || ""
+                    const cat = sAny.product_categoria_nombre || (s.product as any)?.categoria_nombre || "General"
                     const whName = sAny.warehouse_nombre || s.warehouse?.nombre || "Depósito Central"
 
                     return (
                       <tr key={s.id || `${sku}-${whName}`} className="hover:bg-gray-50/50 dark:hover:bg-slate-800/40 transition">
                         <td className="p-3.5 font-mono text-[11px] font-bold text-gray-700 dark:text-gray-300">
-                          {sku}
+                          <div>{sku}</div>
+                          {barcode && barcode !== sku && (
+                            <span className="text-[10px] text-gray-400 font-mono block font-normal">{barcode}</span>
+                          )}
                         </td>
                         <td className="p-3.5">
                           <p className="font-extrabold text-gray-900 dark:text-white truncate max-w-xs">{nombre}</p>

@@ -99,7 +99,7 @@ export default function PlanillaConteoA4Modal({
     return list
   }, [sessionItems, sortBy, session.pasillo])
 
-  // Paginación de alta fidelidad A4
+  // Paginación inteligente A4: si hay hasta 32 artículos, entran 100% en 1 sola hoja
   const pagesData = useMemo(() => {
     if (sortedItems.length === 0) {
       return [
@@ -116,12 +116,14 @@ export default function PlanillaConteoA4Modal({
       ]
     }
 
-    const totalPages = Math.ceil(sortedItems.length / rowsPerPage) || 1
+    // Si la sesión cabe en una sola hoja A4 (hasta 32 productos), NO forzamos 2da página
+    const pageSize = sortedItems.length <= 32 ? sortedItems.length : (rowsPerPage || 30)
+    const totalPages = Math.ceil(sortedItems.length / pageSize) || 1
     const pages = []
 
     for (let pIdx = 0; pIdx < totalPages; pIdx++) {
-      const start = pIdx * rowsPerPage
-      const end = Math.min(start + rowsPerPage, sortedItems.length)
+      const start = pIdx * pageSize
+      const end = Math.min(start + pageSize, sortedItems.length)
       const pageItems = sortedItems.slice(start, end)
 
       pages.push({
@@ -133,6 +135,7 @@ export default function PlanillaConteoA4Modal({
         endIdx: end,
         isFirstPage: pIdx === 0,
         isLastPage: pIdx === totalPages - 1,
+        targetRows: pageSize,
       })
     }
 
@@ -624,7 +627,7 @@ export default function PlanillaConteoA4Modal({
 
                   {/* 2. TABLA DE ARTÍCULOS PARA CONTEO */}
                   <div className="border border-black rounded-sm overflow-hidden flex-1 flex flex-col">
-                    <table className="w-full text-left text-[11px] border-collapse">
+                    <table className="w-full h-full text-left text-[11px] border-collapse table-fixed">
                       <thead>
                         <tr className="bg-black text-white font-black uppercase text-[8.5px] tracking-wider border-b border-black">
                           <th className="p-0.5 text-center w-7 border-r border-slate-700">#</th>
@@ -661,7 +664,6 @@ export default function PlanillaConteoA4Modal({
                             <tr
                               key={item.id || `item-${idx}`}
                               className={idx % 2 === 1 ? "bg-slate-50/70" : "bg-white"}
-                              style={{ height: rowHeight }}
                             >
                               {/* # Nro secuencial */}
                               <td className="p-0.5 text-center font-mono font-bold text-black border-r border-black/80 text-[10px]">
@@ -731,12 +733,11 @@ export default function PlanillaConteoA4Modal({
                         })}
 
                         {/* Relleno de líneas vacías si la página tiene menos ítems para preservar altura */}
-                        {page.items.length < rowsPerPage &&
-                          Array.from({ length: rowsPerPage - page.items.length }).map((_, fIdx) => (
+                        {page.items.length < (page.targetRows || rowsPerPage) &&
+                          Array.from({ length: (page.targetRows || rowsPerPage) - page.items.length }).map((_, fIdx) => (
                             <tr
                               key={`fill-${fIdx}`}
                               className="bg-white"
-                              style={{ height: rowHeight }}
                             >
                               <td className="border-r border-black/80 text-center text-slate-300 font-mono text-[9px]">
                                 {page.startIdx + page.items.length + fIdx}

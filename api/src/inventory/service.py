@@ -19,7 +19,7 @@ from api.src.inventory.schemas import (
     ApproveAdjustmentBody, RejectAdjustmentBody,
     PhysicalSessionCreate, PhysicalSessionItemCountBody, PhysicalSessionItemReconcileBody,
 )
-from api.src.products.models import Product
+from api.src.products.models import Product, ProductCategory
 
 
 async def create_warehouse(db: AsyncSession, data: WarehouseCreate, default_company_id: uuid.UUID | None = None) -> dict:
@@ -195,14 +195,11 @@ async def get_stock(db: AsyncSession, warehouse_id: str, product_id: str) -> Sto
 
 
 async def get_stock_by_warehouse(db: AsyncSession, warehouse_id: str) -> list[dict]:
-    # El frontend siempre esperó s.product?.nombre / s.product?.sku (y
-    # s.warehouse?.nombre), pero este endpoint nunca devolvió esa relación
-    # -- StockResponse solo tenía product_id crudo. Resultado: en Inventario
-    # nunca se veían nombres de producto, solo el ID, en toda la pantalla.
     result = await db.execute(
-        select(Stock, Product, Warehouse)
+        select(Stock, Product, Warehouse, ProductCategory.nombre.label("categoria_nombre"))
         .join(Product, Stock.product_id == Product.id)
         .join(Warehouse, Stock.warehouse_id == Warehouse.id)
+        .outerjoin(ProductCategory, Product.categoria_id == ProductCategory.id)
         .where(Stock.warehouse_id == warehouse_id)
     )
     rows = result.all()
@@ -219,15 +216,24 @@ async def get_stock_by_warehouse(db: AsyncSession, warehouse_id: str) -> list[di
             "nombre": p.nombre,
             "sku": p.sku,
             "costo_promedio": p.costo_promedio,
+            "product_categoria_nombre": cat_nombre or "General",
             "product": {
-                "id": p.id, "sku": p.sku, "nombre": p.nombre, "categoria_id": p.categoria_id,
-                "codigo_barra": p.codigo_barra, "unidad_medida": p.unidad_medida,
-                "precio_venta": p.precio_venta, "costo_promedio": p.costo_promedio,
-                "activo": p.activo, "created_at": p.created_at, "updated_at": p.updated_at,
+                "id": p.id,
+                "sku": p.sku,
+                "nombre": p.nombre,
+                "categoria_id": p.categoria_id,
+                "categoria_nombre": cat_nombre or "General",
+                "codigo_barra": p.codigo_barra,
+                "unidad_medida": p.unidad_medida,
+                "precio_venta": p.precio_venta,
+                "costo_promedio": p.costo_promedio,
+                "activo": p.activo,
+                "created_at": p.created_at,
+                "updated_at": p.updated_at,
             },
             "warehouse": {"id": w.id, "nombre": w.nombre, "codigo": w.codigo, "company_id": w.company_id, "activo": w.activo},
         }
-        for s, p, w in rows
+        for s, p, w, cat_nombre in rows
     ]
 
 

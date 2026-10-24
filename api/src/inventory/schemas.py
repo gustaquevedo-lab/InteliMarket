@@ -64,6 +64,7 @@ class StockProductSummary(BaseModel):
     sku: str
     nombre: str
     categoria_id: Optional[UUID] = None
+    categoria_nombre: Optional[str] = None
     codigo_barra: Optional[str] = None
     unidad_medida: Optional[str] = None
     precio_venta: Optional[Decimal] = None
@@ -99,6 +100,7 @@ class StockResponse(BaseModel):
     nombre: Optional[str] = None
     sku: Optional[str] = None
     costo_promedio: Optional[Decimal] = None
+    product_categoria_nombre: Optional[str] = None
     product: Optional[StockProductSummary] = None
     warehouse: Optional[StockWarehouseSummary] = None
 

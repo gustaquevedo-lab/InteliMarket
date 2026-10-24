@@ -131,28 +131,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
   const loadCountSessions = useCallback(async () => {
     setLoadingCountSessions(true)
     try {
-      // 1. Cargar sesiones de la App Móvil Extra Conteo (supermer_count_sessions)
-      let mobileSessions: any[] = []
-      try {
-        const resMobile = await api.inventory.sessions.list()
-        if (Array.isArray(resMobile)) {
-          mobileSessions = resMobile.map((s: any) => {
-            const isActive = s.estado === "abierta" || s.estado === "en_conteo"
-            const totalDisc = s.total_discrepancias ?? s.items?.filter((i: any) => Number(i.diferencia || 0) !== 0)?.length ?? 0
-            const totalCounted = s.total_items_contados ?? s.items?.length ?? 0
-            return {
-              ...s,
-              _source: "mobile",
-              _is_active: isActive,
-              _label: `${isActive ? "🟢 [ACTIVO] " : ""}${s.codigo} — ${s.area || "Salón"} [App Conteo] (${totalDisc} discr., ${totalCounted} contados) [${(s.estado || "").toUpperCase()}]`,
-            }
-          })
-        }
-      } catch (err: any) {
-        console.warn("Error cargando sesiones de app de conteo:", err)
-      }
-
-      // 2. Cargar sesiones de Toma Física de Salón/Depósito
+      // Cargar sesiones de Toma Física de Salón/Depósito
       let physicalSessions: any[] = []
       try {
         const resPhysical = await api.inventory.physicalSessions.list()
@@ -171,8 +150,7 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
         console.warn("Error cargando sesiones de toma física:", err)
       }
 
-      // 3. Combinar y priorizar las activas
-      const combined = [...mobileSessions, ...physicalSessions].sort((a, b) => {
+      const combined = [...physicalSessions].sort((a, b) => {
         if (a._is_active && !b._is_active) return -1
         if (!a._is_active && b._is_active) return 1
         return new Date(b.created_at || b.fecha_inicio || 0).getTime() - new Date(a.created_at || a.fecha_inicio || 0).getTime()
@@ -198,24 +176,23 @@ export default function AjustesTab({ warehouses, products }: AjustesTabProps) {
       const s = countSessions.find((x) => x.id === sessionId)
       let rawItems: any[] = []
 
-      if (s?._source === "physical") {
-        const full = await api.inventory.physicalSessions.get(sessionId)
-        rawItems = (full?.items || []).map((it: any) => ({
-          producto_id: it.producto_id,
-          producto_nombre: it.producto_nombre,
-          codigo_barra: it.codigo_barra,
-          cantidad_sistema: Number(it.cantidad_sistema || 0),
-          cantidad_contada: Number(it.cantidad_reconciliada ?? it.cantidad_conteo_2 ?? it.cantidad_conteo_1 ?? it.cantidad_sistema ?? 0),
-          diferencia: it.diferencia !== null && it.diferencia !== undefined ? Number(it.diferencia) : (Number(it.cantidad_reconciliada ?? it.cantidad_conteo_2 ?? it.cantidad_conteo_1 ?? 0) - Number(it.cantidad_sistema || 0)),
+      const full = await api.inventory.physicalSessions.get(sessionId)
+      rawItems = (full?.items || []).map((it: any) => {
+        const cantSis = Number(it.cantidad_sistema || 0)
+        const cantContada = Number(it.cantidad_final ?? it.cantidad_reconciliada ?? it.cantidad_conteo_2 ?? it.cantidad_conteo_1 ?? cantSis)
+        const diff = it.diferencia !== null && it.diferencia !== undefined ? Number(it.diferencia) : (cantContada - cantSis)
+        return {
+          producto_id: it.product_id || it.producto_id,
+          producto_nombre: it.product_nombre || it.producto_nombre,
+          codigo_barra: it.product_codigo_barra || it.codigo_barra || it.product_sku,
+          cantidad_sistema: cantSis,
+          cantidad_contada: cantContada,
+          diferencia: diff,
           costo_promedio: Number(it.costo_unitario || 0),
           foto_evidencia_url: it.foto_evidencia_url,
-          requiere_ajuste: it.requiere_ajuste || Math.abs(Number(it.diferencia || 0)) > 0.001,
-        }))
-      } else {
-        // App móvil Extra Conteo (supermer_count_items)
-        const list = await api.inventory.sessions.items.list(sessionId)
-        rawItems = Array.isArray(list) ? list : []
-      }
+          requiere_ajuste: it.requiere_ajuste || Math.abs(diff) > 0.0001,
+        }
+      })
 
       if (!rawItems || rawItems.length === 0) {
         toast.warning(
