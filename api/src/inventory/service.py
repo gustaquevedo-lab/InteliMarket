@@ -1,7 +1,7 @@
 """Inventory service — workflow doble aprobación (Gerencia + Administración),
 audit trail inmutable, toma física con doble conteo ciego."""
 
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 import uuid
@@ -2052,6 +2052,35 @@ async def close_physical_session(
         "items_con_diferencia": len(items_con_diff),
         "diferencia_total_gs": diferencia_total_gs,
     }
+
+
+async def delete_physical_session(
+    db: AsyncSession,
+    session_id: str,
+    user_id: uuid.UUID | None = None,
+) -> bool:
+    """Elimina una sesión de toma física y sus ítems siempre que no esté cerrada ni tenga ajuste generado."""
+    sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+
+    session_res = await db.execute(
+        select(PhysicalInventorySession).where(PhysicalInventorySession.id == sid)
+    )
+    session = session_res.scalar_one_or_none()
+    if not session:
+        raise ValueError("Sesión no encontrada")
+    if session.estado == "cerrada" or session.adjustment_id:
+        raise ValueError("No se puede eliminar una sesión de conteo que ya fue cerrada con ajuste de stock generado.")
+
+    # Eliminar ítems de la sesión
+    await db.execute(
+        delete(PhysicalInventorySessionItem).where(PhysicalInventorySessionItem.session_id == sid)
+    )
+    # Eliminar la cabecera de la sesión
+    await db.execute(
+        delete(PhysicalInventorySession).where(PhysicalInventorySession.id == sid)
+    )
+    await db.flush()
+    return True
 
 
 # ---------------------------------------------------------------------------

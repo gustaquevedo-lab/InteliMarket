@@ -5,7 +5,7 @@ import {
   Filter, RefreshCw, Eye, UserCheck, ShieldAlert, ArrowRight,
   TrendingDown, TrendingUp, Scale, Check, Layers, ChevronRight, AlertCircle, Sparkles,
   ClipboardList, Users, Shield, ShieldCheck, ArrowLeft, Send,
-  Printer, Building2, Tag, FileSpreadsheet, Loader2
+  Printer, Building2, Tag, FileSpreadsheet, Loader2, Trash2
 } from "lucide-react"
 import {
   api,
@@ -149,6 +149,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
   // Modal Cierre de Sesión
   const [showCloseModal, setShowCloseModal] = useState(false)
   const [closingSession, setClosingSession] = useState(false)
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
 
   // Escáner rápido
   const [scannerCode, setScannerCode] = useState("")
@@ -442,6 +443,33 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
   }
 
   // ---------------------------------------------------------------------------
+  // ELIMINAR / ANULAR SESIÓN DE CONTEO
+  // ---------------------------------------------------------------------------
+  const handleDeleteSession = async (session: PhysicalSession) => {
+    if (session.estado === "cerrada") {
+      toast.error("Acción denegada", "No se puede eliminar una sesión de inventario que ya fue cerrada con ajuste de stock.")
+      return
+    }
+
+    const confirmMsg = `¿Deseas eliminar permanentemente la toma física #${session.codigo} (${session.warehouse_nombre || "Depósito"})? Se descartarán todos los ítems y conteos registrados.`
+    if (!window.confirm(confirmMsg)) return
+
+    setDeletingSessionId(session.id)
+    try {
+      await api.inventory.physicalSessions.delete(session.id)
+      toast.success("Toma física eliminada", `La sesión #${session.codigo} ha sido eliminada.`)
+      if (activeSession?.id === session.id) {
+        setActiveSession(null)
+      }
+      loadSessions()
+    } catch (err: any) {
+      toast.error("Error al eliminar", err.message || "No se pudo eliminar la sesión.")
+    } finally {
+      setDeletingSessionId(null)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // ESCÁNER RÁPIDO EN PLANILLA
   // ---------------------------------------------------------------------------
   const handleScannerSubmit = (e: React.FormEvent) => {
@@ -654,6 +682,24 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
             >
               <RefreshCw className="w-4 h-4" />
             </button>
+
+            {/* Botón Eliminar / Descartar Toma */}
+            {!isClosed && (
+              <button
+                type="button"
+                onClick={() => handleDeleteSession(activeSession)}
+                disabled={deletingSessionId === activeSession.id}
+                className="px-3 py-2 text-xs font-bold text-rose-600 hover:text-white hover:bg-rose-600 dark:text-rose-400 dark:hover:bg-rose-900 border border-rose-300 dark:border-rose-800 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                title="Eliminar y descartar esta sesión de conteo"
+              >
+                {deletingSessionId === activeSession.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                <span>Eliminar Toma</span>
+              </button>
+            )}
 
             {/* Botón Cierre de Sesión */}
             {!isClosed && (
@@ -1743,7 +1789,7 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                         </span>
                       </td>
 
-                      {/* Acción Abrir Planilla / Imprimir Directo */}
+                      {/* Acción Abrir Planilla / Imprimir Directo / Eliminar */}
                       <td className="p-3.5 text-center">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
@@ -1754,6 +1800,21 @@ export default function TomaFisicaTab({ warehouses, products, onGoToAdjustments 
                           >
                             <Printer className="w-4 h-4" />
                           </button>
+                          {session.estado !== "cerrada" && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSession(session)}
+                              disabled={deletingSessionId === session.id}
+                              className="p-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl border border-rose-300 dark:border-rose-800 transition shadow-2xs hover:scale-105 cursor-pointer disabled:opacity-50"
+                              title="Eliminar sesión de conteo"
+                            >
+                              {deletingSessionId === session.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                            </button>
+                          )}
                           <button
                             onClick={() => openSessionDetail(session)}
                             className="btn-primary text-xs px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1.5"

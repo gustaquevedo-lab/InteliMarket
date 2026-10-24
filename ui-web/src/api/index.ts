@@ -2430,6 +2430,8 @@ export const api = {
         client.put<PhysicalSessionItem>(`/v1/inventory/physical-sessions/${sessionId}/items/${itemId}/reconcile`, data),
       close: (sessionId: string) =>
         client.post<{ ok: boolean; mensaje: string; adjustment_id?: string; items_con_diferencia: number; diferencia_total_gs: number }>(`/v1/inventory/physical-sessions/${sessionId}/close`),
+      delete: (sessionId: string) =>
+        client.delete<{ ok: boolean; mensaje: string }>(`/v1/inventory/physical-sessions/${sessionId}`),
     },
     recordMerma: (data: { warehouse_id: string; product_id: string; cantidad: number; motivo: string; observaciones?: string; lot_id?: string }) =>
       client.post<any>(`/v1/inventory/mermas`, { ...data, company_id: COMPANY_ID }),

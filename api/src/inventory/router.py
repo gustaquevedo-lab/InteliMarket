@@ -662,3 +662,21 @@ async def close_physical_session(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+@router.delete("/inventory/physical-sessions/{session_id}")
+async def delete_physical_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+    _=Depends(require_permission("inventory:adjust")),
+):
+    """Elimina una sesión de toma física y sus ítems (siempre que no esté cerrada)."""
+    try:
+        user_id = UUID(user["id"]) if user.get("id") else None
+        await service.delete_physical_session(db, session_id, user_id=user_id)
+        await db.commit()
+        return {"ok": True, "mensaje": "Sesión de toma física eliminada correctamente."}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
