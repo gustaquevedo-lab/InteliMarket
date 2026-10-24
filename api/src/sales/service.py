@@ -1592,13 +1592,42 @@ async def reopen_sale_payment(
             ))
 
     # Actualizar crédito del socio si corresponde
+    was_credit = forma_pago_anterior in ("EXTRA_CLUB", "CREDITO")
+    now_credit = sale.condicion == "credito" or nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO") or (is_multi and has_credit_payment)
     if cust_obj:
-        was_credit = forma_pago_anterior in ("EXTRA_CLUB", "CREDITO")
-        now_credit = sale.condicion == "credito" or nueva_forma_pago.upper() in ("EXTRA_CLUB", "CREDITO")
         if now_credit and not was_credit:
             cust_obj.credito_usado = (cust_obj.credito_usado or Decimal("0")) + (sale.total or Decimal("0"))
         elif was_credit and not now_credit:
             cust_obj.credito_usado = max(Decimal("0"), (cust_obj.credito_usado or Decimal("0")) - (sale.total or Decimal("0")))
+
+    # ── Sincronización canónica con accounts_receivable (Anti-facturas huérfanas) ──
+    from api.src.accounts_receivable.models import Account
+    from api.src.accounts_receivable.service import create_accounts_receivable_for_sale
+    ar_exist = await db.execute(select(Account).where(Account.sale_id == sale.id))
+    existing_ar = ar_exist.scalar_one_or_none()
+
+    if now_credit:
+        cid_target = sale.customer_id or (cust_obj.id if cust_obj else None)
+        if cid_target:
+            if not existing_ar:
+                await create_accounts_receivable_for_sale(
+                    db,
+                    company_id=str(sale.company_id),
+                    customer_id=str(cid_target),
+                    sale_id=str(sale.id),
+                    total=sale.total,
+                    numero=sale.numero,
+                    fecha_emision=sale.fecha or sale.created_at,
+                )
+            else:
+                existing_ar.customer_id = cid_target
+                existing_ar.monto_original = sale.total
+                existing_ar.saldo_pendiente = sale.total
+                existing_ar.estado = "pendiente"
+                existing_ar.numero_documento = sale.numero
+    elif was_credit and not now_credit and existing_ar:
+        existing_ar.estado = "anulado"
+        existing_ar.saldo_pendiente = Decimal("0")
 
     # Reconciliar o ajustar CashCount
     if sale.session_id:
