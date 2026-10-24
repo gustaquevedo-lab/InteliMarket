@@ -515,9 +515,8 @@ export default function PlanillaConteoA4Modal({
                 onChange={(e) => setRowsPerPage(Number(e.target.value))}
                 className="bg-transparent font-bold text-slate-800 dark:text-slate-200 outline-none cursor-pointer"
               >
-                <option value={25}>25 filas (Holgado)</option>
-                <option value={30}>30 filas (Recomendado - 1 sola hoja)</option>
-                <option value={35}>35 filas (Máxima Capacidad)</option>
+                <option value={30}>30 filas (Estándar A4)</option>
+                <option value={35}>35 filas (Máxima Capacidad A4)</option>
               </select>
             </div>
           </div>
@@ -551,9 +550,9 @@ export default function PlanillaConteoA4Modal({
               >
                 {/* ── PARTE SUPERIOR DE LA HOJA: ENCABEZADO ULTRA-COMPACTO Y TABLA ── */}
                 <div className="flex-1 flex flex-col">
-                  {/* 1. ENCABEZADO ULTRA-COMPACTO DE ALTA DENSIDAD */}
-                  <div className="border border-black rounded-sm p-1.5 mb-1.5 bg-slate-50/50">
-                    <div className="flex justify-between items-center pb-1 mb-1 border-b border-black/30">
+                  {/* 1. ENCABEZADO ULTRA-COMPACTO Y ELEGANTE (SIN CSS GRID NI COLAPSO) */}
+                  <div className="border border-black rounded-sm p-2 mb-2 bg-slate-50/50 shrink-0">
+                    <div className="flex justify-between items-center pb-1.5 mb-1.5 border-b border-black/30">
                       <div className="flex items-center gap-2">
                         <img
                           src="/logo_extra.png"
@@ -563,94 +562,63 @@ export default function PlanillaConteoA4Modal({
                             ;(e.target as HTMLElement).style.display = "none"
                           }}
                         />
-                        <span className="text-xs font-black uppercase text-black tracking-tight leading-none">
-                          {emisor.nombreFantasia}
-                        </span>
-                        <span className="text-[9px] text-slate-600 font-bold leading-none">
-                          RUC: {emisor.ruc}
-                        </span>
-                        <span className="text-[8.5px] font-black uppercase px-1.5 py-0.5 rounded-xs bg-black text-white ml-1 leading-none">
+                        <div>
+                          <span className="text-xs font-black uppercase text-black tracking-tight leading-none block">
+                            {emisor.nombreFantasia}
+                          </span>
+                          <span className="text-[8.5px] text-slate-600 font-bold leading-none">
+                            RUC: {emisor.ruc}
+                          </span>
+                        </div>
+                        <span className="text-[8.5px] font-black uppercase px-2 py-0.5 rounded-xs bg-black text-white ml-2 leading-none">
                           {printBlindMode ? "Planilla de Conteo Físico Ciego" : "Control de Conteo y Stock Sistema"}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 font-mono text-[10px]">
                         <span className="font-black text-black">TOMA #{session.codigo}</span>
                         <span className="text-slate-600">• DEPÓSITO: <strong className="text-black">{session.warehouse_nombre || "Principal"}</strong></span>
-                        <span className="font-black bg-black text-white px-1.5 py-0.5 rounded-xs">
+                        <span className="font-black bg-black text-white px-2 py-0.5 rounded-xs">
                           HOJA {page.pageNumber} / {page.totalPages}
                         </span>
                       </div>
                     </div>
 
-                    {/* Tira compacta de parámetros y metadatos */}
-                    <div className="grid grid-cols-12 gap-1 text-[9px] leading-tight">
-                      <div className="col-span-6 flex items-center gap-1 truncate">
-                        <span className="font-bold text-slate-500 uppercase">Alcance:</span>
-                        <strong className="text-black uppercase truncate">
-                          {session.tipo} {session.descripcion_alcance ? `— ${session.descripcion_alcance}` : ""}
-                        </strong>
+                    {/* Metadatos operativos en tira horizontal clara */}
+                    <div className="flex justify-between items-center text-[9px] leading-normal">
+                      <div className="flex items-center gap-2 truncate">
+                        <span><strong className="text-slate-500 uppercase">Alcance:</strong> <span className="font-bold text-black uppercase">{session.tipo} {session.descripcion_alcance ? `— ${session.descripcion_alcance}` : ""}</span></span>
+                        {session.supplier_nombre && (
+                          <span>• <strong className="text-slate-500 uppercase">Prov:</strong> <span className="font-bold text-black">{session.supplier_nombre}</span></span>
+                        )}
+                        {session.categoria_nombre && (
+                          <span>• <strong className="text-slate-500 uppercase">Rubro:</strong> <span className="font-bold text-black">{session.categoria_nombre}</span></span>
+                        )}
                       </div>
-                      <div className="col-span-3 flex items-center gap-1 truncate">
-                        <span className="font-bold text-slate-500 uppercase">Góndola:</span>
-                        <strong className="text-black truncate">{session.pasillo || "General / Salón"}</strong>
-                      </div>
-                      <div className="col-span-3 flex items-center gap-1 justify-end font-mono">
-                        <span className="font-bold text-slate-500 uppercase">Emisión:</span>
-                        <strong className="text-black">{formatFechaParaguay(session.created_at)}</strong>
-                      </div>
-
-                      {(session.supplier_nombre || session.categoria_nombre) && (
-                        <div className="col-span-6 flex items-center gap-1 truncate">
-                          {session.supplier_nombre && (
-                            <span className="truncate">
-                              <span className="font-bold text-slate-500 uppercase">Prov:</span>{" "}
-                              <strong className="text-black">{session.supplier_nombre}</strong>
-                            </span>
-                          )}
-                          {session.categoria_nombre && (
-                            <span className="truncate ml-1.5">
-                              <span className="font-bold text-slate-500 uppercase">Rubro:</span>{" "}
-                              <strong className="text-black">{session.categoria_nombre}</strong>
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      <div className={`${(session.supplier_nombre || session.categoria_nombre) ? "col-span-3" : "col-span-6"} flex items-center gap-1 truncate`}>
-                        <span className="font-bold text-slate-500 uppercase">C1:</span>
-                        <strong className="text-black truncate">{session.contador_1_nombre || "Titular"}</strong>
-                      </div>
-                      <div className={`${(session.supplier_nombre || session.categoria_nombre) ? "col-span-3" : "col-span-6"} flex items-center gap-1 truncate justify-end`}>
-                        <span className="font-bold text-slate-500 uppercase">C2:</span>
-                        <strong className="text-black truncate">{session.contador_2_nombre || "Doble Ciego"}</strong>
+                      <div className="flex items-center gap-3 shrink-0 font-mono text-[9px]">
+                        <span><strong className="text-slate-500 uppercase">C1:</strong> <span className="font-bold text-black">{session.contador_1_nombre || "Titular"}</span></span>
+                        <span><strong className="text-slate-500 uppercase">C2:</strong> <span className="font-bold text-black">{session.contador_2_nombre || "Doble Ciego"}</span></span>
+                        <span><strong className="text-slate-500 uppercase">Emisión:</strong> <span className="font-bold text-black">{formatFechaParaguay(session.created_at)}</span></span>
                       </div>
                     </div>
                   </div>
 
-                  {/* 2. TABLA DE ARTÍCULOS PARA CONTEO */}
-                  <div className="border border-black rounded-sm overflow-hidden flex-1 flex flex-col">
-                    <table className="w-full h-full text-left text-[11px] border-collapse table-fixed">
+                  {/* 2. TABLA OFICIAL DE ARTÍCULOS PARA CONTEO */}
+                  <div className="border border-black rounded-sm overflow-hidden flex-1">
+                    <table className="w-full text-left border-collapse table-fixed">
                       <thead>
                         <tr className="bg-black text-white font-black uppercase text-[8.5px] tracking-wider border-b border-black">
-                          <th className="p-0.5 text-center w-7 border-r border-slate-700">#</th>
-                          <th className="p-0.5 w-26 text-center font-mono border-r border-slate-700">Cód. Barras</th>
-                          <th className="p-0.5 border-r border-slate-700">Descripción del Producto</th>
-                          <th className="p-0.5 w-16 text-center border-r border-slate-700">Góndola</th>
-                          {!printBlindMode && (
-                            <th className="p-0.5 w-16 text-right font-mono border-r border-slate-700">Stock Sist.</th>
-                          )}
-                          <th className="p-0.5 w-18 text-center border-r border-slate-700 bg-slate-900 text-white leading-tight">
+                          <th className="p-1 text-center w-8 border-r border-slate-700">#</th>
+                          <th className="p-1 w-32 text-center font-mono border-r border-slate-700">Cód. Barras</th>
+                          <th className="p-1 px-2 border-r border-slate-700">Descripción del Producto</th>
+                          <th className="p-1 w-20 text-center border-r border-slate-700 bg-slate-900 text-white leading-tight">
                             <span className="block leading-none">1° Conteo</span>
                             <span className="text-[7px] font-normal opacity-80">(Manual)</span>
                           </th>
-                          <th className="p-0.5 w-18 text-center border-r border-slate-700 bg-slate-900 text-white leading-tight">
+                          <th className="p-1 w-20 text-center border-r border-slate-700 bg-slate-900 text-white leading-tight">
                             <span className="block leading-none">2° Conteo</span>
                             <span className="text-[7px] font-normal opacity-80">(Doble Ciego)</span>
                           </th>
-                          <th className="p-0.5 w-16 text-center border-r border-slate-700 leading-tight">
-                            <span className="block leading-none">Vencimiento</span>
-                            <span className="text-[7px] font-normal opacity-80">DD/MM/AA</span>
-                          </th>
-                          <th className="p-0.5 w-20 text-center leading-tight">Estado / Obs</th>
+                          <th className="p-1 w-24 text-center leading-tight">Obs.</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-black/80 font-medium">
@@ -665,6 +633,7 @@ export default function PlanillaConteoA4Modal({
                             <tr
                               key={item.id || `item-${idx}`}
                               className={idx % 2 === 1 ? "bg-slate-50/70" : "bg-white"}
+                              style={{ height: "24px" }}
                             >
                               {/* # Nro secuencial */}
                               <td className="p-0.5 text-center font-mono font-bold text-black border-r border-black/80 text-[10px]">
@@ -672,37 +641,23 @@ export default function PlanillaConteoA4Modal({
                               </td>
 
                               {/* Código de Barras */}
-                              <td className="p-0.5 text-center font-mono font-bold text-black border-r border-black/80 text-[9.5px] tracking-tight">
+                              <td className="p-0.5 text-center font-mono font-bold text-black border-r border-black/80 text-[10px] tracking-tight">
                                 {item.product_codigo_barra || item.product_sku || "—"}
                               </td>
 
-                              {/* Descripción de Producto (Sin recorte horizontal de fuentes) */}
-                              <td className="px-1.5 py-1 text-black font-semibold border-r border-black/80 max-w-[260px] align-middle">
-                                <div className="font-bold text-[10.5px] leading-snug break-words text-black">
+                              {/* Descripción de Producto (En 1 línea sin truncar letras, SKU abajo) */}
+                              <td className="px-2 py-0.5 text-black border-r border-black/80 align-middle overflow-hidden">
+                                <div className="font-bold text-[10px] leading-tight text-black truncate" title={item.product_nombre}>
                                   {item.product_nombre}
                                 </div>
-                                {item.product_sku && item.product_codigo_barra && (
-                                  <div className="text-[8px] font-mono text-slate-600 leading-normal mt-0.5">
-                                    SKU: {item.product_sku}
-                                  </div>
-                                )}
+                                <div className="text-[8px] font-mono text-slate-500 leading-none mt-0.5">
+                                  SKU: {item.product_sku || "—"}
+                                </div>
                               </td>
-
-                              {/* Góndola / Pasillo */}
-                              <td className="p-0.5 text-center font-mono text-[9px] text-slate-800 border-r border-black/80">
-                                {session.pasillo || "—"}
-                              </td>
-
-                              {/* Stock Sistema (Si no está en modo ciego) */}
-                              {!printBlindMode && (
-                                <td className="p-0.5 text-right font-mono font-black text-black border-r border-black/80 text-[10px]">
-                                  {Number(item.cantidad_sistema || 0).toLocaleString("es-PY")}
-                                </td>
-                              )}
 
                               {/* Casilla 1° Conteo */}
                               <td className="p-0.5 text-center border-r border-black/80 bg-slate-50/40">
-                                <div className={`border border-black rounded-xs ${boxHeight} w-full flex items-center justify-center font-mono font-black text-black text-[12px] bg-white`}>
+                                <div className="border border-black rounded-xs h-5.5 w-full flex items-center justify-center font-mono font-black text-black text-[11px] bg-white">
                                   {showRecordedC1
                                     ? Number(item.cantidad_conteo_1).toLocaleString("es-PY")
                                     : ""}
@@ -711,56 +666,20 @@ export default function PlanillaConteoA4Modal({
 
                               {/* Casilla 2° Conteo */}
                               <td className="p-0.5 text-center border-r border-black/80 bg-slate-50/40">
-                                <div className={`border border-black rounded-xs ${boxHeight} w-full flex items-center justify-center font-mono font-black text-black text-[12px] bg-white`}>
+                                <div className="border border-black rounded-xs h-5.5 w-full flex items-center justify-center font-mono font-black text-black text-[11px] bg-white">
                                   {showRecordedC2
                                     ? Number(item.cantidad_conteo_2).toLocaleString("es-PY")
                                     : ""}
                                 </div>
                               </td>
 
-                              {/* Casilla Vencimiento / Lote */}
-                              <td className="p-0.5 text-center border-r border-black/80">
-                                <div className={`border border-dashed border-slate-400 rounded-xs ${boxHeight} w-full flex items-center justify-center font-mono text-[8px] text-slate-400`}>
-                                  ___/___/___
-                                </div>
-                              </td>
-
-                              {/* Casilla Observaciones / Estado */}
+                              {/* Casilla Observaciones */}
                               <td className="p-0.5 text-center">
-                                <div className={`${boxHeight} w-full border border-dashed border-slate-300 rounded-xs`}></div>
+                                <div className="h-5.5 w-full border border-dashed border-slate-300 rounded-xs"></div>
                               </td>
                             </tr>
                           )
                         })}
-
-                        {/* Relleno de líneas vacías si la página tiene menos ítems para preservar altura */}
-                        {page.items.length < ((page as any).targetRows || rowsPerPage) &&
-                          Array.from({ length: ((page as any).targetRows || rowsPerPage) - page.items.length }).map((_, fIdx) => (
-                            <tr
-                              key={`fill-${fIdx}`}
-                              className="bg-white"
-                            >
-                              <td className="border-r border-black/80 text-center text-slate-300 font-mono text-[9px]">
-                                {page.startIdx + page.items.length + fIdx}
-                              </td>
-                              <td className="border-r border-black/80"></td>
-                              <td className="border-r border-black/80"></td>
-                              <td className="border-r border-black/80"></td>
-                              {!printBlindMode && <td className="border-r border-black/80"></td>}
-                              <td className="border-r border-black/80 p-0.5">
-                                <div className={`border border-black rounded-xs ${boxHeight} w-full`}></div>
-                              </td>
-                              <td className="border-r border-black/80 p-0.5">
-                                <div className={`border border-black rounded-xs ${boxHeight} w-full`}></div>
-                              </td>
-                              <td className="border-r border-black/80 p-0.5">
-                                <div className={`border border-dashed border-slate-300 rounded-xs ${boxHeight} w-full`}></div>
-                              </td>
-                              <td className="p-0.5">
-                                <div className={`border border-dashed border-slate-200 rounded-xs ${boxHeight} w-full`}></div>
-                              </td>
-                            </tr>
-                          ))}
                       </tbody>
                     </table>
                   </div>
