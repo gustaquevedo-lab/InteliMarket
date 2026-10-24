@@ -103,19 +103,23 @@ export default function KardexProductoDetalleModal({
                       <td className="p-3">
                         <span
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                            m.tipo === "ENTRADA"
+                            m.tipo === "saldo_inicial"
+                              ? "bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300"
+                              : m.tipo === "ENTRADA" || (m.cantidad ?? 0) > 0
                               ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-                              : m.tipo === "SALIDA"
+                              : m.tipo === "SALIDA" || (m.cantidad ?? 0) < 0
                               ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
                               : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
                           }`}
                         >
-                          {m.tipo === "ENTRADA" ? (
+                          {m.tipo === "saldo_inicial" ? (
+                            <span className="w-1.5 h-1.5 rounded-full bg-purple-500 inline-block mr-0.5" />
+                          ) : isPositive ? (
                             <ArrowUpRight className="w-3 h-3" />
                           ) : (
                             <ArrowDownRight className="w-3 h-3" />
                           )}
-                          {m.tipo}
+                          {m.tipo === "saldo_inicial" ? "SALDO INICIAL" : m.tipo}
                         </span>
                       </td>
                       <td className="p-3 text-gray-600 dark:text-gray-300">

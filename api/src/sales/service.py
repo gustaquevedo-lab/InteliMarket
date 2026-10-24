@@ -887,20 +887,6 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
                 lot.cantidad_disponible -= deduct
                 lot.cantidad -= deduct
                 actual_cost += Decimal(str(deduct)) * Decimal(str(lot.costo_unitario))
-
-                lot_movement = InventoryMovement(
-                    company_id=data.company_id,
-                    warehouse_id=warehouse_id,
-                    product_id=item_data.product_id,
-                    variant_id=item_data.variant_id,
-                    tipo="salida_venta_lote",
-                    cantidad=-deduct,
-                    costo_unitario=lot.costo_unitario,
-                    referencia_type="sale",
-                    referencia_id=sale.id,
-                    user_id=data.user_id,
-                )
-                db.add(lot_movement)
                 remaining -= deduct
 
             if remaining > 0:

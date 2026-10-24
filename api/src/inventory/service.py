@@ -1019,7 +1019,7 @@ async def list_movements(
 
     if product_id:
         # Modo Kardex de Producto: calculo de saldo acumulado particionado para ese SKU
-        inner_where = "im.company_id = :comp_id AND im.product_id = :prod_id"
+        inner_where = "im.company_id = :comp_id AND im.product_id = :prod_id AND im.tipo != 'salida_venta_lote'"
         params["prod_id"] = uuid.UUID(product_id) if isinstance(product_id, str) else product_id
         if warehouse_id:
             inner_where += " AND im.warehouse_id = :wh_id"
@@ -1065,7 +1065,7 @@ async def list_movements(
     else:
         # Modo Historial General: directo sobre indices (ix_inventory_movements_comp_created / comp_tipo_created)
         # sin costo de window function global sobre ~1M de filas
-        direct_where = ["im.company_id = :comp_id"]
+        direct_where = ["im.company_id = :comp_id", "im.tipo != 'salida_venta_lote'"]
         if warehouse_id:
             direct_where.append("im.warehouse_id = :wh_id")
             params["wh_id"] = uuid.UUID(warehouse_id) if isinstance(warehouse_id, str) else warehouse_id
