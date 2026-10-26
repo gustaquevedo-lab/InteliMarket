@@ -112,6 +112,7 @@ interface CreditApprovalRequest {
   estado: string
   solicitado_por_nombre?: string
   aprobado_gerente_id?: string | null
+  detalle?: any[]
   created_at: string
 }
 
@@ -1163,6 +1164,23 @@ try {
     }
   }
 
+  const resolveActividadesApproval = async (id: string, decision: "aprobar" | "corregir" | "rechazar") => {
+    setResolvingId(`cred-${id}`)
+    try {
+      await api.creditApprovalRequests.resolverActividades(id, decision)
+      toast.success(
+        decision === "aprobar" ? "Actividades aprobadas" : decision === "corregir" ? "Pedido corregido con precios del servidor" : "Actividades rechazadas",
+        decision === "corregir" ? "Se aplicaron los descuentos vigentes del servidor." : "Decisión aplicada al pedido."
+      )
+      emitSound("positivo")
+      fetchCreditApprovals()
+    } catch (e: any) {
+      toast.error("No se pudo procesar", e?.message || "Intente de nuevo.")
+    } finally {
+      setResolvingId(null)
+    }
+  }
+
   // ── STOCK CRÍTICO / BAJO ─────────────────────────────────────────────────
   const fetchLowStock = useCallback(async () => {
     try {
@@ -1932,6 +1950,38 @@ try {
                               ⚠️ {c.motivo}
                             </div>
                           )}
+
+                          {c.detalle && Array.isArray(c.detalle) && c.detalle.length > 0 && (
+                            <div className="mt-2 space-y-1.5">
+                              {c.detalle.map((d: any, idx: number) => {
+                                const motivoLabels: Record<string, string> = {
+                                  descuento_distinto: "🏷 Descuento distinto",
+                                  actividad_vencida: "⏳ Actividad vencida",
+                                  presupuesto_insuficiente: "💰 Presupuesto insuficiente",
+                                  bonificada_sin_derecho: "🎁 Bonificada sin derecho",
+                                  descuento_sin_actividad: "⚠️ Descuento sin actividad",
+                                }
+                                const label = motivoLabels[d.motivo] || d.motivo
+                                return (
+                                  <div key={idx} className="text-xs bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 p-2 rounded-lg flex flex-col gap-0.5">
+                                    <div className="font-bold flex items-center gap-1.5">
+                                      <span>{label}</span>
+                                    </div>
+                                    {d.solicitado && d.servidor && (
+                                      <div className="text-[11px] opacity-80">
+                                        Móvil: ₲{d.solicitado.descuento_unitario?.toLocaleString() || 0} vs Servidor: ₲{d.servidor.descuento_unitario?.toLocaleString() || 0}
+                                      </div>
+                                    )}
+                                    {d.motivo === "presupuesto_insuficiente" && d.servidor && (
+                                      <div className="text-[11px] opacity-80">
+                                        Saldo disponible: ₲{d.servidor.saldo?.toLocaleString() || 0}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
                         </div>
                         {c.monto != null && (
                           <div className="text-right shrink-0">
@@ -1943,23 +1993,52 @@ try {
                         )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 pt-1">
-                        <button
-                          onClick={() => resolveCreditApproval(c.id, false)}
-                          disabled={resolvingId === `cred-${c.id}`}
-                          className="py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer hover:bg-rose-50 disabled:opacity-50 transition"
-                        >
-                          <X className="w-4 h-4" /> Rechazar
-                        </button>
-                        <button
-                          onClick={() => resolveCreditApproval(c.id, true)}
-                          disabled={resolvingId === `cred-${c.id}`}
-                          className="py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50 transition active:scale-[0.98]"
-                        >
-                          {resolvingId === `cred-${c.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                          Aprobar Crédito
-                        </button>
-                      </div>
+                      {c.motivo === "actividades" || (c.detalle && c.detalle.length > 0) ? (
+                        <div className="grid grid-cols-3 gap-2 pt-1">
+                          <button
+                            onClick={() => resolveActividadesApproval(c.id, "rechazar")}
+                            disabled={resolvingId === `cred-${c.id}`}
+                            className="py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer hover:bg-rose-50 disabled:opacity-50 transition"
+                          >
+                            <X className="w-4 h-4" /> Rechazar
+                          </button>
+                          <button
+                            onClick={() => resolveActividadesApproval(c.id, "corregir")}
+                            disabled={resolvingId === `cred-${c.id}`}
+                            className="py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-700 dark:text-amber-300 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50 transition"
+                            title="Aceptar pedido aplicando solo los descuentos vigentes del servidor"
+                          >
+                            <RefreshCcw className="w-3.5 h-3.5" /> Corregir
+                          </button>
+                          <button
+                            onClick={() => resolveActividadesApproval(c.id, "aprobar")}
+                            disabled={resolvingId === `cred-${c.id}`}
+                            className="py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-1 shadow-md shadow-emerald-500/20 cursor-pointer disabled:opacity-50 transition active:scale-[0.98]"
+                            title="Aprobar excepciones de descuento solicitadas por el vendedor"
+                          >
+                            {resolvingId === `cred-${c.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                            Aprobar
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <button
+                            onClick={() => resolveCreditApproval(c.id, false)}
+                            disabled={resolvingId === `cred-${c.id}`}
+                            className="py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-rose-600 dark:text-rose-400 font-bold text-xs flex items-center justify-center gap-1 cursor-pointer hover:bg-rose-50 disabled:opacity-50 transition"
+                          >
+                            <X className="w-4 h-4" /> Rechazar
+                          </button>
+                          <button
+                            onClick={() => resolveCreditApproval(c.id, true)}
+                            disabled={resolvingId === `cred-${c.id}`}
+                            className="py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50 transition active:scale-[0.98]"
+                          >
+                            {resolvingId === `cred-${c.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                            Aprobar Crédito
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

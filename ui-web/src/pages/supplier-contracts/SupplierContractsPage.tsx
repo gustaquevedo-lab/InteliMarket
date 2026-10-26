@@ -12,8 +12,9 @@ import { api, type CommercialAgreement } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency } from "../../utils/format"
+import ActividadesPage from "../actividades/ActividadesPage"
 
-type Tab = "dashboard" | "contratos" | "rebates" | "negociaciones" | "cumplimiento"
+type Tab = "dashboard" | "contratos" | "actividades" | "rebates" | "negociaciones" | "cumplimiento"
 type NegStatus = "abierta" | "en_curso" | "cerrada_exitosa" | "cerrada_sin_acuerdo"
 
 const daysUntil = (d?: string) => d ? Math.ceil((new Date(d + "T00:00:00").getTime() - Date.now()) / 86400000) : null
@@ -502,6 +503,7 @@ export default function SupplierContractsPage() {
         {[
           { id: "dashboard", label: "Resumen Ejecutivo", icon: FileSignature },
           { id: "contratos", label: `Acuerdos Vigentes`, count: contracts.length, icon: Layers },
+          { id: "actividades", label: "Actividades & Rendición", icon: Tag },
           { id: "rebates", label: `Rebates & Retornos`, count: rebates.length, icon: Percent },
           { id: "negociaciones", label: `Minutas & Negociación`, count: negotiations.length, icon: KanbanSquare },
           { id: "cumplimiento", label: "Metas de Volumen", icon: Target },
@@ -531,6 +533,13 @@ export default function SupplierContractsPage() {
           )
         })}
       </div>
+
+      {/* TAB ACTIVIDADES */}
+      {tab === "actividades" && (
+        <div className="pt-2">
+          <ActividadesPage />
+        </div>
+      )}
 
       {/* TAB DASHBOARD */}
       {tab === "dashboard" && (

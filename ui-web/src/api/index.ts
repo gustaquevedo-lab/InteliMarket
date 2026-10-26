@@ -2242,6 +2242,23 @@ export const api = {
     list: (params?: { estado?: string }) => client.get<any[]>("/v1/credit-approval-requests", params),
     approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/credit-approval-requests/${id}/approve`),
     reject: (id: string, motivo: string) => client.post<{ success: boolean }>(`/v1/credit-approval-requests/${id}/reject`, { motivo }),
+    resolverActividades: (id: string, decision: "aprobar" | "corregir" | "rechazar", motivo?: string) =>
+      client.post<{ success: boolean; message: string; estado: string }>(`/v1/credit-accounts/approvals/${id}/actividades`, { decision, motivo }),
+  },
+  actividades: {
+    list: (params?: { supplier_id?: string; ciclo?: string; tipo?: string; activa?: boolean }) =>
+      client.get<any[]>("/v1/actividades", params),
+    get: (id: string) => client.get<any>(`/v1/actividades/${id}`),
+    rendiciones: {
+      list: (params?: { supplier_id?: string; ciclo?: string; estado?: string }) =>
+        client.get<any[]>("/v1/actividades/rendiciones", params),
+      previa: (supplier_id: string, ciclo: string) =>
+        client.get<any>("/v1/actividades/rendiciones/previa", { supplier_id, ciclo }),
+      cerrar: (supplier_id: string, ciclo: string) =>
+        client.post<any>("/v1/actividades/rendiciones/cerrar", { supplier_id, ciclo }),
+      descargarExcel: (id: string, filename?: string) =>
+        downloadAuthenticated(`/v1/actividades/rendiciones/${id}/excel`, undefined, filename || `Rendicion_${id}.xlsx`),
+    },
   },
   writeoffRequests: {
     list: (params?: { estado?: string }) => client.get<WriteoffRequest[]>("/v1/receivable-writeoff-requests", params),

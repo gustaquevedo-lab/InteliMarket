@@ -72,6 +72,7 @@ const ExpensesPage = lazy(() => import("./pages/expenses/ExpensesPage"))
 const FinancialPage = lazy(() => import("./pages/financial/FinancialPage"))
 const BancosPage = lazy(() => import("./pages/bancos/BancosPage"))
 const SupplierContractsPage = lazy(() => import("./pages/supplier-contracts/SupplierContractsPage"))
+const ActividadesPage = lazy(() => import("./pages/actividades/ActividadesPage"))
 const ChequesPage = lazy(() => import("./pages/cheques/ChequesPage"))
 const PaymentsPage = lazy(() => import("./pages/payments/PaymentsPage"))
 const SupplierLogin = lazy(() => import("./pages/supplier-portal/SupplierLogin"))
@@ -337,6 +338,8 @@ function AppRoutes() {
           ["cheques", <ChequesPage />],
           ["payments", <PaymentsPage />],
           ["contratos-proveedores", <SupplierContractsPage />],
+          ["actividades", <ActividadesPage />],
+          ["actividades-proveedor", <ActividadesPage />],
           ["portal/proveedores", <SupplierPortalHubPage />],
           ["acuerdos-clientes", <CustomerAgreementsPage />],
           ["distribuidora", <DistribuidoraPage />],
