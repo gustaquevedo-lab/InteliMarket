@@ -1,0 +1,230 @@
+[
+  {
+    "nombre": "escala_cumple",
+    "lineas": [
+      {"product_id": "p-marilan-1", "cantidad": "12", "precio": "16884", "costo": "12000"},
+      {"product_id": "p-marilan-2", "cantidad": "8", "precio": "5200", "costo": "3500"}
+    ],
+    "actividades": [
+      {
+        "id": "act-marilan-5",
+        "tipo": "escala",
+        "producto_ids": ["p-marilan-1", "p-marilan-2"],
+        "vigente_hasta": "2026-10-31",
+        "saldo": "1000000",
+        "valoriza": "lista",
+        "tramos": [
+          {"desde": "20", "porcentaje": "5", "cada": null, "bonifica": null, "producto_bonificado_id": null, "tope": null}
+        ]
+      }
+    ],
+    "esperado": [
+      {"product_id": "p-marilan-1", "actividad_id": "act-marilan-5", "descuento_unitario": "845", "bonificada": false, "valor": "10140"},
+      {"product_id": "p-marilan-2", "actividad_id": "act-marilan-5", "descuento_unitario": "260", "bonificada": false, "valor": "2080"}
+    ]
+  },
+  {
+    "nombre": "escala_no_cumple",
+    "lineas": [
+      {"product_id": "p-marilan-1", "cantidad": "11", "precio": "16884", "costo": "12000"},
+      {"product_id": "p-marilan-2", "cantidad": "8", "precio": "5200", "costo": "3500"}
+    ],
+    "actividades": [
+      {
+        "id": "act-marilan-5",
+        "tipo": "escala",
+        "producto_ids": ["p-marilan-1", "p-marilan-2"],
+        "vigente_hasta": "2026-10-31",
+        "saldo": "1000000",
+        "valoriza": "lista",
+        "tramos": [
+          {"desde": "20", "porcentaje": "5", "cada": null, "bonifica": null, "producto_bonificado_id": null, "tope": null}
+        ]
+      }
+    ],
+    "esperado": [
+      {"product_id": "p-marilan-1", "actividad_id": null, "descuento_unitario": "0", "bonificada": false, "valor": "0"},
+      {"product_id": "p-marilan-2", "actividad_id": null, "descuento_unitario": "0", "bonificada": false, "valor": "0"}
+    ]
+  },
+  {
+    "nombre": "escala_tramo_mayor",
+    "lineas": [
+      {"product_id": "p-1", "cantidad": "60", "precio": "10000", "costo": "8000"}
+    ],
+    "actividades": [
+      {
+        "id": "act-escalonada",
+        "tipo": "escala",
+        "producto_ids": ["p-1"],
+        "vigente_hasta": "2026-10-31",
+        "saldo": "1000000",
+        "valoriza": "lista",
+        "tramos": [
+          {"desde": "20", "porcentaje": "5", "cada": null, "bonifica": null, "producto_bonificado_id": null, "tope": null},
+          {"desde": "50", "porcentaje": "8", "cada": null, "bonifica": null, "producto_bonificado_id": null, "tope": null}
+        ]
+      }
+    ],
+    "esperado": [
+      {"product_id": "p-1", "actividad_id": "act-escalonada", "descuento_unitario": "800", "bonificada": false, "valor": "48000"}
+    ]
+  },
+  {
+    "nombre": "bonificacion_tope",
+    "lineas": [
+      {"product_id": "p-boni", "cantidad": "34", "precio": "10000", "costo": "6000"}
+    ],
+    "actividades": [
+      {
+        "id": "act-boni-tope",
+        "tipo": "bonificacion",
+        "producto_ids": ["p-boni"],
+        "vigente_hasta": "2026-10-31",
+        "saldo": "1000000",
+        "valoriza": "lista",
+        "tramos": [
+          {"desde": "10", "porcentaje": null, "cada": "10", "bonifica": "1", "producto_bonificado_id": null, "tope": "5"}
+        ]
+      }
+    ],
+    "esperado": [
+      {"product_id": "p-boni", "actividad_id": null, "descuento_unitario": "0", "bonificada": false, "valor": "0"},
+      {"product_id": "p-boni", "actividad_id": "act-boni-tope", "cantidad": "3", "descuento_unitario": "0", "bonificada": true, "valor": "30000"}
+    ]
+  },
+  {
+    "nombre": "bonificacion_tope_alcanzado",
+    "lineas": [
+      {"product_id": "p-boni", "cantidad": "80", "precio": "10000", "costo": "6000"}
+    ],
+    "actividades": [
+      {
+        "id": "act-boni-tope",
+        "tipo": "bonificacion",
+        "producto_ids": ["p-boni"],
+        "vigente_hasta": "2026-10-31",
+        "saldo": "1000000",
+        "valoriza": "lista",
+        "tramos": [
+          {"desde": "10", "porcentaje": null, "cada": "10", "bonifica": "1", "producto_bonificado_id": null, "tope": "5"}
+        ]
+      }
+    ],
+    "esperado": [
+      {"product_id": "p-boni", "actividad_id": null, "descuento_unitario": "0", "bonificada": false, "valor": "0"},
+      {"product_id": "p-boni", "actividad_id": "act-boni-tope", "cantidad": "5", "descuento_unitario": "0", "bonificada": true, "valor": "50000"}
+    ]
+  },
+  {
+    "nombre": "bonificacion_valor_costo",
+    "lineas": [
+      {"product_id": "p-costo", "cantidad": "30", "precio": "10000", "costo": "4000"}
+    ],
+    "actividades": [
+      {
+        "id": "act-boni-costo",
+        "tipo": "bonificacion",
+        "producto_ids": ["p-costo"],
+        "vigente_hasta": "2026-10-31",
+        "saldo": "1000000",
+        "valoriza": "costo",
+        "tramos": [
+          {"desde": "10", "porcentaje": null, "cada": "10", "bonifica": "1", "producto_bonificado_id": null, "tope": null}
+        ]
+      }
+    ],
+    "esperado": [
+      {"product_id": "p-costo", "actividad_id": null, "descuento_unitario": "0", "bonificada": false, "valor": "0"},
+      {"product_id": "p-costo", "actividad_id": "act-boni-costo", "cantidad": "3", "descuento_unitario": "0", "bonificada": true, "valor": "12000"}
+    ]
+  },
+  {
+    "nombre": "escala_precios_distintos_redondeo",
+    "lineas": [
+      {"product_id": "p-redondeo", "cantidad": "12", "precio": "16884", "costo": "12000"}
+    ],
+    "actividades": [
+      {
+        "id": "act-redondeo",
+        "tipo": "escala",
+        "producto_ids": ["p-redondeo"],
+        "vigente_hasta": "2026-10-31",
+        "saldo": "1000000",
+        "valoriza": "lista",
+        "tramos": [
+          {"desde": "10", "porcentaje": "5", "cada": null, "bonifica": null, "producto_bonificado_id": null, "tope": null}
+        ]
+      }
+    ],
+    "esperado": [
+      {"product_id": "p-redondeo", "actividad_id": "act-redondeo", "descuento_unitario": "845", "bonificada": false, "valor": "10140"}
+    ]
+  },
+  {
+    "nombre": "dos_actividades_misma_linea",
+    "lineas": [
+      {"product_id": "p-doble", "cantidad": "20", "precio": "10000", "costo": "7000"}
+    ],
+    "actividades": [
+      {
+        "id": "act-5pct",
+        "tipo": "escala",
+        "producto_ids": ["p-doble"],
+        "vigente_hasta": "2026-10-20",
+        "saldo": "1000000",
+        "valoriza": "lista",
+        "tramos": [
+          {"desde": "10", "porcentaje": "5", "cada": null, "bonifica": null, "producto_bonificado_id": null, "tope": null}
+        ]
+      },
+      {
+        "id": "act-8pct",
+        "tipo": "escala",
+        "producto_ids": ["p-doble"],
+        "vigente_hasta": "2026-10-31",
+        "saldo": "1000000",
+        "valoriza": "lista",
+        "tramos": [
+          {"desde": "10", "porcentaje": "8", "cada": null, "bonifica": null, "producto_bonificado_id": null, "tope": null}
+        ]
+      }
+    ],
+    "esperado": [
+      {"product_id": "p-doble", "actividad_id": "act-8pct", "descuento_unitario": "800", "bonificada": false, "valor": "16000"}
+    ]
+  },
+  {
+    "nombre": "dos_actividades_empate_vence_antes",
+    "lineas": [
+      {"product_id": "p-empate", "cantidad": "20", "precio": "10000", "costo": "7000"}
+    ],
+    "actividades": [
+      {
+        "id": "act-vence-tarde",
+        "tipo": "escala",
+        "producto_ids": ["p-empate"],
+        "vigente_hasta": "2026-11-15",
+        "saldo": "1000000",
+        "valoriza": "lista",
+        "tramos": [
+          {"desde": "10", "porcentaje": "5", "cada": null, "bonifica": null, "producto_bonificado_id": null, "tope": null}
+        ]
+      },
+      {
+        "id": "act-vence-pronto",
+        "tipo": "escala",
+        "producto_ids": ["p-empate"],
+        "vigente_hasta": "2026-10-28",
+        "saldo": "1000000",
+        "valoriza": "lista",
+        "tramos": [
+          {"desde": "10", "porcentaje": "5", "cada": null, "bonifica": null, "producto_bonificado_id": null, "tope": null}
+        ]
+      }
+    ],
+    "esperado": [
+      {"product_id": "p-empate", "actividad_id": "act-vence-pronto", "descuento_unitario": "500", "bonificada": false, "valor": "10000"}
+    ]
+  }
+]
