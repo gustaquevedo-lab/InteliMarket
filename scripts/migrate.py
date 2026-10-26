@@ -292,6 +292,13 @@ COLUMN_MIGRATIONS = [
     ("expenses",                 "pagado_por",            "UUID"),
     ("expenses",                 "pagado_at",             "TIMESTAMPTZ"),
     ("expenses",                 "forma_pago_resumen",    "VARCHAR(100)"),
+    # actividades extensions
+    ("sale_items",               "actividad_id",          "UUID"),
+    ("products",                 "unidades_por_caja",     "NUMERIC(10,2)"),
+    ("products",                 "division_id",           "UUID"),
+    ("supplier_credit_notes",    "rendicion_id",          "UUID"),
+    ("credit_approval_requests", "motivo",                "TEXT DEFAULT 'credito'"),
+    ("credit_approval_requests", "detalle",               "JSONB"),
 ]
 
 # ──────────────────────────────────────────────
@@ -721,6 +728,74 @@ CREATE INDEX IF NOT EXISTS ix_delivery_notes_company ON delivery_notes (company_
 CREATE INDEX IF NOT EXISTS ix_delivery_notes_customer ON delivery_notes (customer_id);
 """
 
+# ──────────────────────────────────────────────
+# Table creations (Actividades de Proveedor - Casa Gonzalito)
+# ──────────────────────────────────────────────
+ACTIVIDADES_DDL = """
+CREATE TABLE IF NOT EXISTS actividades (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL,
+    legacy_id INTEGER,
+    nombre VARCHAR(255) NOT NULL,
+    supplier_id UUID NOT NULL,
+    ciclo VARCHAR(6) NOT NULL,
+    vigente_desde DATE NOT NULL,
+    vigente_hasta DATE NOT NULL,
+    tipo VARCHAR(20) NOT NULL,
+    alcance VARCHAR(20) NOT NULL,
+    alcance_ids UUID[] NOT NULL DEFAULT '{}'::uuid[],
+    presupuesto NUMERIC(15, 0) NOT NULL DEFAULT 0,
+    consumido NUMERIC(15, 0) NOT NULL DEFAULT 0,
+    valoriza_bonificacion VARCHAR(20) NOT NULL DEFAULT 'lista',
+    cuenta_contable TEXT,
+    activa BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT uq_actividades_company_legacy UNIQUE (company_id, legacy_id)
+);
+
+CREATE TABLE IF NOT EXISTS actividad_tramos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actividad_id UUID NOT NULL REFERENCES actividades(id) ON DELETE CASCADE,
+    desde_cantidad NUMERIC(12, 2) NOT NULL,
+    porcentaje NUMERIC(5, 2),
+    cada NUMERIC(12, 2),
+    bonifica NUMERIC(12, 2),
+    producto_bonificado_id UUID,
+    tope NUMERIC(12, 2),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS actividad_aplicaciones (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL,
+    actividad_id UUID NOT NULL REFERENCES actividades(id),
+    sale_id UUID NOT NULL,
+    sale_item_id UUID,
+    descuento_monto NUMERIC(15, 0) NOT NULL DEFAULT 0,
+    unidades_bonificadas NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    valor NUMERIC(15, 0) NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS actividad_rendiciones (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    company_id UUID NOT NULL,
+    supplier_id UUID NOT NULL,
+    ciclo VARCHAR(6) NOT NULL,
+    monto NUMERIC(15, 0) NOT NULL DEFAULT 0,
+    cobrado NUMERIC(15, 0) NOT NULL DEFAULT 0,
+    estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+    asiento_numero INTEGER,
+    created_by UUID,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT uq_actividad_rendiciones_company_supplier_ciclo UNIQUE (company_id, supplier_id, ciclo)
+);
+
+ALTER TABLE credit_approval_requests ALTER COLUMN credit_account_id DROP NOT NULL;
+"""
+
 # Índices medidos (lecturas completas en pg_stat_user_tables, 19-oct-2026). En una base con datos,
 # crearlos antes a mano con CREATE INDEX CONCURRENTLY y el mismo nombre para no bloquear escrituras.
 INDEX_DDL = """
@@ -739,6 +814,12 @@ CREATE INDEX IF NOT EXISTS ix_sales_orders_company_fecha ON sales_orders (compan
 CREATE INDEX IF NOT EXISTS ix_sales_orders_sale ON sales_orders (sale_id);
 CREATE INDEX IF NOT EXISTS ix_inventory_movements_ref ON inventory_movements (referencia_id);
 CREATE INDEX IF NOT EXISTS ix_inventory_movements_product_created ON inventory_movements (product_id, created_at);
+CREATE INDEX IF NOT EXISTS ix_actividades_company_ciclo ON actividades (company_id, ciclo);
+CREATE INDEX IF NOT EXISTS ix_actividades_supplier ON actividades (supplier_id);
+CREATE INDEX IF NOT EXISTS ix_actividad_tramos_actividad ON actividad_tramos (actividad_id);
+CREATE INDEX IF NOT EXISTS ix_actividad_aplicaciones_actividad ON actividad_aplicaciones (actividad_id);
+CREATE INDEX IF NOT EXISTS ix_actividad_aplicaciones_sale ON actividad_aplicaciones (sale_id);
+CREATE INDEX IF NOT EXISTS ix_actividad_rendiciones_supplier_ciclo ON actividad_rendiciones (supplier_id, ciclo);
 """
 
 ALEMBIC_VERSIONS = [
@@ -780,6 +861,8 @@ async def main():
         print("  ✓ SP5 tables")
         await c.execute(PLATFORM_DDL)
         print("  ✓ platform tables")
+        await c.execute(ACTIVIDADES_DDL)
+        print("  ✓ actividades tables")
         await c.execute(INDEX_DDL)
         print("  ✓ índices de rendimiento")
 

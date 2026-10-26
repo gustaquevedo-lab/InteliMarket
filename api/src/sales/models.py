@@ -81,6 +81,7 @@ class SaleItem(Base):
     iva_monto = Column(Numeric(15, 0), nullable=False)
     total = Column(Numeric(15, 0), nullable=False)
     costo_unitario = Column(Numeric(15, 0))
+    actividad_id = Column(UUID(as_uuid=True), ForeignKey("actividades.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     sale = relationship("Sale", back_populates="items")

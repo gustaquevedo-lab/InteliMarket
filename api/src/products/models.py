@@ -55,6 +55,8 @@ class Product(Base):
     imagen_url = Column(String(500), nullable=True)
     caja_unitaria_factor = Column(Numeric(10, 4), default=1.0, server_default=text("1.0"), comment="Factor de conversion a Cajas Unitarias (UC = 5.678 L)")
     segmento_paresa = Column(String(100), nullable=True, index=True, comment="Segmento de negocio PARESA (ssd_core_ms, hidra_core_dasani, etc.)")
+    unidades_por_caja = Column(Numeric(10, 2), nullable=True, comment="Unidades por caja del producto (CANT_CAJA del legacy)")
+    division_id = Column(UUID(as_uuid=True), nullable=True, index=True, comment="División comercial del producto")
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

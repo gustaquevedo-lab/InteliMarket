@@ -1,7 +1,7 @@
 """Credit account models"""
 
 from sqlalchemy import Column, String, BigInteger, Integer, Boolean, Date, DateTime, ForeignKey, Numeric, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 
 from api.src.db import Base
@@ -107,7 +107,9 @@ class CreditApprovalRequest(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     sale_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
     customer_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    credit_account_id = Column(UUID(as_uuid=True), ForeignKey("credit_accounts.id"), nullable=False)
+    credit_account_id = Column(UUID(as_uuid=True), ForeignKey("credit_accounts.id"), nullable=True)
+    motivo = Column(Text, default="credito", nullable=True)
+    detalle = Column(JSONB, nullable=True)
     monto = Column(Numeric(15, 2), nullable=False)
     limite_credito = Column(Numeric(15, 2))
     saldo_disponible = Column(Numeric(15, 2))

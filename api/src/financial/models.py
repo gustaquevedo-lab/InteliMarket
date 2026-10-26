@@ -255,6 +255,7 @@ class SupplierCreditNote(Base):
     moneda = Column(String(3), default="PYG")
     observaciones = Column(Text)
     cancelado = Column(Boolean, default=False)
+    rendicion_id = Column(UUID(as_uuid=True), ForeignKey("actividad_rendiciones.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
