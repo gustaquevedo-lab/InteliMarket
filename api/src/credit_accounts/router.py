@@ -392,3 +392,22 @@ async def reject_approval_request(
     if "error" in result:
         raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
     return {"success": True}
+
+
+class ActividadResolucionBody(BaseModel):
+    accion: str  # "aprobar" | "corregir" | "rechazar"
+
+
+@approval_router.post("/{request_id}/actividades")
+@router.post("/approvals/{request_id}/actividades")
+async def resolver_actividades(
+    request_id: str,
+    body: ActividadResolucionBody,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    result = await service.resolver_aprobacion_actividades(db, request_id, body.accion, user["id"])
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+

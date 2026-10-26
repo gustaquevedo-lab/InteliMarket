@@ -3,14 +3,17 @@
 from api.src.common.money import gs
 from sqlalchemy import select, text, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime, timezone, date
 from decimal import Decimal, ROUND_HALF_UP
 import json
 import uuid
 
 from api.src.credit_accounts.models import CreditAccount, CreditMovement, CreditApprovalRequest, ReceivableWriteoffRequest, CustomerAdvance
-from api.src.credit_accounts.schemas import CreditAccountCreate, CreditAccountUpdate, CreditPayment, MoraConfig, DunningConfig, CustomerAdvanceCreate
+from api.src.credit_accounts.schemas import (
+    CreditAccountCreate, CreditAccountUpdate, CreditPayment, MoraConfig,
+    DunningConfig, CustomerAdvanceCreate, AuthorizeExcessRequest
+)
 from api.src.customers.models import Customer
 
 
@@ -291,9 +294,33 @@ async def authorize_excess(
 
 
 async def create_approval_request(
-    db: AsyncSession, company_id, sale_id, customer_id, credit_account_id,
-    monto: Decimal, limite_credito: Decimal, saldo_disponible: Decimal,
+    db: AsyncSession, company_id, sale_id, customer_id, credit_account_id=None,
+    monto: Decimal = Decimal(0), limite_credito: Decimal = Decimal(0), saldo_disponible: Decimal = Decimal(0),
+    motivo: str = "credito", detalle: Any = None,
 ) -> CreditApprovalRequest:
+    # Si ya existe uno para el sale_id (es único), suma el motivo y el detalle
+    existing_stmt = select(CreditApprovalRequest).where(CreditApprovalRequest.sale_id == sale_id)
+    res = await db.execute(existing_stmt)
+    existing = res.scalar_one_or_none()
+
+    if existing:
+        motivos = [m.strip() for m in (existing.motivo or "").split(",") if m.strip()]
+        if motivo not in motivos:
+            motivos.append(motivo)
+            existing.motivo = ", ".join(motivos)
+        if detalle:
+            if existing.detalle and isinstance(existing.detalle, list) and isinstance(detalle, list):
+                existing.detalle = existing.detalle + detalle
+            elif existing.detalle and isinstance(existing.detalle, dict) and isinstance(detalle, dict):
+                existing.detalle = {**existing.detalle, **detalle}
+            else:
+                existing.detalle = detalle
+        if credit_account_id and not existing.credit_account_id:
+            existing.credit_account_id = credit_account_id
+        await db.flush()
+        await db.refresh(existing)
+        return existing
+
     request = CreditApprovalRequest(
         company_id=company_id,
         sale_id=sale_id,
@@ -302,6 +329,8 @@ async def create_approval_request(
         monto=monto,
         limite_credito=limite_credito,
         saldo_disponible=saldo_disponible,
+        motivo=motivo,
+        detalle=detalle,
     )
     db.add(request)
     await db.flush()
@@ -447,6 +476,170 @@ async def reject_credit_request(db: AsyncSession, request_id: str, user_id: str,
     except Exception:
         pass
     return {"success": True, "request": request}
+
+
+async def resolver_aprobacion_actividades(
+    db: AsyncSession,
+    request_id: str,
+    accion: str,
+    user_id: uuid.UUID | str,
+) -> dict:
+    """Resuelve la retención por motivo de actividades de proveedor.
+    Acciones:
+    - rechazar: cancela la venta (cancel_sale) y marca el request como rechazado.
+    - aprobar: respeta los descuentos del celular. Si además hay crédito pendiente,
+      remueve 'actividades' de motivo pero mantiene la venta en pendiente_aprobacion.
+      Si no hay crédito pendiente, confirma la venta, descuenta stock y consume presupuesto.
+    - corregir: aplica los descuentos del servidor (de request.detalle o recalculados),
+      actualiza los items de la venta y recalcula totales. Mismo criterio para confirmar/consumir.
+    """
+    if isinstance(user_id, str):
+        user_id = uuid.UUID(user_id)
+
+    request = await get_approval_request(db, request_id)
+    if not request:
+        return {"error": "Solicitud no encontrada"}
+    if request.estado != "pendiente":
+        return {"error": f"La solicitud ya está en estado '{request.estado}'"}
+
+    from api.src.sales.service import get_sale, cancel_sale, calculate_taxes, get_sale_items, _deduct_stock_for_sale
+    from api.src.sales.schemas import SaleCreate
+    from api.src.sales.models import SaleItem
+    from api.src.actividades.service import consumir
+
+    sale = await get_sale(db, str(request.sale_id))
+    if not sale:
+        return {"error": "Venta no encontrada"}
+
+    motivos = [m.strip() for m in (request.motivo or "").split(",") if m.strip()]
+
+    if accion == "rechazar":
+        await cancel_sale(db, str(sale.id))
+        request.estado = "rechazado"
+        request.rechazado_por = user_id
+        request.rechazado_at = datetime.now(timezone.utc)
+        request.rechazado_motivo = "Rechazado por discrepancia en actividades de proveedor"
+        await db.flush()
+        return {"success": True, "estado": "rechazado"}
+
+    if accion == "corregir":
+        # Reemplazar descuentos y actividades en los items de la venta con lo del servidor
+        detalle = request.detalle or []
+        diff_by_prod = {d["product_id"]: d.get("servidor", {}) for d in detalle if isinstance(d, dict) and "product_id" in d}
+
+        items_stmt = select(SaleItem).where(SaleItem.sale_id == sale.id)
+        items_res = await db.execute(items_stmt)
+        sale_items = items_res.scalars().all()
+
+        subtotal = Decimal(0)
+        descuento_total = Decimal(0)
+        base_10 = Decimal(0)
+        iva_10 = Decimal(0)
+        base_5 = Decimal(0)
+        iva_5 = Decimal(0)
+        base_ex = Decimal(0)
+
+        for item in sale_items:
+            srv_diff = diff_by_prod.get(str(item.product_id))
+            if srv_diff:
+                item.descuento_unitario = Decimal(str(srv_diff.get("descuento_unitario") or 0))
+                act_str = srv_diff.get("actividad_id")
+                item.actividad_id = uuid.UUID(act_str) if act_str else None
+
+            # Recalcular impuestos
+            taxes = calculate_taxes({
+                "precio_unitario": item.precio_unitario,
+                "cantidad": item.cantidad,
+                "descuento_unitario": getattr(item, "descuento_unitario", Decimal(0)),
+                "descuento_pct": item.descuento_pct or Decimal(0),
+                "iva_tasa": item.iva_tasa or Decimal(10),
+            })
+            item.descuento_monto = taxes["descuento_monto"]
+            item.iva_monto = taxes["iva_monto"]
+            item.total = taxes["total"]
+
+            subtotal += taxes["subtotal_bruto"]
+            descuento_total += taxes["descuento_monto"]
+            tasa = Decimal(str(item.iva_tasa or 10))
+            if tasa == Decimal(10):
+                base_10 += taxes["base"]
+                iva_10 += taxes["iva_monto"]
+            elif tasa == Decimal(5):
+                base_5 += taxes["base"]
+                iva_5 += taxes["iva_monto"]
+            else:
+                base_ex += taxes["base"]
+
+        sale.subtotal = subtotal
+        sale.descuento_total = descuento_total
+        sale.base_gravada_10 = base_10
+        sale.iva_10 = iva_10
+        sale.base_gravada_5 = base_5
+        sale.iva_5 = iva_5
+        sale.base_exenta = base_ex
+        sale.total = subtotal - descuento_total
+
+    # Para aprobar o corregir:
+    tiene_credito_pendiente = "credito" in motivos
+    if tiene_credito_pendiente:
+        # Queda pendiente de aprobación crediticia
+        motivos_restantes = [m for m in motivos if m != "actividades"]
+        request.motivo = ", ".join(motivos_restantes)
+        await db.flush()
+        return {"success": True, "estado": sale.estado, "credito_pendiente": True}
+    else:
+        # Confirmar venta y procesar
+        sale.estado = "confirmado"
+        sale.total_pagado = sale.total
+        sale.saldo = Decimal(0)
+        request.estado = "aprobado"
+
+        # Descontar stock
+        raw_items = await get_sale_items(db, str(sale.id))
+        warehouse_id = getattr(sale, "warehouse_id", None)
+        if str(type(warehouse_id)).find("Mock") != -1:
+            warehouse_id = None
+        branch_id = getattr(sale, "branch_id", None)
+        if str(type(branch_id)).find("Mock") != -1:
+            branch_id = None
+        customer_id = getattr(sale, "customer_id", None)
+        if str(type(customer_id)).find("Mock") != -1:
+            customer_id = None
+        condicion = getattr(sale, "condicion", "contado")
+        if str(type(condicion)).find("Mock") != -1 or not condicion:
+            condicion = "contado"
+        tipo_comprobante = getattr(sale, "tipo_comprobante", "ticket")
+        if str(type(tipo_comprobante)).find("Mock") != -1 or not tipo_comprobante:
+            tipo_comprobante = "ticket"
+
+        deduct_data = SaleCreate(
+            company_id=sale.company_id,
+            warehouse_id=warehouse_id,
+            branch_id=branch_id,
+            customer_id=customer_id,
+            condicion=condicion,
+            tipo_comprobante=tipo_comprobante,
+            items=[
+                {
+                    "product_id": i["product_id"],
+                    "variant_id": i.get("variant_id"),
+                    "descripcion": i.get("descripcion"),
+                    "cantidad": i["cantidad"],
+                    "precio_unitario": i["precio_unitario"],
+                    "descuento_pct": i["descuento_pct"],
+                    "descuento_unitario": i.get("descuento_unitario", Decimal(0)),
+                    "actividad_id": i.get("actividad_id"),
+                    "iva_tasa": i["iva_tasa"],
+                    "costo_unitario": i.get("costo_unitario") or 0,
+                }
+                for i in raw_items
+            ],
+        )
+        await _deduct_stock_for_sale(db, sale, deduct_data)
+        await consumir(db, sale)
+        await db.flush()
+        return {"success": True, "estado": "confirmado", "completo": True}
+
 
 
 async def process_payment(db: AsyncSession, company_id: str, customer_id: str, data: CreditPayment) -> dict:
