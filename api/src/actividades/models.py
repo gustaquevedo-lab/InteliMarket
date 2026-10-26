@@ -37,8 +37,8 @@ class Actividad(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    tramos = relationship("ActividadTramo", back_populates="actividad", cascade="all, delete-orphan")
-    aplicaciones = relationship("ActividadAplicacion", back_populates="actividad")
+    tramos = relationship(lambda: ActividadTramo, back_populates="actividad", cascade="all, delete-orphan")
+    aplicaciones = relationship(lambda: ActividadAplicacion, back_populates="actividad")
 
 
 class ActividadTramo(Base):
@@ -55,7 +55,7 @@ class ActividadTramo(Base):
     tope = Column(Numeric(12, 2), nullable=True)  # maximo bonificadas por pedido
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    actividad = relationship("Actividad", back_populates="tramos")
+    actividad = relationship(lambda: Actividad, back_populates="tramos")
 
 
 class ActividadAplicacion(Base):
@@ -73,8 +73,8 @@ class ActividadAplicacion(Base):
     valor = Column(Numeric(15, 0), nullable=False, default=0, server_default=text("0"))  # consumo real del presupuesto
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    actividad = relationship("Actividad", back_populates="aplicaciones")
-    rendicion = relationship("ActividadRendicion", back_populates="aplicaciones")
+    actividad = relationship(lambda: Actividad, back_populates="aplicaciones")
+    rendicion = relationship(lambda: ActividadRendicion, back_populates="aplicaciones")
 
 
 class ActividadRendicion(Base):
@@ -102,4 +102,4 @@ class ActividadRendicion(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    aplicaciones = relationship("ActividadAplicacion", back_populates="rendicion")
+    aplicaciones = relationship(lambda: ActividadAplicacion, back_populates="rendicion")
