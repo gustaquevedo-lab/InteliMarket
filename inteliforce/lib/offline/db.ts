@@ -87,6 +87,12 @@ async function initSchema(db: SQLite.SQLiteDatabase) {
       json TEXT NOT NULL,
       cached_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS cached_actividades (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      json TEXT NOT NULL,
+      cached_at INTEGER NOT NULL
+    );
   `);
 }
 
@@ -214,6 +220,21 @@ export const offlineDb = {
   getCatalog: async <T>(): Promise<T[]> => {
     const db = await getDb();
     const row = await db.getFirstAsync<{ json: string }>(`SELECT json FROM cached_catalog WHERE id = 1`);
+    return row ? JSON.parse(row.json) : [];
+  },
+
+  // Actividades vigentes para evaluar descuentos offline
+  saveActividades: async (actividades: unknown[]) => {
+    const db = await getDb();
+    await db.runAsync(
+      `INSERT OR REPLACE INTO cached_actividades (id, json, cached_at) VALUES (1, ?, ?)`,
+      [JSON.stringify(actividades), Date.now()]
+    );
+  },
+
+  getActividades: async <T>(): Promise<T[]> => {
+    const db = await getDb();
+    const row = await db.getFirstAsync<{ json: string }>(`SELECT json FROM cached_actividades WHERE id = 1`);
     return row ? JSON.parse(row.json) : [];
   },
 };

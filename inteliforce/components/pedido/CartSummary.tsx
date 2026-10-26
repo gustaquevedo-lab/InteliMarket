@@ -8,6 +8,7 @@ import { useTheme } from '@/hooks/useTheme';
 interface CartSummaryProps {
   itemCount: number;
   totalAmount: number;
+  totalAhorro?: number;
   onConfirmOrder: () => void;
   disabled?: boolean;
 }
@@ -15,6 +16,7 @@ interface CartSummaryProps {
 export function CartSummary({
   itemCount,
   totalAmount,
+  totalAhorro = 0,
   onConfirmOrder,
   disabled = false,
 }: CartSummaryProps) {
@@ -37,6 +39,9 @@ export function CartSummary({
           {itemCount} producto{itemCount > 1 ? 's' : ''} en carrito
         </Text>
         <Text style={[styles.totalText, { color: theme.primary }]}>{formatGS(totalAmount)}</Text>
+        {totalAhorro > 0 && (
+          <Text style={styles.ahorroText}>Ahorro: -{formatGS(totalAhorro)}</Text>
+        )}
       </View>
 
       <TouchableOpacity
@@ -95,6 +100,12 @@ const styles = StyleSheet.create({
   totalText: {
     fontSize: 19,
     fontWeight: '800',
+    marginTop: 2,
+  },
+  ahorroText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#10B981',
     marginTop: 2,
   },
   checkoutBtn: {

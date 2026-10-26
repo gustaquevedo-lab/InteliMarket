@@ -20,6 +20,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { haptic } from '@/lib/haptics';
 import { api, isNetworkError } from '@/lib/api';
 import { offlineDb } from '@/lib/offline/db';
+import { evaluar, ActividadInput } from '@/lib/actividades';
 import { ThemeColors } from '@/constants/colors';
 
 export default function PedidoCatalogScreen() {
@@ -33,16 +34,29 @@ export default function PedidoCatalogScreen() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todos');
+  const [actividades, setActividades] = useState<ActividadInput[]>([]);
+
+  useEffect(() => {
+    offlineDb.getActividades<ActividadInput>().then((acts) => {
+      if (acts && acts.length > 0) setActividades(acts);
+    });
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
     return () => clearTimeout(timer);
   }, [search]);
 
-  // Con señal, refresca el catálogo guardado; sin señal, se usa el último guardado.
+  // Con señal, refresca el catálogo y las actividades guardadas; sin señal, se usa lo último guardado.
   useEffect(() => {
     api.get<ProductItem[]>('/products?search=&limit=20000')
       .then((all) => offlineDb.saveCatalog(all))
+      .catch(() => {});
+    api.get<ActividadInput[]>('/inteliforce/actividades')
+      .then((acts) => {
+        setActividades(acts);
+        offlineDb.saveActividades(acts);
+      })
       .catch(() => {});
   }, []);
 
@@ -86,6 +100,28 @@ export default function PedidoCatalogScreen() {
     cart.forEach((i) => map.set(i.productId, i.cantidad));
     return map;
   }, [cart]);
+
+  const { totalAmount, totalAhorro } = useMemo(() => {
+    const lineas = cart.map((i) => ({
+      product_id: i.productId,
+      cantidad: i.cantidad,
+      precio: i.precio_unitario,
+    }));
+    const evaluated = evaluar(lineas, actividades);
+    let subtotal = 0;
+    let ahorro = 0;
+    cart.forEach((i) => {
+      subtotal += i.precio_unitario * i.cantidad;
+      const evalLine = evaluated.find((e) => !e.bonificada && e.product_id === i.productId);
+      if (evalLine && evalLine.descuento_unitario > 0) {
+        ahorro += evalLine.descuento_unitario * i.cantidad;
+      }
+    });
+    return {
+      totalAmount: Math.max(0, subtotal - ahorro),
+      totalAhorro: ahorro,
+    };
+  }, [cart, actividades]);
 
   return (
     <View style={styles.container}>
@@ -213,7 +249,8 @@ export default function PedidoCatalogScreen() {
       {/* Floating Bottom Cart Summary */}
       <CartSummary
         itemCount={getCartItemCount()}
-        totalAmount={getCartTotal()}
+        totalAmount={totalAmount}
+        totalAhorro={totalAhorro}
         onConfirmOrder={() => {
           haptic.medium();
           router.push('/(vendedor)/pedido/confirmar');

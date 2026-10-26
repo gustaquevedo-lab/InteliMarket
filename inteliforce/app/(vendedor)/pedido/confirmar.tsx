@@ -1,5 +1,4 @@
-// app/(vendedor)/pedido/confirmar.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,6 +19,8 @@ import { useVisit } from '@/hooks/useVisit';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { useTheme } from '@/hooks/useTheme';
 import { api } from '@/lib/api';
+import { offlineDb } from '@/lib/offline/db';
+import { evaluar, ActividadInput } from '@/lib/actividades';
 import { formatGS } from '@/lib/format';
 import { haptic } from '@/lib/haptics';
 
@@ -36,14 +37,75 @@ export default function ConfirmarPedidoScreen() {
     updateCartQty,
     removeFromCart,
     clearCart,
-    getCartTotal,
   } = useVisit();
 
   const { enqueueOrExecute } = useOfflineQueue();
 
+  const [actividades, setActividades] = useState<ActividadInput[]>([]);
   const [condicion, setCondicion] = useState<'contado' | 'credito'>('contado');
   const [observaciones, setObservaciones] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    offlineDb.getActividades<ActividadInput>().then((cached) => {
+      if (cached && cached.length > 0) setActividades(cached);
+    });
+    api.get<ActividadInput[]>('/inteliforce/actividades')
+      .then((acts) => {
+        setActividades(acts);
+        offlineDb.saveActividades(acts);
+      })
+      .catch(() => {});
+  }, []);
+
+  const evaluated = useMemo(() => {
+    const lineas = cart.map((i) => ({
+      product_id: i.productId,
+      cantidad: i.cantidad,
+      precio: i.precio_unitario,
+    }));
+    return evaluar(lineas, actividades);
+  }, [cart, actividades]);
+
+  const { subtotalBruto, totalAhorro, totalNeto, bonificadas } = useMemo(() => {
+    let subtotal = 0;
+    let ahorro = 0;
+    const bonis: Array<{
+      product_id: string;
+      actividad_id: string | null;
+      cantidad: number;
+      nombre: string;
+    }> = [];
+
+    cart.forEach((item) => {
+      subtotal += item.precio_unitario * item.cantidad;
+      const evalLine = evaluated.find(
+        (e) => !e.bonificada && e.product_id === item.productId
+      );
+      if (evalLine && evalLine.descuento_unitario > 0) {
+        ahorro += evalLine.descuento_unitario * item.cantidad;
+      }
+    });
+
+    evaluated
+      .filter((e) => e.bonificada)
+      .forEach((b) => {
+        const matchingCart = cart.find((c) => c.productId === b.product_id);
+        bonis.push({
+          product_id: b.product_id,
+          actividad_id: b.actividad_id,
+          cantidad: b.cantidad || 0,
+          nombre: matchingCart?.nombre || b.nombre_actividad || 'Producto bonificado',
+        });
+      });
+
+    return {
+      subtotalBruto: subtotal,
+      totalAhorro: ahorro,
+      totalNeto: Math.max(0, subtotal - ahorro),
+      bonificadas: bonis,
+    };
+  }, [cart, evaluated]);
 
   // Modal de autorización requerida (Error 409)
   const [authRequiredData, setAuthRequiredData] = useState<{
@@ -51,8 +113,6 @@ export default function ConfirmarPedidoScreen() {
     credito_usado?: number;
     monto_pedido?: number;
   } | null>(null);
-
-  const total = getCartTotal();
 
   const handleSubmitOrder = async () => {
     if (cart.length === 0) {
@@ -65,13 +125,32 @@ export default function ConfirmarPedidoScreen() {
     const payload = {
       customer_id: customer_id || '',
       condicion,
-      items: cart.map((item) => ({
-        product_id: item.productId,
-        cantidad: item.cantidad,
-        precio_unitario: item.precio_unitario,
-        descuento_pct: item.descuento_pct || 0,
-        iva_tasa: item.iva_tasa || 10,
-      })),
+      items: [
+        ...cart.map((item) => {
+          const evalLine = evaluated.find(
+            (e) => !e.bonificada && e.product_id === item.productId
+          );
+          return {
+            product_id: item.productId,
+            cantidad: item.cantidad,
+            precio_unitario: item.precio_unitario,
+            descuento_unitario: evalLine?.descuento_unitario || 0,
+            actividad_id: evalLine?.actividad_id || null,
+            descuento_pct: item.descuento_pct || 0,
+            iva_tasa: item.iva_tasa || 10,
+          };
+        }),
+        ...bonificadas.map((b) => ({
+          product_id: b.product_id,
+          cantidad: b.cantidad,
+          precio_unitario: 0,
+          descuento_unitario: 0,
+          actividad_id: b.actividad_id,
+          bonificada: true,
+          descuento_pct: 0,
+          iva_tasa: 10,
+        })),
+      ],
       observaciones: observaciones.trim() || undefined,
       credit_authorization_id: null,
       // Mismo id en el envío directo y en el reintento de la cola: el servidor no duplica la venta.
@@ -111,7 +190,7 @@ export default function ConfirmarPedidoScreen() {
         Alert.alert(
           '¡Pedido Confirmado!',
           `Número de pedido: ${result.data?.numero || 'Generado'}\nTotal: ${formatGS(
-            result.data?.total ?? total
+            result.data?.total ?? totalNeto
           )}`,
           [{ text: 'Aceptar', onPress: () => router.back() }]
         );
@@ -212,13 +291,36 @@ export default function ConfirmarPedidoScreen() {
           <Text style={[styles.sectionTitle, { color: theme.text }]}>Productos Seleccionados ({cart.length})</Text>
         </View>
 
-        {cart.map((item) => (
+        {cart.map((item) => {
+          const evalLine = evaluated.find(
+            (e) => !e.bonificada && e.product_id === item.productId
+          );
+          return (
+            <CartItem
+              key={item.productId}
+              item={item}
+              descuentoUnitario={evalLine?.descuento_unitario || 0}
+              actividadNombre={evalLine?.nombre_actividad}
+              onIncrement={() => updateCartQty(item.productId, item.cantidad + 1)}
+              onDecrement={() => updateCartQty(item.productId, item.cantidad - 1)}
+              onRemove={() => removeFromCart(item.productId)}
+            />
+          );
+        })}
+
+        {bonificadas.map((b, idx) => (
           <CartItem
-            key={item.productId}
-            item={item}
-            onIncrement={() => updateCartQty(item.productId, item.cantidad + 1)}
-            onDecrement={() => updateCartQty(item.productId, item.cantidad - 1)}
-            onRemove={() => removeFromCart(item.productId)}
+            key={`boni_${b.product_id}_${idx}`}
+            item={{
+              productId: b.product_id,
+              nombre: b.nombre,
+              precio_unitario: 0,
+              cantidad: b.cantidad,
+              iva_tasa: 10,
+              descuento_pct: 0,
+            }}
+            isBonificado={true}
+            actividadNombre="Bonificación"
           />
         ))}
 
@@ -245,12 +347,22 @@ export default function ConfirmarPedidoScreen() {
             },
           ]}
         >
+          {totalAhorro > 0 && (
+            <View style={styles.breakdownRow}>
+              <Text style={[styles.breakdownLabel, { color: '#10B981', fontWeight: '700' }]}>
+                Ahorro Actividades
+              </Text>
+              <Text style={[styles.breakdownVal, { color: '#10B981', fontWeight: '800' }]}>
+                -{formatGS(totalAhorro)}
+              </Text>
+            </View>
+          )}
           <View style={styles.breakdownRow}>
             <Text style={[styles.breakdownLabel, { color: isDark ? '#94A3B8' : '#CBD5E1' }]}>
               Subtotal Gravadas (10%)
             </Text>
             <Text style={[styles.breakdownVal, { color: '#FFFFFF' }]}>
-              {formatGS(Math.round((total * 10) / 11))}
+              {formatGS(Math.round((totalNeto * 10) / 11))}
             </Text>
           </View>
           <View style={styles.breakdownRow}>
@@ -258,20 +370,20 @@ export default function ConfirmarPedidoScreen() {
               Liquidación IVA (10%)
             </Text>
             <Text style={[styles.breakdownVal, { color: '#38BDF8' }]}>
-              {formatGS(Math.round(total / 11))}
+              {formatGS(Math.round(totalNeto / 11))}
             </Text>
           </View>
           <View style={[styles.totalDivider, { backgroundColor: isDark ? '#334155' : 'rgba(255,255,255,0.1)' }]} />
           <View style={styles.totalRow}>
             <Text style={styles.totalLabel}>Total a Pagar</Text>
-            <Text style={[styles.totalAmount, { color: theme.primary }]}>{formatGS(total)}</Text>
+            <Text style={[styles.totalAmount, { color: theme.primary }]}>{formatGS(totalNeto)}</Text>
           </View>
           <Text style={styles.ivaDisclaimer}>Importe en Guaraníes con IVA incluido</Text>
         </Card>
 
         {/* Botón Submit */}
         <Button
-          title={`Confirmar Pedido • ${formatGS(total)}`}
+          title={`Confirmar Pedido • ${formatGS(totalNeto)}`}
           onPress={handleSubmitOrder}
           loading={loading}
           size="lg"
@@ -334,7 +446,7 @@ export default function ConfirmarPedidoScreen() {
                 <Text style={[styles.modalCreditRow, { color: theme.textSecondary }]}>
                   Monto Pedido:{' '}
                   <Text style={{ fontWeight: '800', color: theme.danger }}>
-                    {formatGS(authRequiredData.monto_pedido || total)}
+                    {formatGS(authRequiredData.monto_pedido || totalNeto)}
                   </Text>
                 </Text>
               </View>
