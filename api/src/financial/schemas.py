@@ -546,6 +546,7 @@ class SupplierCreditNoteCreate(BaseModel):
     monto: float
     moneda: Optional[str] = "PYG"
     observaciones: Optional[str] = None
+    rendicion_id: Optional[str] = None
 
 
 class SupplierCreditNoteApply(BaseModel):

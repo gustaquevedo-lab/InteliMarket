@@ -299,6 +299,13 @@ COLUMN_MIGRATIONS = [
     ("supplier_credit_notes",    "rendicion_id",          "UUID"),
     ("credit_approval_requests", "motivo",                "TEXT DEFAULT 'credito'"),
     ("credit_approval_requests", "detalle",               "JSONB"),
+    ("actividad_aplicaciones",   "rendicion_id",          "UUID REFERENCES actividad_rendiciones(id) ON DELETE SET NULL"),
+    ("actividad_rendiciones",    "total_descuentos",      "NUMERIC(15,0) NOT NULL DEFAULT 0"),
+    ("actividad_rendiciones",    "total_bonificaciones",  "NUMERIC(15,0) NOT NULL DEFAULT 0"),
+    ("actividad_rendiciones",    "total_rendicion",       "NUMERIC(15,0) NOT NULL DEFAULT 0"),
+    ("actividad_rendiciones",    "asiento_id",            "UUID"),
+    ("actividad_rendiciones",    "cerrada_por",           "UUID"),
+    ("actividad_rendiciones",    "cerrada_at",            "TIMESTAMPTZ"),
 ]
 
 # ──────────────────────────────────────────────

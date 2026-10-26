@@ -67,12 +67,14 @@ class ActividadAplicacion(Base):
     actividad_id = Column(UUID(as_uuid=True), ForeignKey("actividades.id"), nullable=False, index=True)
     sale_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     sale_item_id = Column(UUID(as_uuid=True), nullable=True)
+    rendicion_id = Column(UUID(as_uuid=True), ForeignKey("actividad_rendiciones.id", ondelete="SET NULL"), nullable=True, index=True)
     descuento_monto = Column(Numeric(15, 0), nullable=False, default=0, server_default=text("0"))
     unidades_bonificadas = Column(Numeric(12, 2), nullable=False, default=0, server_default=text("0"))
     valor = Column(Numeric(15, 0), nullable=False, default=0, server_default=text("0"))  # consumo real del presupuesto
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     actividad = relationship("Actividad", back_populates="aplicaciones")
+    rendicion = relationship("ActividadRendicion", back_populates="aplicaciones")
 
 
 class ActividadRendicion(Base):
@@ -86,10 +88,18 @@ class ActividadRendicion(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     supplier_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     ciclo = Column(String(6), nullable=False, index=True)  # AAAAMM
-    monto = Column(Numeric(15, 0), nullable=False, default=0, server_default=text("0"))
+    total_descuentos = Column(Numeric(15, 0), nullable=False, default=0, server_default=text("0"))
+    total_bonificaciones = Column(Numeric(15, 0), nullable=False, default=0, server_default=text("0"))
+    total_rendicion = Column(Numeric(15, 0), nullable=False, default=0, server_default=text("0"))
+    monto = Column(Numeric(15, 0), nullable=False, default=0, server_default=text("0"))  # alias legacy para compatibilidad
     cobrado = Column(Numeric(15, 0), nullable=False, default=0, server_default=text("0"))
-    estado = Column(String(20), nullable=False, default="pendiente", server_default=text("'pendiente'"))  # pendiente | parcial | cobrada
+    estado = Column(String(20), nullable=False, default="abierta", server_default=text("'abierta'"))  # abierta | cerrada | conciliada
+    asiento_id = Column(UUID(as_uuid=True), nullable=True)
     asiento_numero = Column(Integer, nullable=True)
+    cerrada_por = Column(UUID(as_uuid=True), nullable=True)
+    cerrada_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    aplicaciones = relationship("ActividadAplicacion", back_populates="rendicion")

@@ -2825,6 +2825,33 @@ async def create_supplier_credit_note(db: AsyncSession, company_id: str, data: S
     if monto_dec <= 0:
         raise ValueError("El monto de la Nota de Crédito debe ser mayor a 0")
 
+    rid = uuid.UUID(data.rendicion_id) if data.rendicion_id else None
+    if rid:
+        from api.src.actividades.models import ActividadRendicion
+        r_res = await db.execute(
+            select(ActividadRendicion).where(
+                ActividadRendicion.id == rid,
+                ActividadRendicion.company_id == cid
+            )
+        )
+        rendicion = r_res.scalar_one_or_none()
+        if not rendicion:
+            raise ValueError("Rendición no encontrada")
+        if rendicion.supplier_id != sid:
+            raise ValueError("El proveedor de la nota de crédito no coincide con el de la rendición")
+
+        # Sumar NCs previas para esta rendición
+        nc_sum_res = await db.execute(
+            select(func.coalesce(func.sum(SupplierCreditNote.monto), Decimal(0))).where(
+                SupplierCreditNote.rendicion_id == rid,
+                SupplierCreditNote.cancelado == False
+            )
+        )
+        prev_nc = nc_sum_res.scalar() or Decimal(0)
+        target = rendicion.total_rendicion if (rendicion.total_rendicion and rendicion.total_rendicion > 0) else rendicion.monto
+        if (prev_nc + monto_dec) >= target:
+            rendicion.estado = "conciliada"
+
     note = SupplierCreditNote(
         company_id=cid,
         supplier_id=sid,
@@ -2841,6 +2868,7 @@ async def create_supplier_credit_note(db: AsyncSession, company_id: str, data: S
         moneda=data.moneda or "PYG",
         observaciones=data.observaciones,
         cancelado=False,
+        rendicion_id=rid,
     )
     db.add(note)
     await db.commit()
@@ -2862,6 +2890,7 @@ async def create_supplier_credit_note(db: AsyncSession, company_id: str, data: S
         "saldo_disponible": float(note.saldo_disponible),
         "moneda": note.moneda,
         "observaciones": note.observaciones,
+        "rendicion_id": str(note.rendicion_id) if note.rendicion_id else None,
     }
 
 

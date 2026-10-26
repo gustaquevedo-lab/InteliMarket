@@ -150,6 +150,7 @@ from api.src.suscripciones.router import router as suscripciones_router
 from api.src.servicios.router import router as servicios_router
 from api.src.vouchers.router import router as vouchers_router
 from api.src.inteliforce.router import router as inteliforce_router
+from api.src.actividades.router import router as actividades_router
 from api.src.supermer.router import router as supermer_router
 
 @asynccontextmanager
@@ -486,5 +487,6 @@ app.include_router(servicios_router)
 app.include_router(vouchers_router)
 app.include_router(vouchers_router, prefix="/api")
 app.include_router(inteliforce_router)
+app.include_router(actividades_router)
 app.include_router(supermer_router)
 
