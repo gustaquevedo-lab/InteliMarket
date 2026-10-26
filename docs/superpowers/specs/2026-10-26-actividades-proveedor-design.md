@@ -6,7 +6,8 @@ Vertical: Distribuidora (Casa Gonzalito). Aprobado por el usuario por partes el 
 
 En el sistema viejo las "actividades" son promociones pagadas por el proveedor (ej. "MARILAN 5% desde 20 unidades", "cada 10 cajas 1 gratis") con presupuesto mensual. Medición sobre la copia local (22-ene a 22-jul-2026): 103.517 líneas con actividad (27% de las líneas), ₲2.419 M de descuento (5,3% de la facturación) y 26.948 unidades bonificadas. El pedido de InteliMarket hoy guarda descuento 0: sin este motor, al ser InteliMarket el único facturador los clientes pagarían ~5% más.
 
-Datos del legacy (`columbia`): `actividad` (cabecera, `TIPOACT`, `CICLO`, `PRESUPUESTO`, `ATTRIB`, `FECINI/FECFIN`, `CODICUENT/CODICTA`), `item_act` (`DC=1` = tramo con `CANTVEND` meta y `CANTBONI` % o unidades; `DC=0` = productos del alcance), `item_ventas.ACTIV` = `A`+IDCLIENTE+actividad.ID o fecha-hora+vendedor+actividad.ID. Tipos usados: 2 (escala→%) y 1 (cada N, M gratis). Tipos 3 y 4 sin ventas en 6 meses. `ATTRIB=8` (87%) = meta en cajas (`productos.CANT_CAJA`).
+Datos del legacy (`columbia`): `actividad` (cabecera, `TIPOACT`, `CICLO`, `PRESUPUESTO`, `ATTRIB`, `FECINI/FECFIN`, `CODICUENT/CODICTA`), `item_act` (`DC=1` = tramo con `CANTVEND` meta y `CANTBONI` % o unidades; `DC=0` = productos del alcance), `item_ventas.ACTIV` = `A`+IDCLIENTE+actividad.ID o fecha-hora+vendedor+actividad.ID. Tipos usados: 2 (escala→%) y 1 (cada N, M gratis). Tipos 3 y 4 sin ventas en 6 meses. `ATTRIB=8` (87%) = indicador de meta en cajas en interfaz de usuario.
+*Nota de verificación Task 7:* En `item_act`, `CANTVEND` ya viene persistido en unidades finales (ej. 40 para 'DSD 1CX' de wafer con 40 u/caja; 6 para 'DSD 1CFS' con 6 u/caja; 20 para sachet de 18 u/caja). Por lo tanto `desde_cantidad` se mapea directo sin multiplicar por `CANT_CAJA`.
 
 ## Decisiones del usuario
 

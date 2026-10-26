@@ -333,11 +333,11 @@ def sync_productos(pg, my, cat_map):
 
         query_cols = (
             f"SELECT CODIGO, COD_BARRA, NOMBRE, ID_CATEGORIA, SERVICIO, INACTIVO, "
-            f"FECHA, FECMOD, PRECIOCOSTO, {peso_col_name} "
+            f"FECHA, FECMOD, PRECIOCOSTO, CANT_CAJA, {peso_col_name} "
             f"FROM productos WHERE FECMOD > %s ORDER BY FECMOD"
             if peso_col_name else
             f"SELECT CODIGO, COD_BARRA, NOMBRE, ID_CATEGORIA, SERVICIO, INACTIVO, "
-            f"FECHA, FECMOD, PRECIOCOSTO, NULL as PESO "
+            f"FECHA, FECMOD, PRECIOCOSTO, CANT_CAJA, NULL as PESO "
             f"FROM productos WHERE FECMOD > %s ORDER BY FECMOD"
         )
         cur.execute(query_cols, (since,))
@@ -347,7 +347,7 @@ def sync_productos(pg, my, cat_map):
         return set(), {}
     max_ts = since
     codigos, costos, rows = set(), {}, []
-    for (codigo, cod_barra, nombre, id_cat, servicio, inactivo, fecha, fecmod, preciocosto, peso_raw) in legacy_rows:
+    for (codigo, cod_barra, nombre, id_cat, servicio, inactivo, fecha, fecmod, preciocosto, cant_caja, peso_raw) in legacy_rows:
         cod = txt_keep(codigo, 50)
         if not cod:
             continue
@@ -356,18 +356,220 @@ def sync_productos(pg, my, cat_map):
         costo = money(preciocosto) if preciocosto else 0
         costos[cod] = costo
         peso_kg = num3(peso_raw) if peso_raw is not None else None
-        # products.costo_promedio/ultimo_costo y peso_kg
+        unidades_por_caja = num3(cant_caja) if cant_caja else None
+        # products.costo_promedio/ultimo_costo, peso_kg y unidades_por_caja
         rows.append((uuid.uuid5(NS, f"prod:{cod}"), COMPANY_ID, cat_id, cod,
                      txt_keep(cod_barra, 50), (txt(nombre) or cod)[:200],
                      "servicio" if servicio == 1 else "producto",
-                     not bool(inactivo), costo, costo, peso_kg))
+                     not bool(inactivo), costo, costo, peso_kg, unidades_por_caja))
         if fecmod and fecmod > max_ts:
             max_ts = fecmod
     n = upsert(pg, "products", ["id", "company_id", "category_id", "sku", "codigo_barra",
-                                 "nombre", "tipo", "activo", "costo_promedio", "ultimo_costo", "peso_kg"], rows)
+                                 "nombre", "tipo", "activo", "costo_promedio", "ultimo_costo", "peso_kg", "unidades_por_caja"], rows)
     log(f"  productos: {n} filas actualizadas (FECMOD > {since})")
     set_watermark(pg, "productos", last_synced_at=max_ts)
     return codigos, costos
+
+
+def sync_actividades(pg, my):
+    """Sincroniza actividades de proveedor y sus tramos desde el legacy MySQL (tablas actividad e item_act).
+    - Tipos soportados: 2 (escala -> 'escala') y 1 (bonificacion -> 'bonificacion').
+    - Se acota por CICLO >= ciclo actual - 1 (configurable con SYNC_ACTIVIDADES_CICLO_MIN).
+    - Preserva 'consumido' en Postgres (no se pisa en upsert).
+    """
+    today = date.today()
+    prev_month = today.month - 1 if today.month > 1 else 12
+    prev_year = today.year if today.month > 1 else today.year - 1
+    default_ciclo = f"{prev_year}{prev_month:02d}"
+    ciclo_min = os.getenv("SYNC_ACTIVIDADES_CICLO_MIN", default_ciclo)
+
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT ID, IDUNICO, NOMBRE, TIPOACT, FECINI, FECFIN, CICLO, PRESUPUESTO, CODICUENT, ATTRIB, INACTIVO, SUPERADO "
+            "FROM actividad WHERE CICLO >= %s ORDER BY ID",
+            (ciclo_min,)
+        )
+        act_rows = cur.fetchall()
+
+    if not act_rows:
+        log("  actividades: sin registros para sincronizar")
+        return
+
+    # Mapeo de tipos soportados
+    # 2 -> escala, 1 -> bonificacion. 3 y 4 se saltean con log.
+    valid_acts = []
+    idunicos = []
+    for r in act_rows:
+        aid, idunico, nombre, tipoact, fecini, fecfin, ciclo, presupuesto, codicuent, attrib, inactivo, superado = r
+        if tipoact == 2:
+            tipo = "escala"
+        elif tipoact == 1:
+            tipo = "bonificacion"
+        else:
+            log(f"  actividad ID {aid} ({nombre}): tipoact {tipoact} no soportado (se saltea)")
+            continue
+        valid_acts.append(r)
+        if idunico:
+            idunicos.append(idunico)
+
+    if not valid_acts or not idunicos:
+        log("  actividades: no hay actividades válidas con tramos")
+        return
+
+    # Leer item_act en bloques de hasta 500 IDUNICO
+    items_by_idunico = {}
+    codiprods_needed = set()
+    with my.cursor() as cur:
+        chunk_size = 500
+        for i in range(0, len(idunicos), chunk_size):
+            chunk = idunicos[i:i + chunk_size]
+            placeholders = ",".join(["%s"] * len(chunk))
+            cur.execute(
+                f"SELECT ID, IDUNICO, CODIPROD, CANTBONI, CANTVEND, LIMITE, DESCUENTO, DC "
+                f"FROM item_act WHERE IDUNICO IN ({placeholders}) ORDER BY ID",
+                tuple(chunk)
+            )
+            for it in cur.fetchall():
+                it_idunico = it[1]
+                items_by_idunico.setdefault(it_idunico, []).append(it)
+                cod = txt_keep(it[2], 50)
+                if cod:
+                    codiprods_needed.add(cod)
+
+    # Obtener proveedor (ID_PROVEEDOR) de los productos de anclaje
+    prod_to_prov = {}
+    if codiprods_needed:
+        with my.cursor() as cur:
+            prod_list = list(codiprods_needed)
+            for i in range(0, len(prod_list), 500):
+                chunk = prod_list[i:i + 500]
+                placeholders = ",".join(["%s"] * len(chunk))
+                cur.execute(
+                    f"SELECT CODIGO, ID_PROVEEDOR FROM productos WHERE CODIGO IN ({placeholders})",
+                    tuple(chunk)
+                )
+                for c, p in cur.fetchall():
+                    cod = txt_keep(c, 50)
+                    prov = txt_keep(p, 50)
+                    if cod and prov:
+                        prod_to_prov[cod] = prov
+
+    act_rows_to_upsert = []
+    tramo_rows_to_upsert = []
+
+    for r in valid_acts:
+        aid, idunico, nombre, tipoact, fecini, fecfin, ciclo, presupuesto, codicuent, attrib, inactivo, superado = r
+        tipo = "escala" if tipoact == 2 else "bonificacion"
+        act_uuid = uuid.uuid5(NS, f"actividad:{aid}")
+
+        items = items_by_idunico.get(idunico, [])
+        tramos_raw = [it for it in items if it[7] == 1]
+        prods_raw = [it for it in items if it[7] == 0]
+
+        if not tramos_raw:
+            continue
+
+        if prods_raw:
+            prod_cods = [txt_keep(it[2], 50) for it in prods_raw if txt_keep(it[2], 50)]
+        else:
+            prod_cods = [txt_keep(it[2], 50) for it in tramos_raw if txt_keep(it[2], 50)]
+
+        alcance_ids = [uuid.uuid5(NS, f"prod:{c}") for c in prod_cods]
+
+        anchor_cod = txt_keep(tramos_raw[0][2], 50)
+        id_prov = prod_to_prov.get(anchor_cod)
+        supplier_id = uuid.uuid5(NS, f"prov:{id_prov}") if id_prov else PLACEHOLDER_SUP_ID
+
+        nom = (txt(nombre) or f"Actividad {aid}")[:255]
+        ini = fecini if fecini and fecini != date(1, 1, 1) else date(2000, 1, 1)
+        fin = fecfin if fecfin and fecfin != date(1, 1, 1) else date(2099, 12, 31)
+        activa = bool(inactivo == 0 and superado == 0)
+        presup = Decimal(str(presupuesto or 0))
+
+        act_rows_to_upsert.append((
+            act_uuid,
+            COMPANY_ID,
+            aid,
+            nom,
+            supplier_id,
+            str(ciclo or "")[:6],
+            ini,
+            fin,
+            tipo,
+            "productos",
+            alcance_ids,
+            presup,
+            "lista",
+            txt_keep(codicuent, 50),
+            activa,
+        ))
+
+        for t in tramos_raw:
+            t_id = t[0]
+            tramo_id = uuid.uuid5(NS, f"actividad_tramo:{t_id}")
+            cod_item = txt_keep(t[2], 50)
+            cant_boni = Decimal(str(t[3] or 0))
+            cant_vend = Decimal(str(t[4] or 0))
+            limite_raw = t[5]
+            tope = Decimal(str(limite_raw)) if limite_raw and limite_raw < 10000000 else None
+
+            if tipo == "escala":
+                desde = cant_vend
+                pct = cant_boni
+                cada = None
+                bonifica = None
+                prod_boni = None
+            else:
+                desde = cant_vend
+                pct = None
+                cada = cant_vend
+                bonifica = cant_boni
+                prod_boni = uuid.uuid5(NS, f"prod:{cod_item}") if cod_item else None
+
+            tramo_rows_to_upsert.append((
+                tramo_id,
+                act_uuid,
+                desde,
+                pct,
+                cada,
+                bonifica,
+                prod_boni,
+                tope,
+            ))
+
+    n_act = upsert(
+        pg,
+        "actividades",
+        [
+            "id", "company_id", "legacy_id", "nombre", "supplier_id", "ciclo",
+            "vigente_desde", "vigente_hasta", "tipo", "alcance", "alcance_ids",
+            "presupuesto", "valoriza_bonificacion", "cuenta_contable", "activa"
+        ],
+        act_rows_to_upsert,
+        conflict_col="id",
+        update_cols=[
+            "company_id", "legacy_id", "nombre", "supplier_id", "ciclo",
+            "vigente_desde", "vigente_hasta", "tipo", "alcance", "alcance_ids",
+            "presupuesto", "valoriza_bonificacion", "cuenta_contable", "activa"
+        ],
+    )
+
+    n_tramos = upsert(
+        pg,
+        "actividad_tramos",
+        [
+            "id", "actividad_id", "desde_cantidad", "porcentaje", "cada",
+            "bonifica", "producto_bonificado_id", "tope"
+        ],
+        tramo_rows_to_upsert,
+        conflict_col="id",
+        update_cols=[
+            "actividad_id", "desde_cantidad", "porcentaje", "cada",
+            "bonifica", "producto_bonificado_id", "tope"
+        ],
+    )
+
+    log(f"  actividades: {n_act} actividades y {n_tramos} tramos sincronizados (CICLO >= {ciclo_min})")
 
 
 def sync_clientes(pg, my):
@@ -1434,6 +1636,7 @@ def main():
         "depositos": lambda: sync_depositos(pg, my),
         "proveedores": lambda: sync_proveedores(pg, my),
         "productos": None,   # necesita cat_map, se arma abajo
+        "actividades": lambda: sync_actividades(pg, my),
         "clientes": lambda: sync_clientes(pg, my),
         "precios": None,     # necesita codigos, se arma abajo
         "stock": None,       # necesita valid_wh, se arma abajo
@@ -1463,6 +1666,8 @@ def main():
     codigos = clientes = set()
     if not ONLY or ONLY == "productos":
         codigos, _costos = sync_productos(pg, my, cat_map)
+    if not ONLY or ONLY == "actividades":
+        sync_actividades(pg, my)
     if not ONLY or ONLY == "clientes":
         clientes = sync_clientes(pg, my)
     if not ONLY or ONLY == "precios":
