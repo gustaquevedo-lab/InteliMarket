@@ -44,7 +44,7 @@ Cada uno tiene su prueba en la tarea dueña (marcadas **[RF1]**…**[RF5]**).
 **Interfaces:**
 - Produces: modelos `Actividad`, `ActividadTramo`, `ActividadAplicacion`, `ActividadRendicion` con las columnas de la spec §1; columnas `sale_items.actividad_id`, `products.unidades_por_caja`, `products.division_id`, `supplier_credit_notes.rendicion_id`, `credit_approval_requests.motivo` (text, default `'credito'`), `credit_approval_requests.detalle` (jsonb).
 
-- [ ] **Step 1: Test que falla**
+- [x] **Step 1: Test que falla**
 
 ```python
 def test_tablas_actividades():
@@ -56,10 +56,10 @@ def test_tablas_actividades():
     assert ActividadRendicion.__tablename__ == "actividad_rendiciones"
 ```
 
-- [ ] **Step 2:** `pytest api/tests/test_actividades_models.py -v` → FAIL (módulo no existe).
-- [ ] **Step 3:** Escribir modelos y `ACTIVIDADES_DDL` (mismas columnas y tipos; único `(company_id, legacy_id)` en actividades y `(company_id, supplier_id, ciclo)` en rendiciones; índices `actividad_aplicaciones(actividad_id)`, `(sale_id)`). En el mismo DDL: `ALTER TABLE credit_approval_requests ALTER COLUMN credit_account_id DROP NOT NULL;` y reflejarlo en `credit_accounts/models.py` (`nullable=True`). Agregar columnas a `COLUMN_MIGRATIONS` y a los modelos SQLAlchemy existentes (`SaleItem`, `Product`, `SupplierCreditNote`, `CreditApprovalRequest`).
-- [ ] **Step 4:** `pytest api/tests/test_actividades_models.py api/tests/test_imports.py -v` → PASS.
-- [ ] **Step 5:** En la VM: `DATABASE_URL=... uv run python scripts/migrate.py` dos veces (idempotente; la segunda solo muestra ✓). Commit + push: `feat(actividades): tablas y columnas del motor de actividades`.
+- [x] **Step 2:** `pytest api/tests/test_actividades_models.py -v` → FAIL (módulo no existe).
+- [x] **Step 3:** Escribir modelos y `ACTIVIDADES_DDL` (mismas columnas y tipos; único `(company_id, legacy_id)` en actividades y `(company_id, supplier_id, ciclo)` en rendiciones; índices `actividad_aplicaciones(actividad_id)`, `(sale_id)`). En el mismo DDL: `ALTER TABLE credit_approval_requests ALTER COLUMN credit_account_id DROP NOT NULL;` y reflejarlo en `credit_accounts/models.py` (`nullable=True`). Agregar columnas a `COLUMN_MIGRATIONS` y a los modelos SQLAlchemy existentes (`SaleItem`, `Product`, `SupplierCreditNote`, `CreditApprovalRequest`).
+- [x] **Step 4:** `pytest api/tests/test_actividades_models.py api/tests/test_imports.py -v` → PASS.
+- [x] **Step 5:** En la VM: `DATABASE_URL=... uv run python scripts/migrate.py` dos veces (idempotente; la segunda solo muestra ✓). Commit + push: `feat(actividades): tablas y columnas del motor de actividades`.
 
 ---
 
@@ -77,7 +77,7 @@ def test_tablas_actividades():
   - salida: una entrada por línea original `{"product_id", "actividad_id"|None, "descuento_unitario": Decimal, "bonificada": False}` más una por cada línea bonificada `{"product_id", "actividad_id", "cantidad", "descuento_unitario": 0, "bonificada": True, "valor": Decimal}`; cada línea con descuento lleva también `"valor"` (= descuento_unitario × cantidad).
   - No mira saldo (eso es la auditoría, Task 5). Usa `gs()` de `api/src/common/money.py`.
 
-- [ ] **Step 1: Casos** en `actividades_casos.json` (lista de `{"nombre", "lineas", "actividades", "esperado"}`), como mínimo:
+- [x] **Step 1: Casos** en `actividades_casos.json` (lista de `{"nombre", "lineas", "actividades", "esperado"}`), como mínimo:
   - `escala_cumple`: MARILAN 5% desde 20; líneas 12×16884 y 8×5200 → unitarios 845 y 260.
   - `escala_no_cumple`: mismas con 11+8=19 → sin actividad.
   - `escala_tramo_mayor`: tramos 20→5% y 50→8%; 60 unidades → 8%.
@@ -85,7 +85,7 @@ def test_tablas_actividades():
   - `bonificacion_valor_costo`: valoriza=costo, costo 4000, 3 bonificadas → valor 12000.
   - **[RF1]** `escala_precios_distintos_redondeo`: precio 16884 × 5% = 844,2 → 845 por unidad (no sobre el total).
   - **[RF2]** `dos_actividades_misma_linea`: 5% vs 8% sobre el mismo producto → gana 8%; con 5% vs 5% → gana la de `vigente_hasta` menor.
-- [ ] **Step 2: Test** que recorre el JSON:
+- [x] **Step 2: Test** que recorre el JSON:
 
 ```python
 import json, pathlib
@@ -99,9 +99,9 @@ def test_caso(caso):
     assert json.loads(json.dumps(evaluar(caso["lineas"], caso["actividades"]), default=str), parse_float=Decimal) == caso["esperado"]
 ```
   (Normalizar Decimals a string en `esperado` si hace falta; lo importante es que el mismo JSON lo lea la app en Task 8.)
-- [ ] **Step 3:** `pytest api/tests/test_actividades_engine.py -v` → FAIL.
-- [ ] **Step 4:** Implementar `evaluar` (spec §2): por actividad, base = suma de cantidades de líneas con `product_id` en `producto_ids`; escala → mayor tramo con `desde ≤ base` → `gs(precio × pct / 100)` por línea; bonificación → `floor(base / cada) × bonifica`, `min(tope)`; por línea quedarse con la de mayor descuento (empate: `vigente_hasta` menor).
-- [ ] **Step 5:** `pytest api/tests/test_actividades_engine.py api/tests/test_money.py -v` → PASS. Commit + push.
+- [x] **Step 3:** `pytest api/tests/test_actividades_engine.py -v` → FAIL.
+- [x] **Step 4:** Implementar `evaluar` (spec §2): por actividad, base = suma de cantidades de líneas con `product_id` en `producto_ids`; escala → mayor tramo con `desde ≤ base` → `gs(precio × pct / 100)` por línea; bonificación → `floor(base / cada) × bonifica`, `min(tope)`; por línea quedarse con la de mayor descuento (empate: `vigente_hasta` menor).
+- [x] **Step 5:** `pytest api/tests/test_actividades_engine.py api/tests/test_money.py -v` → PASS. Commit + push.
 
 ---
 
@@ -114,10 +114,10 @@ def test_caso(caso):
 **Interfaces:**
 - Produces: `SaleItemInput.descuento_unitario: Decimal = 0`, `SaleItemInput.actividad_id: UUID | None = None`. Si `descuento_unitario > 0`: `descuento_monto = descuento_unitario × cantidad` (ignora `descuento_pct`). `SaleItem.actividad_id` se graba.
 
-- [ ] **Step 1: Test que falla:** 12 × 16884 con `descuento_unitario=845`, IVA 10 → `descuento_monto == 10140`, `total == 192468`, `iva_monto == iva_incluido(192468, 10) == 17497`.
-- [ ] **Step 2:** `pytest api/tests/test_sales_tax.py -v` → FAIL.
-- [ ] **Step 3:** Implementar (una rama en `calculate_taxes`; pasar `actividad_id` al `SaleItem`).
-- [ ] **Step 4:** `pytest api/tests/test_sales_tax.py api/tests/test_money.py -v` → PASS. Commit + push.
+- [x] **Step 1: Test que falla:** 12 × 16884 con `descuento_unitario=845`, IVA 10 → `descuento_monto == 10140`, `total == 192468`, `iva_monto == iva_incluido(192468, 10) == 17497`.
+- [x] **Step 2:** `pytest api/tests/test_sales_tax.py -v` → FAIL.
+- [x] **Step 3:** Implementar (una rama en `calculate_taxes`; pasar `actividad_id` al `SaleItem`).
+- [x] **Step 4:** `pytest api/tests/test_sales_tax.py api/tests/test_money.py -v` → PASS. Commit + push.
 
 ---
 
@@ -134,12 +134,12 @@ def test_caso(caso):
   - `async def liberar(db, sale_id) -> None`: resta lo consumido y borra las aplicaciones.
   - `async def saldo(db, actividad_id) -> Decimal` (presupuesto − consumido).
 
-- [ ] **Step 1: Tests que fallan** (mock db al estilo de `api/tests/test_ruta_caja_service.py`):
+- [x] **Step 1: Tests que fallan** (mock db al estilo de `api/tests/test_ruta_caja_service.py`):
   - `consumir` agrega una aplicación por línea con actividad y suma al consumido.
   - **[RF3]** llamar `consumir` dos veces para la misma venta no duplica.
   - **[RF5]** `liberar` resta y borra.
   - **[RF4]** `consumir` usa `with_for_update()` sobre la actividad (verificar en la query construida).
-- [ ] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** `pytest api/tests/test_actividades_service.py -v` → PASS. Commit + push.
+- [x] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** `pytest api/tests/test_actividades_service.py -v` → PASS. Commit + push.
 
 ---
 
@@ -157,9 +157,9 @@ def test_caso(caso):
   - `def auditar(celular: list[dict], servidor: list[dict], saldos: dict[str, Decimal]) -> list[dict]`: devuelve las diferencias `{"product_id", "motivo", "celular", "servidor"}` con motivos `descuento_distinto`, `actividad_vencida`, `presupuesto_insuficiente`, `bonificada_sin_derecho`, `descuento_sin_actividad`. Lista vacía = pasa.
 - Comportamiento en `create_order`: el precio sigue saliendo del servidor (Precio 1). Se calcula `servidor = evaluar(...)`; si `auditar` da vacío, las líneas van con el descuento del servidor; si no, van **con lo del celular** (es lo que vio el cliente), la venta se crea con `estado="pendiente_aprobacion"` y se crea/actualiza el pedido de aprobación (Task 6) con `motivo` que incluya `actividades` y `detalle` = diferencias. Las líneas bonificadas se agregan como `SaleItemInput` con `precio_unitario` de lista y `descuento_unitario` = precio (total 0) y `actividad_id`.
 
-- [ ] **Step 1: Tests que fallan** de `auditar` (función pura): igual → `[]`; descuento distinto; actividad que el servidor ya no tiene → `actividad_vencida`; saldo menor que el valor → `presupuesto_insuficiente`; línea `bonificada` que el servidor no genera; descuento con `actividad_id` nulo.
-- [ ] **Step 2:** FAIL. **Step 3:** implementar `vigentes`, `auditar`, el endpoint y el cambio en `create_order` (quitar el comentario `shortcut: ... ni actividades de proveedor`).
-- [ ] **Step 4:** `pytest api/tests/test_actividades_auditoria.py api/tests/test_actividades_engine.py -v` → PASS. Commit + push.
+- [x] **Step 1: Tests que fallan** de `auditar` (función pura): igual → `[]`; descuento distinto; actividad que el servidor ya no tiene → `actividad_vencida`; saldo menor que el valor → `presupuesto_insuficiente`; línea `bonificada` que el servidor no genera; descuento con `actividad_id` nulo.
+- [x] **Step 2:** FAIL. **Step 3:** implementar `vigentes`, `auditar`, el endpoint y el cambio en `create_order` (quitar el comentario `shortcut: ... ni actividades de proveedor`).
+- [x] **Step 4:** `pytest api/tests/test_actividades_auditoria.py api/tests/test_actividades_engine.py -v` → PASS. Commit + push.
 
 ---
 
@@ -174,8 +174,8 @@ def test_caso(caso):
 - Produces: `POST /credit-accounts/approvals/{id}/actividades` con body `{"accion": "aprobar"|"corregir"|"rechazar"}` y permiso `aprobar_actividades` (una firma; el crédito conserva su doble firma). `aprobar` → venta confirmada con los descuentos del celular y `consumir()`. `corregir` → reemplaza descuento/actividad de las líneas por lo del servidor (recalcular totales con `calculate_taxes`), confirma y `consumir()`. `rechazar` → `cancel_sale`. Si el pedido además tiene motivo `credito` pendiente, la venta no se confirma hasta resolver los dos.
 - Ubicar el permiso igual que los existentes (grep `aprobar_credito` o similar en `api/src/auth`).
 
-- [ ] **Step 1: Tests que fallan:** crear pedido de aprobación sin `credit_account_id`; segundo motivo sobre el mismo `sale_id` se fusiona; `corregir` deja los descuentos del servidor; con crédito pendiente no confirma.
-- [ ] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** PASS (+ `pytest api/tests -k "credit or actividades" -v`). Commit + push.
+- [x] **Step 1: Tests que fallan:** crear pedido de aprobación sin `credit_account_id`; segundo motivo sobre el mismo `sale_id` se fusiona; `corregir` deja los descuentos del servidor; con crédito pendiente no confirma.
+- [x] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** PASS (+ `pytest api/tests -k "credit or actividades" -v`). Commit + push.
 
 ---
 
@@ -193,9 +193,9 @@ def test_caso(caso):
   - Proveedor = el `ID_PROVEEDOR` del producto del tramo. `presupuesto = PRESUPUESTO`, `vigente_desde/hasta = FECINI/FECFIN`, `activa = INACTIVO=0 AND SUPERADO=0`, `cuenta_contable = CODICUENT`, `valoriza_bonificacion = lista`.
   - **No** pisar `consumido` (lo maneja InteliMarket).
 
-- [ ] **Step 1:** Probar primero contra la copia local (`mysql -u etl -petl columbia` en minisforum, apuntando el script con una variable de entorno de host si ya existe; si no, correr la consulta de lectura a mano) y comparar 3 actividades reales (una de cada tipo, p. ej. IDs 22861, 22931, 22167) campo por campo con lo cargado en Postgres.
-- [ ] **Step 2:** Validar el supuesto `ATTRIB & 8` = meta en cajas con esas 3 (ver cantidades vendidas reales en `item_ventas` con su `ACTIV`). Si no se confirma, dejar `desde` sin multiplicar y anotarlo en la spec.
-- [ ] **Step 3:** Correr el sync real en la VM una vez a mano; verificar conteo de actividades vigentes (~190 por ciclo). Commit + push.
+- [x] **Step 1:** Probar primero contra la copia local (`mysql -u etl -petl columbia` en minisforum, apuntando el script con una variable de entorno de host si ya existe; si no, correr la consulta de lectura a mano) y comparar 3 actividades reales (una de cada tipo, p. ej. IDs 22861, 22931, 22167) campo por campo con lo cargado en Postgres.
+- [x] **Step 2:** Validar el supuesto `ATTRIB & 8` = meta en cajas con esas 3 (ver cantidades vendidas reales en `item_ventas` con su `ACTIV`). Si no se confirma, dejar `desde` sin multiplicar y anotarlo en la spec.
+- [x] **Step 3:** Correr el sync real en la VM una vez a mano; verificar conteo de actividades vigentes (~190 por ciclo). Commit + push.
 
 ---
 
@@ -209,10 +209,10 @@ def test_caso(caso):
 - Consumes: formato de `GET /inteliforce/actividades` (Task 5) y `api/tests/fixtures/actividades_casos.json` (Task 2).
 - Produces: `export function evaluar(lineas, actividades)` con la misma salida que Python. Redondeo: `Math.ceil` para el descuento unitario (mismo criterio que `gs`).
 
-- [ ] **Step 1: Test** `actividades.test.ts` con `node:assert` que lee `../api/tests/fixtures/actividades_casos.json` y compara cada caso.
-- [ ] **Step 2:** `cd inteliforce && npx --yes tsx lib/actividades.test.ts` → FAIL.
-- [ ] **Step 3:** Implementar `evaluar` y las pantallas.
-- [ ] **Step 4:** test → PASS; `npx tsc --noEmit` sin errores nuevos. Commit + push. (El APK lo genera el usuario localmente.)
+- [x] **Step 1: Test** `actividades.test.ts` con `node:assert` que lee `../api/tests/fixtures/actividades_casos.json` y compara cada caso.
+- [x] **Step 2:** `cd inteliforce && npx --yes tsx lib/actividades.test.ts` → FAIL.
+- [x] **Step 3:** Implementar `evaluar` y las pantallas.
+- [x] **Step 4:** test → PASS; `npx tsc --noEmit` sin errores nuevos. Commit + push. (El APK lo genera el usuario localmente.)
 
 ---
 
@@ -230,8 +230,8 @@ def test_caso(caso):
   - `GET /actividades` (lista con filtros ciclo/proveedor) y `GET /actividades/{id}` para la pantalla.
 - Antes de implementar: confirmar en `account_plans` de Casa Gonzalito que exista la cuenta de reintegros; si no, crearla con el endpoint existente (anotar el código usado en la spec).
 
-- [ ] **Step 1: Tests que fallan:** monto de la rendición = suma de aplicaciones del proveedor y ciclo; segunda rendición igual → 409; nota de crédito con `rendicion_id` por menos → `parcial`, por el total → `cobrada`.
-- [ ] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** PASS. Commit + push.
+- [x] **Step 1: Tests que fallan:** monto de la rendición = suma de aplicaciones del proveedor y ciclo; segunda rendición igual → 409; nota de crédito con `rendicion_id` por menos → `parcial`, por el total → `cobrada`.
+- [x] **Step 2:** FAIL. **Step 3:** implementar. **Step 4:** PASS. Commit + push.
 
 ---
 
@@ -242,14 +242,14 @@ def test_caso(caso):
 - Modify: `ui-web/src/App.tsx` y `ui-web/src/components/Layout.tsx` (ruta y menú en la sección Distribuidora; el menú real sale de `tenants.config`, verificarlo ahí), pantalla existente de aprobaciones de crédito (mostrar `motivo` y la tabla de `detalle` celular vs servidor, y los botones aprobar/corregir/rechazar para actividades), formulario de nota de crédito de proveedor (selector de rendición pendiente)
 - Montos con `ui-web/src/utils/money.ts`.
 
-- [ ] **Step 1:** Implementar. **Step 2:** `cd ui-web && npm run build` sin errores. **Step 3:** Verificar en el navegador (preview) la lista, la descarga y la cola con un pedido retenido de prueba. Commit + push.
+- [x] **Step 1:** Implementar. **Step 2:** `cd ui-web && npm run build` sin errores. **Step 3:** Verificar en el navegador (preview) la lista, la descarga y la cola con un pedido retenido de prueba. Commit + push.
 
 ---
 
 ### Task 11: Despliegue y prueba de punta a punta
 
-- [ ] **Step 1:** En la VM: `migrate.py`, reinicio `api-2` → `api`, `deploy-ui.sh`, salud OK.
-- [ ] **Step 2:** Sync de actividades manual (Task 7) y comprobar vigentes en `GET /inteliforce/actividades`.
-- [ ] **Step 3:** Pedido de prueba por la API como preventista con una actividad de escala que cumple → venta confirmada, descuento correcto, aplicación grabada, `consumido` sube. Mismo pedido con un descuento alterado → retenido con motivo; resolver con `corregir`. Anular la venta → `consumido` vuelve.
-- [ ] **Step 4:** Rendición del ciclo de prueba: Excel, cierre, asiento visible, nota de crédito que la cancela.
-- [ ] **Step 5:** Borrar los datos de prueba (ventas, aplicaciones, rendición, asiento) o hacerlo en el schema `sandbox`. Actualizar `docs/ROADMAP-DISTRIBUIDORA.md` y la memoria del roadmap. Commit + push.
+- [x] **Step 1:** En la VM: `migrate.py`, reinicio `api-2` → `api`, `deploy-ui.sh`, salud OK.
+- [x] **Step 2:** Sync de actividades manual (Task 7) y comprobar vigentes en `GET /inteliforce/actividades`.
+- [x] **Step 3:** Pedido de prueba por la API como preventista con una actividad de escala que cumple → venta confirmada, descuento correcto, aplicación grabada, `consumido` sube. Mismo pedido con un descuento alterado → retenido con motivo; resolver con `corregir`. Anular la venta → `consumido` vuelve.
+- [x] **Step 4:** Rendición del ciclo de prueba: Excel, cierre, asiento visible, nota de crédito que la cancela.
+- [x] **Step 5:** Borrar los datos de prueba (ventas, aplicaciones, rendición, asiento) o hacerlo en el schema `sandbox`. Actualizar `docs/ROADMAP-DISTRIBUIDORA.md` y la memoria del roadmap. Commit + push.

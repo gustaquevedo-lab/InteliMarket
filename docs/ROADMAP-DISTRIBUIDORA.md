@@ -13,6 +13,7 @@
 | 4 | Compras e Inventario | ✅ COMPLETO | Commits ecc67a27..0bc85d6f. Reglas proveedor, forecast, SIFEN, muelle, pesaje camión |
 | 5 | Logística / Reparto | ✅ COMPLETO | Commits 8c6b73d8..a1a4d7d8. Deploy pendiente (migración via psql en VM) |
 | 6 | Contabilidad | ⬜ PENDIENTE | Sin spec ni plan — 3.26M asientos desde 2007 |
+| 7 | Actividades de Proveedor y Rendición | ✅ COMPLETO + DEPLOY | Commits 785866fc..56916500. Motor puro, sync 159 activs, auditoría pedidos, UI web & mobile, rendición Excel |
 
 ## Sub-proyecto 1: Rutas y Vendedores de Campo ✅
 
@@ -86,6 +87,24 @@ Siguiente paso: ejecutar plan con `superpowers:executing-plans`.
 El más pesado. Dejar para último o hacer por partes (balance → diario → etc.)
 
 Siguiente paso: brainstorm → spec → plan → ejecutar.
+
+## Sub-proyecto 7: Actividades de Proveedor y Rendición ✅
+
+**Spec:** `docs/superpowers/specs/2026-10-26-actividades-proveedor-design.md`  
+**Plan:** `docs/superpowers/plans/2026-10-26-actividades-proveedor-plan.md`  
+**Commits:** `785866fc`..`56916500`
+
+Entregables:
+- Modelos y tablas Postgres: `actividades`, `actividad_tramos`, `actividad_aplicaciones`, `actividad_rendiciones`
+- Motor puro idéntico Python (`api/src/actividades/engine.py`) y TypeScript (`inteliforce/lib/actividades.ts`) con 9 fixtures de validación idénticos
+- Consumo/liberación idempotente de presupuesto con `SELECT ... FOR UPDATE`
+- Auditoría en creación de pedidos mobile con cola de aprobación y motivos (Aprobar / Corregir / Rechazar)
+- Sync incremental de actividades desde MySQL legacy (159 actividades activas en ciclo 202610)
+- App móvil Inteliforce con evaluación offline en carrito y feedback reactivo
+- Generación de rendición mensual con exportación Excel (openpyxl) y asiento contable dual
+- Pantalla web `ActividadesPage.tsx` integrada en `/actividades` y contratos de proveedor
+
+Deploy: Migración aplicada, servicios reiniciados con zero-downtime, UI compilada y validada en `minisforum-ia` ✅
 
 ---
 
