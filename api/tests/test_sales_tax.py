@@ -64,3 +64,22 @@ class TestMultipleItems:
         total = sum(i["total"] for i in items)
         assert total_base + total_iva == total
         assert total == 265000
+
+
+def test_calculate_taxes_descuento_unitario():
+    from decimal import Decimal
+    from api.src.sales.service import calculate_taxes
+    from api.src.common.money import iva_incluido
+
+    item = {
+        "precio_unitario": 16884,
+        "cantidad": 12,
+        "descuento_unitario": 845,
+        "iva_tasa": 10,
+    }
+    result = calculate_taxes(item)
+    assert result["descuento_monto"] == Decimal("10140")
+    assert result["total"] == Decimal("192468")
+    assert result["iva_monto"] == Decimal("17497")
+    assert result["iva_monto"] == iva_incluido(192468, 10)
+

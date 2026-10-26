@@ -78,11 +78,15 @@ def get_escpos_logo_bytes(max_width_px: int = 384) -> bytes:
 def calculate_taxes(item: dict) -> dict:
     precio = gs(item["precio_unitario"])
     cantidad = Decimal(str(item["cantidad"]))
-    descuento_pct = Decimal(str(item.get("descuento_pct", 0)))
+    descuento_unitario = Decimal(str(item.get("descuento_unitario") or 0))
+    descuento_pct = Decimal(str(item.get("descuento_pct") or 0))
     iva_tasa = Decimal(str(item.get("iva_tasa", 10)))
 
     subtotal_bruto = gs(precio * cantidad)
-    descuento_monto = gs(subtotal_bruto * (descuento_pct / Decimal("100")))
+    if descuento_unitario > Decimal("0"):
+        descuento_monto = gs(descuento_unitario * cantidad)
+    else:
+        descuento_monto = gs(subtotal_bruto * (descuento_pct / Decimal("100")))
     # El precio de venta en Paraguay ya viene con el IVA incluido (precio de
     # gondola/vidriera) -- esta funcion trataba precio_unitario como una
     # base SIN IVA y le sumaba el impuesto encima, inflando ~9-10% el total
@@ -550,6 +554,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             iva_monto=taxes["iva_monto"],
             total=taxes["total"],
             costo_unitario=item_data.costo_unitario,
+            actividad_id=getattr(item_data, "actividad_id", None),
         )
         db.add(item)
 

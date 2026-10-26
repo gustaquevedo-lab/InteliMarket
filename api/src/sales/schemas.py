@@ -14,6 +14,8 @@ class SaleItemInput(BaseModel):
     cantidad: Decimal = Field(ge=Decimal("0.001"))
     precio_unitario: Decimal = Field(ge=0)
     descuento_pct: Decimal = Field(default=0, ge=0, le=100)
+    descuento_unitario: Decimal = Field(default=Decimal(0), ge=0)
+    actividad_id: Optional[UUID] = None
     iva_tasa: Decimal = Field(default=10)
     costo_unitario: Optional[Decimal] = None
 
