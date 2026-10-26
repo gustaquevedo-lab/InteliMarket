@@ -158,6 +158,9 @@ class MobileOrderItem(BaseModel):
     cantidad: Decimal
     precio_unitario: Decimal
     descuento_pct: Decimal = Decimal("0")
+    descuento_unitario: Decimal = Decimal("0")
+    actividad_id: Optional[uuid.UUID] = None
+    bonificada: bool = False
     iva_tasa: Decimal = Decimal("10")
 
 

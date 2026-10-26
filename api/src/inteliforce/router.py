@@ -126,6 +126,14 @@ async def update_customer_location(
     )
 
 
+@router.get("/actividades")
+async def get_actividades(db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """Retorna las actividades vigentes hoy para la empresa del preventista."""
+    from api.src.actividades.service import vigentes
+    from datetime import date
+    rep = await _current_rep(db, user)
+    return await vigentes(db, rep.company_id, hoy=date.today())
+
 
 @router.post("/orders", status_code=status.HTTP_201_CREATED)
 async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
@@ -133,6 +141,10 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
     from api.src.sales.schemas import SaleCreate, SaleItemInput
     from api.src.price_lists.models import PriceList, PriceListItem
     from api.src.products.models import Product
+    from api.src.actividades.service import vigentes, auditar
+    from api.src.actividades.engine import evaluar
+    from api.src.common.money import gs
+    from datetime import date
     from sqlalchemy import select
     from decimal import Decimal
 
@@ -145,7 +157,6 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
 
     # Igual que la preventa legacy: lista "Precio 1" (ya con IVA, entera) e ignora clientes.LISTA
     # (medido en fac_ventas: 97% de las líneas). Precio, IVA y descuento los decide el servidor.
-    # shortcut: sin escalas PRECIO2/3 (0,3% de líneas) ni actividades de proveedor (~19% con descuento), ver informe 01 §P1.7.
     ids = [i.product_id for i in data.items]
     products = {p.id: p for p in (await db.execute(select(Product).where(
         Product.company_id == rep.company_id, Product.id.in_(ids),
@@ -156,17 +167,122 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
         .where(PriceList.company_id == rep.company_id, PriceList.nombre == "Precio 1",
                PriceListItem.activo == True, PriceListItem.product_id.in_(ids))
     )).all())
-    items = []
+
+    # Cargar actividades vigentes y saldos
+    act_list = await vigentes(db, rep.company_id, hoy=date.today())
+    saldos = {a["id"]: a["saldo"] for a in act_list}
+
+    # Armar líneas para evaluación en servidor
+    lineas_eval = []
     for item in data.items:
-        product = products.get(item.product_id)
-        if not product or not precio1.get(item.product_id):
-            raise HTTPException(status_code=400, detail=f"Producto {item.product_id} no existe o no tiene Precio 1")
-        iva = Decimal(str(product.iva_tasa if product.iva_tasa is not None else 10))
-        items.append(SaleItemInput(
-            product_id=item.product_id, cantidad=item.cantidad,
-            precio_unitario=gs(Decimal(str(precio1[item.product_id]))),
-            descuento_pct=0, iva_tasa=iva,
-        ))
+        if not getattr(item, "bonificada", False):
+            product = products.get(item.product_id)
+            if not product or item.product_id not in precio1:
+                raise HTTPException(status_code=400, detail=f"Producto {item.product_id} no existe o no tiene Precio 1")
+            pr = gs(Decimal(str(precio1[item.product_id])))
+            lineas_eval.append({
+                "product_id": str(item.product_id),
+                "cantidad": item.cantidad,
+                "precio": pr,
+                "costo": product.costo_promedio,
+            })
+
+    servidor_eval = evaluar(lineas_eval, act_list)
+
+    # Armar celular_eval para auditar
+    celular_eval = []
+    for item in data.items:
+        pr = gs(Decimal(str(precio1.get(item.product_id, 0))))
+        desc_u = Decimal(str(item.descuento_unitario or 0))
+        val = desc_u * Decimal(str(item.cantidad)) if not item.bonificada else (pr * Decimal(str(item.cantidad)))
+        celular_eval.append({
+            "product_id": str(item.product_id),
+            "actividad_id": str(item.actividad_id) if item.actividad_id else None,
+            "cantidad": item.cantidad,
+            "descuento_unitario": desc_u,
+            "bonificada": item.bonificada,
+            "valor": val,
+        })
+
+    diferencias = auditar(celular_eval, servidor_eval, saldos)
+
+    items = []
+    if diferencias:
+        # Van con lo del celular (lo que vio el cliente), retenido para aprobación
+        for item in data.items:
+            product = products.get(item.product_id)
+            pr = gs(Decimal(str(precio1.get(item.product_id, 0))))
+            iva = Decimal(str(product.iva_tasa if product and product.iva_tasa is not None else 10))
+            if item.bonificada:
+                items.append(SaleItemInput(
+                    product_id=item.product_id,
+                    cantidad=item.cantidad,
+                    precio_unitario=pr,
+                    descuento_unitario=pr,
+                    descuento_pct=0,
+                    actividad_id=item.actividad_id,
+                    iva_tasa=iva,
+                    costo_unitario=product.costo_promedio if product else None,
+                ))
+            else:
+                items.append(SaleItemInput(
+                    product_id=item.product_id,
+                    cantidad=item.cantidad,
+                    precio_unitario=pr,
+                    descuento_unitario=item.descuento_unitario,
+                    descuento_pct=item.descuento_pct,
+                    actividad_id=item.actividad_id,
+                    iva_tasa=iva,
+                    costo_unitario=product.costo_promedio if product else None,
+                ))
+        estado_inicial = "pendiente_aprobacion"
+        retencion_motivo = "actividades"
+        retencion_detalle = diferencias
+    else:
+        # Van con el descuento del servidor
+        srv_regulares = [s for s in servidor_eval if not s.get("bonificada")]
+        srv_bonificadas = [s for s in servidor_eval if s.get("bonificada")]
+
+        reg_idx = 0
+        for item in data.items:
+            if not item.bonificada:
+                product = products.get(item.product_id)
+                pr = gs(Decimal(str(precio1[item.product_id])))
+                iva = Decimal(str(product.iva_tasa if product and product.iva_tasa is not None else 10))
+                srv_match = srv_regulares[reg_idx] if reg_idx < len(srv_regulares) else {}
+                reg_idx += 1
+                items.append(SaleItemInput(
+                    product_id=item.product_id,
+                    cantidad=item.cantidad,
+                    precio_unitario=pr,
+                    descuento_unitario=srv_match.get("descuento_unitario", Decimal(0)),
+                    descuento_pct=0,
+                    actividad_id=uuid_lib.UUID(srv_match["actividad_id"]) if srv_match.get("actividad_id") else None,
+                    iva_tasa=iva,
+                    costo_unitario=product.costo_promedio if product else None,
+                ))
+
+        # Agregar líneas bonificadas generadas por el servidor
+        for boni in srv_bonificadas:
+            b_pid = uuid_lib.UUID(boni["product_id"])
+            b_prod = products.get(b_pid)
+            if not b_prod:
+                b_prod = await db.get(Product, b_pid)
+            b_precio = gs(Decimal(str(precio1.get(b_pid, 0))))
+            b_iva = Decimal(str(b_prod.iva_tasa if b_prod and b_prod.iva_tasa is not None else 10))
+            items.append(SaleItemInput(
+                product_id=b_pid,
+                cantidad=boni["cantidad"],
+                precio_unitario=b_precio,
+                descuento_unitario=b_precio,
+                descuento_pct=0,
+                actividad_id=uuid_lib.UUID(boni["actividad_id"]) if boni.get("actividad_id") else None,
+                iva_tasa=b_iva,
+                costo_unitario=b_prod.costo_promedio if b_prod else None,
+            ))
+        estado_inicial = None
+        retencion_motivo = None
+        retencion_detalle = None
 
     sale_data = SaleCreate(
         id=uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, f"inteliforce:{rep.company_id}:{data.client_op_id}") if data.client_op_id else None,
@@ -180,6 +296,9 @@ async def create_order(data: MobileOrderCreate, db: AsyncSession = Depends(get_d
         observaciones=data.observaciones or f"Pedido tomado en campo por {rep.nombre}",
         user_id=rep.user_id,
         credit_authorization_id=data.credit_authorization_id,
+        estado=estado_inicial,
+        retencion_motivo=retencion_motivo,
+        retencion_detalle=retencion_detalle,
     )
 
     try:

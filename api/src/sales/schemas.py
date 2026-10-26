@@ -1,7 +1,7 @@
 """Sales schemas"""
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime
 from uuid import UUID
 from decimal import Decimal
@@ -50,6 +50,9 @@ class SaleCreate(BaseModel):
     monto_donacion: Optional[Decimal] = Decimal("0")
     donacion_campana: Optional[str] = None
     donacion_ong: Optional[str] = None
+    estado: Optional[str] = None
+    retencion_motivo: Optional[str] = None
+    retencion_detalle: Optional[Any] = None
 
 
 class SaleResponse(BaseModel):

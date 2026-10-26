@@ -521,7 +521,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         condicion="credito" if is_credito else (data.condicion or "contado"),
         moneda=data.moneda,
         tipo_cambio=data.tipo_cambio,
-        estado="confirmado",
+        estado=getattr(data, "estado", None) or "confirmado",
         observaciones=data.observaciones,
         user_id=data.user_id,
         session_id=effective_session_id,
@@ -626,6 +626,18 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             # Fallback seguro: no bloquear la venta si falla el log de donación
             print(f"[DONACIONES] Advertencia registrando donacion: {don_err}")
 
+    if getattr(data, "retencion_motivo", None):
+        from api.src.credit_accounts.service import create_approval_request
+        await create_approval_request(
+            db, data.company_id, sale.id, data.customer_id,
+            credit_account_id=None,
+            monto=sale.total,
+            limite_credito=Decimal(0),
+            saldo_disponible=Decimal(0),
+            motivo=data.retencion_motivo,
+            detalle=getattr(data, "retencion_detalle", None),
+        )
+
     if is_credito:
         if not data.customer_id:
             raise ValueError("No se puede registrar una venta a crédito o Extra Club sin un cliente identificado.")
@@ -654,6 +666,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             await create_approval_request(
                 db, data.company_id, sale.id, data.customer_id, check["credit_account_id"],
                 monto_credito, check["limite_credito"], check["saldo_disponible"],
+                motivo="credito",
             )
             await db.flush()
             await db.refresh(sale)
@@ -687,6 +700,11 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             db, str(data.company_id), str(data.customer_id), str(sale.id), monto_credito, sale.numero,
             fecha_emision=sale.created_at,
         )
+
+    if sale.estado == "pendiente_aprobacion":
+        await db.flush()
+        await db.refresh(sale)
+        return sale
 
     await _deduct_stock_for_sale(db, sale, data)
     puntos_ganados = 0  # sin fidelización en esta vertical
