@@ -833,14 +833,14 @@ async def approve_adjustment_administracion(
 
             stock = await get_stock(db, str(adjustment.warehouse_id), str(item.product_id))
             if stock:
-                stock.cantidad = int(item.cantidad_fisica)
+                stock.cantidad = stock.cantidad + int(item.diferencia)
                 stock.updated_at = datetime.now(timezone.utc)
             else:
                 stock = Stock(
                     warehouse_id=adjustment.warehouse_id,
                     product_id=item.product_id,
                     variant_id=item.variant_id,
-                    cantidad=int(item.cantidad_fisica),
+                    cantidad=max(0, int(item.diferencia)),
                     costo_unitario=item.costo_unitario,
                 )
                 db.add(stock)
@@ -986,8 +986,17 @@ async def approve_adjustment(db: AsyncSession, adjustment_id: str, user_id: uuid
 
             stock = await get_stock(db, str(adjustment.warehouse_id), str(item.product_id))
             if stock:
-                stock.cantidad = int(item.cantidad_fisica)
+                stock.cantidad = stock.cantidad + int(item.diferencia)
                 stock.updated_at = datetime.now(timezone.utc)
+            else:
+                stock = Stock(
+                    warehouse_id=adjustment.warehouse_id,
+                    product_id=item.product_id,
+                    variant_id=item.variant_id,
+                    cantidad=max(0, int(item.diferencia)),
+                    costo_unitario=item.costo_unitario,
+                )
+                db.add(stock)
 
     adjustment.estado = "aprobado"
     adjustment.aprobado_por = user_id
