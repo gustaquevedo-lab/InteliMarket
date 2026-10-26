@@ -692,6 +692,10 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     puntos_ganados = 0  # sin fidelización en esta vertical
     await _redeem_customer_offers(db, sale, data)
 
+    if sale.estado != "pendiente_aprobacion":
+        from api.src.actividades.service import consumir
+        await consumir(db, sale)
+
     await db.flush()
     await db.refresh(sale)
     # Atributo transitorio (no es columna) para que el router pueda mostrar
@@ -1656,6 +1660,9 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
                 referencia_id=sale.id,
                 motivo=f"Cancelacion de venta {sale.numero}",
             ))
+
+    from api.src.actividades.service import liberar
+    await liberar(db, sale.id)
 
     await db.flush()
     await db.refresh(sale)
