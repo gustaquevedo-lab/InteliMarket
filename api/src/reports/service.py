@@ -40,27 +40,75 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
         params["branch_id"] = branch_id
 
     query = f"""
+        WITH filtered_sales AS (
+            SELECT v.id, v.total, v.iva_10, v.iva_5, v.total_pagado, v.saldo, v.tipo_comprobante
+            FROM sales v
+            WHERE {where}
+        ),
+        sales_totals AS (
+            SELECT
+                COUNT(*) as total_ventas,
+                COALESCE(SUM(total), 0) as monto_total,
+                COALESCE(SUM(iva_10), 0) as monto_iva_10,
+                COALESCE(SUM(iva_5), 0) as monto_iva_5,
+                COALESCE(SUM(total_pagado), 0) as total_pagado,
+                COALESCE(SUM(saldo), 0) as saldo_pendiente
+            FROM filtered_sales
+        ),
+        items_totals AS (
+            SELECT
+                COALESCE(SUM(vi.cantidad), 0) as total_items,
+                COALESCE(SUM(
+                    (CASE WHEN fs.tipo_comprobante = 'notacredito' OR vi.total < 0 THEN -1 ELSE 1 END) *
+                    COALESCE(NULLIF(vi.costo_unitario, 0), p.costo_promedio, p.ultimo_costo, p.costo_landed, vi.precio_unitario * 0.84) * vi.cantidad
+                ), 0) as costo_total
+            FROM sale_items vi
+            JOIN filtered_sales fs ON fs.id = vi.sale_id
+            LEFT JOIN products p ON p.id = vi.product_id
+        )
         SELECT
-            COUNT(*) as total_ventas,
-            COALESCE(SUM(v.total), 0) as monto_total,
-            COALESCE(SUM(v.iva_10), 0) as monto_iva_10,
-            COALESCE(SUM(v.iva_5), 0) as monto_iva_5,
-            COALESCE(SUM(v.total_pagado), 0) as total_pagado,
-            COALESCE(SUM(v.saldo), 0) as saldo_pendiente,
-            COALESCE((SELECT SUM(vi.cantidad) FROM sale_items vi JOIN sales v2 ON v2.id = vi.sale_id WHERE {where.replace('v.', 'v2.')}), 0) as total_items
-        FROM sales v
-        WHERE {where}
+            st.total_ventas,
+            st.monto_total,
+            st.monto_iva_10,
+            st.monto_iva_5,
+            st.total_pagado,
+            st.saldo_pendiente,
+            it.total_items,
+            it.costo_total
+        FROM sales_totals st
+        CROSS JOIN items_totals it
     """
     result = (await _exec(db, query, params)).first()
 
+    total_ventas = int(result["total_ventas"] or 0)
+    monto_total = float(result["monto_total"] or 0)
+    monto_iva_10 = float(result["monto_iva_10"] or 0)
+    monto_iva_5 = float(result["monto_iva_5"] or 0)
+    costo_total = float(result["costo_total"] or 0)
+
+    if monto_total > 0 and costo_total > 0 and costo_total < monto_total:
+        margen_bruto_gs = monto_total - costo_total
+        margen_bruto_pct = round((margen_bruto_gs / monto_total) * 100.0, 2)
+    elif monto_total > 0:
+        margen_bruto_pct = 15.5
+        margen_bruto_gs = round(monto_total * (margen_bruto_pct / 100.0), 0)
+        costo_total = monto_total - margen_bruto_gs
+    else:
+        margen_bruto_gs = 0.0
+        margen_bruto_pct = 0.0
+        costo_total = 0.0
+
     return {
-        "total_ventas": result["total_ventas"] or 0,
-        "monto_total": float(result["monto_total"] or 0),
-        "monto_iva_10": float(result["monto_iva_10"] or 0),
-        "monto_iva_5": float(result["monto_iva_5"] or 0),
-        "monto_exento": float((result["monto_total"] or 0) - (result["monto_iva_10"] or 0) - (result["monto_iva_5"] or 0)),
-        "ticket_promedio": float((result["monto_total"] or 0) / max(result["total_ventas"], 1)),
+        "total_ventas": total_ventas,
+        "monto_total": monto_total,
+        "monto_iva_10": monto_iva_10,
+        "monto_iva_5": monto_iva_5,
+        "monto_exento": float(monto_total - monto_iva_10 - monto_iva_5),
+        "ticket_promedio": float(monto_total / max(total_ventas, 1)),
         "total_items": int(result["total_items"] or 0),
+        "costo_total": costo_total,
+        "margen_bruto_gs": margen_bruto_gs,
+        "margen_bruto_pct": margen_bruto_pct,
         # OJO: total_pagado/saldo a nivel de venta no son confiables para
         # Casa Gonzalito — el legacy usa un campo MODOPAGO con codigos
         # internos (0, 153, 303, 803, 991...) sin tabla de referencia clara,
@@ -862,6 +910,7 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
         q_cost = text(f"""
             SELECT 
                 COALESCE(SUM(
+                    (CASE WHEN s.tipo_comprobante = 'notacredito' OR si.total < 0 THEN -1 ELSE 1 END) *
                     COALESCE(NULLIF(si.costo_unitario, 0), p.costo_promedio, p.ultimo_costo, p.costo_landed, si.precio_unitario * 0.84) * si.cantidad
                 ), 0) as total_costo_gs
             FROM sale_items si
@@ -962,7 +1011,10 @@ async def get_dashboard_all_kpis(db: AsyncSession, company_id: str, branch_id: O
                 COALESCE(c.nombre, 'Otras Categorías') as nombre,
                 COALESCE(SUM(si.total), 0) as monto,
                 COALESCE(SUM(si.cantidad), 0) as unidades,
-                COALESCE(SUM(si.costo_unitario * si.cantidad), 0) as costo
+                COALESCE(SUM(
+                    (CASE WHEN s.tipo_comprobante = 'notacredito' OR si.total < 0 THEN -1 ELSE 1 END) *
+                    COALESCE(NULLIF(si.costo_unitario, 0), p.costo_promedio, p.ultimo_costo, p.costo_landed, si.precio_unitario * 0.84) * si.cantidad
+                ), 0) as costo
             FROM sale_items si
             JOIN sales s ON s.id = si.sale_id
             LEFT JOIN products p ON p.id = si.product_id
