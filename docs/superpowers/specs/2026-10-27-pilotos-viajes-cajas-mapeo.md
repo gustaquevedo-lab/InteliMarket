@@ -38,8 +38,8 @@ Hallazgos que corrigen el mapeo anterior:
   que no están en `cajaassiento` (267422, 267431, 267436).
 - **El faltante/sobrante** queda en `cta_cte_funcionarios` (`ID_CAJA`, `DEBITOCREDITO=0` faltante / 1 sobrante). Con eso, de 1.036
   cajas cerradas con carga: 816 cierran exacto, 212 difieren exactamente en lo registrado ahí, 8 no se explican (5 por menos de
-  1.000 Gs.; 266129 por 224.178; 267017 por 12.351; 266954 por 7,6 M, con 3 cobros por cheque que el legacy repite en
-  `cheques_recibidos` y `cobroschequesrecibidos`).
+  1.000 Gs.; 266129 por 224.178; 267017 por 12.351; 266954 por 7,6 M, que el legacy deposita en Bado
+  (`NUESTRO DEP HECHO EN CAP. BADO`, 8,69 M) y además registra como entregado: a consultar con la oficina).
 - Las 743 cajas con ARENDIR=0 son de tesorería/cobranza (depósitos, transferencias, cheques): sus movimientos no cierran con la
   fórmula de reparto (ej. 267335, 267366) y no son rendición de cobrador; el comparador las cuenta aparte.
 
