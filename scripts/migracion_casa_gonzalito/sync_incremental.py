@@ -166,7 +166,11 @@ def mysql_conn():
 
 
 def pg_conn():
-    return psycopg.connect(PG_DSN, autocommit=False, options="-c timezone=America/Asuncion")
+    # PG_SEARCH_PATH (opcional): para probar en un schema aparte sin tocar public.
+    opts = "-c timezone=America/Asuncion"
+    if os.getenv("PG_SEARCH_PATH"):
+        opts += f" -c search_path={os.getenv('PG_SEARCH_PATH')}"
+    return psycopg.connect(PG_DSN, autocommit=False, options=opts)
 
 
 # ----------------------------------------------------------------------------
@@ -1619,6 +1623,328 @@ def recalcular_iva(pg, sale_ids, purchase_ids):
 
 
 # ----------------------------------------------------------------------------
+# Viajes de reparto + cajas de cobrador (piloto de trips / route_sessions)
+#
+# Legacy: cajas (una por carga/salida) -> rescamion (camion, chofer, km) + fac_resumen (carga:
+# peso, monto) -> fac_ventas.ID_CAJA (facturas del viaje); cajaautoriza = rendicion autorizada;
+# cobros*.ID_CAJAS = lo cobrado contra esa caja. IM tiene UNA sesion y UN viaje por
+# (cobrador, fecha) (UNIQUE), asi que varias cajas del mismo cobrador y dia se consolidan.
+# Ventana: 60 dias (VIAJES_DESDE=YYYY-MM-DD para fijarla) en la primera corrida; despues se
+# reprocesan los ultimos ~600 IDCAJA (cajas abiertas que cierran despues). Todas las consultas
+# al legacy son por rango de PK/indice (IDCAJA, ID_CAJA, ID_CAJAS), nunca por fecha sola.
+# No pisa lo que IM maneja: filas ya existentes en estado terminal se saltan.
+# ----------------------------------------------------------------------------
+VIAJES_REVISAR = 600  # IDCAJA hacia atras en corridas incrementales (~14 dias)
+
+
+def _chunks(seq, n=5000):
+    seq = list(seq)
+    for i in range(0, len(seq), n):
+        yield seq[i:i + n]
+
+
+def _estados(pg, table, ids):
+    """{id: estado} de filas ya existentes en Postgres (para no pisar lo que IM ya maneja)."""
+    out = {}
+    for ch in _chunks(ids):
+        with pg.cursor() as cur:
+            cur.execute(f"SELECT id, estado FROM {table} WHERE id = ANY(%s)", (ch,))
+            out.update(dict(cur.fetchall()))
+    return out
+
+
+def _ocupados(pg, table, desde):
+    """{(cobrador_id, fecha): id} ya existentes (cualquier origen) — UNIQUE (company, cobrador, fecha)."""
+    with pg.cursor() as cur:
+        cur.execute(f"SELECT cobrador_id, fecha, id FROM {table} WHERE company_id = %s AND fecha >= %s",
+                    (COMPANY_ID, desde))
+        return {(r[0], r[1]): r[2] for r in cur.fetchall()}
+
+
+def _rango(my, sql, lo, hi):
+    with my.cursor() as cur:
+        cur.execute(sql, (lo, hi))
+        return cur.fetchall()
+
+
+def _primer_idcaja(my, desde):
+    """Menor IDCAJA cuya FECHA >= desde, por biseccion sobre la PK (cada sondeo es 1 fila)."""
+    with my.cursor() as cur:
+        cur.execute("SELECT MAX(IDCAJA) FROM cajas")
+        hi = cur.fetchone()[0] or 0
+        lo = 0
+        while lo < hi:
+            mid = (lo + hi) // 2
+            cur.execute("SELECT FECHA FROM cajas WHERE IDCAJA >= %s ORDER BY IDCAJA LIMIT 1", (mid,))
+            r = cur.fetchone()
+            f = safe_dt(r[0]) if r else None
+            if r and f and f.date() >= desde:
+                hi = mid
+            else:
+                lo = mid + 1
+    return max(1, lo - 300)  # margen: IDCAJA no es perfectamente monotono con FECHA
+
+
+def make_func_resolver(pg, my):
+    """Codigo de funcionario legacy -> users.id (users.email = CI, como en create_accounts.py);
+    si no tiene usuario, uuid5 determinista (no se crean usuarios aca)."""
+    with my.cursor() as cur:
+        cur.execute("SELECT IDFUNCIONARIO, CI_NUMERO FROM funcionarios")
+        ci = {txt_keep(c, 10): txt_keep(n) for c, n in cur.fetchall()}
+    with pg.cursor() as cur:
+        cur.execute("SELECT email, id FROM users")
+        users = dict(cur.fetchall())
+
+    def resolve(code):
+        code = txt_keep(code, 10)
+        if not code:
+            return None
+        return users.get(ci.get(code)) or uuid.uuid5(NS, f"func:{code}")
+    return resolve
+
+
+def ventana_cajas(pg, my):
+    """Cajas a procesar en esta corrida: dict por IDCAJA. Descarta cargas sin cobrador asignado."""
+    from datetime import timedelta
+    last_id, _ = get_watermark(pg, "viajes")
+    desde = (date.fromisoformat(os.environ["VIAJES_DESDE"]) if os.getenv("VIAJES_DESDE")
+             else date.today() - timedelta(days=60))
+    lo = max(1, last_id - VIAJES_REVISAR) if last_id else _primer_idcaja(my, desde)
+    with my.cursor() as cur:
+        cur.execute(
+            "SELECT IDCAJA, IDFUNCIONARIO, IDCOBRADOR, FECHA, CIERE, ARENDIR, FECCIERE, OBSERVACION "
+            "FROM cajas WHERE IDCAJA >= %s ORDER BY IDCAJA", (lo,))
+        rows = cur.fetchall()
+    cajas = []
+    for (idcaja, func, cobr, fecha, ciere, arendir, fcierre, obs) in rows:
+        f = safe_dt(fecha)
+        if not f or f.date() < desde:
+            continue
+        cajas.append(dict(id=idcaja, func=func, cobr=(txt(cobr) or "")[:10] or None, fecha=f.date(), ciere=bool(ciere),
+                          arendir=money(arendir), fcierre=safe_dt(fcierre), obs=txt(obs)))
+    if last_id and cajas:  # incremental: el primer dia puede estar partido por el limite de IDCAJA
+        fmin = min(c["fecha"] for c in cajas)
+        cajas = [c for c in cajas if c["fecha"] > fmin]
+    sin_cobr = [c for c in cajas if not c["cobr"]]
+    cajas = [c for c in cajas if c["cobr"]]
+    if sin_cobr:
+        log(f"  viajes: {len(sin_cobr)} cargas sin cobrador asignado (IDCOBRADOR=0, Gs. "
+            f"{sum(c['arendir'] for c in sin_cobr):,}) no se importan")
+    return {c["id"]: c for c in cajas}, (last_id, lo, desde)
+
+
+def sync_camiones(pg, my):
+    with my.cursor() as cur:
+        cur.execute("SELECT IDCAMIONES, MARCA, MODELO, CHAPA, CAPACIAD, OBSERVACION FROM camiones")
+        legacy_rows = cur.fetchall()
+    with pg.cursor() as cur:
+        cur.execute("SELECT patente, id FROM trip_vehicles WHERE company_id = %s", (COMPANY_ID,))
+        usadas = dict(cur.fetchall())
+    rows, patente_de = [], {}
+    for (cid, marca, modelo, chapa, cap, obs) in sorted(legacy_rows):
+        vid = uuid.uuid5(NS, f"camion:{cid}")
+        pat = (txt_keep(chapa, 15) or "").upper()
+        if pat in ("", "0", "."):
+            pat = f"LEG-{cid}"
+        if usadas.get(pat, vid) != vid:  # chapa repetida en el legacy (ej. OAL 707) o ya creada en IM
+            pat = f"{pat[:10]}-{cid}"
+        usadas[pat] = vid
+        patente_de[cid] = pat
+        # CAPACIAD mezcla toneladas (<=40) y kg: se normaliza a kg; 0 = sin dato
+        cap = float(cap or 0)
+        kg = cap * 1000 if 0 < cap <= 40 else cap
+        desc = " ".join(p for p in (txt(marca), txt(modelo), f"({txt(obs)})" if txt(obs) else None) if p)
+        rows.append((vid, COMPANY_ID, pat, desc[:100] or None, Decimal(str(kg)).quantize(Decimal("0.01")), True))
+    n = upsert(pg, "trip_vehicles", ["id", "company_id", "patente", "descripcion", "max_weight_kg", "activo"], rows)
+    log(f"  camiones: {n} filas (resync completo)")
+    return patente_de
+
+
+def sync_cajas_ruta(pg, my, cajas, resolve):
+    """cajas -> route_sessions (1 por cobrador+fecha) + route_liquidations/items desde cajaautoriza/cobros*."""
+    if not cajas:
+        log("  cajas_ruta: sin cajas nuevas")
+        return {}
+    lo, hi = min(cajas), max(cajas)
+    autor = {r[0]: r[1:] for r in _rango(
+        my, "SELECT IDCAJA, EFECTIVO, PAGARES, DESCUENTOS, AUTOR, FECHA FROM cajaautoriza "
+            "WHERE IDCAJA BETWEEN %s AND %s", lo, hi)}
+    cobros = {}
+    for idc, m in _rango(my, "SELECT ID_CAJAS, MONTO FROM cobros WHERE ID_CAJAS BETWEEN %s AND %s", lo, hi):
+        cobros[idc] = cobros.get(idc, 0) + money(m)
+    cheques = _rango(my, "SELECT IDCOBROS, ID_CAJAS, IDCLIENTES, NOCHEQUE, MONTO FROM cobroschequesrecibidos "
+                         "WHERE ID_CAJAS BETWEEN %s AND %s", lo, hi)
+    pagares = _rango(my, "SELECT IDCOBROS, ID_CAJAS, IDCLIENTES, NUMEDOCU, MONTO FROM cobrospagares "
+                         "WHERE ID_CAJAS BETWEEN %s AND %s", lo, hi)
+
+    grupos = {}
+    for c in cajas.values():
+        grupos.setdefault((c["cobr"], c["fecha"]), []).append(c)
+    ocupados = _ocupados(pg, "route_sessions", min(g[0]["fecha"] for g in grupos.values()))
+    sid_de = {k: uuid.uuid5(NS, f"rsesion:{k[0]}:{k[1].isoformat()}") for k in grupos}
+    cobr_uuid = {k: resolve(k[0]) for k in grupos}
+    ya = _estados(pg, "route_sessions", list(sid_de.values()))
+
+    sess, liq, caja_sid, saltadas = [], [], {}, 0
+    for k, cs in grupos.items():
+        sid, cu = sid_de[k], cobr_uuid[k]
+        ajeno = ocupados.get((cu, k[1]))
+        if (ajeno and ajeno != sid) or ya.get(sid, "abierta") != "abierta":
+            saltadas += 1  # sesion creada por IM o ya cerrada: no se toca
+            continue
+        for c in cs:
+            caja_sid[c["id"]] = sid
+        cerrada = all(c["ciere"] for c in cs)
+        fc = max((c["fcierre"] for c in cs if c["fcierre"]), default=None)
+        sess.append((sid, COMPANY_ID, cu, None, k[1], "cerrada" if cerrada else "abierta", 0,
+                     datetime.combine(k[1], datetime.min.time()), (fc if cerrada else None),
+                     resolve(cs[0]["func"]) or cu))
+    n_s = upsert(pg, "route_sessions", ["id", "company_id", "cobrador_id", "route_id", "fecha", "estado",
+                                        "fondo_inicial", "opened_at", "closed_at", "created_by"], sess)
+
+    liq_de = {}  # session -> liquidation id (solo sesiones con cajaautoriza)
+    for k, cs in grupos.items():
+        sid = sid_de[k]
+        if not any(c["id"] in caja_sid for c in cs) or not any(c["id"] in autor for c in cs):
+            continue
+        a = [autor[c["id"]] for c in cs if c["id"] in autor]
+        ids = [c["id"] for c in cs]
+        chq = sum(money(m) for (_i, ic, _c, _n, m) in cheques if ic in ids)
+        liq_de[sid] = uuid.uuid5(NS, f"rliq:{k[0]}:{k[1].isoformat()}")
+        obs = " | ".join(dict.fromkeys(c["obs"] for c in cs if c["obs"]))
+        todas_aut = all(x[3] == 1 for x in a)
+        liq.append((liq_de[sid], sid, money(sum(x[0] or 0 for x in a)), chq, money(sum(x[1] or 0 for x in a)), 0,
+                    money(sum(x[2] or 0 for x in a)), money(sum(c["arendir"] for c in cs)),
+                    sum(cobros.get(i, 0) for i in ids) + chq + sum(money(m) for (_i, ic, _c, _n, m) in pagares if ic in ids),
+                    "autorizada" if todas_aut else "pendiente",
+                    f"Legacy cajas {','.join(map(str, ids))}" + (f" | {obs}" if obs else ""),
+                    max((safe_dt(x[4]) for x in a if safe_dt(x[4])), default=None) if todas_aut else None))
+    existentes = _estados(pg, "route_liquidations", [r[0] for r in liq])  # una liquidacion autorizada no se reescribe
+    liq = [r for r in liq if r[0] not in existentes]
+    n_l = upsert(pg, "route_liquidations", ["id", "route_session_id", "efectivo_declarado", "cheques_declarado",
+                                            "pagares_declarado", "nc_aplicadas", "descuentos_autorizados",
+                                            "efectivo_esperado", "total_cobrado_ar", "estado", "observaciones",
+                                            "fecha_autorizacion"], liq)
+    nuevas = {r[0] for r in liq}
+    items = []
+    for tipo, filas in (("cheque", cheques), ("pagare", pagares)):
+        for (iid, idc, cli, num, m) in filas:
+            c = cajas.get(idc)
+            sid = caja_sid.get(idc)
+            lid = liq_de.get(sid)
+            if not c or lid not in nuevas:
+                continue
+            items.append((uuid.uuid5(NS, f"rliqitem:{tipo}:{iid}"), lid, tipo, (txt_keep(num, 50) or str(iid)),
+                          money(m), uuid.uuid5(NS, f"cli:{txt_keep(cli, 15)}") if txt_keep(cli, 15) else None))
+    n_i = upsert(pg, "route_liquidation_items", ["id", "liquidation_id", "tipo", "numero", "monto", "customer_id"], items)
+    log(f"  cajas_ruta: {len(cajas)} cajas -> {n_s} route_sessions, {n_l} route_liquidations, {n_i} items"
+        f"{', ' + str(saltadas) + ' sesiones saltadas (ya cerradas/de IM)' if saltadas else ''}")
+    return {k: sid_de[k] for k in grupos}
+
+
+def sync_viajes(pg, my, cajas, resolve, patente_de, sesiones):
+    """rescamion + fac_resumen -> trips (1 por cobrador+fecha); fac_ventas.ID_CAJA -> trip_stops (1 por factura)
+    con un sales_order 'facturado' por factura (trip_stops lo exige) y sus items desde sale_items."""
+    if not cajas:
+        return
+    lo, hi = min(cajas), max(cajas)
+    res = {}
+    for (idc, cam, km_s, km_l) in _rango(
+            my, "SELECT IDCAJA, IDCAMION, KILOMSALIDA, KILOMLLEGADA FROM rescamion "
+                "WHERE IDCAJA BETWEEN %s AND %s ORDER BY Id_RESCAMION", lo, hi):
+        res.setdefault(idc, []).append((cam, km_s or 0, km_l or 0))
+    peso = {}
+    for (idc, p) in _rango(my, "SELECT IDCAJA, PESO FROM fac_resumen WHERE IDCAJA BETWEEN %s AND %s", lo, hi):
+        peso[idc] = peso.get(idc, 0) + float(p or 0)
+    facs = {}
+    for (idf, idc) in _rango(my, "SELECT IDFACVENTAS, ID_CAJA FROM fac_ventas WHERE ID_CAJA BETWEEN %s AND %s", lo, hi):
+        facs.setdefault(idc, []).append(idf)
+
+    grupos = {}
+    for c in cajas.values():
+        if c["id"] in res:  # sin rescamion no hay camion: no es un viaje
+            grupos.setdefault((c["cobr"], c["fecha"]), []).append(c)
+    ocupados = _ocupados(pg, "trips", min((k[1] for k in grupos), default=date.today()))
+    tid_de = {k: uuid.uuid5(NS, f"trip:{k[0]}:{k[1].isoformat()}") for k in grupos}
+    ya = _estados(pg, "trips", list(tid_de.values()))
+
+    trips, plan, multi_camion = [], [], 0
+    for k, cs in grupos.items():
+        tid, cu = tid_de[k], resolve(k[0])
+        ajeno = ocupados.get((cu, k[1]))
+        if (ajeno and ajeno != tid) or ya.get(tid, "en_ruta") != "en_ruta":
+            continue
+        rs = [r for c in cs for r in res[c["id"]]]
+        cam = rs[0][0]
+        if len({r[0] for r in rs}) > 1:
+            multi_camion += 1  # el legacy usa >1 camion ese dia: IM solo guarda el del primer viaje
+        mismos = [r for r in rs if r[0] == cam]
+        completo = all(c["ciere"] for c in cs)
+        trips.append((tid, COMPANY_ID, cu, patente_de.get(cam) or "SIN-CAMION", k[1],
+                      "completado" if completo else "en_ruta", min(r[1] for r in mismos), max(r[2] for r in mismos),
+                      Decimal(str(round(sum(peso.get(c["id"], 0) for c in cs), 2))),
+                      sesiones.get(k), resolve(cs[0]["func"]) or cu))
+        plan.append((tid, completo, [f for c in cs for f in facs.get(c["id"], [])]))
+    n_t = upsert(pg, "trips", ["id", "company_id", "cobrador_id", "patente", "fecha", "estado", "km_salida",
+                               "km_llegada", "peso_total_kg", "route_session_id", "despachante_id"], trips)
+
+    sale_ids = {uuid.uuid5(NS, f"fac:{f}"): f for _t, _c, fs in plan for f in fs}
+    ventas = {}
+    for ch in _chunks(sale_ids):
+        with pg.cursor() as cur:
+            cur.execute("SELECT id, customer_id, fecha, condicion, total, vendedor_codigo FROM sales "
+                        "WHERE id = ANY(%s)", (ch,))
+            ventas.update({r[0]: r[1:] for r in cur.fetchall()})
+    so, soi, stops, sti, sin_venta = [], [], [], [], 0
+    for tid, completo, fs in plan:
+        for orden, idf in enumerate(sorted(fs), 1):
+            vid = uuid.uuid5(NS, f"fac:{idf}")
+            v = ventas.get(vid)
+            if not v or not v[0]:  # factura no migrada o sin cliente (trip_stops.customer_id es NOT NULL)
+                sin_venta += 1
+                continue
+            cust, fecha, cond, total, vend = v
+            oid = uuid.uuid5(NS, f"so_fac:{idf}")
+            sid = uuid.uuid5(NS, f"tstop:{idf}")
+            so.append((oid, COMPANY_ID, cust, f"F{idf}", fecha, "facturado", cond, total, total, vid,
+                       "legacy_viaje", vend))
+            stops.append((sid, tid, oid, cust, orden, "entregado" if completo else "pendiente"))
+    for ch in _chunks({r[9] for r in so}):
+        with pg.cursor() as cur:
+            cur.execute("SELECT id, sale_id, product_id, cantidad, precio_unitario, iva_tasa, iva_monto, total "
+                        "FROM sale_items WHERE sale_id = ANY(%s)", (ch,))
+            for (iid, sale_id, prod, cant, prec, tasa, ivam, tot) in cur.fetchall():
+                oid = uuid.uuid5(NS, f"so_fac:{sale_ids[sale_id]}")
+                soi.append((uuid.uuid5(NS, f"soi:{iid}"), oid, prod, cant, cant, prec, tasa, ivam, tot, iid))
+    entregado = {s[2] for s in stops if s[5] == "entregado"}
+    stop_de = {s[2]: s[0] for s in stops}
+    for (iid_, oid, prod, cant, cant_f, prec, tasa, ivam, tot, sale_item) in soi:
+        sti.append((uuid.uuid5(NS, f"tsi:{sale_item}"), stop_de[oid], iid_, prod, cant,
+                    cant if oid in entregado else 0))
+    upsert(pg, "sales_orders", ["id", "company_id", "customer_id", "numero", "fecha", "estado", "condicion",
+                                "subtotal", "total", "sale_id", "origen", "vendedor_codigo"], so)
+    upsert(pg, "sales_order_items", ["id", "order_id", "product_id", "cantidad", "cantidad_facturada",
+                                     "precio_unitario", "iva_tasa", "iva_monto", "total"],
+           [r[:9] for r in soi])
+    upsert(pg, "trip_stops", ["id", "trip_id", "sales_order_id", "customer_id", "orden_visita", "estado"], stops)
+    upsert(pg, "trip_stop_items", ["id", "stop_id", "sales_order_item_id", "product_id", "cantidad_asignada",
+                                   "cantidad_entregada"], sti)
+    log(f"  viajes: {n_t} trips, {len(stops)} paradas (facturas), {len(sti)} items; {sin_venta} facturas sin venta/cliente "
+        f"en IM, {multi_camion} dias con >1 camion (se guarda el primero)")
+
+
+def sync_viajes_y_cajas(pg, my):
+    last_id, _ = get_watermark(pg, "viajes")
+    patente_de = sync_camiones(pg, my)
+    resolve = make_func_resolver(pg, my)
+    cajas, _info = ventana_cajas(pg, my)
+    sesiones = sync_cajas_ruta(pg, my, cajas, resolve)
+    sync_viajes(pg, my, cajas, resolve, patente_de, sesiones)
+    if cajas:
+        set_watermark(pg, "viajes", last_id=max(max(cajas), last_id))
+
+
+# ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
 def main():
@@ -1647,6 +1973,7 @@ def main():
         "cajas": lambda: sync_cajas(pg, my),
         "rutas": None,  # rutas + zparruta, se arma abajo
         "rescamion": lambda: sync_rescamion(pg, my),
+        "viajes": lambda: sync_viajes_y_cajas(pg, my),
         "contabilidad": None,  # plan de cuentas + asientos, se arma abajo
         "efectivo": lambda: sync_efectivo(pg, my),
         "pedidos_ruta": lambda: sync_pedidos(pg, my),
@@ -1713,6 +2040,10 @@ def main():
         sync_zparruta(pg, my, rutas_validas)
     if not ONLY or ONLY == "rescamion":
         sync_rescamion(pg, my)
+
+    log("\n[4e2] Viajes de reparto + cajas de cobrador (trips / route_sessions)")
+    if not ONLY or ONLY == "viajes":
+        sync_viajes_y_cajas(pg, my)
 
     log("\n[4f] Contabilidad (plan de cuentas + libro diario)")
     if not ONLY or ONLY == "contabilidad":
