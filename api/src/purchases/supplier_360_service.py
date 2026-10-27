@@ -299,7 +299,8 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         monto_snc_reclamado = sum(s["monto_reclamado"] for s in inv_sncs)
         monto_retenido = _dec_to_float(inv.monto_retenido_nc)
         tiene_nc_vinculada = len(inv_apps) > 0 or len(inv_sncs) > 0 or bool(inv.requiere_nc) or (monto_retenido > 0)
-        saldo_neto_real = max(0.0, saldo - monto_retenido)
+        # Regla 13: Prohibición estricta de pre-neteo. El saldo exigible es el saldo pendiente contable inmutable.
+        saldo_neto_real = saldo
 
         # Lote de pago
         lote_info = p_run_by_invoice.get(inv.id)

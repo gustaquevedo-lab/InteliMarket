@@ -284,7 +284,36 @@ def parse_sifen_xml(xml_content: str | bytes) -> dict[str, Any]:
     descuento_total = Decimal(descuento_total_raw)
     subtotal = total - iva_10 - iva_5 + descuento_total
 
+    # 7. Documento Asociado (para Notas de Crédito, Débito o Remisiones SIFEN)
+    cdc_asociado = None
+    numero_factura_asociada = None
+    motivo_nc = None
+
+    for elem in de_elem.iter():
+        tag = _strip_ns(elem.tag).lower()
+        if tag == "gcamdeasoc":
+            cdc_asociado = _find_element_text(elem, ["dCdCDERef"])
+            if not cdc_asociado:
+                est_aso = _find_element_text(elem, ["dEstDocAso"]) or ""
+                pun_aso = _find_element_text(elem, ["dPuntExpDocAso"]) or ""
+                num_aso = _find_element_text(elem, ["dNumDocAso"]) or ""
+                if est_aso and pun_aso and num_aso:
+                    numero_factura_asociada = f"{est_aso.zfill(3)}-{pun_aso.zfill(3)}-{num_aso.zfill(7)}"
+            else:
+                clean_cdc = re.sub(r"\D", "", cdc_asociado)
+                if len(clean_cdc) >= 24:
+                    est_aso = clean_cdc[11:14]
+                    pun_aso = clean_cdc[14:17]
+                    num_aso = clean_cdc[17:24]
+                    numero_factura_asociada = f"{est_aso}-{pun_aso}-{num_aso}"
+        elif tag == "gcamncde":
+            motivo_nc = _find_element_text(elem, ["dDesMotEmi"])
+
     return {
+        "cdc_asociado": cdc_asociado,
+        "numero_factura_asociada": numero_factura_asociada,
+        "motivo_nc": motivo_nc,
+
         "cdc": cdc,
         "timbrado": timbrado,
         "numero_factura": numero_factura,

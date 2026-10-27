@@ -382,7 +382,7 @@ def generate_supplier_360_pdf(company: dict, data: dict, generated_by: str = "",
                 _c(f.get("fecha_vencimiento"), color=v_color, bold=es_v),
                 _n(_fmt_gs(f.get("total"))),
                 _c(nc_txt, bold=(m_nc > 0 or f.get("requiere_nc")), color=nc_col),
-                _n(_fmt_gs(f.get("saldo_neto_real", f.get("saldo_pendiente"))), bold=True, color=v_color),
+                _n(_fmt_gs(f.get("saldo_pendiente", f.get("total"))), bold=True, color=v_color),
                 _c(fase[:25], bold=True),
             ])
         t_facs = Table(fac_table_data, colWidths=[26 * mm, 18 * mm, 16 * mm, 16 * mm, 26 * mm, 26 * mm, 26 * mm, 30 * mm])
@@ -714,7 +714,7 @@ def generate_supplier_360_pdf(company: dict, data: dict, generated_by: str = "",
                 _c(f.get("fecha_vencimiento"), color=v_color, bold=es_v),
                 _n(_fmt_gs(f.get("total"))),
                 _c(nc_txt, bold=(m_nc > 0 or f.get("requiere_nc")), color=nc_col),
-                _n(_fmt_gs(f.get("saldo_neto_real", f.get("saldo_pendiente"))), bold=True, color=v_color),
+                _n(_fmt_gs(f.get("saldo_pendiente", f.get("total"))), bold=True, color=v_color),
                 _c(fase[:24], bold=True),
             ])
         t_facs = Table(fac_table_data, colWidths=[26 * mm, 18 * mm, 16 * mm, 16 * mm, 26 * mm, 26 * mm, 26 * mm, 30 * mm])

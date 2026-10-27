@@ -323,8 +323,25 @@ async def ingest_parsed_dte(
         db.add(nc)
         await db.flush()
 
-        # AUTO-CONCILIACIÓN INTELIGENTE: Si el proveedor tiene una SNC pendiente que calza con esta NC, vincularla de inmediato
+        # Vinculación formal por documento asociado extraído del XML SIFEN (gCamDEAsoc)
+        fac_asoc_num = dte_data.get("numero_factura_asociada")
+        if fac_asoc_num:
+            nc.numero_factura_origen = fac_asoc_num
+
+        # AUTO-CONCILIACIÓN INTELIGENTE:
+        # 1. Si el XML indica explícitamente la factura asociada (gCamDEAsoc), conciliarla prioritariamente
+        # 2. Si no, o complementariamente, buscar si hay una SNC pendiente que calce con esta NC
         try:
+            target_inv = None
+            if fac_asoc_num:
+                inv_match_q = select(SupplierInvoice).where(
+                    SupplierInvoice.company_id == company_uuid,
+                    SupplierInvoice.supplier_id == supplier.id,
+                    SupplierInvoice.numero_factura == fac_asoc_num,
+                    SupplierInvoice.estado != "cancelada"
+                )
+                target_inv = (await db.execute(inv_match_q)).scalars().first()
+
             snc_q = select(SupplierNcRequest).where(
                 SupplierNcRequest.company_id == company_uuid,
                 SupplierNcRequest.supplier_id == supplier.id,
@@ -334,7 +351,8 @@ async def ingest_parsed_dte(
             
             matched_snc = None
             for s in open_sncs:
-                if abs((s.monto_reclamado or Decimal("0")) - total_nc) <= Decimal("10"):
+                # Si coincide factura o coincide monto exacto
+                if (target_inv and s.invoice_id == target_inv.id) or (abs((s.monto_reclamado or Decimal("0")) - total_nc) <= Decimal("10")):
                     matched_snc = s
                     break
             
@@ -346,31 +364,42 @@ async def ingest_parsed_dte(
                 matched_snc.nc_recibida_monto = total_nc
                 matched_snc.nc_recibida_fecha = nc.fecha
                 matched_snc.observaciones = f"{(matched_snc.observaciones or '').strip()} [Auto-conciliada con NC SIFEN {nc.numero}]".strip()
-                
-                if matched_snc.invoice_id:
-                    inv_match = (await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == matched_snc.invoice_id))).scalar_one_or_none()
-                    if inv_match:
-                        nc.numero_factura_origen = inv_match.numero_factura
-                        inv_match.monto_retenido_nc = max(Decimal("0"), (inv_match.monto_retenido_nc or Decimal("0")) - total_nc)
-                        if inv_match.monto_retenido_nc <= Decimal("10"):
-                            inv_match.monto_retenido_nc = Decimal("0")
-                            inv_match.requiere_nc = False
-                            inv_match.bloqueada_para_pago = False
-                            inv_match.estado = "aprobada" if (inv_match.saldo_pendiente or Decimal("0")) > Decimal("0") else "pagada"
-                            inv_match.motivo_bloqueo = None
-                        
-                        db.add(SupplierCreditNoteApplication(
-                            company_id=company_uuid,
-                            credit_note_id=nc.id,
-                            invoice_id=inv_match.id,
-                            monto_aplicado=total_nc,
-                            observaciones=f"Auto-conciliación SIFEN contra {matched_snc.numero_solicitud}"
-                        ))
-                        # Si quedó vinculada directamente a la factura, no duplicar saldo en monedero libre
-                        nc.saldo_disponible = Decimal("0")
-                        logger.info(f"SNC {matched_snc.numero_solicitud} auto-conciliada exitosamente con NC SIFEN {nc.numero} para factura {inv_match.numero_factura}")
+                if not target_inv and matched_snc.invoice_id:
+                    target_inv = (await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == matched_snc.invoice_id, SupplierInvoice.estado != 'cancelada'))).scalar_one_or_none()
+
+            if target_inv:
+                if not nc.numero_factura_origen:
+                    nc.numero_factura_origen = target_inv.numero_factura
+
+                monto_aplicar = min(total_nc, target_inv.saldo_pendiente or Decimal("0"))
+                if monto_aplicar > Decimal("0"):
+                    target_inv.saldo_pendiente = max(Decimal("0"), (target_inv.saldo_pendiente or Decimal("0")) - monto_aplicar)
+                    nc.saldo_disponible = max(Decimal("0"), total_nc - monto_aplicar)
+                else:
+                    nc.saldo_disponible = Decimal("0")
+
+                target_inv.monto_retenido_nc = max(Decimal("0"), (target_inv.monto_retenido_nc or Decimal("0")) - total_nc)
+                if target_inv.monto_retenido_nc <= Decimal("10"):
+                    target_inv.monto_retenido_nc = Decimal("0")
+                    target_inv.requiere_nc = False
+                    target_inv.bloqueada_para_pago = False
+                    target_inv.motivo_bloqueo = None
+                if (target_inv.saldo_pendiente or Decimal("0")) <= Decimal("0"):
+                    target_inv.estado = "pagada"
+                elif target_inv.estado == "retenida_discrepancia":
+                    target_inv.estado = "aprobada"
+
+                db.add(SupplierCreditNoteApplication(
+                    company_id=company_uuid,
+                    credit_note_id=nc.id,
+                    invoice_id=target_inv.id,
+                    monto_aplicado=total_nc,
+                    observaciones=f"Compensación formal de NC SIFEN {nc.numero} referenciada a {target_inv.numero_factura}"
+                ))
+                logger.info(f"NC SIFEN {nc.numero} aplicada formalmente a factura {target_inv.numero_factura} por ₲ {total_nc:,.0f}")
         except Exception as e_snc:
-            logger.warning(f"Error menor en auto-conciliación SNC de NC {nc.numero}: {e_snc}")
+            logger.warning(f"Error menor en auto-conciliación de NC {nc.numero}: {e_snc}")
+
         return {
             "created": True,
             "id": str(nc.id),

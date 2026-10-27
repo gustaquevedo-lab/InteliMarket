@@ -236,7 +236,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
         (f.timbrado || "").includes(searchFactura)
 
       // Filtro de Estado de Saldo
-      const tieneSaldo = (f.saldo_neto_real ?? 0) > 0 || (f.saldo_pendiente ?? 0) > 0
+      const tieneSaldo = (f.saldo_pendiente ?? 0) > 0
       const matchSaldo =
         filterEstadoSaldo === "todos" ||
         (filterEstadoSaldo === "pendientes" && tieneSaldo) ||
@@ -271,15 +271,16 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
         return (b.fecha_emision || "").localeCompare(a.fecha_emision || "")
       }
       if (sortFacturasPor === "saldo") {
-        return (b.saldo_neto_real ?? b.saldo_pendiente ?? 0) - (a.saldo_neto_real ?? a.saldo_pendiente ?? 0)
+        return (b.saldo_pendiente ?? 0) - (a.saldo_pendiente ?? 0)
       }
       return 0
     })
   }, [data?.facturas, searchFactura, filterEstadoSaldo, filterVencimiento, filterNcFactura, filterFaseFactura, sortFacturasPor])
 
   const totalSaldoFiltradas = useMemo(() => {
-    return facturasFiltradas.reduce((acc, f) => acc + (f.saldo_neto_real ?? f.saldo_pendiente ?? 0), 0)
+    return facturasFiltradas.reduce((acc, f) => acc + (f.saldo_pendiente ?? 0), 0)
   }, [facturasFiltradas])
+
 
   // Filtrado de NCs en Monedero
   const monederoItemsFiltrados = useMemo(() => {
@@ -933,7 +934,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                             <th className="p-3">Vencimiento</th>
                             <th className="p-3 text-right">Total Factura</th>
                             <th className="p-3 text-center">NC Vinculada / Deducción</th>
-                            <th className="p-3 text-right">Saldo Neto Real</th>
+                            <th className="p-3 text-right">Saldo Pendiente</th>
                             <th className="p-3 text-center">Fase de Pago</th>
                             <th className="p-3 text-center">Condición</th>
                             <th className="p-3 text-center">Ítems</th>
@@ -1026,7 +1027,7 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                       )}
                                     </td>
                                     <td className="p-3 text-right font-mono font-black text-rose-600 dark:text-rose-400">
-                                      {formatPYG(f.saldo_neto_real !== undefined ? f.saldo_neto_real : f.saldo_pendiente)}
+                                      {formatPYG(f.saldo_pendiente)}
                                     </td>
                                     <td className="p-3 text-center">
                                       {getFaseBadge(f.fase_pago, f.fase_pago_label)}
