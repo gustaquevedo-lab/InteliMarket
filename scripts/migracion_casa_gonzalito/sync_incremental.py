@@ -42,6 +42,9 @@ import pymysql
 import pymysql.cursors
 import psycopg
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from api.src.common.money import gs  # noqa: E402  (redondeo de Gs.: entero hacia arriba)
+
 # ----------------------------------------------------------------------------
 # Configuración (default MYSQL_HOST = legacy EN VIVO, no la copia local de dev)
 # ----------------------------------------------------------------------------
@@ -1785,86 +1788,167 @@ def sync_camiones(pg, my):
     return patente_de
 
 
+def _numdoc(v):
+    """NUMFAC/NUMERO del legacy vienen como double o varchar: se normalizan a texto para cruzarlos."""
+    try:
+        return str(int(float(v)))
+    except (TypeError, ValueError):
+        return (txt_keep(v) or "").strip()
+
+
+_BANCO = ("BCO", "BANCO", "GNB", "INTERFISA", "B.N.F", "CTA.CTE", "CTA CTE", "CTA.", "FAMILIAR", "ITAU", "SUDAMERIS")
+
+
+def tipo_asiento(dh, extra):
+    """cajaassiento: DH=1 es un ingreso; DH=0 sale de la caja: deposito si la cuenta es un banco, gasto si no."""
+    if dh == 1:
+        return "otro_ingreso"
+    return "deposito" if any(b in (extra or "").upper() for b in _BANCO) else "gasto"
+
+
+def leer_cajas_legacy(my, lo, hi):
+    """Todo lo que cierra una caja en el sistema viejo, por rango de IDCAJA (solo PK/indices ID_CAJA*).
+    Devuelve {idcaja: dict(mov=componentes de calcular_rendicion, items=[...], efectivo/cheques=lo entregado,
+    faltante=lo que el legacy carga al funcionario en cta_cte_funcionarios)}. Ver 'Como cierra una caja' en el spec."""
+    r = lambda sql: _rango(my, sql, lo, hi)
+    cajas = {}
+
+    def caja(i):
+        return cajas.setdefault(i, dict(mov={}, items=[], efectivo=0, cheques=0, faltante=0))
+
+    def suma(i, k, m):
+        mv = caja(i)["mov"]
+        mv[k] = mv.get(k, 0) + m
+
+    for (idc, m) in r("SELECT ID_CAJA, MONTO FROM fac_ventas WHERE ID_CAJA BETWEEN %s AND %s"):
+        suma(idc, "facturas", int(gs(m)))
+    # credito = lo que de verdad quedo por cobrar (ctas_a_cobrar): una factura IDTIPO_VENTA=2 sin fila ahi se cobro
+    # en el acto, y una contado puede pasar a credito (total o parcial) despues de la entrega
+    for (idct, idc, num, m) in r("SELECT IDCTA_A_COBRAR, ID_CAJA, NUMERO, MONTO FROM ctas_a_cobrar WHERE ID_CAJA BETWEEN %s AND %s"):
+        suma(idc, "credito", int(gs(m)))
+        caja(idc)["items"].append(("credito", idct, _numdoc(num), int(gs(m)), None, None))
+    for (idcb, idc, cli, num, m) in r("SELECT IDCOBROS, ID_CAJAS, IDCLIENTES, NUMEDOCU, MONTO FROM cobros "
+                                      "WHERE ID_CAJAS BETWEEN %s AND %s"):
+        suma(idc, "cobros", int(gs(m)))
+        caja(idc)["items"].append(("cobro", idcb, (txt_keep(num, 50) or str(idcb)), int(gs(m)), None, cli))
+    for (ida, idc, num, conc, m, extra, dh) in r(
+            "SELECT IDASIENTO, ID_CAJAS, NUMERDOC, CONCEPTO, MONTO, EXTRA, DH FROM cajaassiento "
+            "WHERE ID_CAJAS BETWEEN %s AND %s"):
+        tipo = tipo_asiento(dh, extra)
+        suma(idc, {"otro_ingreso": "otros_ingresos", "deposito": "depositos", "gasto": "gastos"}[tipo], int(gs(m)))
+        caja(idc)["items"].append((tipo, ida, (txt_keep(conc, 50) or str(ida)), int(gs(m)), txt_keep(extra, 100), None))
+    # cajaautoriza (Tesoreria): ademas de OTROEGRESO (que ya es cajaassiento) autoriza anticipos al funcionario y
+    # pagos a proveedores con el efectivo de la caja; son gastos autorizados que no pasan por cajaassiento
+    for (ida, idc, ant, pprov, antprov, chq) in r(
+            "SELECT ID, IDCAJA, ANTICIPO, PAGPROV, ANTPROV, CHEQUEEMIT FROM cajaautoriza WHERE IDCAJA BETWEEN %s AND %s"):
+        for col, label, v in (("ANTICIPO", "ANTICIPO A FUNCIONARIO", ant), ("PAGPROV", "PAGO A PROVEEDOR", pprov),
+                              ("ANTPROV", "ANTICIPO A PROVEEDOR", antprov), ("CHEQUEEMIT", "CHEQUE EMITIDO", chq)):
+            m = int(gs(money(v)))
+            if m:
+                suma(idc, "gastos", m)
+                caja(idc)["items"].append(("gasto", f"aut{ida}{col}", label, m, "cajaautoriza", None))
+    for (idn, idc, num, m, conc, cli) in r("SELECT IDNOTACREDITO, ID_CAJA, NUMNOTACRED, MONTO, CONCEPTO, IDCLIENTE "
+                                           "FROM notacredito WHERE ID_CAJA BETWEEN %s AND %s"):
+        suma(idc, "devoluciones", int(gs(m)))
+        caja(idc)["items"].append(("devolucion", idn, (txt_keep(num, 50) or str(idn)), int(gs(m)), txt_keep(conc, 100), cli))
+    # lo que la caja realmente entrego
+    for idc, m in r("SELECT IDCAJA, MONTO FROM efectivo WHERE IDCAJA BETWEEN %s AND %s"):
+        caja(idc)["efectivo"] += int(gs(m))
+    for sql in ("SELECT ID_CAJA, VALOR FROM cheques_recibidos WHERE ID_CAJA BETWEEN %s AND %s",
+                "SELECT ID_CAJA, VALOR FROM cheques_al_dia WHERE ID_CAJA BETWEEN %s AND %s",
+                "SELECT ID_CAJAS, MONTO FROM cobroschequesrecibidos WHERE ID_CAJAS BETWEEN %s AND %s"):
+        for idc, m in r(sql):
+            caja(idc)["cheques"] += int(gs(m))
+    # faltante (DEBITOCREDITO=0) o sobrante (1) que el legacy carga al funcionario
+    for idc, m, dc in r("SELECT ID_CAJA, MONTO, DEBITOCREDITO FROM cta_cte_funcionarios WHERE ID_CAJA BETWEEN %s AND %s"):
+        caja(idc)["faltante"] += int(gs(m)) * (1 if not dc else -1)
+    return cajas
+
+
+def limpiar_formato_antiguo(pg, cajas):
+    """Antes habia una sesion por (cobrador, fecha) con ids uuid5 'rsesion:<cobr>:<fecha>': se borran las que el sync
+    habia creado en esta ventana (sus liquidaciones/items caen en cascada); las nuevas son una por caja."""
+    viejas = {(c["cobr"], c["fecha"]) for c in cajas.values()}
+    sids = [uuid.uuid5(NS, f"rsesion:{c}:{f.isoformat()}") for c, f in viejas]
+    n = 0
+    for ch in _chunks(sids, 2000):
+        if DRY_RUN:
+            continue
+        with pg.cursor() as cur:
+            cur.execute("DELETE FROM route_liquidations WHERE route_session_id = ANY(%s)", (ch,))
+            cur.execute("UPDATE trips SET route_session_id = NULL WHERE route_session_id = ANY(%s)", (ch,))
+            cur.execute("DELETE FROM route_sessions WHERE id = ANY(%s) AND legacy_caja_id IS NULL", (ch,))
+            n += cur.rowcount
+        pg.commit()
+    if n:
+        log(f"  cajas_ruta: {n} sesiones del formato antiguo (por cobrador+dia) reemplazadas")
+
+
 def sync_cajas_ruta(pg, my, cajas, resolve):
-    """cajas -> route_sessions (1 por cobrador+fecha) + route_liquidations/items desde cajaautoriza/cobros*."""
+    """Una route_session por CAJA/SALIDA (cajas.IDCAJA). Las cajas cerradas llevan su liquidacion con los items
+    de la formula (cobros, otros ingresos, depositos, gastos, devoluciones). Devuelve {idcaja: session_id}."""
     if not cajas:
         log("  cajas_ruta: sin cajas nuevas")
         return {}
+    from api.src.ruta_caja.rendicion import calcular_rendicion
     lo, hi = min(cajas), max(cajas)
+    leg = leer_cajas_legacy(my, lo, hi)
     autor = {r[0]: r[1:] for r in _rango(
-        my, "SELECT IDCAJA, EFECTIVO, PAGARES, DESCUENTOS, AUTOR, FECHA FROM cajaautoriza "
-            "WHERE IDCAJA BETWEEN %s AND %s", lo, hi)}
-    cobros = {}
-    for idc, m in _rango(my, "SELECT ID_CAJAS, MONTO FROM cobros WHERE ID_CAJAS BETWEEN %s AND %s", lo, hi):
-        cobros[idc] = cobros.get(idc, 0) + money(m)
-    cheques = _rango(my, "SELECT IDCOBROS, ID_CAJAS, IDCLIENTES, NOCHEQUE, MONTO FROM cobroschequesrecibidos "
-                         "WHERE ID_CAJAS BETWEEN %s AND %s", lo, hi)
+        my, "SELECT IDCAJA, PAGARES, DESCUENTOS, AUTOR, FECHA FROM cajaautoriza WHERE IDCAJA BETWEEN %s AND %s", lo, hi)}
     pagares = _rango(my, "SELECT IDCOBROS, ID_CAJAS, IDCLIENTES, NUMEDOCU, MONTO FROM cobrospagares "
                          "WHERE ID_CAJAS BETWEEN %s AND %s", lo, hi)
-
-    grupos = {}
-    for c in cajas.values():
-        grupos.setdefault((c["cobr"], c["fecha"]), []).append(c)
-    ocupados = _ocupados(pg, "route_sessions", min(g[0]["fecha"] for g in grupos.values()))
-    sid_de = {k: uuid.uuid5(NS, f"rsesion:{k[0]}:{k[1].isoformat()}") for k in grupos}
-    cobr_uuid = {k: resolve(k[0]) for k in grupos}
+    cheques = _rango(my, "SELECT IDCOBROS, ID_CAJAS, IDCLIENTES, NOCHEQUE, MONTO FROM cobroschequesrecibidos "
+                         "WHERE ID_CAJAS BETWEEN %s AND %s", lo, hi)
+    limpiar_formato_antiguo(pg, cajas)
+    sid_de = {i: uuid.uuid5(NS, f"rsesion:caja:{i}") for i in cajas}
     ya = _estados(pg, "route_sessions", list(sid_de.values()))
 
-    sess, liq, caja_sid, saltadas = [], [], {}, 0
-    for k, cs in grupos.items():
-        sid, cu = sid_de[k], cobr_uuid[k]
-        ajeno = ocupados.get((cu, k[1]))
-        if (ajeno and ajeno != sid) or ya.get(sid, "abierta") != "abierta":
-            saltadas += 1  # sesion creada por IM o ya cerrada: no se toca
+    sess, liq, saltadas = [], [], 0
+    for i, c in cajas.items():
+        if ya.get(sid_de[i], "abierta") != "abierta":
+            saltadas += 1  # sesion ya cerrada (por el sync o por IM): no se toca
             continue
-        for c in cs:
-            caja_sid[c["id"]] = sid
-        cerrada = all(c["ciere"] for c in cs)
-        fc = max((c["fcierre"] for c in cs if c["fcierre"]), default=None)
-        sess.append((sid, COMPANY_ID, cu, None, k[1], "cerrada" if cerrada else "abierta", 0,
-                     datetime.combine(k[1], datetime.min.time()), (fc if cerrada else None),
-                     resolve(cs[0]["func"]) or cu))
+        cu = resolve(c["cobr"])
+        sess.append((sid_de[i], COMPANY_ID, cu, None, c["fecha"], "cerrada" if c["ciere"] else "abierta", 0,
+                     datetime.combine(c["fecha"], datetime.min.time()), (c["fcierre"] if c["ciere"] else None),
+                     resolve(c["func"]) or cu, i))
     n_s = upsert(pg, "route_sessions", ["id", "company_id", "cobrador_id", "route_id", "fecha", "estado",
-                                        "fondo_inicial", "opened_at", "closed_at", "created_by"], sess)
+                                        "fondo_inicial", "opened_at", "closed_at", "created_by", "legacy_caja_id"], sess)
+    nuevas_sid = {r[0] for r in sess}
 
-    liq_de = {}  # session -> liquidation id (solo sesiones con cajaautoriza)
-    for k, cs in grupos.items():
-        sid = sid_de[k]
-        if not any(c["id"] in caja_sid for c in cs) or not any(c["id"] in autor for c in cs):
+    liq_de, items = {}, []
+    for i, c in cajas.items():
+        if not c["ciere"] or sid_de[i] not in nuevas_sid:
             continue
-        a = [autor[c["id"]] for c in cs if c["id"] in autor]
-        ids = [c["id"] for c in cs]
-        chq = sum(money(m) for (_i, ic, _c, _n, m) in cheques if ic in ids)
-        liq_de[sid] = uuid.uuid5(NS, f"rliq:{k[0]}:{k[1].isoformat()}")
-        obs = " | ".join(dict.fromkeys(c["obs"] for c in cs if c["obs"]))
-        todas_aut = all(x[3] == 1 for x in a)
-        liq.append((liq_de[sid], sid, money(sum(x[0] or 0 for x in a)), chq, money(sum(x[1] or 0 for x in a)), 0,
-                    money(sum(x[2] or 0 for x in a)), money(sum(c["arendir"] for c in cs)),
-                    sum(cobros.get(i, 0) for i in ids) + chq + sum(money(m) for (_i, ic, _c, _n, m) in pagares if ic in ids),
-                    "autorizada" if todas_aut else "pendiente",
-                    f"Legacy cajas {','.join(map(str, ids))}" + (f" | {obs}" if obs else ""),
-                    max((safe_dt(x[4]) for x in a if safe_dt(x[4])), default=None) if todas_aut else None))
-    existentes = _estados(pg, "route_liquidations", [r[0] for r in liq])  # una liquidacion autorizada no se reescribe
+        d = leg.get(i) or dict(mov={}, items=[], efectivo=0, cheques=0)
+        a = autor.get(i, (0, 0, 0, None))
+        lid = liq_de[i] = uuid.uuid5(NS, f"rliq:caja:{i}")
+        total = calcular_rendicion(d["mov"])
+        liq.append((lid, sid_de[i], d["efectivo"], d["cheques"], money(a[0]), 0, money(a[1]),
+                    total["total"], total["cobros"], "autorizada",
+                    f"Legacy caja {i}" + (f" | {c['obs']}" if c["obs"] else ""),
+                    safe_dt(a[3]) or c["fcierre"]))
+        for (tipo, iid, num, m, banco, cli) in d["items"]:
+            items.append((uuid.uuid5(NS, f"rliqitem:{tipo}:{iid}"), lid, tipo, num, banco, m,
+                          uuid.uuid5(NS, f"cli:{txt_keep(cli, 15)}") if txt_keep(cli, 15) else None))
+    for tipo, filas in (("cheque", cheques), ("pagare", pagares)):
+        for (iid, idc, cli, num, m) in filas:
+            if idc in liq_de:
+                items.append((uuid.uuid5(NS, f"rliqitem:{tipo}:{iid}"), liq_de[idc], tipo,
+                              (txt_keep(num, 50) or str(iid)), None, money(m),
+                              uuid.uuid5(NS, f"cli:{txt_keep(cli, 15)}") if txt_keep(cli, 15) else None))
+    existentes = _estados(pg, "route_liquidations", list(liq_de.values()))  # una liquidacion existente no se reescribe
     liq = [r for r in liq if r[0] not in existentes]
     n_l = upsert(pg, "route_liquidations", ["id", "route_session_id", "efectivo_declarado", "cheques_declarado",
                                             "pagares_declarado", "nc_aplicadas", "descuentos_autorizados",
                                             "efectivo_esperado", "total_cobrado_ar", "estado", "observaciones",
                                             "fecha_autorizacion"], liq)
     nuevas = {r[0] for r in liq}
-    items = []
-    for tipo, filas in (("cheque", cheques), ("pagare", pagares)):
-        for (iid, idc, cli, num, m) in filas:
-            c = cajas.get(idc)
-            sid = caja_sid.get(idc)
-            lid = liq_de.get(sid)
-            if not c or lid not in nuevas:
-                continue
-            items.append((uuid.uuid5(NS, f"rliqitem:{tipo}:{iid}"), lid, tipo, (txt_keep(num, 50) or str(iid)),
-                          money(m), uuid.uuid5(NS, f"cli:{txt_keep(cli, 15)}") if txt_keep(cli, 15) else None))
-    n_i = upsert(pg, "route_liquidation_items", ["id", "liquidation_id", "tipo", "numero", "monto", "customer_id"], items)
-    log(f"  cajas_ruta: {len(cajas)} cajas -> {n_s} route_sessions, {n_l} route_liquidations, {n_i} items"
-        f"{', ' + str(saltadas) + ' sesiones saltadas (ya cerradas/de IM)' if saltadas else ''}")
-    return {k: sid_de[k] for k in grupos}
+    n_i = upsert(pg, "route_liquidation_items", ["id", "liquidation_id", "tipo", "numero", "banco", "monto", "customer_id"],
+                 [r for r in items if r[1] in nuevas])
+    log(f"  cajas_ruta: {len(cajas)} cajas -> {n_s} route_sessions (una por caja), {n_l} route_liquidations, {n_i} items"
+        f"{', ' + str(saltadas) + ' sesiones saltadas (ya cerradas)' if saltadas else ''}")
+    return sid_de
 
 
 def sync_viajes(pg, my, cajas, resolve, patente_de, sesiones):
@@ -1887,7 +1971,7 @@ def sync_viajes(pg, my, cajas, resolve, patente_de, sesiones):
 
     grupos = {}
     for c in cajas.values():
-        if c["id"] in res:  # sin rescamion no hay camion: no es un viaje
+        if c["id"] in res or c["arendir"] > 0:  # carga sin rescamion: viaje 'SIN-CAMION' (sus facturas deben rendir)
             grupos.setdefault((c["cobr"], c["fecha"]), []).append(c)
     ocupados = _ocupados(pg, "trips", min((k[1] for k in grupos), default=date.today()))
     tid_de = {k: uuid.uuid5(NS, f"trip:{k[0]}:{k[1].isoformat()}") for k in grupos}
@@ -1899,7 +1983,7 @@ def sync_viajes(pg, my, cajas, resolve, patente_de, sesiones):
         ajeno = ocupados.get((cu, k[1]))
         if (ajeno and ajeno != tid) or ya.get(tid, "en_ruta") != "en_ruta":
             continue
-        rs = [r for c in cs for r in res[c["id"]]]
+        rs = [r for c in cs for r in res.get(c["id"], [])] or [(0, 0, 0)]
         cam = rs[0][0]
         if len({r[0] for r in rs}) > 1:
             multi_camion += 1  # el legacy usa >1 camion ese dia: IM solo guarda el del primer viaje
@@ -1908,7 +1992,7 @@ def sync_viajes(pg, my, cajas, resolve, patente_de, sesiones):
         trips.append((tid, COMPANY_ID, cu, patente_de.get(cam) or "SIN-CAMION", k[1],
                       "completado" if completo else "en_ruta", min(r[1] for r in mismos), max(r[2] for r in mismos),
                       Decimal(str(round(sum(peso.get(c["id"], 0) for c in cs), 2))),
-                      sesiones.get(k), resolve(cs[0]["func"]) or cu))
+                      sesiones.get(min(c["id"] for c in cs)), resolve(cs[0]["func"]) or cu))
         plan.append((tid, completo, [f for c in cs for f in facs.get(c["id"], [])]))
     n_t = upsert(pg, "trips", ["id", "company_id", "cobrador_id", "patente", "fecha", "estado", "km_salida",
                                "km_llegada", "peso_total_kg", "route_session_id", "despachante_id"], trips)
@@ -1954,6 +2038,22 @@ def sync_viajes(pg, my, cajas, resolve, patente_de, sesiones):
     upsert(pg, "trip_stops", ["id", "trip_id", "sales_order_id", "customer_id", "orden_visita", "estado"], stops)
     upsert(pg, "trip_stop_items", ["id", "stop_id", "sales_order_item_id", "product_id", "cantidad_asignada",
                                    "cantidad_entregada"], sti)
+    # cada parada rinde a la caja/salida de su factura; cada sesion apunta a su viaje (si el viaje existe)
+    if not DRY_RUN:
+        with pg.cursor() as cur:
+            for idc, fs in facs.items():
+                sid = sesiones.get(idc)
+                if sid and idc in cajas and fs:
+                    cur.execute("UPDATE trip_stops SET route_session_id = %s WHERE id = ANY(%s) "
+                                "AND route_session_id IS DISTINCT FROM %s",
+                                (sid, [uuid.uuid5(NS, f"tstop:{f}") for f in fs], sid))
+            for k, cs in grupos.items():
+                for c in cs:
+                    sid = sesiones.get(c["id"])
+                    if sid:
+                        cur.execute("UPDATE route_sessions SET trip_id = %s WHERE id = %s AND trip_id IS DISTINCT FROM %s "
+                                    "AND EXISTS (SELECT 1 FROM trips WHERE id = %s)", (tid_de[k], sid, tid_de[k], tid_de[k]))
+        pg.commit()
     log(f"  viajes: {n_t} trips, {len(stops)} paradas (facturas), {len(sti)} items; {sin_venta} facturas sin venta/cliente "
         f"en IM, {multi_camion} dias con >1 camion (se guarda el primero)")
 

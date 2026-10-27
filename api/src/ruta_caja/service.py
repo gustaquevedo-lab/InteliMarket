@@ -69,18 +69,16 @@ async def list_route_sessions(
 
 # tipo de item de la liquidacion -> componente de calcular_rendicion
 _TIPO_COMPONENTE = {"cobro": "cobros", "otro_ingreso": "otros_ingresos", "devolucion": "devoluciones",
-                    "dev_credito": "dev_credito", "deposito": "depositos", "gasto": "gastos"}
+                    "credito": "credito", "deposito": "depositos", "gasto": "gastos"}
 
 _MOV_SQL = text("""
-    SELECT CASE WHEN s.condicion = 'credito' THEN 'facturas_credito' ELSE 'facturas_contado' END AS k,
-           COALESCE(SUM(s.total), 0) AS m
+    SELECT 'facturas' AS k, COALESCE(SUM(s.total), 0) AS m, COALESCE(SUM(s.total) FILTER (WHERE s.condicion = 'credito'), 0) AS c
     FROM trip_stops ts
     JOIN sales_orders so ON so.id = ts.sales_order_id
     JOIN sales s ON s.id = so.sale_id
     WHERE ts.route_session_id = :sid
-    GROUP BY 1
     UNION ALL
-    SELECT i.tipo, COALESCE(SUM(i.monto), 0)
+    SELECT i.tipo, COALESCE(SUM(i.monto), 0), 0
     FROM route_liquidation_items i
     JOIN route_liquidations l ON l.id = i.liquidation_id
     WHERE l.route_session_id = :sid AND i.tipo = ANY(:tipos)
@@ -89,19 +87,26 @@ _MOV_SQL = text("""
 
 
 async def movimientos_sesion(db: AsyncSession, session: RouteSession) -> dict:
-    """Componentes de la rendicion de una caja/salida, leidos de las facturas de sus paradas y de los items
-    de su liquidacion. Una sesion sin cobros cargados (no viene del sistema viejo) usa los cobros de AR del dia."""
+    """Componentes de la rendicion de una caja/salida, leidos de las facturas de sus paradas y de los items de su
+    liquidacion. Si no hay items de credito (sesion propia, no migrada) el credito son las ventas a credito de la carga
+    y los cobros salen de AR del dia."""
     rows = (await db.execute(_MOV_SQL, {"sid": str(session.id), "tipos": list(_TIPO_COMPONENTE)})).fetchall()
     mov: dict = {}
-    for k, m in rows:
+    credito_ventas = 0
+    for k, m, c in rows:
         mov[_TIPO_COMPONENTE.get(k, k)] = Decimal(m or 0)
-    if not mov.get("cobros") and session.legacy_caja_id is None:
-        ar = await db.execute(text("""
-            SELECT COALESCE(SUM(monto_total), 0) FROM receivable_payments
-            WHERE cobrador_id = :cobrador_id AND forma_pago = 'efectivo'
-              AND (created_at AT TIME ZONE 'America/Asuncion')::date = CAST(:fecha AS date)
-        """), {"cobrador_id": str(session.cobrador_id), "fecha": str(session.fecha)})
-        mov["cobros"] = Decimal(ar.scalar() or 0)
+        if k == "facturas":
+            credito_ventas = Decimal(c or 0)
+    if session.legacy_caja_id is None:
+        if not mov.get("credito"):
+            mov["credito"] = credito_ventas
+        if not mov.get("cobros"):
+            ar = await db.execute(text("""
+                SELECT COALESCE(SUM(monto_total), 0) FROM receivable_payments
+                WHERE cobrador_id = :cobrador_id AND forma_pago = 'efectivo'
+                  AND (created_at AT TIME ZONE 'America/Asuncion')::date = CAST(:fecha AS date)
+            """), {"cobrador_id": str(session.cobrador_id), "fecha": str(session.fecha)})
+            mov["cobros"] = Decimal(ar.scalar() or 0)
     return mov
 
 

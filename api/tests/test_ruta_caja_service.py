@@ -70,14 +70,14 @@ def _filas(*filas):
 
 @pytest.mark.asyncio
 async def test_close_session_calcula_esperado_con_la_formula():
-    """efectivo_esperado = contado + cobros + otros ingresos - devoluciones - depositos - gastos."""
+    """efectivo_esperado = facturas - credito + cobros + otros ingresos - devoluciones - depositos - gastos."""
     from api.src.ruta_caja.service import close_session
     db = _mock_db()
     db.get.return_value = _sesion()
     db.execute.side_effect = [_filas(
-        ("facturas_contado", 2545086), ("facturas_credito", 900), ("cobro", 50344),
-        ("otro_ingreso", 4952), ("deposito", 2600382), ("dev_credito", 10),
-    )]
+        ("facturas", 2545900, 0), ("cobro", 50344, 0), ("otro_ingreso", 4952, 0),
+        ("deposito", 2600382, 0), ("credito", 900, 0),
+    ), MagicMock()]
     sid = str(uuid.uuid4())
     await close_session(db, sid, 0, 0, 0, 0, 0, [], closed_by=str(uuid.uuid4()))
     liq_obj = [c[0][0] for c in db.add.call_args_list if hasattr(c[0][0], "efectivo_esperado")][-1]

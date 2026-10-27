@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 
 class LiquidationItemCreate(BaseModel):
-    tipo: str  # cheque, pagare, cobro, otro_ingreso, deposito, gasto, devolucion, dev_credito
+    tipo: str  # cheque, pagare, cobro, otro_ingreso, deposito, gasto, devolucion, credito
     numero: str
     banco: Optional[str] = None
     monto: Decimal

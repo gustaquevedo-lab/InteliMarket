@@ -56,7 +56,7 @@ class RouteLiquidationItem(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     liquidation_id = Column(UUID(as_uuid=True), nullable=False)
-    # cheque, pagare, cobro, otro_ingreso, deposito, gasto, devolucion, dev_credito
+    # cheque, pagare, cobro, otro_ingreso, deposito, gasto, devolucion, credito
     tipo = Column(String(20), nullable=False)
     numero = Column(String(50), nullable=False)
     banco = Column(String(100), nullable=True)
