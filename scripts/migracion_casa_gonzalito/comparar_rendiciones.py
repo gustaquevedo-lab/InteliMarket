@@ -1,150 +1,109 @@
 #!/usr/bin/env python3
 """
-Compara, por cobrador+dia (= una route_session de IM), el ARENDIR del legacy (suma de sus cajas)
-contra el monto a rendir que calcula InteliMarket con api/src/ruta_caja/service.py (close_session ->
-efectivo_esperado). SOLO LECTURA: el legacy se lee por rangos de PK/indice, y el calculo de IM corre
-en una transaccion que SIEMPRE se revierte (close_session hace commit() pero va sobre un SAVEPOINT
-dentro de esa transaccion externa).
+Compara, POR CAJA/SALIDA (una route_session de IM = una cajas.IDCAJA del legacy), la rendicion que calcula
+InteliMarket (api/src/ruta_caja: movimientos_sesion + calcular_rendicion, con lo ya sincronizado en Postgres)
+contra la MISMA formula alimentada con los datos del legacy (sync_incremental.leer_cajas_legacy) y contra lo que la
+caja realmente entrego en el legacy (efectivo + cheques). SOLO LECTURA (el legacy se lee por rangos de PK/indice).
 
 Uso (en la VM, desde ~/intelimarket):
-    .venv/bin/python scripts/migracion_casa_gonzalito/comparar_rendiciones.py --desde 2026-07-16 --hasta 2026-07-22 [--detalle]
-Variables: MYSQL_HOST/MYSQL_USER/MYSQL_PASSWORD (como el sync; default legacy en vivo),
-PG_SEARCH_PATH + DB_SEARCH_PATH (opcionales, para apuntar a un schema de prueba).
+    .venv/bin/python scripts/migracion_casa_gonzalito/comparar_rendiciones.py --desde 2026-10-20 --hasta 2026-10-27 [--detalle]
+Variables: MYSQL_HOST/MYSQL_USER/MYSQL_PASSWORD (como el sync; default legacy en vivo).
 """
 import argparse
 import asyncio
 import sys
 import uuid
-from collections import Counter, defaultdict
-from datetime import date, datetime, timedelta
+from collections import Counter
+from datetime import date, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1])]
 
-import sync_incremental as si  # noqa: E402  (helpers y mapeos del sync: _primer_idcaja, NS, etc.)
-from sqlalchemy import text  # noqa: E402
+import sync_incremental as si  # noqa: E402
+from api.src.db import engine  # noqa: E402
+from api.src.ruta_caja.models import RouteSession  # noqa: E402
+from api.src.ruta_caja.rendicion import COMPONENTES, calcular_rendicion  # noqa: E402
+from api.src.ruta_caja.service import movimientos_sesion  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
-from api.src.db import engine  # noqa: E402
-from api.src.ruta_caja.service import close_session  # noqa: E402
 
-
-def legacy_grupos(my, desde, hasta):
+def cajas_cerradas(my, desde, hasta):
     lo = si._primer_idcaja(my, desde)
     hi = si._primer_idcaja(my, hasta + timedelta(days=1)) + 600
-    cajas = []
+    out = []
     for (idc, cobr, fecha, ciere, ar) in si._rango(
             my, "SELECT IDCAJA, IDCOBRADOR, FECHA, CIERE, ARENDIR FROM cajas WHERE IDCAJA BETWEEN %s AND %s", lo, hi):
         f = si.safe_dt(fecha)
-        if f and desde <= f.date() <= hasta:
-            cajas.append(dict(id=idc, cobr=(si.txt(cobr) or ""), fecha=f.date(), ciere=bool(ciere), ar=si.money(ar)))
-    if not cajas:
-        return {}, [], {}
-    lo, hi = min(c["id"] for c in cajas), max(c["id"] for c in cajas)
-    facs = defaultdict(list)
-    for (idf, idc) in si._rango(my, "SELECT IDFACVENTAS, ID_CAJA FROM fac_ventas WHERE ID_CAJA BETWEEN %s AND %s", lo, hi):
-        facs[idc].append(idf)
-    cobros = Counter()
-    for (idc, m) in si._rango(my, "SELECT ID_CAJAS, MONTO FROM cobros WHERE ID_CAJAS BETWEEN %s AND %s", lo, hi):
-        cobros[idc] += si.money(m)
-    grupos, sin_cobr = defaultdict(list), []
-    for c in cajas:
-        c["facs"], c["cobros"] = facs.get(c["id"], []), cobros.get(c["id"], 0)
-        if c["cobr"]:
-            grupos[(c["cobr"], c["fecha"])].append(c)
-        else:
-            sin_cobr.append(c)
-    return dict(grupos), sin_cobr, facs
+        if f and desde <= f.date() <= hasta and ciere:
+            out.append(dict(id=idc, cobr=(si.txt(cobr) or ""), fecha=f.date(), ar=si.money(ar)))
+    return out
 
 
-def total_facturas(pg, facs_ids):
-    """Total facturado de esas facturas segun IM (sales.total; ya migradas por el sync)."""
-    ids = [uuid.uuid5(si.NS, f"fac:{f}") for f in facs_ids]
-    tot = 0
-    for ch in si._chunks(ids):
-        with pg.cursor() as cur:
-            cur.execute("SELECT COALESCE(SUM(total), 0) FROM sales WHERE id = ANY(%s)", (ch,))
-            tot += int(cur.fetchone()[0])
-    return tot
+async def calcula_im(db, sid):
+    ses = await db.get(RouteSession, sid)
+    if not ses:
+        return None
+    return calcular_rendicion(await movimientos_sesion(db, ses))
 
 
-async def im_calcula(sid):
-    """efectivo_esperado / total_cobrado_ar segun ruta_caja.close_session, en transaccion revertida."""
-    async with engine.connect() as conn:
-        trans = await conn.begin()
-        try:
-            db = AsyncSession(bind=conn, join_transaction_mode="create_savepoint", expire_on_commit=False)
-            await db.execute(text("UPDATE route_sessions SET estado = 'abierta' WHERE id = :i"), {"i": sid})
-            liq = await close_session(db, str(sid), 0, 0, 0, 0, 0, [])
-            return int(liq.efectivo_esperado), int(liq.total_cobrado_ar), None
-        except Exception as e:  # el error mismo es un hallazgo
-            msg = str(getattr(e, "orig", e)).strip().splitlines()[0][:140]
-            return None, None, f"{type(e).__name__}: {msg}"
-        finally:
-            await trans.rollback()
-
-
-async def contar_liquidaciones():
-    async with engine.connect() as conn:
-        return (await conn.execute(text("SELECT count(*) FROM route_liquidations"))).scalar()
+def explica(l, im):
+    return ", ".join(f"{k}: legacy {l[k]:,} / IM {im[k]:,}" for k in COMPONENTES if l[k] != im[k])
 
 
 async def main_async(args):
     desde, hasta = date.fromisoformat(args.desde), date.fromisoformat(args.hasta)
-    my, pg = si.mysql_conn(), si.pg_conn()
-    resolve = si.make_func_resolver(pg, my)
-    grupos, sin_cobr, _ = legacy_grupos(my, desde, hasta)
-    print(f"Legacy {desde}..{hasta}: {sum(len(g) for g in grupos.values())} cajas con cobrador -> "
-          f"{len(grupos)} cobrador-dias; {len(sin_cobr)} cargas sin cobrador (Gs. "
-          f"{sum(c['ar'] for c in sin_cobr):,}, no existen en IM)")
-    liq_antes = await contar_liquidaciones()
-    with pg.cursor() as cur:
-        cur.execute("SELECT id FROM route_sessions WHERE fecha BETWEEN %s AND %s", (desde, hasta))
-        sesiones_im = {r[0] for r in cur.fetchall()}
-
+    my = si.mysql_conn()
+    cajas = cajas_cerradas(my, desde, hasta)
+    sin_cobr = [c for c in cajas if not c["cobr"]]
+    cajas = [c for c in cajas if c["cobr"]]
+    print(f"Legacy {desde}..{hasta}: {len(cajas)} cajas cerradas con cobrador (+{len(sin_cobr)} sin cobrador, no se importan)")
+    leg = {}
+    ids = sorted(c["id"] for c in cajas)
+    for i in range(0, len(ids), 400):
+        leg.update(si.leer_cajas_legacy(my, ids[i], ids[min(i + 399, len(ids) - 1)]))
     filas, causas = [], Counter()
-    for (cobr, fecha), cs in sorted(grupos.items(), key=lambda kv: (kv[0][1], kv[0][0])):
-        ar = sum(c["ar"] for c in cs)
-        facturado = total_facturas(pg, [f for c in cs for f in c["facs"]])
-        sid = uuid.uuid5(si.NS, f"rsesion:{cobr}:{fecha.isoformat()}")
-        if sid not in sesiones_im:
-            im, causa = None, "SIN_SESION_IM: la caja no esta como route_session (no sincronizada)"
-        else:
-            im, _tot, err = await im_calcula(sid)
-            if err:
-                causa = f"IM_NO_CALCULA: {err}"
-            elif im == ar:
+    async with engine.connect() as conn:
+        db = AsyncSession(bind=conn, expire_on_commit=False)
+        for c in sorted(cajas, key=lambda c: c["id"]):
+            d = leg.get(c["id"]) or dict(mov={}, efectivo=0, cheques=0, faltante=0)
+            l = calcular_rendicion(d["mov"])
+            im = await calcula_im(db, uuid.uuid5(si.NS, f"rsesion:caja:{c['id']}"))
+            entregado = d["efectivo"] + d["cheques"]
+            if im is None:
+                causa = "SIN_SESION_IM: caja no sincronizada como route_session"
+            elif im["total"] == l["total"] and all(im[k] == l[k] for k in COMPONENTES):
                 causa = "IGUAL"
-            elif ar == facturado and ar > 0:
-                causa = "CONCEPTO: ARENDIR legacy = total facturado de la carga; IM = efectivo cobrado en AR"
             else:
-                causa = "OTRA: diferencia sin explicar por facturado/cobros"
-        causas[causa.split(":")[0]] += 1
-        filas.append((fecha, cobr, [c["id"] for c in cs], ar, facturado, sum(c["cobros"] for c in cs), im, causa))
-
-    iguales = sum(1 for f in filas if f[7] == "IGUAL")
-    print(f"\nRESUMEN: {len(filas)} cobrador-dias | iguales: {iguales} | distintos: {len(filas) - iguales}")
-    for k, v in causas.most_common():
-        ej = next(f for f in filas if f[7].split(':')[0] == k)
-        print(f"  {k}: {v}   ej: caja(s) {ej[2]} cobrador {ej[1]} {ej[0]} ARENDIR={ej[3]:,} facturado={ej[4]:,} "
-              f"IM={ej[6]}  -> {ej[7]}")
-    con_multi = sum(1 for f in filas if len(f[2]) > 1)
-    print(f"  (nota) {con_multi} cobrador-dias reunen >1 caja legacy: IM tiene una sola sesion por cobrador+dia")
-    ar0 = sum(1 for f in filas if f[3] == 0)
-    print(f"  (nota) {ar0} cobrador-dias con ARENDIR=0 (cajas de cobranza/deposito, sin carga de reparto)")
-    igual_fact = sum(1 for f in filas if f[3] == f[4])
-    print(f"  (nota) ARENDIR legacy == total facturado de la(s) carga(s) en {igual_fact}/{len(filas)} cobrador-dias; "
-          f"ruta_caja.efectivo_esperado se define como cobros de AR (receivable_payments), otro concepto")
+                causa = "DIFIERE: " + explica(l, im)
+            causas[causa.split(":")[0]] += 1
+            dif = l["total"] - entregado
+            if dif == 0:
+                real = "exacta"
+            elif dif == d["faltante"]:
+                real = "faltante/sobrante registrado en cta_cte_funcionarios"
+            else:
+                real = "SIN EXPLICAR"
+            filas.append((c, l, im, entregado, dif, real, causa))
+        await db.close()
+    n = len(filas)
+    print(f"\nIM vs formula con datos del legacy: iguales {causas['IGUAL']}/{n} ({100 * causas['IGUAL'] // max(n, 1)}%)")
+    for k, v in causas.items():
+        if k != "IGUAL":
+            ej = next(f for f in filas if f[6].startswith(k))
+            print(f"  {k}: {v}  ej: caja {ej[0]['id']} {ej[0]['fecha']} -> {ej[6]}")
+    real = Counter(f[5] for f in filas)
+    print(f"Formula vs lo que la caja entrego en el legacy (efectivo+cheques): " +
+          "; ".join(f"{k}: {v}" for k, v in real.most_common()))
+    for f in filas:
+        if f[5] == "SIN EXPLICAR":
+            print(f"  SIN EXPLICAR caja {f[0]['id']} {f[0]['fecha']}: formula {f[1]['total']:,} entregado {f[3]:,} dif {f[4]:,} {f[1]}")
     if args.detalle:
-        print("\nfecha       cobrador cajas                 ARENDIR     facturado   cobros     IM_esperado  causa")
-        for (fecha, cobr, ids, ar, fa, cob, im, causa) in filas:
-            print(f"{fecha} {cobr:>8} {','.join(map(str, ids))[:20]:<20} {ar:>12,} {fa:>12,} {cob:>10,} "
-                  f"{'-' if im is None else format(im, ','):>12}  {causa[:90]}")
-    liq_despues = await contar_liquidaciones()
-    print(f"\nSolo lectura verificada: route_liquidations antes={liq_antes} despues={liq_despues}")
+        print("\ncaja     fecha       formula_legacy  formula_IM  entregado  dif  causa")
+        for (c, l, im, ent, dif, real_, causa) in filas:
+            print(f"{c['id']} {c['fecha']} {l['total']:>14,} {('-' if im is None else format(im['total'], ',')):>12} "
+                  f"{ent:>12,} {dif:>10,}  {real_[:20]} | {causa[:60]}")
     my.close()
-    pg.close()
     await engine.dispose()
 
 
