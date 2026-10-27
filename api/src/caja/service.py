@@ -5101,16 +5101,31 @@ async def confirm_session_cash_reception(
             select(CashCount).where(CashCount.session_id == sid).order_by(CashCount.created_at.desc()).limit(1)
         )
         count = count_res.scalar_one_or_none()
-        count_id = count.id if count else session_obj.id
+        m_inicial_pyg = monto_recibido_pyg if ajustar_declarado else contado_neto_pyg
+        m_inicial_brl = monto_recibido_brl if ajustar_declarado else contado_neto_brl
+        m_inicial_usd = monto_recibido_usd if ajustar_declarado else contado_neto_usd
+        if not count:
+            count = CashCount(
+                session_id=sid,
+                monto_efectivo=m_inicial_pyg,
+                monto_efectivo_brl=m_inicial_brl,
+                monto_efectivo_usd=m_inicial_usd,
+                monto_total=m_inicial_pyg,
+                diferencia=Decimal("0"),
+                observaciones="Arqueo generado automáticamente al recepcionar y asentar sobre de efectivo en Tesorería",
+            )
+            db.add(count)
+            await db.flush()
+
         handoff = CashHandoff(
             company_id=cid,
             session_id=sid,
-            cash_count_id=count_id,
+            cash_count_id=count.id if count else None,
             entregado_por=session_obj.user_id,
             entregado_por_nombre=session_obj.cajero_nombre,
-            monto_pyg=monto_recibido_pyg if ajustar_declarado else contado_neto_pyg,
-            monto_brl=monto_recibido_brl if ajustar_declarado else contado_neto_brl,
-            monto_usd=monto_recibido_usd if ajustar_declarado else contado_neto_usd,
+            monto_pyg=m_inicial_pyg,
+            monto_brl=m_inicial_brl,
+            monto_usd=m_inicial_usd,
             estado="pendiente",
         )
         db.add(handoff)
