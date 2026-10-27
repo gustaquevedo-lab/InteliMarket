@@ -111,6 +111,7 @@ export default function SupplierPaymentOrderModal({
   const [creditNotes, setCreditNotes] = useState<any[]>([])
   const [vaultBalance, setVaultBalance] = useState<number>(0)
   const [vaultBalanceBRL, setVaultBalanceBRL] = useState<number>(0)
+  const [vaultBalanceUSD, setVaultBalanceUSD] = useState<number>(0)
   const [availableCheques, setAvailableCheques] = useState<any[]>([])
   const [loadingAux, setLoadingAux] = useState(true)
 
@@ -277,6 +278,7 @@ export default function SupplierPaymentOrderModal({
         if (vaultRes.status === "fulfilled" && vaultRes.value) {
           setVaultBalance(Number(vaultRes.value.saldo_en_boveda_pyg || 0))
           setVaultBalanceBRL(Number(vaultRes.value.saldo_en_boveda_brl || 0))
+          setVaultBalanceUSD(Number(vaultRes.value.saldo_en_boveda_usd || 0))
         }
         if (chequesRes.status === "fulfilled" && Array.isArray(chequesRes.value)) {
           setAvailableCheques(chequesRes.value)
@@ -453,11 +455,21 @@ export default function SupplierPaymentOrderModal({
   // Cotización sugerida para BRL (desde facturas o 1.450 Gs./R$)
   const defaultExchangeRateBRL = useMemo(() => {
     for (const item of Object.values(selectedInvoicesMap)) {
-      if ((item.inv as any).tipo_cambio && Number((item.inv as any).tipo_cambio) > 1) {
+      if ((item.inv as any).moneda === "BRL" && Number((item.inv as any).tipo_cambio) > 1) {
         return Number((item.inv as any).tipo_cambio)
       }
     }
     return 1450
+  }, [selectedInvoicesMap])
+
+  // Cotización sugerida para USD (desde facturas o 7.800 Gs./USD)
+  const defaultExchangeRateUSD = useMemo(() => {
+    for (const item of Object.values(selectedInvoicesMap)) {
+      if ((item.inv as any).moneda === "USD" && Number((item.inv as any).tipo_cambio) > 1) {
+        return Number((item.inv as any).tipo_cambio)
+      }
+    }
+    return 7800
   }, [selectedInvoicesMap])
 
   // Detección de proveedor BR o facturas con Reales
@@ -467,12 +479,15 @@ export default function SupplierPaymentOrderModal({
       Object.values(selectedInvoicesMap).some(it => (it.inv as any).moneda === "BRL" || Number((it.inv as any).total_brl || 0) > 0)
   }, [supplier, selectedInvoicesMap])
 
-  // Totales calculados de desembolsos (convirtiendo BRL a PYG si corresponde)
+  // Totales calculados de desembolsos (convirtiendo BRL y USD a PYG si corresponde)
   const summaryDesembolsos = useMemo(() => {
     let total = 0
     disbursements.forEach(d => {
       if (d.forma_pago === "boveda" && d.moneda === "BRL") {
         const tc = Number(d.tipo_cambio || defaultExchangeRateBRL || 1450)
+        total += Math.round(Number(d.monto || 0) * tc)
+      } else if (d.forma_pago === "boveda" && d.moneda === "USD") {
+        const tc = Number(d.tipo_cambio || defaultExchangeRateUSD || 7800)
         total += Math.round(Number(d.monto || 0) * tc)
       } else {
         total += Number(d.monto || 0)
@@ -481,7 +496,7 @@ export default function SupplierPaymentOrderModal({
     const diferencia = summaryFacturas.neto - total
     const cuadra = Math.abs(diferencia) <= 50 && total > 0
     return { total, diferencia, cuadra }
-  }, [disbursements, summaryFacturas.neto, defaultExchangeRateBRL])
+  }, [disbursements, summaryFacturas.neto, defaultExchangeRateBRL, defaultExchangeRateUSD])
 
   const validateInvoiceAllocations = (): boolean => {
     for (const item of Object.values(selectedInvoicesMap)) {
@@ -814,6 +829,23 @@ export default function SupplierPaymentOrderModal({
     const validLegalInvoices = getSanitizedLegalInvoices()
     if (validLegalInvoices === null) {
       return
+    }
+
+    for (const d of disbursements) {
+      if (d.forma_pago === "boveda") {
+        if (d.moneda === "USD" && Number(d.monto || 0) > vaultBalanceUSD) {
+          toast.error("Saldo insuficiente en Bóveda (US$)", `Disponible: US$ ${vaultBalanceUSD.toLocaleString("es-PY", { minimumFractionDigits: 2 })} | Solicitado: US$ ${Number(d.monto || 0).toLocaleString("es-PY", { minimumFractionDigits: 2 })}`)
+          return
+        }
+        if (d.moneda === "BRL" && Number(d.monto || 0) > vaultBalanceBRL) {
+          toast.error("Saldo insuficiente en Bóveda (R$)", `Disponible: R$ ${vaultBalanceBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2 })} | Solicitado: R$ ${Number(d.monto || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`)
+          return
+        }
+        if ((!d.moneda || d.moneda === "PYG") && Number(d.monto || 0) > vaultBalance) {
+          toast.error("Saldo insuficiente en Bóveda (₲)", `Disponible: ${formatPYG(vaultBalance)} | Solicitado: ${formatPYG(Number(d.monto || 0))}`)
+          return
+        }
+      }
     }
 
     setSubmitting(true)
@@ -1816,7 +1848,7 @@ export default function SupplierPaymentOrderModal({
               </div>
 
               {/* BARRA DE DISPONIBILIDAD DE FONDOS */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 p-3 rounded-2xl bg-slate-900 text-white text-xs border border-slate-800">
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5 p-3 rounded-2xl bg-slate-900 text-white text-xs border border-slate-800">
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Bóveda (₲)</span>
                   <span className="font-mono font-bold text-emerald-400">{formatPYG(vaultBalance)}</span>
@@ -1824,6 +1856,10 @@ export default function SupplierPaymentOrderModal({
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Bóveda (R$)</span>
                   <span className="font-mono font-bold text-teal-400">R$ {vaultBalanceBRL.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Bóveda (US$)</span>
+                  <span className="font-mono font-bold text-amber-400">US$ {vaultBalanceUSD.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">Cuentas Bancarias</span>
@@ -2006,7 +2042,7 @@ export default function SupplierPaymentOrderModal({
                         >
                           <option value="transferencia">🏦 Banco - Transferencia SIPAP</option>
                           <option value="cheque">📜 Banco - Cheque Emitido (Al día o Diferido)</option>
-                          <option value="boveda">🔒 Efectivo Bóveda Central (₲ / R$)</option>
+                          <option value="boveda">🔒 Efectivo Bóveda Central (₲ / R$ / US$)</option>
                           <option value="fondo_fijo">💼 Efectivo Fondo Fijo (Caja Chica)</option>
                           <option value="nota_credito">📄 Nota de Crédito (Saldo a Favor)</option>
                         </select>
@@ -2022,7 +2058,7 @@ export default function SupplierPaymentOrderModal({
                                 <button
                                   type="button"
                                   onClick={() => updateDisbursementRow(index, { moneda: "PYG", tipo_cambio: 1 })}
-                                  className={`px-2 py-0.5 text-[9px] font-bold rounded transition ${d.moneda !== "BRL" ? "bg-white dark:bg-slate-700 text-rose-600 dark:text-white shadow-xs" : "text-slate-500"}`}
+                                  className={`px-2 py-0.5 text-[9px] font-bold rounded transition ${d.moneda !== "BRL" && d.moneda !== "USD" ? "bg-white dark:bg-slate-700 text-rose-600 dark:text-white shadow-xs" : "text-slate-500"}`}
                                 >
                                   ₲ PYG
                                 </button>
@@ -2033,10 +2069,39 @@ export default function SupplierPaymentOrderModal({
                                 >
                                   R$ BRL
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => updateDisbursementRow(index, { moneda: "USD", tipo_cambio: d.tipo_cambio || defaultExchangeRateUSD })}
+                                  className={`px-2 py-0.5 text-[9px] font-bold rounded transition ${d.moneda === "USD" ? "bg-amber-600 text-white shadow-xs" : "text-slate-500"}`}
+                                >
+                                  💵 US$ USD
+                                </button>
                               </div>
                             </div>
 
-                            {d.moneda === "BRL" ? (
+                            {d.moneda === "USD" ? (
+                              <div className="space-y-1.5">
+                                <CurrencyInput
+                                  required
+                                  currency="USD"
+                                  allowDecimals
+                                  value={d.monto}
+                                  onChangeValue={(num) => updateDisbursementRow(index, { monto: num })}
+                                  placeholder="0.00"
+                                  className="w-full p-2 text-xs font-mono font-black text-amber-600 dark:text-amber-400 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-right"
+                                />
+                                <div className="flex items-center justify-between text-[10px] text-slate-500 px-1">
+                                  <span>Cotiz: 1 US$ =</span>
+                                  <input
+                                    type="number"
+                                    value={d.tipo_cambio || defaultExchangeRateUSD}
+                                    onChange={e => updateDisbursementRow(index, { tipo_cambio: Number(e.target.value) || 1 })}
+                                    className="w-20 p-1 text-[10px] font-mono font-bold text-right bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded"
+                                  />
+                                  <span className="font-bold text-slate-700 dark:text-slate-300">₲</span>
+                                </div>
+                              </div>
+                            ) : d.moneda === "BRL" ? (
                               <div className="space-y-1.5">
                                 <CurrencyInput
                                   required
@@ -2072,9 +2137,20 @@ export default function SupplierPaymentOrderModal({
 
                           <div>
                             <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
-                              {d.moneda === "BRL" ? "Validación Bóveda R$ & Equivalente" : "Validación Bóveda ₲"}
+                              {d.moneda === "USD" ? "Validación Bóveda US$ & Equivalente" : d.moneda === "BRL" ? "Validación Bóveda R$ & Equivalente" : "Validación Bóveda ₲"}
                             </label>
-                            {d.moneda === "BRL" ? (
+                            {d.moneda === "USD" ? (
+                              <div className="space-y-1">
+                                <div className={`p-2 rounded-xl text-xs font-mono font-bold ${
+                                  vaultBalanceUSD >= Number(d.monto || 0) ? "bg-amber-500/10 text-amber-600" : "bg-red-500/10 text-red-500"
+                                }`}>
+                                  Disponible US$: {vaultBalanceUSD.toLocaleString("es-PY", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                                <div className="text-[10px] font-mono text-slate-500 px-1">
+                                  Amortiza a la Factura: <strong className="text-slate-800 dark:text-slate-200">{formatPYG(Math.round(Number(d.monto || 0) * (d.tipo_cambio || defaultExchangeRateUSD)))}</strong>
+                                </div>
+                              </div>
+                            ) : d.moneda === "BRL" ? (
                               <div className="space-y-1">
                                 <div className={`p-2 rounded-xl text-xs font-mono font-bold ${
                                   vaultBalanceBRL >= Number(d.monto || 0) ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"

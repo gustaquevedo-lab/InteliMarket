@@ -3,7 +3,8 @@ import {
   CreditCard, Search, Plus, Filter, Download, Eye, CheckCircle2,
   XCircle, AlertTriangle, Clock, Calendar, RefreshCw, Loader2,
   Building2, Landmark, User, FileText, ArrowUpRight, ArrowDownLeft, ShieldCheck,
-  Check, X, FileSpreadsheet, History, Info, Sparkles, DollarSign, Receipt, Ban
+  Check, X, FileSpreadsheet, History, Info, Sparkles, DollarSign, Receipt, Ban,
+  ArrowUp, ArrowDown, ArrowUpDown
 } from "lucide-react"
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -90,6 +91,21 @@ export default function ChequesPage() {
 
   // Filtro rápido de cronograma de vencimiento diferidos
   const [filtroVencimiento, setFiltroVencimiento] = useState<string>("all")
+
+  // Ordenamiento interactivo (Estándar: Vencimiento de más recientes a más antiguos)
+  type SortField = "fecha_vencimiento" | "fecha_emision" | "monto" | "numero" | "beneficiario"
+  type SortOrder = "asc" | "desc"
+  const [sortField, setSortField] = useState<SortField>("fecha_vencimiento")
+  const [sortOrder, setSortOrder] = useState<SortOrder>("desc")
+
+  const handleToggleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortOrder(prev => prev === "desc" ? "asc" : "desc")
+    } else {
+      setSortField(field)
+      setSortOrder(field === "fecha_vencimiento" || field === "fecha_emision" || field === "monto" ? "desc" : "asc")
+    }
+  }
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -241,11 +257,36 @@ export default function ChequesPage() {
 
       return matchesSearch && matchesBanco && matchesEstado && matchesTipo
     }).sort((a, b) => {
-      const dateA = new Date(a.fecha_emision || a.fecha_pago || a.created_at || 0).getTime()
-      const dateB = new Date(b.fecha_emision || b.fecha_pago || b.created_at || 0).getTime()
-      return dateB - dateA
+      let valA: any
+      let valB: any
+
+      if (sortField === "fecha_vencimiento") {
+        valA = new Date(a.fecha_pago || a.fecha_emision || a.created_at || 0).getTime()
+        valB = new Date(b.fecha_pago || b.fecha_emision || b.created_at || 0).getTime()
+      } else if (sortField === "fecha_emision") {
+        valA = new Date(a.fecha_emision || a.created_at || 0).getTime()
+        valB = new Date(b.fecha_emision || b.created_at || 0).getTime()
+      } else if (sortField === "monto") {
+        valA = Number(a.monto || 0)
+        valB = Number(b.monto || 0)
+      } else if (sortField === "numero") {
+        valA = String(a.numero || "").toLowerCase()
+        valB = String(b.numero || "").toLowerCase()
+        return sortOrder === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA)
+      } else if (sortField === "beneficiario") {
+        valA = String(a.beneficiario || a.supplier_nombre || supplierMap[a.supplier_id] || "").toLowerCase()
+        valB = String(b.beneficiario || b.supplier_nombre || supplierMap[b.supplier_id] || "").toLowerCase()
+        return sortOrder === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA)
+      } else {
+        valA = new Date(a.fecha_pago || a.fecha_emision || 0).getTime()
+        valB = new Date(b.fecha_pago || b.fecha_emision || 0).getTime()
+      }
+
+      if (valA < valB) return sortOrder === "asc" ? -1 : 1
+      if (valA > valB) return sortOrder === "asc" ? 1 : -1
+      return 0
     })
-  }, [cheques, search, filterBanco, filterEstado, filterTipo, tab, supplierMap, filtroVencimiento])
+  }, [cheques, search, filterBanco, filterEstado, filterTipo, tab, supplierMap, filtroVencimiento, sortField, sortOrder])
 
   const handleUpdateEstado = async (id: string, nuevoEstado: string, notas?: string) => {
     try {
@@ -683,12 +724,76 @@ export default function ChequesPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-xs min-w-[850px]">
-              <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800">
+              <thead className="bg-gray-50 dark:bg-slate-800/60 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100 dark:border-slate-800 select-none">
                 <tr>
-                  <th className="p-3.5 text-left">N° Cheque / Banco</th>
-                  <th className="p-3.5 text-left">Beneficiario / Proveedor</th>
-                  <th className="p-3.5 text-left">Emisión & Cobro</th>
-                  <th className="p-3.5 text-right">Monto</th>
+                  <th
+                    onClick={() => handleToggleSort("numero")}
+                    className="p-3.5 text-left cursor-pointer hover:text-slate-900 dark:hover:text-white transition group"
+                    title="Ordenar por N° de Cheque"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>N° Cheque / Banco</span>
+                      {sortField === "numero" ? (
+                        sortOrder === "asc" ? <ArrowUp className="w-3 h-3 text-rose-500" /> : <ArrowDown className="w-3 h-3 text-rose-500" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-60 transition" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleToggleSort("beneficiario")}
+                    className="p-3.5 text-left cursor-pointer hover:text-slate-900 dark:hover:text-white transition group"
+                    title="Ordenar por Beneficiario o Proveedor"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Beneficiario / Proveedor</span>
+                      {sortField === "beneficiario" ? (
+                        sortOrder === "asc" ? <ArrowUp className="w-3 h-3 text-rose-500" /> : <ArrowDown className="w-3 h-3 text-rose-500" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-60 transition" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleToggleSort("fecha_vencimiento")}
+                    className={`p-3.5 text-left cursor-pointer hover:text-slate-900 dark:hover:text-white transition group ${
+                      sortField === "fecha_vencimiento" ? "bg-rose-500/10 dark:bg-rose-500/15" : ""
+                    }`}
+                    title="Clic para ordenar por Fecha de Vencimiento / Cobro (Más recientes a más antiguos)"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className={sortField === "fecha_vencimiento" ? "text-rose-600 dark:text-rose-400 font-black" : ""}>
+                        Emisión & Vencimiento
+                      </span>
+                      {sortField === "fecha_vencimiento" ? (
+                        sortOrder === "desc" ? (
+                          <span className="flex items-center text-[9px] font-black text-rose-600 dark:text-rose-400 gap-0.5 bg-rose-500/20 px-1 py-0.2 rounded">
+                            <ArrowDown className="w-3 h-3" /> Recientes
+                          </span>
+                        ) : (
+                          <span className="flex items-center text-[9px] font-black text-rose-600 dark:text-rose-400 gap-0.5 bg-rose-500/20 px-1 py-0.2 rounded">
+                            <ArrowUp className="w-3 h-3" /> Antiguos
+                          </span>
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-40 group-hover:opacity-100 transition" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleToggleSort("monto")}
+                    className="p-3.5 text-right cursor-pointer hover:text-slate-900 dark:hover:text-white transition group"
+                    title="Ordenar por Monto del Cheque"
+                  >
+                    <div className="flex items-center justify-end gap-1">
+                      <span>Monto</span>
+                      {sortField === "monto" ? (
+                        sortOrder === "asc" ? <ArrowUp className="w-3 h-3 text-rose-500" /> : <ArrowDown className="w-3 h-3 text-rose-500" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-60 transition" />
+                      )}
+                    </div>
+                  </th>
                   <th className="p-3.5 text-center">Tipo</th>
                   <th className="p-3.5 text-center">Estado</th>
                   <th className="p-3.5 text-right">Acciones</th>

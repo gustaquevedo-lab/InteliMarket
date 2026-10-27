@@ -809,6 +809,7 @@ class MultiSupplierPaymentBatchCreate(BaseModel):
     cheques: list[MultiSupplierChequeItem] = []
     monto_total_desembolso_pyg: Decimal  # Monto total del cheque/transferencia matriz
     monto_total_desembolso_brl: Optional[Decimal] = None
+    monto_total_desembolso_usd: Optional[Decimal] = None
     diferencia_cambio_total: Optional[Decimal] = Decimal("0")
     items: list[MultiSupplierBatchItem]
 

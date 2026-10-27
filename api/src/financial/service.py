@@ -5416,10 +5416,97 @@ async def _execute_disbursements_internal(
 
         # ── A. EFECTIVO BÓVEDA CENTRAL ───────────────────────────────────────
         if fp == "boveda":
-            is_brl = (d.moneda or "PYG").upper() == "BRL"
+            moneda_des = (d.moneda or "PYG").upper()
+            is_brl = moneda_des == "BRL"
+            is_usd = moneda_des == "USD"
             now_dt = datetime.now(timezone.utc)
 
-            if is_brl:
+            if is_usd:
+                monto_solicitado_usd = monto_original
+                # Verificar saldo en bóveda en Dólares (US$)
+                bov_saldo_res = await db.execute(
+                    select(func.coalesce(func.sum(VaultEntry.monto_usd), 0))
+                    .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+                )
+                saldo_boveda_usd = bov_saldo_res.scalar_one() or Decimal("0")
+                if saldo_boveda_usd < monto_solicitado_usd:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Saldo insuficiente de Dólares (US$) en Bóveda Central. Disponible: US$ {saldo_boveda_usd:,.2f} | Solicitado: US$ {monto_solicitado_usd:,.2f}"
+                    )
+
+                # Consumo FIFO de VaultEntry con saldo en Dólares
+                entries_res = await db.execute(
+                    select(VaultEntry)
+                    .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda", VaultEntry.monto_usd > 0)
+                    .order_by(VaultEntry.created_at.asc())
+                )
+                vault_entries = list(entries_res.scalars().all())
+                remaining_usd = monto_solicitado_usd
+
+                for e in vault_entries:
+                    if remaining_usd <= Decimal("0"):
+                        break
+                    e_monto_usd = Decimal(str(e.monto_usd or 0))
+                    if e_monto_usd <= remaining_usd:
+                        if (e.monto_pyg and e.monto_pyg > 0) or (e.monto_brl and e.monto_brl > 0):
+                            db.add(VaultEntry(
+                                company_id=cid,
+                                branch_id=e.branch_id,
+                                origen=e.origen,
+                                handoff_id=e.handoff_id,
+                                monto_pyg=Decimal("0"),
+                                monto_usd=e_monto_usd,
+                                monto_brl=Decimal("0"),
+                                estado="pagado_proveedor",
+                                fecha_deposito=now_dt,
+                                observaciones=f"Egreso US$ por Pago Proveedor {order.numero_orden}",
+                                registrado_por=uuid.UUID(user_id) if user_id else None,
+                            ))
+                            e.monto_usd = Decimal("0")
+                        else:
+                            e.estado = "pagado_proveedor"
+                            e.fecha_deposito = now_dt
+                            e.observaciones = f"Egreso US$ por Pago Proveedor {order.numero_orden}"
+                            if user_id:
+                                e.registrado_por = uuid.UUID(user_id)
+                        remaining_usd -= e_monto_usd
+                    else:
+                        db.add(VaultEntry(
+                            company_id=cid,
+                            branch_id=e.branch_id,
+                            origen=e.origen,
+                            handoff_id=e.handoff_id,
+                            monto_pyg=Decimal("0"),
+                            monto_usd=remaining_usd,
+                            monto_brl=Decimal("0"),
+                            estado="pagado_proveedor",
+                            fecha_deposito=now_dt,
+                            observaciones=f"Egreso parcial US$ por Pago Proveedor {order.numero_orden}",
+                            registrado_por=uuid.UUID(user_id) if user_id else None,
+                        ))
+                        e.monto_usd = e_monto_usd - remaining_usd
+                        remaining_usd = Decimal("0")
+                        break
+
+                # Registrar movimiento de caja/bóveda en Dólares
+                from api.src.caja.models import CashRegister
+                reg_res = await db.execute(
+                    select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc(), CashRegister.created_at.asc()).limit(1)
+                )
+                main_reg = reg_res.scalar_one_or_none()
+                if main_reg:
+                    db.add(CashRegisterMovement(
+                        company_id=cid,
+                        register_id=main_reg.id,
+                        tipo="retiro",
+                        monto=monto_solicitado_usd,
+                        moneda="USD",
+                        fecha=datetime.now(TZ_ASUNCION),
+                        usuario=user_nombre or "Tesorería",
+                        observaciones=f"Pago {order.numero_orden} (US$ {monto_solicitado_usd:,.2f} @ TC {tc:,.0f}) - {contraparte_str}",
+                    ))
+            elif is_brl:
                 monto_solicitado_brl = monto_original
                 # Verificar saldo en bóveda en Reales (R$)
                 bov_saldo_res = await db.execute(
@@ -6904,10 +6991,94 @@ async def create_multi_supplier_payment_batch(
         db.add(bt)
 
     elif fp == "boveda":
-        is_brl_batch = payload.moneda_desembolso == "BRL" or any(it.moneda == "BRL" for it in payload.items)
+        moneda_batch = (payload.moneda_desembolso or "").upper()
+        is_usd_batch = moneda_batch == "USD" or any(getattr(it, "moneda", "") == "USD" for it in payload.items)
+        is_brl_batch = (not is_usd_batch) and (moneda_batch == "BRL" or any(getattr(it, "moneda", "") == "BRL" for it in payload.items))
         now_dt = datetime.now(timezone.utc)
 
-        if is_brl_batch:
+        if is_usd_batch:
+            total_usd_declarado = payload.monto_total_desembolso_usd or sum(Decimal(str(it.monto_moneda)) for it in payload.items if getattr(it, "moneda", "") == "USD")
+            bov_saldo_res = await db.execute(
+                select(func.coalesce(func.sum(VaultEntry.monto_usd), 0))
+                .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+            )
+            saldo_boveda_usd = bov_saldo_res.scalar_one() or Decimal("0")
+            if saldo_boveda_usd < total_usd_declarado:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Saldo insuficiente de Dólares (US$) en Bóveda Central. Disponible: US$ {saldo_boveda_usd:,.2f} | Solicitado por lote: US$ {total_usd_declarado:,.2f}"
+                )
+
+            entries_res = await db.execute(
+                select(VaultEntry)
+                .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda", VaultEntry.monto_usd > 0)
+                .order_by(VaultEntry.created_at.asc())
+            )
+            vault_entries = list(entries_res.scalars().all())
+            remaining_usd = total_usd_declarado
+
+            for e in vault_entries:
+                if remaining_usd <= Decimal("0"):
+                    break
+                e_monto = Decimal(str(e.monto_usd or 0))
+                if e_monto <= remaining_usd:
+                    if (e.monto_pyg and e.monto_pyg > 0) or (e.monto_brl and e.monto_brl > 0):
+                        db.add(VaultEntry(
+                            company_id=cid,
+                            branch_id=e.branch_id,
+                            origen=e.origen,
+                            handoff_id=e.handoff_id,
+                            monto_pyg=Decimal("0"),
+                            monto_usd=e_monto,
+                            monto_brl=Decimal("0"),
+                            estado="pagado_proveedor",
+                            fecha_deposito=now_dt,
+                            observaciones=f"Egreso US$ Lote Multi-Proveedor ({len(payload.items)} prov.)",
+                            registrado_por=uuid.UUID(user_id) if user_id else None,
+                        ))
+                        e.monto_usd = Decimal("0")
+                    else:
+                        e.estado = "pagado_proveedor"
+                        e.fecha_deposito = now_dt
+                        e.observaciones = f"Egreso US$ Lote Multi-Proveedor ({len(payload.items)} prov.)"
+                        if user_id:
+                            e.registrado_por = uuid.UUID(user_id)
+                    remaining_usd -= e_monto
+                else:
+                    db.add(VaultEntry(
+                        company_id=cid,
+                        branch_id=e.branch_id,
+                        origen=e.origen,
+                        handoff_id=e.handoff_id,
+                        monto_pyg=Decimal("0"),
+                        monto_usd=remaining_usd,
+                        monto_brl=Decimal("0"),
+                        estado="pagado_proveedor",
+                        fecha_deposito=now_dt,
+                        observaciones=f"Egreso parcial US$ Lote Multi-Proveedor ({len(payload.items)} prov.)",
+                        registrado_por=uuid.UUID(user_id) if user_id else None,
+                    ))
+                    e.monto_usd = e_monto - remaining_usd
+                    remaining_usd = Decimal("0")
+                    break
+
+            from api.src.caja.models import CashRegister
+            reg_res = await db.execute(
+                select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc(), CashRegister.created_at.asc()).limit(1)
+            )
+            main_reg = reg_res.scalar_one_or_none()
+            if main_reg:
+                db.add(CashRegisterMovement(
+                    company_id=cid,
+                    register_id=main_reg.id,
+                    tipo="retiro",
+                    monto=total_usd_declarado,
+                    moneda="USD",
+                    fecha=datetime.now(TZ_ASUNCION),
+                    usuario=user_nombre or "Tesorería",
+                    observaciones=f"Egreso Bóveda US$ Lote Multi-Proveedor ({len(payload.items)} prov.)",
+                ))
+        elif is_brl_batch:
             total_brl_declarado = payload.monto_total_desembolso_brl or sum(Decimal(str(it.monto_moneda)) for it in payload.items if it.moneda == "BRL")
             bov_saldo_res = await db.execute(
                 select(func.coalesce(func.sum(VaultEntry.monto_brl), 0))
