@@ -466,8 +466,8 @@ def load_ventas(pg, my, cli_ids):
         with mysql_stream() as sc:
             cur = sc.cursor()
             cur.execute("SELECT IDFACVENTAS, IDCLIENTE, NUMFAC, MONTO, FECHA, "
-                        "MODOPAGO, TIMBRADO, RENDIDO FROM fac_ventas")
-            for (idfac, idcli, numfac, monto, fecha, modopago, timbrado, rendido) in cur:
+                        "IDTIPO_VENTA, TIMBRADO, RENDIDO FROM fac_ventas")
+            for (idfac, idcli, numfac, monto, fecha, tipo_venta, timbrado, rendido) in cur:
                 facturas.add(idfac)
                 idc = txt_keep(idcli, 15)
                 cust = uuid.uuid5(NS, f"cli:{idc}") if (idc and idc in cli_ids) else None
@@ -475,7 +475,7 @@ def load_ventas(pg, my, cli_ids):
                 obs = f"NUMFAC={money(numfac)} TIMB={txt_keep(timbrado) or ''}".strip()
                 yield (uuid.uuid5(NS, f"fac:{idfac}"), COMPANY_ID, cust,
                        str(idfac)[:20], safe_dt(fecha) or datetime.now(), "factura",
-                       "credito" if (modopago or 0) in (1, 2) else "contado",
+                       "credito" if (tipo_venta or 0) in (2, 6) else "contado",  # tipo_ventas: 2 Credito, 6 Servicio Credito
                        "PYG", "completado", total, total,
                        total if rendido else 0, 0 if rendido else total,
                        obs[:500], datetime.now())

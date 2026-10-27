@@ -698,11 +698,36 @@ def sync_stock(pg, my, valid_wh):
 # ----------------------------------------------------------------------------
 # Documentos inmutables -> incremental por ID autoincrement
 # ----------------------------------------------------------------------------
+def condicion_venta(idtipo_venta):
+    """tipo_ventas del legacy: 2 = Credito, 6 = Servicio Credito; el resto es contado."""
+    return "credito" if (idtipo_venta or 0) in (2, 6) else "contado"
+
+
+def backfill_condicion_ventas(pg, my):
+    """Una vez: marca 'credito' las ventas ya importadas (antes se leía MODOPAGO, que nunca vale 1/2).
+    Lee el legacy por rangos de PK, sin escanear la tabla entera de una vez."""
+    with my.cursor() as cur:
+        cur.execute("SELECT MAX(IDFACVENTAS) FROM fac_ventas")
+        top = cur.fetchone()[0] or 0
+    total, paso = 0, 50000
+    for desde in range(0, top + 1, paso):
+        with my.cursor() as cur:
+            cur.execute("SELECT IDFACVENTAS FROM fac_ventas WHERE IDFACVENTAS > %s AND IDFACVENTAS <= %s "
+                        "AND IDTIPO_VENTA IN (2, 6)", (desde, desde + paso))
+            ids = [str(uuid.uuid5(NS, f"fac:{r[0]}")) for r in cur.fetchall()]
+        if ids and not DRY_RUN:
+            with pg.cursor() as c:
+                c.execute("UPDATE sales SET condicion = 'credito' WHERE id = ANY(%s::uuid[]) AND condicion <> 'credito'", (ids,))
+                total += c.rowcount
+            pg.commit()
+    log(f"  condicion: {total} ventas marcadas credito")
+
+
 def sync_ventas(pg, my):
     last_id, _ = get_watermark(pg, "ventas")
     with my.cursor() as cur:
         cur.execute(
-            "SELECT IDFACVENTAS, IDCLIENTE, NUMFAC, MONTO, FECHA, MODOPAGO, TIMBRADO, RENDIDO, IDVENDEDOR "
+            "SELECT IDFACVENTAS, IDCLIENTE, NUMFAC, MONTO, FECHA, IDTIPO_VENTA, TIMBRADO, RENDIDO, IDVENDEDOR "
             "FROM fac_ventas WHERE IDFACVENTAS > %s ORDER BY IDFACVENTAS", (last_id,))
         legacy_rows = cur.fetchall()
     if not legacy_rows:
@@ -710,14 +735,14 @@ def sync_ventas(pg, my):
         return set(), last_id
     clientes_validos = {txt_keep(c, 15) for c in legacy_id_set(my, "clientes", "IDCLIENTES")}
     max_id, rows = last_id, []
-    for (idfac, idcli, numfac, monto, fecha, modopago, timbrado, rendido, idvend) in legacy_rows:
+    for (idfac, idcli, numfac, monto, fecha, tipo_venta, timbrado, rendido, idvend) in legacy_rows:
         idc = txt_keep(idcli, 15)
         cust = uuid.uuid5(NS, f"cli:{idc}") if (idc and idc in clientes_validos) else None
         total = money(monto)
         obs = f"NUMFAC={money(numfac)} TIMB={txt_keep(timbrado) or ''}".strip()
         rows.append((uuid.uuid5(NS, f"fac:{idfac}"), COMPANY_ID, cust, str(idfac)[:20],
                      safe_dt(fecha) or datetime.now(), "factura",
-                     "credito" if (modopago or 0) in (1, 2) else "contado", "PYG", "completado",
+                     condicion_venta(tipo_venta), "PYG", "completado",
                      total, total, total if rendido else 0, 0 if rendido else total, obs[:500],
                      txt_keep(idvend, 10)))
         max_id = max(max_id, idfac)
@@ -1963,6 +1988,7 @@ def main():
         "proveedores": lambda: sync_proveedores(pg, my),
         "productos": None,   # necesita cat_map, se arma abajo
         "actividades": lambda: sync_actividades(pg, my),
+        "condicion": lambda: backfill_condicion_ventas(pg, my),
         "clientes": lambda: sync_clientes(pg, my),
         "precios": None,     # necesita codigos, se arma abajo
         "stock": None,       # necesita valid_wh, se arma abajo
@@ -2040,6 +2066,9 @@ def main():
         sync_zparruta(pg, my, rutas_validas)
     if not ONLY or ONLY == "rescamion":
         sync_rescamion(pg, my)
+
+    if ONLY == "condicion":  # solo a mano, una vez: corrige ventas viejas mal marcadas contado
+        backfill_condicion_ventas(pg, my)
 
     log("\n[4e2] Viajes de reparto + cajas de cobrador (trips / route_sessions)")
     if not ONLY or ONLY == "viajes":

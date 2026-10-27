@@ -78,19 +78,17 @@ async def get_route_session_detail(db: AsyncSession, session_id: str) -> dict:
     # AR summary for the cobrador on this date
     ar_sql = text("""
         SELECT
-            COALESCE(SUM(CASE WHEN tipo = 'efectivo' THEN monto ELSE 0 END), 0) AS total_efectivo,
-            COALESCE(SUM(CASE WHEN tipo = 'cheque' THEN monto ELSE 0 END), 0) AS total_cheques,
-            COALESCE(SUM(CASE WHEN tipo = 'pagare' THEN monto ELSE 0 END), 0) AS total_pagares,
-            COALESCE(SUM(CASE WHEN tipo = 'nc' THEN monto ELSE 0 END), 0) AS total_nc
+            COALESCE(SUM(CASE WHEN forma_pago = 'efectivo' THEN monto_total ELSE 0 END), 0) AS total_efectivo,
+            COALESCE(SUM(CASE WHEN forma_pago = 'cheque' THEN monto_total ELSE 0 END), 0) AS total_cheques,
+            COALESCE(SUM(CASE WHEN forma_pago = 'pagare' THEN monto_total ELSE 0 END), 0) AS total_pagares,
+            COALESCE(SUM(CASE WHEN forma_pago = 'nc' THEN monto_total ELSE 0 END), 0) AS total_nc
         FROM receivable_payments
         WHERE cobrador_id = :cobrador_id
-          AND created_at AT TIME ZONE 'America/Asuncion' >= :fecha_start
-          AND created_at AT TIME ZONE 'America/Asuncion' < :fecha_end
+          AND (created_at AT TIME ZONE 'America/Asuncion')::date = CAST(:fecha AS date)
     """)
     ar_result = await db.execute(ar_sql, {
         "cobrador_id": str(session.cobrador_id),
-        "fecha_start": str(session.fecha),
-        "fecha_end": str(session.fecha),
+        "fecha": str(session.fecha),
     })
     ar_row = ar_result.fetchone()
     ar_summary = {
@@ -124,21 +122,21 @@ async def close_session(
 
     # efectivo_esperado: sum of efectivo payments for this cobrador today
     efectivo_sql = text("""
-        SELECT COALESCE(SUM(monto), 0)
+        SELECT COALESCE(SUM(monto_total), 0)
         FROM receivable_payments
         WHERE cobrador_id = :cobrador_id
-          AND created_at::date AT TIME ZONE 'America/Asuncion' = :fecha
-          AND tipo = 'efectivo'
+          AND (created_at AT TIME ZONE 'America/Asuncion')::date = CAST(:fecha AS date)
+          AND forma_pago = 'efectivo'
     """)
     ef_result = await db.execute(efectivo_sql, {"cobrador_id": cobrador_id, "fecha": str(fecha)})
     efectivo_esperado = Decimal(ef_result.scalar() or 0)
 
     # total_cobrado_ar: all payments for this cobrador today
     total_sql = text("""
-        SELECT COALESCE(SUM(monto), 0)
+        SELECT COALESCE(SUM(monto_total), 0)
         FROM receivable_payments
         WHERE cobrador_id = :cobrador_id
-          AND created_at::date AT TIME ZONE 'America/Asuncion' = :fecha
+          AND (created_at AT TIME ZONE 'America/Asuncion')::date = CAST(:fecha AS date)
     """)
     total_result = await db.execute(total_sql, {"cobrador_id": cobrador_id, "fecha": str(fecha)})
     total_cobrado_ar = Decimal(total_result.scalar() or 0)
