@@ -84,6 +84,8 @@ async def main_async(args):
                 real = "faltante/sobrante registrado en cta_cte_funcionarios"
             else:
                 real = "SIN EXPLICAR"
+            if l["facturas"] == 0:  # sin carga de reparto: cajas de tesoreria/cobranza (depositos, transferencias, cheques)
+                real = "caja sin carga (tesoreria/cobranza): " + real
             filas.append((c, l, im, entregado, dif, real, causa))
         await db.close()
     n = len(filas)
@@ -92,12 +94,16 @@ async def main_async(args):
         if k != "IGUAL":
             ej = next(f for f in filas if f[6].startswith(k))
             print(f"  {k}: {v}  ej: caja {ej[0]['id']} {ej[0]['fecha']} -> {ej[6]}")
-    real = Counter(f[5] for f in filas)
-    print(f"Formula vs lo que la caja entrego en el legacy (efectivo+cheques): " +
-          "; ".join(f"{k}: {v}" for k, v in real.most_common()))
-    for f in filas:
-        if f[5] == "SIN EXPLICAR":
-            print(f"  SIN EXPLICAR caja {f[0]['id']} {f[0]['fecha']}: formula {f[1]['total']:,} entregado {f[3]:,} dif {f[4]:,} {f[1]}")
+    for nombre, sel in (("Cajas de reparto (con facturas)", lambda f: f[1]["facturas"] > 0),
+                        ("Cajas sin carga (tesoreria/cobranza)", lambda f: f[1]["facturas"] == 0)):
+        sub = [f for f in filas if sel(f)]
+        real = Counter(f[5].replace("caja sin carga (tesoreria/cobranza): ", "") for f in sub)
+        print(f"{nombre}: {len(sub)} | formula vs entregado (efectivo+cheques): " +
+              "; ".join(f"{k}: {v}" for k, v in real.most_common()))
+        for f in sub:
+            if f[5].endswith("SIN EXPLICAR") and len(sub) and (f[1]["facturas"] > 0 or args.detalle):
+                print(f"  SIN EXPLICAR caja {f[0]['id']} {f[0]['fecha']}: formula {f[1]['total']:,} entregado {f[3]:,} "
+                      f"dif {f[4]:,} {f[1]}")
     if args.detalle:
         print("\ncaja     fecha       formula_legacy  formula_IM  entregado  dif  causa")
         for (c, l, im, ent, dif, real_, causa) in filas:
