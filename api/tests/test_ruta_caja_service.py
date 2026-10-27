@@ -75,7 +75,7 @@ async def test_close_session_calcula_esperado_con_la_formula():
     db = _mock_db()
     db.get.return_value = _sesion()
     db.execute.side_effect = [_filas(
-        ("facturas", 2545900, 0), ("cobro", 50344, 0), ("otro_ingreso", 4952, 0),
+        ("facturas", 2545986, 0), ("cobro", 50344, 0), ("otro_ingreso", 4952, 0),
         ("deposito", 2600382, 0), ("credito", 900, 0),
     ), MagicMock()]
     sid = str(uuid.uuid4())
