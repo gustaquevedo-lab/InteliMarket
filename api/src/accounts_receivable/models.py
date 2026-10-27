@@ -38,6 +38,10 @@ class Account(Base):
     )
 
 
+# Alias canónico para interoperabilidad con módulos de ventas y cobranzas
+AccountsReceivable = Account
+
+
 class CorporateRemission(Base):
     """Lote consolidado de corte mensual enviado a empresas vinculadas para descuento
     por nómina de funcionarios (Extra Club). Al remitirse, la titularidad de cobro

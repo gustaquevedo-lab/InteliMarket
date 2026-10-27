@@ -1267,8 +1267,8 @@ async def reopen_sale_customer(
 
     # Candado: Sincronizar accounts_receivable con el nuevo titular de la venta
     if sale.customer_id:
-        from api.src.accounts_receivable.models import AccountsReceivable
-        ar_res = await db.execute(select(AccountsReceivable).where(AccountsReceivable.sale_id == sale.id))
+        from api.src.accounts_receivable.models import Account
+        ar_res = await db.execute(select(Account).where(Account.sale_id == sale.id))
         ar = ar_res.scalar_one_or_none()
         if ar:
             ar.customer_id = sale.customer_id
