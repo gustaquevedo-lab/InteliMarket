@@ -66,38 +66,24 @@ async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     clean_input = (body.email or "").strip().lower()
     auto_email = f"{clean_input}@intelimarket.com.py" if "@" not in clean_input else clean_input
-    auto_casagonzalito = f"{clean_input}@casagonzalito.py" if "@" not in clean_input else clean_input
-    auto_gonzalito = f"{clean_input}@gonzalito.com.py" if "@" not in clean_input else clean_input
 
     from sqlalchemy import or_
-    conditions = [
-        func.lower(User.email) == clean_input,
-        func.lower(User.email) == auto_email,
-        func.lower(User.email) == auto_casagonzalito,
-        func.lower(User.email) == auto_gonzalito,
-        func.lower(User.nombre) == clean_input,
-        func.lower(User.email) == clean_input.replace("evelyn", "evelin"),
-        func.lower(User.email) == auto_email.replace("evelyn", "evelin"),
-    ]
-    if clean_input in ("admin", "administrador", "admin@intelimarket.py", "admin@intelimarket.com.py", "admin@gonzalito.com.py", "admin@casagonzalito.com.py"):
-        conditions.append(func.lower(User.email) == "admin@casagonzalito.py")
-
-    result = await db.execute(select(User).where(or_(*conditions)))
+    result = await db.execute(
+        select(User).where(
+            or_(
+                func.lower(User.email) == clean_input,
+                func.lower(User.email) == auto_email,
+                func.lower(User.nombre) == clean_input,
+                # Soportar variantes con y/i (ej: evelyn vs evelin)
+                func.lower(User.email) == clean_input.replace("evelyn", "evelin"),
+                func.lower(User.email) == auto_email.replace("evelyn", "evelin"),
+            )
+        )
+    )
     user = result.scalars().first()
 
-    pwd_ok = False
-    if user:
-        pwd_ok = verify_password(body.password, user.password_hash)
-        if not pwd_ok and user.email == "admin@casagonzalito.py" and body.password in ("casa1234", "admin123"):
-            pwd_ok = True
-        elif not pwd_ok and user.email in ("gerencia@gonzalito.com.py", "supervisor@gonzalito.com.py", "demo@intelimarket.py") and body.password in ("admin123", "casa1234"):
-            pwd_ok = True
 
-    if not user or not pwd_ok:
-        import logging
-        logging.getLogger("uvicorn.error").warning(
-            f"LOGIN FAILED: input email='{body.email}', clean='{clean_input}', user_found={user.email if user else None}"
-        )
+    if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Credenciales invalidas")
 
 
