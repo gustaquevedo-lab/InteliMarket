@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 
 class LiquidationItemCreate(BaseModel):
-    tipo: str  # 'cheque' or 'pagare'
+    tipo: str  # cheque, pagare, cobro, otro_ingreso, deposito, gasto, devolucion, dev_credito
     numero: str
     banco: Optional[str] = None
     monto: Decimal
@@ -39,6 +39,8 @@ class RouteSessionResponse(BaseModel):
     opened_at: datetime
     closed_at: Optional[datetime] = None
     created_by: UUID
+    legacy_caja_id: Optional[int] = None
+    trip_id: Optional[UUID] = None
 
     class Config:
         from_attributes = True
@@ -83,6 +85,7 @@ class RouteLiquidationResponse(BaseModel):
 class RouteSessionDetailResponse(RouteSessionResponse):
     liquidation: Optional[RouteLiquidationResponse] = None
     ar_summary: Optional[dict] = None
+    rendicion: Optional[dict] = None  # componentes de la formula + total (calcular_rendicion)
 
 
 class CloseSessionRequest(BaseModel):

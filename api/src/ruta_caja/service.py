@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.src.ruta_caja.rendicion import calcular_rendicion
 from api.src.ruta_caja.models import BankDeposit, RouteLiquidation, RouteLiquidationItem, RouteSession
 from api.src.ruta_caja.schemas import BankDepositCreate
 
@@ -26,7 +27,8 @@ async def open_route_session(
             RouteSession.company_id == company_id,
             RouteSession.cobrador_id == cobrador_id,
             RouteSession.fecha == fecha,
-        )
+            RouteSession.estado == "abierta",
+        ).limit(1)
     )
     existing = result.scalar_one_or_none()
     if existing:
@@ -65,6 +67,49 @@ async def list_route_sessions(
     return result.scalars().all()
 
 
+# tipo de item de la liquidacion -> componente de calcular_rendicion
+_TIPO_COMPONENTE = {"cobro": "cobros", "otro_ingreso": "otros_ingresos", "devolucion": "devoluciones",
+                    "dev_credito": "dev_credito", "deposito": "depositos", "gasto": "gastos"}
+
+_MOV_SQL = text("""
+    SELECT CASE WHEN s.condicion = 'credito' THEN 'facturas_credito' ELSE 'facturas_contado' END AS k,
+           COALESCE(SUM(s.total), 0) AS m
+    FROM trip_stops ts
+    JOIN sales_orders so ON so.id = ts.sales_order_id
+    JOIN sales s ON s.id = so.sale_id
+    WHERE ts.route_session_id = :sid
+    GROUP BY 1
+    UNION ALL
+    SELECT i.tipo, COALESCE(SUM(i.monto), 0)
+    FROM route_liquidation_items i
+    JOIN route_liquidations l ON l.id = i.liquidation_id
+    WHERE l.route_session_id = :sid AND i.tipo = ANY(:tipos)
+    GROUP BY i.tipo
+""")
+
+
+async def movimientos_sesion(db: AsyncSession, session: RouteSession) -> dict:
+    """Componentes de la rendicion de una caja/salida, leidos de las facturas de sus paradas y de los items
+    de su liquidacion. Una sesion sin cobros cargados (no viene del sistema viejo) usa los cobros de AR del dia."""
+    rows = (await db.execute(_MOV_SQL, {"sid": str(session.id), "tipos": list(_TIPO_COMPONENTE)})).fetchall()
+    mov: dict = {}
+    for k, m in rows:
+        mov[_TIPO_COMPONENTE.get(k, k)] = Decimal(m or 0)
+    if not mov.get("cobros") and session.legacy_caja_id is None:
+        ar = await db.execute(text("""
+            SELECT COALESCE(SUM(monto_total), 0) FROM receivable_payments
+            WHERE cobrador_id = :cobrador_id AND forma_pago = 'efectivo'
+              AND (created_at AT TIME ZONE 'America/Asuncion')::date = CAST(:fecha AS date)
+        """), {"cobrador_id": str(session.cobrador_id), "fecha": str(session.fecha)})
+        mov["cobros"] = Decimal(ar.scalar() or 0)
+    return mov
+
+
+def diferencia_liquidacion(liq: RouteLiquidation) -> Decimal:
+    """Lo entregado (efectivo + cheques) menos lo que la formula dice que debia entregar."""
+    return Decimal(liq.efectivo_declarado or 0) + Decimal(liq.cheques_declarado or 0) - Decimal(liq.efectivo_esperado or 0)
+
+
 async def get_route_session_detail(db: AsyncSession, session_id: str) -> dict:
     session = await db.get(RouteSession, session_id)
     if not session:
@@ -98,7 +143,8 @@ async def get_route_session_detail(db: AsyncSession, session_id: str) -> dict:
         "total_nc": int(ar_row[3]) if ar_row else 0,
     }
 
-    return {"session": session, "liquidation": liq, "ar_summary": ar_summary}
+    rendicion = calcular_rendicion(await movimientos_sesion(db, session))
+    return {"session": session, "liquidation": liq, "ar_summary": ar_summary, "rendicion": rendicion}
 
 
 async def close_session(
@@ -110,36 +156,13 @@ async def close_session(
     nc_aplicadas: Decimal,
     descuentos_autorizados: Decimal,
     items: list,
+    closed_by: Optional[str] = None,
 ) -> RouteLiquidation:
     session = await db.get(RouteSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     if session.estado != "abierta":
         raise HTTPException(status_code=409, detail="La sesión no está en estado abierta")
-
-    cobrador_id = str(session.cobrador_id)
-    fecha = session.fecha
-
-    # efectivo_esperado: sum of efectivo payments for this cobrador today
-    efectivo_sql = text("""
-        SELECT COALESCE(SUM(monto_total), 0)
-        FROM receivable_payments
-        WHERE cobrador_id = :cobrador_id
-          AND (created_at AT TIME ZONE 'America/Asuncion')::date = CAST(:fecha AS date)
-          AND forma_pago = 'efectivo'
-    """)
-    ef_result = await db.execute(efectivo_sql, {"cobrador_id": cobrador_id, "fecha": str(fecha)})
-    efectivo_esperado = Decimal(ef_result.scalar() or 0)
-
-    # total_cobrado_ar: all payments for this cobrador today
-    total_sql = text("""
-        SELECT COALESCE(SUM(monto_total), 0)
-        FROM receivable_payments
-        WHERE cobrador_id = :cobrador_id
-          AND (created_at AT TIME ZONE 'America/Asuncion')::date = CAST(:fecha AS date)
-    """)
-    total_result = await db.execute(total_sql, {"cobrador_id": cobrador_id, "fecha": str(fecha)})
-    total_cobrado_ar = Decimal(total_result.scalar() or 0)
 
     liq = RouteLiquidation(
         route_session_id=session_id,
@@ -148,26 +171,25 @@ async def close_session(
         pagares_declarado=pagares_declarado,
         nc_aplicadas=nc_aplicadas,
         descuentos_autorizados=descuentos_autorizados,
-        efectivo_esperado=efectivo_esperado,
-        total_cobrado_ar=total_cobrado_ar,
         estado="pendiente",
     )
     db.add(liq)
     await db.flush()
 
     for item in items:
-        item_obj = RouteLiquidationItem(
-            liquidation_id=str(liq.id) if liq.id else None,
-            tipo=item.tipo if hasattr(item, "tipo") else item["tipo"],
-            numero=item.numero if hasattr(item, "numero") else item["numero"],
-            banco=getattr(item, "banco", None) or item.get("banco") if not hasattr(item, "tipo") else getattr(item, "banco", None),
-            monto=item.monto if hasattr(item, "monto") else item["monto"],
-            customer_id=getattr(item, "customer_id", None),
-            vencimiento=getattr(item, "vencimiento", None),
-        )
-        db.add(item_obj)
+        d = item if isinstance(item, dict) else item.model_dump()
+        db.add(RouteLiquidationItem(
+            liquidation_id=liq.id, tipo=d["tipo"], numero=d["numero"], banco=d.get("banco"),
+            monto=d["monto"], customer_id=d.get("customer_id"), vencimiento=d.get("vencimiento"),
+        ))
+    await db.flush()
+
+    rendicion = calcular_rendicion(await movimientos_sesion(db, session))
+    liq.efectivo_esperado = rendicion["total"]
+    liq.total_cobrado_ar = rendicion["cobros"]
 
     session.estado = "cerrada"
+    session.closed_by = closed_by
     session.closed_at = datetime.now(tz=timezone.utc)
     await db.flush()
     await db.commit()
@@ -187,6 +209,10 @@ async def authorize_liquidation(db: AsyncSession, liquidation_id: str, superviso
         raise HTTPException(status_code=404, detail="Liquidación no encontrada")
     if liq.estado != "pendiente":
         raise HTTPException(status_code=409, detail="Liquidación ya procesada")
+    # faltante o sobrante: lo aprueba un supervisor distinto de quien cerró la caja
+    session = await db.get(RouteSession, liq.route_session_id)
+    if diferencia_liquidacion(liq) != 0 and session and session.closed_by and str(session.closed_by) == str(supervisor_id):
+        raise HTTPException(status_code=403, detail="Un faltante o sobrante lo aprueba otro supervisor, no quien cerró la caja")
     liq.estado = "autorizada"
     liq.supervisor_id = supervisor_id
     liq.fecha_autorizacion = datetime.now(tz=timezone.utc)

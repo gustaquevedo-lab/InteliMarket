@@ -68,12 +68,13 @@ async def get_session(
     if liq:
         liq_resp = RouteLiquidationResponse(
             **{c.key: getattr(liq, c.key) for c in liq.__table__.columns},
-            diferencia=liq.efectivo_declarado - liq.efectivo_esperado,
+            diferencia=service.diferencia_liquidacion(liq),
         )
     return RouteSessionDetailResponse(
         **{c.key: getattr(session, c.key) for c in session.__table__.columns},
         liquidation=liq_resp,
         ar_summary=detail.get("ar_summary"),
+        rendicion=detail.get("rendicion"),
     )
 
 
@@ -82,7 +83,7 @@ async def close_session(
     session_id: str,
     body: CloseSessionRequest,
     db: AsyncSession = Depends(get_db),
-    _=Depends(require_auth),
+    current_user: dict = Depends(require_auth),
 ):
     liq = await service.close_session(
         db,
@@ -93,10 +94,11 @@ async def close_session(
         nc_aplicadas=body.nc_aplicadas,
         descuentos_autorizados=body.descuentos_autorizados,
         items=body.items,
+        closed_by=current_user["sub"],
     )
     return RouteLiquidationResponse(
         **{c.key: getattr(liq, c.key) for c in liq.__table__.columns},
-        diferencia=liq.efectivo_declarado - liq.efectivo_esperado,
+        diferencia=service.diferencia_liquidacion(liq),
     )
 
 
@@ -111,7 +113,7 @@ async def get_liquidation(
     liq = await service.get_liquidation(db, liquidation_id)
     return RouteLiquidationResponse(
         **{c.key: getattr(liq, c.key) for c in liq.__table__.columns},
-        diferencia=liq.efectivo_declarado - liq.efectivo_esperado,
+        diferencia=service.diferencia_liquidacion(liq),
     )
 
 
@@ -124,7 +126,7 @@ async def authorize_liquidation(
     liq = await service.authorize_liquidation(db, liquidation_id, supervisor_id=current_user["sub"])
     return RouteLiquidationResponse(
         **{c.key: getattr(liq, c.key) for c in liq.__table__.columns},
-        diferencia=liq.efectivo_declarado - liq.efectivo_esperado,
+        diferencia=service.diferencia_liquidacion(liq),
     )
 
 
@@ -138,7 +140,7 @@ async def observe_liquidation(
     liq = await service.observe_liquidation(db, liquidation_id, current_user["sub"], body.observaciones)
     return RouteLiquidationResponse(
         **{c.key: getattr(liq, c.key) for c in liq.__table__.columns},
-        diferencia=liq.efectivo_declarado - liq.efectivo_esperado,
+        diferencia=service.diferencia_liquidacion(liq),
     )
 
 
@@ -152,7 +154,7 @@ async def reject_liquidation(
     liq = await service.reject_liquidation(db, liquidation_id, current_user["sub"], body.observaciones)
     return RouteLiquidationResponse(
         **{c.key: getattr(liq, c.key) for c in liq.__table__.columns},
-        diferencia=liq.efectivo_declarado - liq.efectivo_esperado,
+        diferencia=service.diferencia_liquidacion(liq),
     )
 
 

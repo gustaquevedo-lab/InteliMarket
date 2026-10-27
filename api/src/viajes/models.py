@@ -60,6 +60,7 @@ class TripStop(Base):
     firmado = Column(Boolean, nullable=False, default=False, server_default="false")
     observaciones = Column(Text, nullable=True)
     visited_at = Column(DateTime(timezone=True), nullable=True)
+    route_session_id = Column(UUID(as_uuid=True), nullable=True)  # caja/salida a la que rinde esta parada
 
     __table_args__ = (
         Index("ix_trip_stops_trip_id", "trip_id"),

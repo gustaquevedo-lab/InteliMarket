@@ -54,56 +54,73 @@ async def test_open_session_duplicate_returns_409():
     assert exc_info.value.status_code == 409
 
 
-@pytest.mark.asyncio
-async def test_close_session_calculates_efectivo_esperado_from_ar():
-    """close_session sums receivable_payments of tipo='efectivo' for cobrador on fecha."""
-    from api.src.ruta_caja.service import close_session
-    db = _mock_db()
-    session_id = str(uuid.uuid4())
-    cobrador_id = str(uuid.uuid4())
-    mock_session = MagicMock()
-    mock_session.id = session_id
-    mock_session.cobrador_id = cobrador_id
-    mock_session.fecha = date.today()
-    mock_session.estado = "abierta"
-    db.get.return_value = mock_session
-    db.execute.side_effect = [
-        MagicMock(scalar=MagicMock(return_value=120000)),  # efectivo_esperado
-        MagicMock(scalar=MagicMock(return_value=180000)),  # total_cobrado_ar
-    ]
-    await close_session(
-        db, session_id=session_id,
-        efectivo_declarado=115000,
-        cheques_declarado=50000,
-        pagares_declarado=15000,
-        nc_aplicadas=0,
-        descuentos_autorizados=0,
-        items=[],
-    )
-    db.add.assert_called()
-    liq_obj = db.add.call_args_list[-1][0][0]
-    assert liq_obj.efectivo_esperado == 120000
+def _sesion(legacy_caja_id=267575):
+    ses = MagicMock()
+    ses.id = uuid.uuid4()
+    ses.cobrador_id = uuid.uuid4()
+    ses.fecha = date(2026, 7, 21)
+    ses.estado = "abierta"
+    ses.legacy_caja_id = legacy_caja_id
+    return ses
+
+
+def _filas(*filas):
+    return MagicMock(fetchall=MagicMock(return_value=list(filas)))
 
 
 @pytest.mark.asyncio
-async def test_close_session_zero_ar_payments():
-    """efectivo_esperado is 0 (not error) when cobrador has no AR payments today."""
+async def test_close_session_calcula_esperado_con_la_formula():
+    """efectivo_esperado = contado + cobros + otros ingresos - devoluciones - depositos - gastos."""
     from api.src.ruta_caja.service import close_session
     db = _mock_db()
-    mock_session = MagicMock()
-    mock_session.estado = "abierta"
-    mock_session.fecha = date.today()
-    mock_session.cobrador_id = str(uuid.uuid4())
-    db.get.return_value = mock_session
-    db.execute.side_effect = [
-        MagicMock(scalar=MagicMock(return_value=None)),  # None → treat as 0
-        MagicMock(scalar=MagicMock(return_value=None)),  # total also None
-    ]
-    await close_session(
-        db, str(uuid.uuid4()), 30000, 0, 0, 0, 0, []
-    )
-    liq_obj = db.add.call_args_list[-1][0][0]
+    db.get.return_value = _sesion()
+    db.execute.side_effect = [_filas(
+        ("facturas_contado", 2545086), ("facturas_credito", 900), ("cobro", 50344),
+        ("otro_ingreso", 4952), ("deposito", 2600382), ("dev_credito", 10),
+    )]
+    sid = str(uuid.uuid4())
+    await close_session(db, sid, 0, 0, 0, 0, 0, [], closed_by=str(uuid.uuid4()))
+    liq_obj = [c[0][0] for c in db.add.call_args_list if hasattr(c[0][0], "efectivo_esperado")][-1]
     assert liq_obj.efectivo_esperado == 0
+    assert liq_obj.total_cobrado_ar == 50344
+
+
+@pytest.mark.asyncio
+async def test_close_session_sin_movimientos_espera_cero():
+    from api.src.ruta_caja.service import close_session
+    db = _mock_db()
+    db.get.return_value = _sesion()
+    db.execute.side_effect = [_filas()]
+    await close_session(db, str(uuid.uuid4()), 30000, 0, 0, 0, 0, [])
+    liq_obj = db.add.call_args_list[0][0][0]
+    assert liq_obj.efectivo_esperado == 0
+
+
+@pytest.mark.asyncio
+async def test_authorize_faltante_no_lo_aprueba_quien_cerro():
+    from api.src.ruta_caja.service import authorize_liquidation
+    from fastapi import HTTPException
+    db = _mock_db()
+    cobrador = str(uuid.uuid4())
+    liq = MagicMock(estado="pendiente", efectivo_declarado=900, cheques_declarado=0, efectivo_esperado=1000)
+    ses = _sesion()
+    ses.closed_by = cobrador
+    db.get.side_effect = [liq, ses]
+    with pytest.raises(HTTPException) as exc_info:
+        await authorize_liquidation(db, str(uuid.uuid4()), supervisor_id=cobrador)
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_authorize_faltante_otro_supervisor_si_puede():
+    from api.src.ruta_caja.service import authorize_liquidation
+    db = _mock_db()
+    liq = MagicMock(estado="pendiente", efectivo_declarado=900, cheques_declarado=0, efectivo_esperado=1000)
+    ses = _sesion()
+    ses.closed_by = str(uuid.uuid4())
+    db.get.side_effect = [liq, ses]
+    out = await authorize_liquidation(db, str(uuid.uuid4()), supervisor_id=str(uuid.uuid4()))
+    assert out.estado == "autorizada"
 
 
 @pytest.mark.asyncio
@@ -121,19 +138,13 @@ async def test_authorize_already_authorized_returns_409():
 
 
 @pytest.mark.asyncio
-async def test_close_session_timezone_boundary():
-    """AR query filter uses DATE AT TIME ZONE 'America/Asuncion'."""
+async def test_sesion_propia_usa_cobros_de_ar_con_zona_asuncion():
+    """Una sesion sin caja legacy toma los cobros en efectivo de AR del dia, en America/Asuncion."""
     from api.src.ruta_caja import service
     db = _mock_db()
-    mock_session = MagicMock()
-    mock_session.estado = "abierta"
-    mock_session.fecha = date(2026, 10, 14)
-    mock_session.cobrador_id = str(uuid.uuid4())
-    db.get.return_value = mock_session
-    db.execute.side_effect = [
-        MagicMock(scalar=MagicMock(return_value=0)),
-        MagicMock(scalar=MagicMock(return_value=0)),
-    ]
+    db.get.return_value = _sesion(legacy_caja_id=None)
+    db.execute.side_effect = [_filas(), MagicMock(scalar=MagicMock(return_value=120000))]
     await service.close_session(db, str(uuid.uuid4()), 0, 0, 0, 0, 0, [])
-    first_call_sql = str(db.execute.call_args_list[0][0][0])
-    assert "America/Asuncion" in first_call_sql or "AT TIME ZONE" in first_call_sql
+    assert "AT TIME ZONE" in str(db.execute.call_args_list[1][0][0])
+    liq_obj = db.add.call_args_list[0][0][0]
+    assert liq_obj.efectivo_esperado == 120000

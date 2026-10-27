@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, String, Date, DateTime, Numeric, Text, UniqueConstraint, Index
+from sqlalchemy import Column, String, Date, DateTime, Integer, Numeric, Text, Index
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 
@@ -21,10 +21,14 @@ class RouteSession(Base):
     opened_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     closed_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(UUID(as_uuid=True), nullable=False)
+    # una sesion por caja/salida (no por cobrador+dia): caja del sistema viejo, viaje y quien la cerro
+    legacy_caja_id = Column(Integer, nullable=True)
+    trip_id = Column(UUID(as_uuid=True), nullable=True)
+    closed_by = Column(UUID(as_uuid=True), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("company_id", "cobrador_id", "fecha", name="uq_route_session_cobrador_fecha"),
         Index("ix_route_sessions_company_fecha", "company_id", "fecha"),
+        Index("ix_route_sessions_cobrador_fecha", "company_id", "cobrador_id", "fecha"),
     )
 
 
@@ -52,7 +56,8 @@ class RouteLiquidationItem(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     liquidation_id = Column(UUID(as_uuid=True), nullable=False)
-    tipo = Column(String(10), nullable=False)
+    # cheque, pagare, cobro, otro_ingreso, deposito, gasto, devolucion, dev_credito
+    tipo = Column(String(20), nullable=False)
     numero = Column(String(50), nullable=False)
     banco = Column(String(100), nullable=True)
     monto = Column(Numeric(18, 0), nullable=False)

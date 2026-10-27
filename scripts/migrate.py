@@ -356,6 +356,15 @@ CREATE TABLE IF NOT EXISTS route_liquidation_items (
     vencimiento DATE
 );
 
+-- Rendicion por caja/salida (no por cobrador+dia): ver docs/superpowers/specs/2026-10-27-pilotos-viajes-cajas-mapeo.md
+ALTER TABLE route_sessions DROP CONSTRAINT IF EXISTS uq_route_session_cobrador_fecha;
+ALTER TABLE route_sessions ADD COLUMN IF NOT EXISTS legacy_caja_id INTEGER;
+ALTER TABLE route_sessions ADD COLUMN IF NOT EXISTS trip_id UUID;
+ALTER TABLE route_sessions ADD COLUMN IF NOT EXISTS closed_by UUID;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_route_sessions_legacy_caja ON route_sessions (company_id, legacy_caja_id) WHERE legacy_caja_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_route_sessions_cobrador_fecha ON route_sessions (company_id, cobrador_id, fecha);
+ALTER TABLE route_liquidation_items ALTER COLUMN tipo TYPE VARCHAR(20);
+
 CREATE TABLE IF NOT EXISTS bank_deposits (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id UUID NOT NULL,
@@ -430,6 +439,8 @@ CREATE TABLE IF NOT EXISTS trip_stop_items (
     cantidad_faltante NUMERIC(12,3) NOT NULL DEFAULT 0,
     nc_id UUID
 );
+ALTER TABLE trip_stops ADD COLUMN IF NOT EXISTS route_session_id UUID;
+CREATE INDEX IF NOT EXISTS ix_trip_stops_route_session ON trip_stops (route_session_id);
 """
 
 # ──────────────────────────────────────────────

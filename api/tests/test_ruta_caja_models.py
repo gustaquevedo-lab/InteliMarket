@@ -11,7 +11,9 @@ def test_models_importable():
     assert BankDeposit.__tablename__ == "bank_deposits"
 
 
-def test_route_session_has_unique_constraint():
+def test_route_session_ya_no_es_unica_por_cobrador_dia():
+    """Una sesion por caja/salida: puede haber varias del mismo cobrador el mismo dia."""
     from api.src.ruta_caja.models import RouteSession
-    constraint_names = [c.name for c in RouteSession.__table_args__ if hasattr(c, 'name')]
-    assert any("unique" in (n or "").lower() or "uq" in (n or "").lower() for n in constraint_names)
+    nombres = [getattr(c, "name", None) for c in RouteSession.__table_args__]
+    assert "uq_route_session_cobrador_fecha" not in nombres
+    assert hasattr(RouteSession, "legacy_caja_id") and hasattr(RouteSession, "trip_id")
