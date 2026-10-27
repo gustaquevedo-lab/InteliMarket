@@ -152,6 +152,21 @@ export default function RendicionesPage() {
             </div>
           </div>
 
+          {session.rendicion && (
+            <div className="rounded-lg border p-4 space-y-1 text-sm">
+              <p className="font-semibold">Qué tenés que entregar</p>
+              {([
+                ["facturas", "+ Facturas de la carga"], ["credito", "− Crédito (queda por cobrar)"],
+                ["cobros", "+ Cobros de deudas"], ["otros_ingresos", "+ Otros ingresos"],
+                ["devoluciones", "− Devoluciones / notas de crédito"], ["depositos", "− Depósitos y transferencias de clientes"],
+                ["gastos", "− Gastos autorizados"],
+              ] as const).map(([k, label]) => (
+                <div key={k} className="flex justify-between"><span className="text-gray-600">{label}</span><span>{formatPYG(session.rendicion?.[k])}</span></div>
+              ))}
+              <div className="flex justify-between border-t pt-1 font-bold"><span>= Efectivo y cheques a entregar</span><span>{formatPYG(session.rendicion.total)}</span></div>
+            </div>
+          )}
+
           {liq && (
             <div className="rounded-lg border p-4 space-y-2">
               <div className="flex items-center gap-2">
