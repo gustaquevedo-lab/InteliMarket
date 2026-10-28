@@ -49,8 +49,10 @@ async def sincerar_stock(dry_run: bool = True):
                     ABS(SUM(im.cantidad)) as total_descontado_kardex
                 FROM inventory_movements im
                 WHERE im.company_id = :cid
-                  AND im.tipo = 'salida_venta'
-                  AND im.referencia_type = 'sale'
+                  AND (
+                    (im.tipo = 'salida_venta' AND im.referencia_type = 'sale')
+                    OR (im.tipo = 'correccion_sistema' AND im.motivo ILIKE 'Sinceramiento auditado%')
+                  )
                 GROUP BY im.product_id
             )
             SELECT 
