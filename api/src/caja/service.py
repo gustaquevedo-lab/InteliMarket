@@ -1,6 +1,6 @@
 """Caja (Cash Register) service"""
 
-from sqlalchemy import select, func, text, or_, and_, delete, update
+from sqlalchemy import select, func, text, or_, and_, delete, case, literal_column, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone, date, timedelta, time
@@ -129,6 +129,22 @@ INTELIMARKET_31_08_SESSION_IDS = [
     uuid.UUID("914e7eaf-23c2-49e6-9ed0-6fa838b9d891"),  # Evelin Herrero (Caja 10 - Esquina)
     uuid.UUID("81225f58-1c20-43b6-9e28-4c5bc0ce6be1"),  # Tomasa (Caja 2)
 ]
+
+
+# El proveedor guardado en el pago (ej. "dinelco") solo manda sobre la clasificacion de los cobros POSTERIORES a este instante
+# (despliegue del arreglo). Antes, un cobro de Dinelco con el voucher cargado a mano se contaba como Bancard y Tesoreria lo
+# reclasificaba a mano en cada cierre (46 ajustes Bancard -> Dinelco en 41 sesiones entre el 30/09 y el 28/10): si el arreglo
+# rigiera tambien hacia atras, esas sesiones quedarian con Dinelco contado dos veces (nativo + el ajuste de Tesoreria).
+DINELCO_PROVEEDOR_DESDE = datetime(2026, 10, 28, 20, 50, tzinfo=timezone.utc)
+_DINELCO_DESDE_SQL = "TIMESTAMPTZ '2026-10-28 20:50:00+00'"  # mismo instante, para los reportes agregados en SQL
+
+
+def _prov_vigente(proveedor: str | None, fecha: datetime | None) -> str | None:
+    """Devuelve el proveedor del pago solo si el cobro es posterior al despliegue del arreglo (ver arriba)."""
+    if not proveedor or fecha is None:
+        return None
+    f = fecha if getattr(fecha, "tzinfo", None) else fecha.replace(tzinfo=timezone.utc)
+    return proveedor if f >= DINELCO_PROVEEDOR_DESDE else None
 
 
 def classify_payment_channel(
@@ -953,7 +969,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         pos_nombre = pos.nombre_tarjeta if pos else None
         plug_op = plug.tipo_operacion if plug else None
 
-        ckey, clabel, ctipo, cicon = classify_payment_channel(p.forma_pago, p.moneda, pos_op, pos_nombre, plug_op, getattr(p, "proveedor", None))
+        ckey, clabel, ctipo, cicon = classify_payment_channel(p.forma_pago, p.moneda, pos_op, pos_nombre, plug_op, _prov_vigente(getattr(p, "proveedor", None), getattr(p, "fecha", None)))
         m_dec = Decimal(str(p.monto or 0))
         mon = (p.moneda or "PYG").upper()
 
@@ -1014,7 +1030,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         pos_op = pos.tipo_operacion if pos else None
         pos_nom = pos.nombre_tarjeta if pos else None
         plug_op = plug.tipo_operacion if plug else None
-        ckey, _, _, _ = classify_payment_channel(p.forma_pago, p.moneda, pos_op, pos_nom, plug_op, getattr(p, "proveedor", None))
+        ckey, _, _, _ = classify_payment_channel(p.forma_pago, p.moneda, pos_op, pos_nom, plug_op, _prov_vigente(getattr(p, "proveedor", None), getattr(p, "fecha", None)))
         if p.sale_id not in sale_to_channels:
             sale_to_channels[p.sale_id] = []
         sale_to_channels[p.sale_id].append(ckey)
@@ -3427,12 +3443,13 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
     adelantos_por_sesion: dict[tuple, float] = {}
 
     if session_ids:
+        _prov_sql_ls = case((SalePayment.fecha >= literal_column(_DINELCO_DESDE_SQL), SalePayment.proveedor), else_=literal_column("NULL::varchar"))
         pay_query = (
             select(
                 Sale.session_id,
                 SalePayment.forma_pago,
                 SalePayment.moneda,
-                SalePayment.proveedor,
+                _prov_sql_ls,
                 func.coalesce(func.sum(SalePayment.monto), 0).label("total_monto"),
             )
             .select_from(SalePayment)
@@ -3441,7 +3458,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
                 Sale.session_id.in_(session_ids),
                 Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
             )
-            .group_by(Sale.session_id, SalePayment.forma_pago, SalePayment.moneda, SalePayment.proveedor)
+            .group_by(Sale.session_id, SalePayment.forma_pago, SalePayment.moneda, _prov_sql_ls)
         )
         pay_res = await db.execute(pay_query)
         adv_q = await db.execute(
@@ -4132,7 +4149,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         pos_op = linked_pos.tipo_operacion if linked_pos else None
         pos_nom = linked_pos.nombre_tarjeta if linked_pos else None
         plug_op = linked_plug.tipo_operacion if linked_plug else None
-        canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, pos_op, pos_nom, plug_op, row.proveedor)
+        canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, pos_op, pos_nom, plug_op, _prov_vigente(row.proveedor, row.fecha))
 
         if mon == "PYG":
             m_gs = m_dec
@@ -4212,7 +4229,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                 tarjeta_pan = best_match.pan or tarjeta_pan
                 titular = best_match.nombre_cliente or titular
                 if best_match.tipo_operacion:
-                    canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, best_match.tipo_operacion, best_match.nombre_tarjeta, None, row.proveedor)
+                    canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, best_match.tipo_operacion, best_match.nombre_tarjeta, None, _prov_vigente(row.proveedor, row.fecha))
                 if best_match.raw_response and isinstance(best_match.raw_response, dict):
                     raw = best_match.raw_response
                     nro_boleta = raw.get("nroBoleta") or raw.get("nro_boleta") or raw.get("boleta") or raw.get("ticket_numero")
@@ -4492,7 +4509,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                 op_pos_op = getattr(op, "pos_tipo_operacion", None)
                 op_pos_nom = getattr(op, "nombre_tarjeta", None)
                 op_plug_op = getattr(op, "plug_tipo_operacion", None)
-                target_ch, target_label, _, _ = classify_payment_channel(op_fp, op.moneda, op_pos_op, op_pos_nom, op_plug_op, getattr(op, "proveedor", None))
+                target_ch, target_label, _, _ = classify_payment_channel(op_fp, op.moneda, op_pos_op, op_pos_nom, op_plug_op, _prov_vigente(getattr(op, "proveedor", None), getattr(op, "fecha", None)))
                 break
 
         # Si la venta original se pagó en efectivo:
@@ -5755,12 +5772,15 @@ async def get_sales_by_payment_method_report(
     dt_desde, dt_hasta = _parse_range_asuncion(fecha_desde, fecha_hasta)
     comp_uuid = uuid.UUID(str(company_id))
 
+    # Proveedor del pago solo desde el despliegue del arreglo (ver DINELCO_PROVEEDOR_DESDE); mismo texto en SELECT y GROUP BY
+    _prov_sql = case((SalePayment.fecha >= literal_column(_DINELCO_DESDE_SQL), SalePayment.proveedor), else_=literal_column("NULL::varchar"))
+
     # Consultar agrupando por forma_pago, moneda, tipo_operacion de POS y PlugPay
     query = (
         select(
             SalePayment.forma_pago,
             SalePayment.moneda,
-            SalePayment.proveedor.label("proveedor"),
+            _prov_sql.label("proveedor"),
             PosTerminalTransaction.tipo_operacion.label("pos_op"),
             PosTerminalTransaction.nombre_tarjeta.label("pos_nombre"),
             PlugpayTransaction.tipo_operacion.label("plug_op"),
@@ -5780,7 +5800,7 @@ async def get_sales_by_payment_method_report(
         .group_by(
             SalePayment.forma_pago,
             SalePayment.moneda,
-            SalePayment.proveedor,
+            _prov_sql,
             PosTerminalTransaction.tipo_operacion,
             PosTerminalTransaction.nombre_tarjeta,
             PlugpayTransaction.tipo_operacion,
