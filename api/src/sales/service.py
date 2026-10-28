@@ -831,6 +831,18 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     puntos_ganados = await _award_loyalty_points(db, sale, data)
     await _redeem_customer_offers(db, sale, data)
 
+    # Si la venta no vino con recibo_escpos_b64 (ej. ventas offline sincronizadas),
+    # auto-generar el ticket térmico oficial de respaldo para habilitar reimpresión inmediata.
+    if not sale.recibo_escpos_b64:
+        try:
+            t_text, t_b64 = await build_sale_receipt_escpos(db, sale.id)
+            if t_b64:
+                sale.recibo_escpos_b64 = t_b64
+                if not sale.recibo_html:
+                    sale.recibo_html = t_text
+        except Exception as e:
+            logger.warning("Error auto-generando recibo_escpos_b64 en create_sale: %s", e)
+
     await db.flush()
     await db.refresh(sale)
     # Atributo transitorio (no es columna) para que el router pueda mostrar
@@ -1169,6 +1181,20 @@ async def get_sale(db: AsyncSession, sale_id: str) -> Sale | None:
     setattr(sale, "customer_extra_club", c_ec)
     setattr(sale, "cajero_nombre", c_cajero)
     setattr(sale, "caja_nombre", c_caja)
+
+    # Si la venta no cuenta con recibo_escpos_b64, reconstruirlo al vuelo y persistirlo
+    if not sale.recibo_escpos_b64:
+        try:
+            t_text, t_b64 = await build_sale_receipt_escpos(db, sale.id)
+            if t_b64:
+                sale.recibo_escpos_b64 = t_b64
+                if not sale.recibo_html:
+                    sale.recibo_html = t_text
+                await db.commit()
+                await db.refresh(sale)
+        except Exception as e:
+            logger.warning("Error auto-reconstruyendo recibo_escpos_b64 en get_sale: %s", e)
+
     return sale
 
 
