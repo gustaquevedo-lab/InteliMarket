@@ -1314,11 +1314,12 @@ async def record_quick_merma(
     costo = float(product.costo_promedio or product.ultimo_costo or 0)
 
     # Si se especificó un lote puntual (ej. desde control de vencimientos), descontar del lote
+    dec_cant = Decimal(str(cantidad or 0)).quantize(Decimal("0.001"))
     lot_uuid = uuid.UUID(lot_id) if lot_id else None
     if lot_uuid:
         lot = await db.get(StockLot, lot_uuid)
         if lot:
-            lot.cantidad_disponible = max(0, lot.cantidad_disponible - int(cantidad))
+            lot.cantidad_disponible = max(Decimal("0"), Decimal(str(lot.cantidad_disponible or 0)) - dec_cant).quantize(Decimal("0.001"))
             if lot.costo_unitario:
                 costo = float(lot.costo_unitario)
     
@@ -1340,8 +1341,8 @@ async def record_quick_merma(
     
     # 2. Obtener stock actual
     stock = await get_stock(db, warehouse_id, product_id)
-    stock_actual = stock.cantidad if stock else 0
-    nuevo_stock = max(0, stock_actual - int(cantidad))
+    stock_actual = Decimal(str(stock.cantidad or 0)) if stock else Decimal("0")
+    nuevo_stock = max(Decimal("0"), stock_actual - dec_cant).quantize(Decimal("0.001"))
     
     # 3. Item de ajuste
     adj_item = InventoryAdjustmentItem(
@@ -1349,7 +1350,7 @@ async def record_quick_merma(
         product_id=prod_uuid,
         cantidad_sistema=stock_actual,
         cantidad_fisica=nuevo_stock,
-        diferencia=-int(cantidad),
+        diferencia=-dec_cant,
         costo_unitario=costo,
     )
     db.add(adj_item)
@@ -1360,7 +1361,7 @@ async def record_quick_merma(
         warehouse_id=wh_uuid,
         product_id=prod_uuid,
         tipo="merma",
-        cantidad=-int(cantidad),
+        cantidad=-dec_cant,
         costo_unitario=costo,
         referencia_type="adjustment",
         referencia_id=adjustment.id,

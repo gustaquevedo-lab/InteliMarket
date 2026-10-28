@@ -779,7 +779,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
 
     for item_data in data.items:
         cost = round(item_data.costo_unitario)
-        qty = round(float(item_data.cantidad_recibida))
+        qty = Decimal(str(item_data.cantidad_recibida or 0)).quantize(Decimal("0.001"))
 
         po_price = po_price_map.get(str(item_data.product_id))
         if po_price and po_price > 0:
@@ -828,7 +828,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                 warehouse_id=warehouse_id,
                 product_id=item_data.product_id,
                 variant_id=item_data.variant_id,
-                cantidad=0,
+                cantidad=Decimal("0"),
                 costo_unitario=cost,
             )
             db.add(stock_obj)
@@ -837,8 +837,8 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         old_cost = Decimal(str(stock_obj.costo_unitario or 0))
         old_qty = Decimal(str(stock_obj.cantidad or 0))
         d_cost = Decimal(str(cost or 0))
-        d_qty = Decimal(str(qty or 0))
-        stock_obj.cantidad = float(old_qty + d_qty)
+        d_qty = qty
+        stock_obj.cantidad = (old_qty + d_qty).quantize(Decimal("0.001"))
         if old_qty + d_qty > 0:
             stock_obj.costo_unitario = ((old_cost * old_qty + d_cost * d_qty) / (old_qty + d_qty)).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
         stock_obj.updated_at = datetime.now(timezone.utc)
@@ -854,7 +854,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             cantidad=qty,
             cantidad_disponible=qty,
             costo_unitario=cost,
-            costo_total=cost * qty,
+            costo_total=(Decimal(str(cost)) * qty).quantize(Decimal("1")),
             referencia=ref_lote,
             fecha_vencimiento=item_data.fecha_vencimiento,
         )
@@ -1641,7 +1641,7 @@ async def generate_purchase_suggestions(db: AsyncSession, company_id: str) -> di
                 select(Stock).where(Stock.product_id == pid)
             )
             stocks = list(stock_result.scalars().all())
-            current_stock = Decimal(str(sum(int(s.cantidad) for s in stocks)))
+            current_stock = sum((Decimal(str(s.cantidad or 0)) for s in stocks), Decimal("0"))
 
             z_factor = Decimal("1.645")
             if service_level >= 99:

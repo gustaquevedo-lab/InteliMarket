@@ -824,7 +824,7 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
     for item_data in data.items:
         if not item_data.product_id:
             continue
-        qty_to_deduct = int(item_data.cantidad)
+        qty_to_deduct = Decimal(str(item_data.cantidad or 0)).quantize(Decimal("0.001"))
 
         # Si el producto vendido es un Kit/Combo unificado (item_unico), deducir stock de sus componentes
         kit_res = await db.execute(
@@ -836,13 +836,13 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
         if found_kit:
             kit_items_res = await db.execute(select(KitItem).where(KitItem.kit_id == found_kit.id))
             for ki in kit_items_res.scalars().all():
-                comp_qty = int(Decimal(str(ki.cantidad)) * Decimal(str(qty_to_deduct)))
-                if comp_qty <= 0:
+                comp_qty = (Decimal(str(ki.cantidad or 0)) * qty_to_deduct).quantize(Decimal("0.001"))
+                if comp_qty <= Decimal("0"):
                     continue
                 c_stock_res = await db.execute(select(Stock).where(Stock.product_id == ki.product_id).limit(1))
                 c_stock = c_stock_res.scalar_one_or_none()
                 if c_stock:
-                    c_stock.cantidad -= comp_qty
+                    c_stock.cantidad = (Decimal(str(c_stock.cantidad or 0)) - comp_qty).quantize(Decimal("0.001"))
                     c_stock.updated_at = datetime.now(timezone.utc)
                     db.add(InventoryMovement(
                         company_id=data.company_id,
@@ -864,7 +864,7 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
         )
         stock = stock_result.scalar_one_or_none()
         if stock:
-            stock.cantidad -= qty_to_deduct
+            stock.cantidad = (Decimal(str(stock.cantidad or 0)) - qty_to_deduct).quantize(Decimal("0.001"))
             stock.updated_at = datetime.now(timezone.utc)
             warehouse_id = stock.warehouse_id
 
@@ -881,15 +881,15 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
             remaining = qty_to_deduct
             actual_cost = Decimal("0")
             for lot in lots:
-                if remaining <= 0:
+                if remaining <= Decimal("0"):
                     break
-                deduct = min(remaining, int(lot.cantidad_disponible))
-                lot.cantidad_disponible -= deduct
-                lot.cantidad -= deduct
-                actual_cost += Decimal(str(deduct)) * Decimal(str(lot.costo_unitario))
+                deduct = min(remaining, Decimal(str(lot.cantidad_disponible or 0)))
+                lot.cantidad_disponible = (Decimal(str(lot.cantidad_disponible or 0)) - deduct).quantize(Decimal("0.001"))
+                lot.cantidad = (Decimal(str(lot.cantidad or 0)) - deduct).quantize(Decimal("0.001"))
+                actual_cost += deduct * Decimal(str(lot.costo_unitario or 0))
                 remaining -= deduct
 
-            if remaining > 0:
+            if remaining > Decimal("0"):
                 # Los lotes (FIFO) no alcanzaron para cubrir toda la cantidad
                 # vendida -- el costo promedio de esta venta va a estar
                 # subestimado (actual_cost solo cuenta lo que si se encontro
@@ -901,7 +901,7 @@ async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate)
                     sale.id, item_data.product_id, remaining,
                 )
 
-            avg_cost = (actual_cost / Decimal(str(qty_to_deduct))).quantize(Decimal("1")) if qty_to_deduct > 0 else Decimal("0")
+            avg_cost = (actual_cost / qty_to_deduct).quantize(Decimal("1")) if qty_to_deduct > Decimal("0") else Decimal("0")
 
             movement = InventoryMovement(
                 company_id=data.company_id,
@@ -2118,8 +2118,8 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
         stock_result = await db.execute(select(Stock).where(Stock.product_id == item.product_id).limit(1))
         stock = stock_result.scalar_one_or_none()
         if stock:
-            qty = int(item.cantidad)
-            stock.cantidad += qty
+            qty = Decimal(str(item.cantidad or 0)).quantize(Decimal("0.001"))
+            stock.cantidad = (Decimal(str(stock.cantidad or 0)) + qty).quantize(Decimal("0.001"))
             stock.updated_at = datetime.now(timezone.utc)
 
             lots_result = await db.execute(
@@ -2134,11 +2134,11 @@ async def cancel_sale(db: AsyncSession, sale_id: str) -> Sale | None:
 
             remaining = qty
             for lot in lots:
-                if remaining <= 0:
+                if remaining <= Decimal("0"):
                     break
-                lot.cantidad_disponible += remaining
-                lot.cantidad += remaining
-                remaining = 0
+                lot.cantidad_disponible = (Decimal(str(lot.cantidad_disponible or 0)) + remaining).quantize(Decimal("0.001"))
+                lot.cantidad = (Decimal(str(lot.cantidad or 0)) + remaining).quantize(Decimal("0.001"))
+                remaining = Decimal("0")
 
             db.add(InventoryMovement(
                 company_id=sale.company_id,

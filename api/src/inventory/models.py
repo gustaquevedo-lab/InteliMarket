@@ -2,7 +2,7 @@
 audit trail inmutable, toma física con doble conteo ciego."""
 
 import uuid as uuid_module
-from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, Text, ForeignKey, JSON
+from sqlalchemy import Column, String, Boolean, DateTime, Numeric, Integer, Text, ForeignKey, JSON, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -66,8 +66,8 @@ class Stock(Base):
     warehouse_id = Column(UUID(as_uuid=True), nullable=False)
     product_id = Column(UUID(as_uuid=True), nullable=False)
     variant_id = Column(UUID(as_uuid=True))
-    cantidad = Column(Integer, nullable=False, default=0)
-    cantidad_reservada = Column(Integer, nullable=False, default=0)
+    cantidad = Column(Numeric(15, 3), nullable=False, default=0, server_default=text("0"))
+    cantidad_reservada = Column(Numeric(15, 3), nullable=False, default=0, server_default=text("0"))
     costo_unitario = Column(Numeric(15, 0))
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -80,8 +80,8 @@ class StockLot(Base):
     warehouse_id = Column(UUID(as_uuid=True), nullable=False)
     product_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     variant_id = Column(UUID(as_uuid=True))
-    cantidad = Column(Integer, nullable=False, default=0)
-    cantidad_disponible = Column(Integer, nullable=False, default=0)
+    cantidad = Column(Numeric(15, 3), nullable=False, default=0, server_default=text("0"))
+    cantidad_disponible = Column(Numeric(15, 3), nullable=False, default=0, server_default=text("0"))
     costo_unitario = Column(Numeric(15, 0), nullable=False)
     costo_total = Column(Numeric(18, 0), nullable=False)
     referencia = Column(String(100))
@@ -103,7 +103,7 @@ class InventoryMovement(Base):
     product_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     variant_id = Column(UUID(as_uuid=True))
     tipo = Column(String(30), nullable=False)
-    cantidad = Column(Integer, nullable=False)
+    cantidad = Column(Numeric(15, 3), nullable=False)
     costo_unitario = Column(Numeric(15, 0))
     referencia_type = Column(String(30))
     referencia_id = Column(UUID(as_uuid=True))
