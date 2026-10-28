@@ -93,8 +93,8 @@ class StockResponse(BaseModel):
     warehouse_id: UUID
     product_id: UUID
     variant_id: Optional[UUID] = None
-    cantidad: int
-    cantidad_reservada: int
+    cantidad: Decimal
+    cantidad_reservada: Decimal
     costo_unitario: Optional[Decimal] = None
     updated_at: datetime
     nombre: Optional[str] = None
@@ -118,7 +118,7 @@ class MovementCreate(BaseModel):
     product_id: UUID
     variant_id: Optional[UUID] = None
     tipo: str
-    cantidad: int
+    cantidad: Decimal
     costo_unitario: Optional[Decimal] = None
     referencia_type: Optional[str] = None
     referencia_id: Optional[str] = None
@@ -133,7 +133,7 @@ class MovementResponse(BaseModel):
     product_id: UUID
     variant_id: Optional[UUID] = None
     tipo: str
-    cantidad: int
+    cantidad: Decimal
     costo_unitario: Optional[Decimal] = None
     referencia_type: Optional[str] = None
     referencia_id: Optional[UUID] = None
@@ -386,7 +386,7 @@ class ProductLotCreate(BaseModel):
     warehouse_id: Optional[UUID] = None
     referencia: Optional[str] = None
     fecha_vencimiento: Optional[str] = None
-    cantidad: int = Field(default=1, ge=0)
+    cantidad: Decimal = Field(default=Decimal("1"), ge=0)
     observaciones: Optional[str] = None
 
 
@@ -398,8 +398,8 @@ class ProductLotResponse(BaseModel):
     product_id: UUID
     product_nombre: Optional[str] = None
     product_codigo: Optional[str] = None
-    cantidad: int
-    cantidad_disponible: int
+    cantidad: Decimal
+    cantidad_disponible: Decimal
     costo_unitario: float
     fecha_ingreso: Optional[datetime] = None
     fecha_vencimiento: Optional[datetime] = None

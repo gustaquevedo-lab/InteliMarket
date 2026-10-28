@@ -299,9 +299,15 @@ async def _enrich_products_details(db: AsyncSession, c_uuid: UUID, products: lis
         """),
         {"p_ids": p_ids}
     )
-    stock_map = {r.product_id: (int(r.stock_total), int(r.stock_disponible)) for r in stock_map_res}
+    stock_map = {
+        r.product_id: (
+            Decimal(str(r.stock_total or 0)),
+            Decimal(str(r.stock_disponible or 0)),
+        )
+        for r in stock_map_res
+    }
     for p in products:
-        st, sd = stock_map.get(p.id, (0, 0))
+        st, sd = stock_map.get(p.id, (Decimal("0"), Decimal("0")))
         p.__dict__["stock_actual"] = st
         p.__dict__["stock_disponible"] = sd
 

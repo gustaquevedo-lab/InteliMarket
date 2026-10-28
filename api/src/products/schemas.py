@@ -111,8 +111,8 @@ class ProductResponse(BaseModel):
     tiene_serial: bool
     stock_minimo: int
     stock_maximo: Optional[int] = None
-    stock_actual: Optional[int] = 0
-    stock_disponible: Optional[int] = 0
+    stock_actual: Optional[Decimal] = Decimal("0")
+    stock_disponible: Optional[Decimal] = Decimal("0")
     peso_kg: Optional[Decimal] = None
     plu_balanza: Optional[int] = None
     imagen_url: Optional[str] = None
