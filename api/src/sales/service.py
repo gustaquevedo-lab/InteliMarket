@@ -600,6 +600,20 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             cust_nombre_resuelto = c_exist.razon_social or c_exist.nombre_fantasia
             cust_doc_resuelto = c_exist.ruc or c_exist.ci
 
+    # ── Precarga de costos de referencia para congelar en SaleItem al momento de la venta ──
+    # Se ejecuta ANTES de agregar Sale a la sesión para evitar que el autoflush de SQLAlchemy
+    # intente insertar la venta con subtotal/total en NULL.
+    prod_ids = [it.product_id for it in data.items if it.product_id]
+    prod_costs = {}
+    if prod_ids:
+        cost_res = await db.execute(
+            select(Product.id, Product.costo_promedio, Product.ultimo_costo)
+            .where(Product.id.in_(prod_ids))
+        )
+        for r_id, r_prom, r_ult in cost_res:
+            c = r_prom if (r_prom and r_prom > Decimal("0")) else (r_ult or Decimal("0"))
+            prod_costs[r_id] = Decimal(str(c))
+
     sale = Sale(
         id=data.id or uuid.uuid4(),
         company_id=data.company_id,
@@ -618,28 +632,20 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
         session_id=effective_session_id,
         recibo_html=data.recibo_html,
         recibo_escpos_b64=data.recibo_escpos_b64,
+        subtotal=Decimal("0"),
+        descuento_total=Decimal("0"),
+        base_gravada_10=Decimal("0"),
+        base_gravada_5=Decimal("0"),
+        base_exenta=Decimal("0"),
+        iva_10=Decimal("0"),
+        iva_5=Decimal("0"),
+        total=Decimal("0"),
+        saldo=Decimal("0"),
         monto_donacion=data.monto_donacion or Decimal("0"),
         donacion_campana=data.donacion_campana,
         donacion_ong=data.donacion_ong,
     )
     db.add(sale)
-    # Ojo: NO se hace flush aca todavia -- subtotal/total (NOT NULL, sin
-    # default) recien se calculan despues del loop de items. El id se
-    # pre-genera en Python (en vez de esperar el server_default+flush) para
-    # que los SaleItem de abajo puedan referenciar sale.id sin forzar un
-    # INSERT prematuro de sales con subtotal/total todavia en NULL.
-
-    # ── Precarga de costos de referencia para congelar en SaleItem al momento de la venta ──
-    prod_ids = [it.product_id for it in data.items if it.product_id]
-    prod_costs = {}
-    if prod_ids:
-        cost_res = await db.execute(
-            select(Product.id, Product.costo_promedio, Product.ultimo_costo)
-            .where(Product.id.in_(prod_ids))
-        )
-        for r_id, r_prom, r_ult in cost_res:
-            c = r_prom if (r_prom and r_prom > Decimal("0")) else (r_ult or Decimal("0"))
-            prod_costs[r_id] = Decimal(str(c))
 
     for item_data in data.items:
         taxes = calculate_taxes(item_data.model_dump())
