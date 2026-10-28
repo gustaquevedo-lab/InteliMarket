@@ -3257,22 +3257,23 @@ async def calculate_smart_replenishment_preview(
         
         punto_reorden = ((demanda_ajustada * lead_time_dec) + stock_seguridad).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
-        # Días de stock restantes (autonomía basada en stock físico real)
+        # Días de stock restantes (autonomía basada en stock físico real no negativo)
+        effective_stock = max(Decimal("0"), stock_actual)
         if demanda_ajustada > Decimal("0.001"):
-            dias_restantes = (stock_actual / demanda_ajustada).quantize(Decimal("0.1"))
+            dias_restantes = (effective_stock / demanda_ajustada).quantize(Decimal("0.1"))
         else:
-            dias_restantes = Decimal("999.0") if stock_actual > 0 else Decimal("0.0")
+            dias_restantes = Decimal("999.0") if effective_stock > 0 else Decimal("0.0")
             
         dias_totales_objetivo = Decimal(str(dias_cobertura + lead_time_dias))
         target_stock = (demanda_ajustada * dias_totales_objetivo).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
-        if stock_actual <= 0 or stock_actual <= (demanda_ajustada * lead_time_dec) or stock_actual <= stock_seguridad:
+        if effective_stock <= 0 or effective_stock <= (demanda_ajustada * lead_time_dec) or effective_stock <= stock_seguridad:
             autonomia_estado = "critico"
             total_quiebres += 1
-        elif stock_actual <= punto_reorden:
+        elif effective_stock <= punto_reorden:
             autonomia_estado = "bajo"
             total_bajos += 1
-        elif stock_actual <= target_stock:
+        elif effective_stock <= target_stock:
             autonomia_estado = "optimo"
         else:
             autonomia_estado = "sobrestock"
@@ -3280,8 +3281,9 @@ async def calculate_smart_replenishment_preview(
         if solo_quiebre_o_bajo and autonomia_estado not in ("critico", "bajo"):
             continue
             
-        # Cantidad sugerida: basada puramente en stock físico en góndola/depósito
-        deficit = max(Decimal("0"), target_stock - stock_actual)
+        # Cantidad sugerida: basada en stock físico real disponible para reposición
+        # (no inflar el pedido sumando agujeros históricos de ventas sin recepción)
+        deficit = max(Decimal("0"), target_stock - effective_stock)
         cantidad_sugerida = deficit.quantize(Decimal("1"), rounding=ROUND_HALF_UP) if is_unitario else deficit
         
         if cantidad_sugerida > Decimal("0"):
@@ -3301,6 +3303,7 @@ async def calculate_smart_replenishment_preview(
             "categoria_id": str(r[9]) if r[9] else None,
             "categoria_nombre": categoria_nombre,
             "stock_actual": float(stock_actual.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) if is_unitario else float(stock_actual),
+            "stock_deficit": float(abs(stock_actual)) if stock_actual < Decimal("0") else 0.0,
             "stock_en_transito": float(stock_en_transito.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) if is_unitario else float(stock_en_transito),
             "ventas_periodo": float(ventas_periodo.quantize(Decimal("1"), rounding=ROUND_HALF_UP)) if is_unitario else float(ventas_periodo),
             "ventas_mes_actual": vm_actual,

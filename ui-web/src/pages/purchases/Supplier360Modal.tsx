@@ -2353,7 +2353,13 @@ export default function Supplier360Modal({ supplierId, supplierNombre, onClose }
                                 <td className="p-3 font-bold text-slate-900 dark:text-white">{p.nombre}</td>
                                 <td className="p-3 text-right font-mono font-black">
                                   <span className={p.estado_stock === "quiebre" ? "text-red-600" : p.estado_stock === "bajo" ? "text-amber-600" : "text-slate-800 dark:text-slate-200"}>
-                                    {p.stock_actual.toFixed(0)} un.
+                                    {p.stock_actual < 0 ? (
+                                      <span title={`Déficit por ventas sin recepción registrada: ${p.stock_actual.toFixed(0)} un.`}>
+                                        0 un. <span className="text-[10px] text-amber-500 font-normal">({p.stock_actual.toFixed(0)})</span>
+                                      </span>
+                                    ) : (
+                                      `${p.stock_actual.toFixed(0)} un.`
+                                    )}
                                   </span>
                                 </td>
                                 <td className="p-3 text-right font-mono text-slate-600 dark:text-slate-400">{formatPYG(p.costo_promedio)}</td>

@@ -774,10 +774,10 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         qty_stock = stock_by_product.get(pid, 0.0)
         costo = _dec_to_float(p.costo_promedio or p.ultimo_costo)
         precio = _dec_to_float(p.precio_venta)
-        val_costo = qty_stock * costo
-        val_venta = qty_stock * precio
+        val_costo = max(0.0, qty_stock) * costo
+        val_venta = max(0.0, qty_stock) * precio
 
-        stock_unidades_total += qty_stock
+        stock_unidades_total += max(0.0, qty_stock)
         stock_valorizado_costo += val_costo
         stock_valorizado_venta += val_venta
 

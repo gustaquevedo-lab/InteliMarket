@@ -975,6 +975,7 @@ class SmartReplenishmentItem(BaseModel):
     categoria_id: Optional[UUID] = None
     categoria_nombre: Optional[str] = None
     stock_actual: float
+    stock_deficit: Optional[float] = 0.0
     stock_en_transito: float = 0.0
     ventas_periodo: float
     ventas_mes_actual: float = 0.0

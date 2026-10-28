@@ -4643,8 +4643,14 @@ export default function PurchasesPage() {
                               </td>
 
                               {/* Stock Físico */}
-                              <td className="px-1.5 py-1 text-right font-mono font-bold text-[11px] text-gray-800 dark:text-gray-200 whitespace-nowrap" title={`Stock físico actual: ${formatQty(stockActual)}`}>
-                                {formatQty(stockActual)}
+                              <td className="px-1.5 py-1 text-right font-mono font-bold text-[11px] whitespace-nowrap" title={`Stock registrado: ${formatQty(stockActual)} ${it.unidad_medida}. ${stockActual < 0 ? "Ventas registradas sin factura de recepción en el sistema." : ""}`}>
+                                {stockActual < 0 ? (
+                                  <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-extrabold bg-amber-50 dark:bg-amber-950/40 px-1 py-0.2 rounded border border-amber-200 dark:border-amber-800/50">
+                                    0 <span className="text-[9px] font-normal text-rose-500">({formatQty(stockActual)})</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-800 dark:text-gray-200">{formatQty(stockActual)}</span>
+                                )}
                               </td>
 
                               {/* Columnas de Ventas Históricas */}
