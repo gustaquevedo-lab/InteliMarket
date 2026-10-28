@@ -137,6 +137,7 @@ def classify_payment_channel(
     pos_op: str | None = None,
     pos_nombre: str | None = None,
     plug_op: str | None = None,
+    proveedor: str | None = None,
 ) -> tuple[str, str, str, str]:
     """Clasifica un cobro en su canal específico según la taxonomía oficial de canales de pago.
     Retorna (canal_key, canal_label, tipo_categoria, icon).
@@ -145,6 +146,7 @@ def classify_payment_channel(
     mon = (moneda or "PYG").upper().strip()
     pos = (pos_op or "").lower().strip()
     plug = (plug_op or "").lower().strip()
+    prov = (proveedor or "").lower().strip()
 
     if fp in ("EFECTIVO", "CASH") or "EFECTIVO" in fp:
         if mon == "PYG":
@@ -173,6 +175,18 @@ def classify_payment_channel(
         return PAYMENT_CHANNEL_MAP["PLUGPAY_CREDITO"]
     if plug == "pix" or "PLUGPAY_PIX" in fp:
         return PAYMENT_CHANNEL_MAP["PLUGPAY_PIX"]
+
+    # 1b. El cobro se hizo en Dinelco pero NO hay transaccion de terminal de Dinelco que lo identifique (voucher cargado
+    # a mano porque el terminal no respondio): sin esto, una "TARJETA DEBITO" a mano se contaba como Bancard, un QR como
+    # Bancard QR y un PIX como PlugPay PIX. El proveedor que quedo en el pago manda sobre la forma de pago.
+    if prov == "dinelco" and not pos.startswith("dinelco"):
+        if "PIX" in fp:
+            return PAYMENT_CHANNEL_MAP["DINELCO_PIX"]
+        if "QR" in fp:
+            return PAYMENT_CHANNEL_MAP["DINELCO_QR"]
+        if "CREDITO" in fp:
+            return PAYMENT_CHANNEL_MAP["DINELCO_CREDITO"]
+        return PAYMENT_CHANNEL_MAP["DINELCO_DEBITO"]
 
     # 2. Transacciones POS Terminal registradas (Bancard / Dinelco)
     if pos:
@@ -681,6 +695,19 @@ def generate_cierre_escpos(recon: dict) -> dict:
         lines.append(_format_two_col("  Total Comprobantes:", f"{tot_no_ef_gs:,.0f} Gs.", W))
     else:
         lines.append("  (Sin comprobantes no efectivo)")
+    # Adelantos de efectivo ("Cobrá tu salario"): no son ventas, pero su voucher es un comprobante y el efectivo que
+    # entregaron baja la gaveta -- tienen que estar en el ticket, separados por tipo.
+    if recon.get("adelantos_detalle"):
+        lines.append("-" * W)
+        lines.append("[2B. ADELANTOS DE EFECTIVO (Cobra tu salario)]")
+        for d in recon["adelantos_detalle"]:
+            lines.append(_format_two_col(f"  {d['label']} ({d['cantidad']}):", f"{d['monto_gs']:,.0f} Gs.", W))
+        lines.append(_format_two_col("  Total entregado en efectivo:", f"{recon.get('adelantos_gs', 0):,.0f} Gs.", W))
+        if recon.get("adelantos_cargo_cliente_gs", 0) > 0:
+            lines.append(_format_two_col("  Comision al cliente (de Dinelco):", f"{recon['adelantos_cargo_cliente_gs']:,.0f} Gs.", W))
+        if recon.get("adelantos_comision_gs", 0) > 0:
+            lines.append(_format_two_col("  Comision a favor del comercio:", f"{recon['adelantos_comision_gs']:,.0f} Gs.", W))
+        lines.append("-" * W)
     tot_dev_gs = recon.get("total_devoluciones_gs", 0)
     if tot_dev_gs > 0:
         lines.append(_format_two_col("  Ventas Brutas:", f"{recon.get('total_ventas_brutas_gs', recon['total_cobrado_gs']):,.0f} Gs.", W))
@@ -926,7 +953,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         pos_nombre = pos.nombre_tarjeta if pos else None
         plug_op = plug.tipo_operacion if plug else None
 
-        ckey, clabel, ctipo, cicon = classify_payment_channel(p.forma_pago, p.moneda, pos_op, pos_nombre, plug_op)
+        ckey, clabel, ctipo, cicon = classify_payment_channel(p.forma_pago, p.moneda, pos_op, pos_nombre, plug_op, getattr(p, "proveedor", None))
         m_dec = Decimal(str(p.monto or 0))
         mon = (p.moneda or "PYG").upper()
 
@@ -987,7 +1014,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         pos_op = pos.tipo_operacion if pos else None
         pos_nom = pos.nombre_tarjeta if pos else None
         plug_op = plug.tipo_operacion if plug else None
-        ckey, _, _, _ = classify_payment_channel(p.forma_pago, p.moneda, pos_op, pos_nom, plug_op)
+        ckey, _, _, _ = classify_payment_channel(p.forma_pago, p.moneda, pos_op, pos_nom, plug_op, getattr(p, "proveedor", None))
         if p.sale_id not in sale_to_channels:
             sale_to_channels[p.sale_id] = []
         sale_to_channels[p.sale_id].append(ckey)
@@ -1088,6 +1115,17 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     adelantos_gs = sum((Decimal(str(a.monto or 0)) for a in adelantos), Decimal("0"))
     adelantos_comision_gs = sum((Decimal(str(a.comision_gs or 0)) for a in adelantos if a.comision_activa), Decimal("0"))
     adelantos_cargo_cliente_gs = sum((Decimal(str(a.cargo_cliente_gs or 0)) for a in adelantos), Decimal("0"))
+    # Desglose por tipo (Adelanto Dinelco = opcion 2, Red de Pagos = opcion 1) para el ticket, los PDF y los reportes.
+    adelantos_detalle = []
+    for _op, _label in ((2, "Adelanto Dinelco"), (1, "Adelanto Red de Pagos")):
+        _g = [a for a in adelantos if a.opcion == _op]
+        if _g:
+            adelantos_detalle.append({
+                "opcion": _op, "label": _label, "cantidad": len(_g),
+                "monto_gs": float(sum((Decimal(str(a.monto or 0)) for a in _g), Decimal("0"))),
+                "cargo_cliente_gs": float(sum((Decimal(str(a.cargo_cliente_gs or 0)) for a in _g), Decimal("0"))),
+                "comision_gs": float(sum((Decimal(str(a.comision_gs or 0)) for a in _g if a.comision_activa), Decimal("0"))),
+            })
 
     # Reclasificaciones de pagos en Tesorería (ej: venta registrada en POS como Efectivo pero entregada como comprobante SIPAP/Tarjeta, o corregida entre medios no efectivo)
     adj_res = await db.execute(
@@ -1348,6 +1386,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         "adelantos_cantidad": len(adelantos),
         "adelantos_comision_gs": float(adelantos_comision_gs),
         "adelantos_cargo_cliente_gs": float(adelantos_cargo_cliente_gs),
+        "adelantos_detalle": adelantos_detalle,
         "esp_pyg": float(esp_pyg),
         "esp_brl": float(esp_brl),
         "esp_usd": float(esp_usd),
@@ -3385,6 +3424,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
     # 1. Obtener pagos reales registrados por el POS para todas las sesiones del período (fallback)
     session_ids = [session_obj.id for session_obj, _, _ in rows]
     payments_by_session: dict[uuid.UUID, dict] = {}
+    adelantos_por_sesion: dict[tuple, float] = {}
 
     if session_ids:
         pay_query = (
@@ -3392,6 +3432,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
                 Sale.session_id,
                 SalePayment.forma_pago,
                 SalePayment.moneda,
+                SalePayment.proveedor,
                 func.coalesce(func.sum(SalePayment.monto), 0).label("total_monto"),
             )
             .select_from(SalePayment)
@@ -3400,10 +3441,16 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
                 Sale.session_id.in_(session_ids),
                 Sale.estado.in_(["confirmado", "completada", "completado", "pagado"]),
             )
-            .group_by(Sale.session_id, SalePayment.forma_pago, SalePayment.moneda)
+            .group_by(Sale.session_id, SalePayment.forma_pago, SalePayment.moneda, SalePayment.proveedor)
         )
         pay_res = await db.execute(pay_query)
-        for sid, fp_raw, mon, monto in pay_res.all():
+        adv_q = await db.execute(
+            select(CashAdvance.session_id, CashAdvance.opcion, func.coalesce(func.sum(CashAdvance.monto), 0))
+            .where(CashAdvance.session_id.in_(session_ids), CashAdvance.estado == "aprobado")
+            .group_by(CashAdvance.session_id, CashAdvance.opcion)
+        )
+        adelantos_por_sesion = {(sid_, op_): float(m_ or 0) for sid_, op_, m_ in adv_q.all()}
+        for sid, fp_raw, mon, prov_raw, monto in pay_res.all():
             if sid not in payments_by_session:
                 payments_by_session[sid] = {
                     "bancard": Decimal("0"),
@@ -3419,6 +3466,9 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
                     "efectivo_usd": Decimal("0"),
                 }
             fp = (fp_raw or "").upper()
+            # Cobro hecho en Dinelco con voucher cargado a mano: el proveedor manda (si no, contaba como Bancard).
+            if (prov_raw or "").lower() == "dinelco" and "EFECTIVO" not in fp and "DINELCO" not in fp:
+                fp = f"DINELCO {fp}"
             m = Decimal(str(monto or 0))
             if "EFECTIVO" in fp:
                 if mon == "BRL":
@@ -3606,6 +3656,9 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             "monto_dinelco_credito": m_dinelco_cred,
             "monto_dinelco_qr": m_dinelco_qr,
             "monto_dinelco_pix": m_dinelco_pix,
+            # Adelantos de efectivo entregados en el turno (salida de gaveta), por tipo
+            "monto_adelanto_dinelco": adelantos_por_sesion.get((session_obj.id, 2), 0.0),
+            "monto_adelanto_red_pagos": adelantos_por_sesion.get((session_obj.id, 1), 0.0),
             "monto_plugpay_pix": m_plugpay_pix,
             "monto_plugpay_credito": m_plugpay_cred,
             "monto_extra_club": m_extra_club,
@@ -3915,6 +3968,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
             SalePayment.moneda,
             SalePayment.monto,
             SalePayment.fecha,
+            SalePayment.proveedor.label("proveedor"),
             Sale.id.label("sale_id"),
             Sale.numero.label("numero_venta"),
             Sale.numero_interno,
@@ -4078,7 +4132,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         pos_op = linked_pos.tipo_operacion if linked_pos else None
         pos_nom = linked_pos.nombre_tarjeta if linked_pos else None
         plug_op = linked_plug.tipo_operacion if linked_plug else None
-        canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, pos_op, pos_nom, plug_op)
+        canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, pos_op, pos_nom, plug_op, row.proveedor)
 
         if mon == "PYG":
             m_gs = m_dec
@@ -4158,7 +4212,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                 tarjeta_pan = best_match.pan or tarjeta_pan
                 titular = best_match.nombre_cliente or titular
                 if best_match.tipo_operacion:
-                    canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, best_match.tipo_operacion, best_match.nombre_tarjeta)
+                    canal_key, medio_label, _, _ = classify_payment_channel(fp_raw, row.moneda, best_match.tipo_operacion, best_match.nombre_tarjeta, None, row.proveedor)
                 if best_match.raw_response and isinstance(best_match.raw_response, dict):
                     raw = best_match.raw_response
                     nro_boleta = raw.get("nroBoleta") or raw.get("nro_boleta") or raw.get("boleta") or raw.get("ticket_numero")
@@ -4438,7 +4492,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
                 op_pos_op = getattr(op, "pos_tipo_operacion", None)
                 op_pos_nom = getattr(op, "nombre_tarjeta", None)
                 op_plug_op = getattr(op, "plug_tipo_operacion", None)
-                target_ch, target_label, _, _ = classify_payment_channel(op_fp, op.moneda, op_pos_op, op_pos_nom, op_plug_op)
+                target_ch, target_label, _, _ = classify_payment_channel(op_fp, op.moneda, op_pos_op, op_pos_nom, op_plug_op, getattr(op, "proveedor", None))
                 break
 
         # Si la venta original se pagó en efectivo:
@@ -5706,6 +5760,7 @@ async def get_sales_by_payment_method_report(
         select(
             SalePayment.forma_pago,
             SalePayment.moneda,
+            SalePayment.proveedor.label("proveedor"),
             PosTerminalTransaction.tipo_operacion.label("pos_op"),
             PosTerminalTransaction.nombre_tarjeta.label("pos_nombre"),
             PlugpayTransaction.tipo_operacion.label("plug_op"),
@@ -5725,6 +5780,7 @@ async def get_sales_by_payment_method_report(
         .group_by(
             SalePayment.forma_pago,
             SalePayment.moneda,
+            SalePayment.proveedor,
             PosTerminalTransaction.tipo_operacion,
             PosTerminalTransaction.nombre_tarjeta,
             PlugpayTransaction.tipo_operacion,
@@ -5752,7 +5808,7 @@ async def get_sales_by_payment_method_report(
 
     for r in rows:
         ckey, clabel, ctipo, cicon = classify_payment_channel(
-            r.forma_pago, r.moneda, r.pos_op, r.pos_nombre, r.plug_op
+            r.forma_pago, r.moneda, r.pos_op, r.pos_nombre, r.plug_op, r.proveedor
         )
         m = Decimal(str(r.monto_total or 0))
         ops = int(r.cantidad_operaciones or 0)

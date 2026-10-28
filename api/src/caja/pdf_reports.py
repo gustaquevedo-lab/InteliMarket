@@ -96,6 +96,9 @@ def generate_arqueo_diario_pdf(company: dict, sessiones: list[dict], fecha_desde
         ("monto_transferencia", "Transf. SIPAP", "PYG", False),
         ("monto_cheque", "Cheques", "PYG", False),
         ("monto_otro", "Otros Medios", "PYG", False),
+        # Adelantos de efectivo ("Cobrá tu salario"): plata que salió de la gaveta contra el voucher de una tarjeta
+        ("monto_adelanto_dinelco", "Adelanto Dinelco", "PYG", True),
+        ("monto_adelanto_red_pagos", "Adelanto Red Pagos", "PYG", True),
     ]
 
     # Soporte de respaldo para registros legacy agrupados si no tienen desglose específico
@@ -1003,6 +1006,32 @@ def generate_cierre_sesion_individual_pdf(
     ]))
     elements.append(t_pay)
     elements.append(Spacer(1, 10))
+
+    # Adelantos de efectivo contra tarjeta ("Cobrá tu salario"): no son ventas, pero bajan el efectivo esperado
+    if recon and recon.get("adelantos_detalle"):
+        elements.append(Paragraph("<b>2B. ADELANTOS DE EFECTIVO CONTRA TARJETA (COBRÁ TU SALARIO)</b>", styles["Normal"]))
+        elements.append(Spacer(1, 4))
+        adv_data = [["Tipo de adelanto", "Cant.", "Efectivo entregado (₲)", "Comisión al cliente (₲)", "Comisión al comercio (₲)"]]
+        for d in recon["adelantos_detalle"]:
+            adv_data.append([d.get("label", "—"), str(d.get("cantidad", 0)), _fmt_gs(d.get("monto_gs", 0)),
+                             _fmt_gs(d.get("cargo_cliente_gs", 0)), _fmt_gs(d.get("comision_gs", 0))])
+        adv_data.append(["TOTAL", str(recon.get("adelantos_cantidad", 0)), _fmt_gs(recon.get("adelantos_gs", 0)),
+                         _fmt_gs(recon.get("adelantos_cargo_cliente_gs", 0)), _fmt_gs(recon.get("adelantos_comision_gs", 0))])
+        t_adv = Table(adv_data, colWidths=[55 * mm, 15 * mm, 40 * mm, 40 * mm, 36 * mm])
+        t_adv.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
+            ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+            ("FONTNAME", (0, -1), (-1, -1), FONT_BOLD),
+            ("BACKGROUND", (0, -1), (-1, -1), HexColor("#F1F5F9")),
+            ("LINEABOVE", (0, -1), (-1, -1), 1.0, HexColor("#0F172A")),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(t_adv)
+        elements.append(Spacer(1, 10))
 
     # 4. HISTORIAL DE RETIROS PARCIALES (CASH DROPS)
     elements.append(Paragraph("<b>3. REGISTRO DE RETIROS PARCIALES (CASH DROPS / SANGRÍAS)</b>", styles["Normal"]))
