@@ -2243,9 +2243,13 @@ async def get_purchases_vs_sales_report(
     total_ventas = float(sales_res["total_ventas"]) if sales_res and sales_res["total_ventas"] else 0.0
     total_tickets = int(sales_res["tickets_total"]) if sales_res and sales_res["tickets_total"] else 0
 
-    # 2. Compras del período (facturas de proveedor registradas para mercaderías)
+    # 2. Compras del período (facturas comerciales de proveedor recibidas para mercaderías)
     pur_params = {"pur_company_id": company_id}
-    pur_where = "si.company_id = :pur_company_id AND COALESCE(si.estado, 'pendiente') <> 'anulado'"
+    pur_where = (
+        "si.company_id = :pur_company_id "
+        "AND COALESCE(si.estado, 'pendiente') NOT IN ('cancelada', 'cancelado', 'anulada', 'anulado', 'rechazada', 'rechazado') "
+        "AND COALESCE(si.tipo_comprobante, 'factura') IN ('factura', 'mercaderia')"
+    )
     if fecha_desde:
         pur_where += " AND si.fecha_emision >= :pur_fecha_desde"
         pur_params["pur_fecha_desde"] = fecha_desde
@@ -2254,21 +2258,24 @@ async def get_purchases_vs_sales_report(
         pur_params["pur_fecha_hasta"] = fecha_hasta
 
     # Filtro de tipo_provision (mercaderías = bienes + mixto de proveedores comerciales para reventa)
+    prov_subfilter = ""
     if tipo_provision == "mercaderias":
-        pur_where += """ AND COALESCE(sup.tipo_provision, 'bienes') IN ('bienes', 'mixto')
-                         AND (
-                             EXISTS (SELECT 1 FROM products p WHERE p.supplier_id = sup.id)
-                             OR EXISTS (SELECT 1 FROM sale_items vi JOIN products p ON p.id = vi.product_id WHERE p.supplier_id = sup.id)
-                         )"""
+        prov_subfilter = """ AND COALESCE(sup.tipo_provision, 'bienes') IN ('bienes', 'mixto')
+                             AND (
+                                 EXISTS (SELECT 1 FROM products p WHERE p.supplier_id = sup.id)
+                                 OR EXISTS (SELECT 1 FROM sale_items vi JOIN products p ON p.id = vi.product_id WHERE p.supplier_id = sup.id)
+                             )"""
     elif tipo_provision == "bienes":
-        pur_where += """ AND COALESCE(sup.tipo_provision, 'bienes') = 'bienes'
-                         AND (
-                             EXISTS (SELECT 1 FROM products p WHERE p.supplier_id = sup.id)
-                             OR EXISTS (SELECT 1 FROM sale_items vi JOIN products p ON p.id = vi.product_id WHERE p.supplier_id = sup.id)
-                         )"""
+        prov_subfilter = """ AND COALESCE(sup.tipo_provision, 'bienes') = 'bienes'
+                             AND (
+                                 EXISTS (SELECT 1 FROM products p WHERE p.supplier_id = sup.id)
+                                 OR EXISTS (SELECT 1 FROM sale_items vi JOIN products p ON p.id = vi.product_id WHERE p.supplier_id = sup.id)
+                             )"""
     elif tipo_provision in ("mixto", "servicios"):
-        pur_where += " AND COALESCE(sup.tipo_provision, 'bienes') = :pur_tipo_provision"
+        prov_subfilter = " AND COALESCE(sup.tipo_provision, 'bienes') = :pur_tipo_provision"
         pur_params["pur_tipo_provision"] = tipo_provision
+
+    pur_where += prov_subfilter
 
     q_purchases = f"""
         SELECT 
@@ -2279,8 +2286,26 @@ async def get_purchases_vs_sales_report(
         WHERE {pur_where}
     """
     pur_res = (await _exec(db, q_purchases, pur_params)).first()
-    total_compras = float(pur_res["total_compras"]) if pur_res and pur_res["total_compras"] else 0.0
+    total_compras_brutas = float(pur_res["total_compras"]) if pur_res and pur_res["total_compras"] else 0.0
     total_facturas_compras = int(pur_res["facturas_total"]) if pur_res and pur_res["facturas_total"] else 0
+
+    # 2b. Deducción de Notas de Crédito comerciales de proveedores
+    nc_where = "nc.company_id = :pur_company_id AND COALESCE(nc.cancelado, false) = false"
+    if fecha_desde:
+        nc_where += " AND nc.fecha >= :pur_fecha_desde"
+    if fecha_hasta:
+        nc_where += " AND nc.fecha <= :pur_fecha_hasta"
+    nc_where += prov_subfilter
+
+    q_nc = f"""
+        SELECT COALESCE(SUM(nc.monto), 0) as total_nc
+        FROM supplier_credit_notes nc
+        LEFT JOIN suppliers sup ON sup.id = nc.supplier_id
+        WHERE {nc_where}
+    """
+    nc_res = (await _exec(db, q_nc, pur_params)).first()
+    total_nc = float(nc_res["total_nc"]) if nc_res and nc_res["total_nc"] else 0.0
+    total_compras = max(0.0, round(total_compras_brutas - total_nc, 0))
 
     # 3. Métricas de OTB / Presupuesto
     ratio_real_pct = round((total_compras / total_ventas * 100), 2) if total_ventas > 0 else 0.0
@@ -2341,12 +2366,35 @@ async def get_purchases_vs_sales_report(
                 si.supplier_id,
                 COALESCE(sup.razon_social, sup.nombre_fantasia, 'Sin Proveedor') as proveedor,
                 COALESCE(sup.ruc, '—') as ruc,
-                SUM(si.total) as compras_prov,
+                SUM(si.total) as compras_brutas_prov,
                 COUNT(si.id) as facturas_prov
             FROM supplier_invoices si
             LEFT JOIN suppliers sup ON sup.id = si.supplier_id
             WHERE {pur_where}
             GROUP BY si.supplier_id, sup.razon_social, sup.nombre_fantasia, sup.ruc
+        ),
+        nc_prov AS (
+            SELECT 
+                nc.supplier_id,
+                COALESCE(sup.razon_social, sup.nombre_fantasia, 'Sin Proveedor') as proveedor,
+                COALESCE(sup.ruc, '—') as ruc,
+                SUM(nc.monto) as nc_prov
+            FROM supplier_credit_notes nc
+            LEFT JOIN suppliers sup ON sup.id = nc.supplier_id
+            WHERE {nc_where}
+            GROUP BY nc.supplier_id, sup.razon_social, sup.nombre_fantasia, sup.ruc
+        ),
+        cp_net AS (
+            SELECT
+                COALESCE(c.supplier_id, nc.supplier_id) as supplier_id,
+                COALESCE(c.proveedor, nc.proveedor) as proveedor,
+                COALESCE(c.ruc, nc.ruc) as ruc,
+                GREATEST(COALESCE(c.compras_brutas_prov, 0) - COALESCE(nc.nc_prov, 0), 0) as compras_prov,
+                COALESCE(c.compras_brutas_prov, 0) as compras_brutas,
+                COALESCE(nc.nc_prov, 0) as nc_prov,
+                COALESCE(c.facturas_prov, 0) as facturas_prov
+            FROM c_prov c
+            FULL OUTER JOIN nc_prov nc ON nc.supplier_id = c.supplier_id
         ),
         v_ly AS (
             SELECT 
@@ -2377,11 +2425,13 @@ async def get_purchases_vs_sales_report(
             COALESCE(v.ruc, c.ruc) as ruc,
             COALESCE(v.ventas_prov, 0) as ventas,
             COALESCE(c.compras_prov, 0) as compras,
+            COALESCE(c.compras_brutas, 0) as compras_brutas,
+            COALESCE(c.nc_prov, 0) as nc_proveedor,
             COALESCE(c.facturas_prov, 0) as facturas,
             COALESCE(ly.ventas_ly_periodo, 0) as ventas_ly,
             COALESCE(lym.ventas_ly_mes_completo, 0) as ventas_ly_mes
         FROM v_prov v
-        FULL OUTER JOIN c_prov c ON c.supplier_id = v.supplier_id
+        FULL OUTER JOIN cp_net c ON c.supplier_id = v.supplier_id
         LEFT JOIN v_ly ly ON ly.supplier_id::text = COALESCE(v.supplier_id::text, c.supplier_id::text)
         LEFT JOIN v_ly_mes lym ON lym.supplier_id::text = COALESCE(v.supplier_id::text, c.supplier_id::text)
         ORDER BY compras DESC, ventas DESC
@@ -2431,6 +2481,8 @@ async def get_purchases_vs_sales_report(
             "var_interanual_pct": var_interanual_pct,
             "ventas_proyeccion": proy_final,
             "compras": c_monto,
+            "compras_brutas": float(r["compras_brutas"] or 0),
+            "nc_monto": float(r["nc_proveedor"] or 0),
             "facturas": int(r["facturas"] or 0),
             "ratio_pct": ratio_p,
             "ratio_proy_pct": ratio_proy,
@@ -2452,6 +2504,8 @@ async def get_purchases_vs_sales_report(
             "var_interanual_pct": var_global_ly_pct,
             "total_ventas_proyeccion": tot_ventas_proy,
             "total_compras": total_compras,
+            "total_compras_brutas": total_compras_brutas,
+            "total_nc": total_nc,
             "total_tickets_ventas": total_tickets,
             "total_facturas_compras": total_facturas_compras,
             "ratio_real_pct": ratio_real_pct,

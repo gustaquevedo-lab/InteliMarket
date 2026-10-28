@@ -3246,7 +3246,8 @@ async def _compute_daily_cash_flow_full(db: AsyncSession, company_id: str, dias:
     ap_result = await db.execute(
         select(SupplierInvoice).where(
             SupplierInvoice.company_id == cid,
-            SupplierInvoice.estado == "pendiente",
+            SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]),
+            SupplierInvoice.saldo_pendiente > 0,
         )
     )
     ap_invoices = list(ap_result.scalars().all())
