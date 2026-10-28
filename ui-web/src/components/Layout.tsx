@@ -8,8 +8,7 @@ import {
   LogOut, Menu, X, Moon, Sun, Monitor, Search, Plus, Store, ChevronDown, Building2, Shield, Crown, Target,
   ClipboardList, RotateCcw, Percent, Coins, HandCoins, Building, BookOpen, PiggyBank, PieChart, Factory, Smartphone,
   ArrowLeftRight, Cpu, Map, Navigation, BarChart3, MapPin, DollarSign, TrendingUp, Route, Lightbulb, Bot, Clock, Award, Globe, Repeat, Wrench,
-  Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Trophy, Sparkles
-} from "lucide-react"
+  Copy, Package, Upload, Mail, AlertTriangle, LayoutGrid, Trophy, Sparkles, KeyRound} from "lucide-react"
 import { useAuth } from "../context/AuthContext"
 import { useTheme } from "../context/ThemeContext"
 import { useFeatures } from "../context/FeatureContext"
@@ -335,6 +334,12 @@ export default function Layout() {
               </div>
             )}
           </div>
+          <button
+            onClick={() => navigate("/cambiar-clave")}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white hover:bg-white/10 transition-all"
+          >
+            <KeyRound className="w-5 h-5" /> Cambiar clave
+          </button>
           <button
             onClick={() => { logout(); navigate("/login") }}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-red-300 hover:text-red-200 hover:bg-red-500/20 transition-all"

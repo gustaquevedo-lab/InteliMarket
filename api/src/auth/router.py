@@ -428,6 +428,7 @@ async def get_me(
         tenant_id=token_data.get("tenant_id"),
         tenant_slug=token_data.get("tenant_slug"),
         created_at=user.created_at,
+        must_change_password=bool(user.must_change_password),
     )
 
 
@@ -472,7 +473,7 @@ async def change_password(
         raise HTTPException(status_code=401, detail="Contraseña actual incorrecta")
 
     await db.execute(
-        update(User).where(User.id == user.id).values(password_hash=hash_password(body.new_password))
+        update(User).where(User.id == user.id).values(password_hash=hash_password(body.new_password), must_change_password=False)
     )
     await db.commit()
     return {"message": "Contraseña actualizada"}

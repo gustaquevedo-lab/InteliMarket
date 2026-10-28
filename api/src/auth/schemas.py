@@ -74,6 +74,7 @@ class UserResponse(BaseModel):
     tenant_id: Optional[str] = None
     tenant_slug: Optional[str] = None
     created_at: datetime
+    must_change_password: bool = False
 
     class Config:
         from_attributes = True

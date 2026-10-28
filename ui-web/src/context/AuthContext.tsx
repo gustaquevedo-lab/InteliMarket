@@ -10,6 +10,7 @@ interface User {
   tenant_id?: string
   tenant_slug?: string
   foto_url?: string | null
+  must_change_password?: boolean
 }
 
 interface AuthContextType {
@@ -67,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           is_superadmin: claims.is_superadmin === true,
           tenant_id: u.tenant_id, tenant_slug: u.tenant_slug,
           foto_url: (u as any).foto_url,
+          must_change_password: (u as any).must_change_password === true,
         }
         setUser(userObj)
         localStorage.setItem("cached_user_profile", JSON.stringify(userObj))
@@ -168,6 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       is_superadmin: claims.is_superadmin === true,
       tenant_id: me.tenant_id, tenant_slug: me.tenant_slug,
       foto_url: (me as any).foto_url,
+      must_change_password: (me as any).must_change_password === true,
     }
     setUser(userObj)
     localStorage.setItem("cached_user_profile", JSON.stringify(userObj))
@@ -204,7 +207,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{
+      user, loading, login, register, logout,
+      mustChangePassword: !!user?.must_change_password,
+      clearMustChangePassword: () => setUser(u => {
+        if (!u) return u
+        const nu = { ...u, must_change_password: false }
+        localStorage.setItem("cached_user_profile", JSON.stringify(nu))
+        return nu
+      }),
+    }}>
       {children}
     </AuthContext.Provider>
   )

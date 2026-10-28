@@ -27,6 +27,7 @@ const ExecutiveReportPage = lazy(() => import("./pages/gerencial/ExecutiveReport
 const SettingsPage = lazy(() => import("./pages/settings/SettingsPage"))
 const AppsMovilesPage = lazy(() => import("./pages/apps/AppsMovilesPage"))
 const POSPage = lazy(() => import("./pages/pos/POSPage"))
+const ChangePasswordPage = lazy(() => import("./pages/ChangePasswordPage"))
 const SupervisorPage = lazy(() => import("./pages/pos/SupervisorPage"))
 const CajaPage = lazy(() => import("./pages/caja/CajaPage"))
 const AdminPage = lazy(() => import("./pages/admin/AdminPage"))
@@ -178,6 +179,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
   if (loading) return <PageLoader />
   if (!user) return <Navigate to="/login" replace />
+  if (user.must_change_password) return <Navigate to="/cambiar-clave" replace />
   const estacion = ROL_A_ESTACION[(user as any)?.rol]
   if (estacion && window.location.pathname !== estacion) {
     return <Navigate to={estacion} replace />
@@ -257,6 +259,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Suspense fallback={<PageLoader />}><Login /></Suspense>} />
+      <Route path="/cambiar-clave" element={<Suspense fallback={<PageLoader />}><ChangePasswordPage /></Suspense>} />
       <Route path="/portal/proveedores/login" element={<Suspense fallback={<PageLoader />}><SupplierLogin /></Suspense>} />
       <Route path="/portal/proveedores/dashboard" element={<Suspense fallback={<PageLoader />}><SupplierDashboard /></Suspense>} />
       <Route path="/driver-app" element={<Suspense fallback={<PageLoader />}><DriverAppPage /></Suspense>} />
