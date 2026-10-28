@@ -629,8 +629,24 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
     # que los SaleItem de abajo puedan referenciar sale.id sin forzar un
     # INSERT prematuro de sales con subtotal/total todavia en NULL.
 
+    # ── Precarga de costos de referencia para congelar en SaleItem al momento de la venta ──
+    prod_ids = [it.product_id for it in data.items if it.product_id]
+    prod_costs = {}
+    if prod_ids:
+        cost_res = await db.execute(
+            select(Product.id, Product.costo_promedio, Product.ultimo_costo)
+            .where(Product.id.in_(prod_ids))
+        )
+        for r_id, r_prom, r_ult in cost_res:
+            c = r_prom if (r_prom and r_prom > Decimal("0")) else (r_ult or Decimal("0"))
+            prod_costs[r_id] = Decimal(str(c))
+
     for item_data in data.items:
         taxes = calculate_taxes(item_data.model_dump())
+
+        costo_unit = item_data.costo_unitario
+        if (costo_unit is None or costo_unit == Decimal("0")) and item_data.product_id in prod_costs:
+            costo_unit = prod_costs[item_data.product_id]
 
         item = SaleItem(
             sale_id=sale.id,
@@ -644,7 +660,7 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             iva_tasa=item_data.iva_tasa,
             iva_monto=taxes["iva_monto"],
             total=taxes["total"],
-            costo_unitario=item_data.costo_unitario,
+            costo_unitario=costo_unit,
         )
         db.add(item)
 
