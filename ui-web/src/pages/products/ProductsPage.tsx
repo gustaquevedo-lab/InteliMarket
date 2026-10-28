@@ -1517,8 +1517,8 @@ export default function ProductsPage() {
                       <th className="py-2.5 px-1.5 text-right text-slate-900 dark:text-slate-100 whitespace-nowrap">PVP (Minorista)</th>
                       <th className="py-2.5 px-1 text-center whitespace-nowrap" title="Margen Esperado: (PVP - Costo Promedio) / PVP">Margen Esp.</th>
                       <th className="py-2.5 px-1.5 text-right text-indigo-600 dark:text-indigo-400 whitespace-nowrap">P. Mayorista</th>
-                      <th className="py-2.5 px-1.5 text-right text-sky-600 dark:text-sky-400 whitespace-nowrap" title="PVPromedio: Precio Venta Promedio Ponderado Real de Ventas en Caja">PVPromedio</th>
-                      <th className="py-2.5 px-1 text-center whitespace-nowrap" title="Margen Real: (PVPromedio - Costo Promedio) / PVPromedio">Margen Real</th>
+                      <th className="py-2.5 px-1.5 text-right text-sky-600 dark:text-sky-400 whitespace-nowrap" title="PVPromedio: Precio Venta Promedio Ponderado Real en Caja (últimos 30 días o desde el último cambio de precio)">PVPromedio</th>
+                      <th className="py-2.5 px-1 text-center whitespace-nowrap" title="Margen Real: (PVPromedio - Costo Promedio) / PVPromedio en el período vigente">Margen Real</th>
                       <th className="py-2.5 px-1.5 text-center whitespace-nowrap">Acciones</th>
                     </tr>
                   </thead>

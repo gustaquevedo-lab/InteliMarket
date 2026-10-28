@@ -398,15 +398,28 @@ async def _enrich_products_details(db: AsyncSession, c_uuid: UUID, products: lis
             p.__dict__["precio_mayorista"] = None
             p.__dict__["precio_mayorista_min_qty"] = None
 
-    # 4. Asociar Precio de Venta Promedio Ponderado Real (PVPromedio efectivo de ventas)
+    # 4. Asociar Precio de Venta Promedio Ponderado Real (PVPromedio de la lista vigente / últimos 30 días)
     sales_agg_res = await db.execute(
         text("""
-            SELECT product_id,
-                   COALESCE(SUM(total), 0) as total_monto,
-                   COALESCE(SUM(cantidad), 0) as total_qty
-            FROM sale_items
-            WHERE product_id = ANY(:p_ids)
-            GROUP BY product_id
+            WITH latest_changes AS (
+                SELECT product_id, MAX(created_at) as last_changed_at
+                FROM price_variation_logs
+                WHERE product_id = ANY(:p_ids)
+                GROUP BY product_id
+            )
+            SELECT si.product_id,
+                   COALESCE(SUM(si.total), 0) as total_monto,
+                   COALESCE(SUM(si.cantidad), 0) as total_qty
+            FROM sale_items si
+            JOIN sales sa ON sa.id = si.sale_id
+            LEFT JOIN latest_changes lc ON lc.product_id = si.product_id
+            WHERE si.product_id = ANY(:p_ids)
+              AND sa.estado <> 'cancelado'
+              AND sa.fecha >= COALESCE(
+                  CASE WHEN lc.last_changed_at >= (NOW() - INTERVAL '30 days') THEN lc.last_changed_at ELSE NULL END,
+                  (NOW() - INTERVAL '30 days')
+              )
+            GROUP BY si.product_id
         """),
         {"p_ids": p_ids}
     )
@@ -1376,7 +1389,18 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
     precio = float(product.precio_venta or 0)
     precio_regular = float(getattr(product, "precio_regular", None) or precio)
 
-    # 12b. Consulta de Ventas Históricas Totales para calcular Precio de Venta Promedio Ponderado Real
+    # 12b. Consulta de la última alteración de precio y ventas de la lista vigente (o últimos 30 días)
+    last_price_change_res = await db.execute(
+        text("""
+            SELECT MAX(created_at) as last_changed_at
+            FROM price_variation_logs
+            WHERE product_id = :p_id
+        """),
+        {"p_id": p_uuid}
+    )
+    last_change_row = last_price_change_res.first()
+    last_price_change = last_change_row.last_changed_at if last_change_row else None
+
     sales_agg_rows = await db.execute(
         text("""
             SELECT 
@@ -1386,8 +1410,13 @@ async def get_product_360(db: AsyncSession, product_id: str) -> dict | None:
             FROM sale_items si
             JOIN sales sa ON sa.id = si.sale_id
             WHERE si.product_id = :p_id
+              AND sa.estado <> 'cancelado'
+              AND sa.fecha >= COALESCE(
+                  CASE WHEN :last_change >= (NOW() - INTERVAL '30 days') THEN :last_change ELSE NULL END,
+                  (NOW() - INTERVAL '30 days')
+              )
         """),
-        {"p_id": p_uuid}
+        {"p_id": p_uuid, "last_change": last_price_change}
     )
     s_agg = sales_agg_rows.first()
     ventas_totales_qty = float(s_agg.total_qty) if s_agg else 0.0

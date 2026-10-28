@@ -881,7 +881,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                     <Calculator className="w-5 h-5 text-emerald-400" />
                     <div>
                       <h3 className="text-sm font-black uppercase tracking-wider text-white">Margen Bruto Ponderado por Escalas de Precio</h3>
-                      <p className="text-[11px] text-slate-400">Calculado rigurosamente: <strong>(PVP Promedio Real - Costo PPP) ÷ PVP Promedio Real</strong></p>
+                      <p className="text-[11px] text-slate-400">Calculado sobre la lista vigente: <strong>(PVP Promedio Real - Costo PPP) ÷ PVP Promedio Real</strong></p>
                     </div>
                   </div>
                   <span className="text-[10px] font-bold uppercase px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
@@ -893,7 +893,7 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-sm">
                     <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1">Precio Venta Promedio (Real)</span>
                     <p className="text-2xl font-black font-mono text-emerald-400">{formatPYG(margenPond.precio_promedio_real)}</p>
-                    <p className="text-[10px] text-slate-400 mt-1">Ponderado en caja sobre {margenPond.unidades_totales_vendidas > 0 ? `${Number(margenPond.unidades_totales_vendidas).toLocaleString("es-PY")} un.` : "catálogo"}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Ponderado en caja sobre {margenPond.unidades_totales_vendidas > 0 ? `${Number(margenPond.unidades_totales_vendidas).toLocaleString("es-PY")} un. (vigentes)` : "catálogo"}</p>
                   </div>
 
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-sm">
