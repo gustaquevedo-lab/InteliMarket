@@ -28,6 +28,8 @@ export interface SupplierSearchInputProps {
   soloMercaderia?: boolean
   showTypeToggle?: boolean
   showProductCount?: boolean
+  allowAllOption?: boolean
+  allOptionLabel?: string
 }
 
 let cachedSuppliers: SupplierOption[] | null = null
@@ -47,6 +49,8 @@ export default function SupplierSearchInput({
   soloMercaderia = false,
   showTypeToggle = false,
   showProductCount = false,
+  allowAllOption = false,
+  allOptionLabel = "Todos los Proveedores",
 }: SupplierSearchInputProps) {
   const [internalSuppliers, setInternalSuppliers] = useState<SupplierOption[]>(() => propSuppliers || cachedSuppliers || [])
   const [loading, setLoading] = useState(false)
@@ -117,7 +121,10 @@ export default function SupplierSearchInput({
       .slice(0, 40)
   }, [internalSuppliers, query, filterType])
 
+  const isAll = supplierId === "all" || (allowAllOption && value === allOptionLabel)
+
   const selectedSupplierObj = useMemo(() => {
+    if (isAll) return null
     if (!supplierId && !value) return null
     if (supplierId) {
       const match = internalSuppliers.find((s) => s.id === supplierId)
@@ -129,7 +136,7 @@ export default function SupplierSearchInput({
         (s.nombre_fantasia && s.nombre_fantasia.toLowerCase() === value.toLowerCase()) ||
         (s.nombre && s.nombre.toLowerCase() === value.toLowerCase())
     )
-  }, [supplierId, value, internalSuppliers])
+  }, [supplierId, value, internalSuppliers, isAll])
 
   const handleSelect = (s: SupplierOption) => {
     const name = s.razon_social || s.nombre_fantasia || s.nombre || ""
@@ -161,9 +168,14 @@ export default function SupplierSearchInput({
           <span>
             {label} {required && <span className="text-rose-500">*</span>}
           </span>
-          {value && (
+          {value && !isAll && (
             <span className="text-[10px] font-normal text-slate-400">
               {supplierId || selectedSupplierObj ? "Proveedor registrado" : "Beneficiario manual"}
+            </span>
+          )}
+          {isAll && (
+            <span className="text-[10px] font-bold text-blue-500">
+              Sin filtro
             </span>
           )}
         </label>
@@ -175,22 +187,29 @@ export default function SupplierSearchInput({
           <div className="flex items-center gap-2.5 overflow-hidden">
             <div
               className={`p-2 rounded-lg shrink-0 ${
-                supplierId || selectedSupplierObj
+                isAll
+                  ? "bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400"
+                  : supplierId || selectedSupplierObj
                   ? "bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400"
                   : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
               }`}
             >
-              {supplierId || selectedSupplierObj ? <Building2 className="w-4 h-4" /> : <User className="w-4 h-4" />}
+              {isAll || supplierId || selectedSupplierObj ? <Building2 className="w-4 h-4" /> : <User className="w-4 h-4" />}
             </div>
             <div className="truncate">
               <div className="flex items-center gap-2">
                 <span className="font-bold text-xs text-slate-900 dark:text-white truncate">{value}</span>
-                {(selectedSupplierObj?.ruc || supplierId) && (
+                {isAll && (
+                  <span className="font-semibold text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 shrink-0">
+                    Consolidado
+                  </span>
+                )}
+                {!isAll && (selectedSupplierObj?.ruc || (supplierId && supplierId !== "all")) && (
                   <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold shrink-0">
                     RUC: {selectedSupplierObj?.ruc || "Registrado"}
                   </span>
                 )}
-                {showProductCount && selectedSupplierObj?.total_productos !== undefined && (
+                {!isAll && showProductCount && selectedSupplierObj?.total_productos !== undefined && (
                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold shrink-0 ${
                     selectedSupplierObj.total_productos > 0
                       ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300"
@@ -200,7 +219,7 @@ export default function SupplierSearchInput({
                   </span>
                 )}
               </div>
-              {selectedSupplierObj?.nombre_fantasia && selectedSupplierObj.nombre_fantasia !== value && (
+              {!isAll && selectedSupplierObj?.nombre_fantasia && selectedSupplierObj.nombre_fantasia !== value && (
                 <p className="text-[10px] text-slate-400 truncate">Fantasia: {selectedSupplierObj.nombre_fantasia}</p>
               )}
             </div>
@@ -214,7 +233,7 @@ export default function SupplierSearchInput({
                 setIsOpen(true)
               }}
               className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700 transition"
-              title="Cambiar beneficiario"
+              title="Cambiar proveedor o beneficiario"
             >
               <X className="w-4 h-4" />
             </button>
@@ -296,6 +315,36 @@ export default function SupplierSearchInput({
                   <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold uppercase tracking-wider">
                     Manual
                   </span>
+                </button>
+              )}
+
+              {/* Opción Consolidada: Todos los Proveedores */}
+              {allowAllOption && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelectSupplier({ id: "all", name: allOptionLabel })
+                    setQuery("")
+                    setIsOpen(false)
+                  }}
+                  className={`w-full text-left px-3.5 py-2.5 text-xs hover:bg-blue-50/80 dark:hover:bg-blue-950/40 border-b border-slate-200 dark:border-slate-700/80 flex items-center justify-between transition ${
+                    isAll ? "bg-blue-50 dark:bg-blue-950/50 font-bold" : ""
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+                      <Building2 className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-800 dark:text-slate-100">
+                        🏢 {allOptionLabel}
+                      </p>
+                      <p className="text-[10px] text-slate-400">Ver inventario consolidado sin filtro de proveedor</p>
+                    </div>
+                  </div>
+                  {isAll && (
+                    <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                  )}
                 </button>
               )}
 

@@ -23,6 +23,7 @@ import TomaFisicaTab from "./TomaFisicaTab"
 import WarehouseModal, { type WarehouseFormData } from "./WarehouseModal"
 import KardexProductoDetalleModal, { type KardexProductoInfo } from "./KardexProductoDetalleModal"
 import KardexProductPickerModal from "./KardexProductPickerModal"
+import SupplierSearchInput from "../../components/SupplierSearchInput"
 
 export default function InventoryPage() {
   const toast = useToast()
@@ -645,7 +646,7 @@ export default function InventoryPage() {
                 🏢 Extra Supermercado (Central)
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-blue-300">
-                📦 {stock.length} registros de stock
+                📦 {stats?.total_skus_almacenados ? `${stats.total_skus_almacenados.toLocaleString("es-PY")} SKUs con stock` : `${stock.length} registros de stock`}
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
                 💰 {loadingStats ? "Cargando existencias..." : `${formatPYG(stats?.valor_total_costo ?? 0)} en existencias`}
@@ -694,7 +695,17 @@ export default function InventoryPage() {
             <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
               {loadingStats ? "—" : formatPYG(stats?.valor_total_costo ?? 0)}
             </p>
-            <p className="text-[11px] text-slate-400">Patrimonio en inventario</p>
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>Patrimonio en inventario</span>
+              {Boolean(stats?.total_skus_deficit && stats.total_skus_deficit > 0) && (
+                <span
+                  className="text-[10px] text-amber-400 font-bold bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20"
+                  title={`Existen ${stats.total_skus_deficit} artículos con ventas sin recepción registrada (-${formatPYG(stats.valor_deficit_costo || 0)})`}
+                >
+                  {stats.total_skus_deficit} sin recepción
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
@@ -961,36 +972,32 @@ export default function InventoryPage() {
                   </select>
                 </div>
 
-                {/* Filtro Proveedor */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Proveedor</label>
-                  <select
-                    value={valuationSupplier}
-                    onChange={(e) => setValuationSupplier(e.target.value)}
-                    className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 dark:text-slate-200 max-w-xs"
-                  >
-                    <option value="all">🏭 Todos los Proveedores</option>
-                    {suppliersList.filter((s: any) => (s.total_productos || 0) > 0).length > 0 && (
-                      <optgroup label={`📦 Con Mercaderías (${suppliersList.filter((s: any) => (s.total_productos || 0) > 0).length})`}>
-                        {suppliersList
-                          .filter((s: any) => (s.total_productos || 0) > 0)
-                          .map((s: any) => (
-                            <option key={s.id} value={s.id}>
-                              {s.razon_social || s.nombre_fantasia || "Proveedor"} ({s.total_productos} prods)
-                            </option>
-                          ))}
-                      </optgroup>
-                    )}
-                    <optgroup label={`📋 Otros Proveedores (${suppliersList.filter((s: any) => (s.total_productos || 0) === 0).length})`}>
-                      {suppliersList
-                        .filter((s: any) => (s.total_productos || 0) === 0)
-                        .map((s: any) => (
-                          <option key={s.id} value={s.id}>
-                            {s.razon_social || s.nombre_fantasia || "Proveedor"} {s.ruc ? `(${s.ruc})` : ""}
-                          </option>
-                        ))}
-                    </optgroup>
-                  </select>
+                {/* Filtro Proveedor con Buscador Interactivo */}
+                <div className="w-full sm:w-80">
+                  <SupplierSearchInput
+                    label="Proveedor"
+                    value={
+                      valuationSupplier === "all"
+                        ? "Todos los Proveedores"
+                        : (suppliersList.find((s: any) => s.id === valuationSupplier)?.razon_social ||
+                           suppliersList.find((s: any) => s.id === valuationSupplier)?.nombre_fantasia ||
+                           "")
+                    }
+                    supplierId={valuationSupplier}
+                    onSelectSupplier={(res) => {
+                      setValuationSupplier(res.id || "all")
+                    }}
+                    onClear={() => {
+                      setValuationSupplier("all")
+                    }}
+                    suppliers={suppliersList}
+                    allowAllOption={true}
+                    allOptionLabel="Todos los Proveedores"
+                    allowManual={false}
+                    showTypeToggle={true}
+                    showProductCount={true}
+                    placeholder="Buscar proveedor o RUC..."
+                  />
                 </div>
 
                 {/* Fecha de Corte Histórica */}

@@ -997,6 +997,8 @@ export interface InventoryStatsResponse {
   total_unidades_reservadas: number
   valor_total_costo: number
   valor_total_venta_proyectada: number
+  valor_deficit_costo?: number
+  total_skus_deficit?: number
   total_quiebres: number
   total_bajos: number
   cant_mermas_mes: number

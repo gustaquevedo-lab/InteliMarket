@@ -1405,13 +1405,15 @@ async def get_inventory_stats(db: AsyncSession, company_id: str) -> dict:
         text("""
             WITH inv_agg AS (
                 SELECT 
-                    COUNT(DISTINCT s.product_id) as total_skus_almacenados,
-                    COALESCE(SUM(s.cantidad), 0) as total_unidades_fisicas,
+                    COUNT(DISTINCT s.product_id) FILTER (WHERE s.cantidad > 0) as total_skus_almacenados,
+                    COALESCE(SUM(GREATEST(s.cantidad, 0)), 0) as total_unidades_fisicas,
                     COALESCE(SUM(s.cantidad_reservada), 0) as total_unidades_reservadas,
-                    COALESCE(SUM(s.cantidad * COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0)), 0) as valor_total_costo,
-                    COALESCE(SUM(s.cantidad * COALESCE(p.precio_venta, 0)), 0) as valor_total_venta_proyectada,
-                    COUNT(p.id) FILTER (WHERE COALESCE(s.cantidad, 0) <= 0) as total_quiebres,
-                    COUNT(p.id) FILTER (WHERE COALESCE(s.cantidad, 0) > 0 AND COALESCE(s.cantidad, 0) <= COALESCE(p.stock_minimo, 5)) as total_bajos
+                    COALESCE(SUM(GREATEST(s.cantidad, 0) * COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0)), 0) as valor_total_costo,
+                    COALESCE(SUM(GREATEST(s.cantidad, 0) * COALESCE(p.precio_venta, 0)), 0) as valor_total_venta_proyectada,
+                    COALESCE(SUM(CASE WHEN s.cantidad < 0 THEN ABS(s.cantidad) * COALESCE(s.costo_unitario, p.costo_promedio, p.ultimo_costo, 0) ELSE 0 END), 0) as valor_deficit_costo,
+                    COUNT(DISTINCT p.id) FILTER (WHERE s.cantidad < 0) as total_skus_deficit,
+                    COUNT(DISTINCT p.id) FILTER (WHERE COALESCE(s.cantidad, 0) <= 0) as total_quiebres,
+                    COUNT(DISTINCT p.id) FILTER (WHERE s.cantidad > 0 AND s.cantidad <= COALESCE(p.stock_minimo, 5)) as total_bajos
                 FROM products p
                 LEFT JOIN stock s ON s.product_id = p.id
                 WHERE p.company_id = :comp_id AND p.activo = true
@@ -1436,6 +1438,8 @@ async def get_inventory_stats(db: AsyncSession, company_id: str) -> dict:
         "total_unidades_reservadas": float(res.total_unidades_reservadas or 0) if res else 0,
         "valor_total_costo": float(res.valor_total_costo or 0) if res else 0.0,
         "valor_total_venta_proyectada": float(res.valor_total_venta_proyectada or 0) if res else 0.0,
+        "valor_deficit_costo": float(res.valor_deficit_costo or 0) if res else 0.0,
+        "total_skus_deficit": int(res.total_skus_deficit or 0) if res else 0,
         "total_quiebres": int(res.total_quiebres or 0) if res else 0,
         "total_bajos": int(res.total_bajos or 0) if res else 0,
         "cant_mermas_mes": int(res.cant_mermas_mes or 0) if res else 0,
