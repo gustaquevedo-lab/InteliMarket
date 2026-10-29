@@ -1,4 +1,5 @@
 from datetime import datetime
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,34 @@ from api.src.price_lists.schemas import (
 )
 
 router = APIRouter(prefix="/api/v1/price-lists", tags=["price-lists"])
+
+
+class AuditSaveRequest(BaseModel):
+    decisiones: list[dict]
+
+
+@router.get("/audit-state")
+async def get_audit_state(db: AsyncSession = Depends(get_db)):
+    """Obtiene el estado de decisiones de la auditoría de precios guardado en el servidor."""
+    return await service.get_audit_state(db)
+
+
+@router.post("/audit-save")
+async def save_audit_state(body: AuditSaveRequest, db: AsyncSession = Depends(get_db)):
+    """Guarda de forma persistente un lote de decisiones de auditoría de precios en el servidor."""
+    return await service.save_audit_decisions(db, body.decisiones)
+
+
+@router.post("/audit-reset")
+async def reset_audit_state(db: AsyncSession = Depends(get_db)):
+    """Reinicia todas las decisiones de la auditoría guardadas en el servidor."""
+    return await service.reset_audit_decisions(db)
+
+
+@router.post("/audit-apply")
+async def apply_audit_state(db: AsyncSession = Depends(get_db)):
+    """Aplica de forma atómica y definitiva los cambios de precios auditados en la base de datos de producción."""
+    return await service.apply_audit_decisions(db, "00000000-0000-0000-0000-000000000010")
 
 
 @router.get("/variations", response_model=PriceVariationsResponse)

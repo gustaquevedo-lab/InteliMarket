@@ -628,3 +628,243 @@ async def get_price_variations_for_export(
     return items
 
 
+async def get_audit_state(db: AsyncSession) -> dict:
+    res = await db.execute(text("""
+        SELECT product_id, sku, precio_aprobado, margen_modo, margen_aprobado, status, usuario, updated_at
+        FROM price_audit_decisions;
+    """))
+    rows = res.mappings().all()
+    decisiones = {}
+    for r in rows:
+        decisiones[str(r["product_id"])] = {
+            "price": int(round(float(r["precio_aprobado"]))),
+            "margin_mode": r["margen_modo"] or "eff",
+            "margin": float(r["margen_aprobado"]) if r["margen_aprobado"] is not None else None,
+            "status": r["status"],
+            "usuario": r["usuario"],
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+        }
+    return {
+        "status": "ok",
+        "total": len(decisiones),
+        "decisiones": decisiones,
+    }
+
+
+async def save_audit_decisions(db: AsyncSession, items: list[dict]) -> dict:
+    if not items:
+        return {"status": "ok", "saved_count": 0}
+
+    for it in items:
+        pid = it.get("product_id")
+        if not pid:
+            continue
+        p_aprobado = int(round(float(it.get("precio_aprobado") or it.get("price") or 0)))
+        m_modo = it.get("margen_modo") or it.get("margin_mode") or "eff"
+        m_aprobado = it.get("margen_aprobado") or it.get("margin")
+        m_aprobado = float(m_aprobado) if m_aprobado is not None else None
+        status = it.get("status") or "MODIFIED"
+        sku = str(it.get("sku") or "")
+        usuario = str(it.get("usuario") or "")
+
+        await db.execute(text("""
+            INSERT INTO price_audit_decisions (
+                product_id, sku, precio_aprobado, margen_modo, margen_aprobado, status, usuario, updated_at
+            ) VALUES (
+                :pid, :sku, :p_aprobado, :m_modo, :m_aprobado, :status, :usuario, NOW()
+            )
+            ON CONFLICT (product_id) DO UPDATE SET
+                sku = COALESCE(NULLIF(EXCLUDED.sku, ''), price_audit_decisions.sku),
+                precio_aprobado = EXCLUDED.precio_aprobado,
+                margen_modo = EXCLUDED.margen_modo,
+                margen_aprobado = EXCLUDED.margen_aprobado,
+                status = EXCLUDED.status,
+                usuario = EXCLUDED.usuario,
+                updated_at = NOW();
+        """), {
+            "pid": pid,
+            "sku": sku,
+            "p_aprobado": p_aprobado,
+            "m_modo": m_modo,
+            "m_aprobado": m_aprobado,
+            "status": status,
+            "usuario": usuario,
+        })
+    await db.commit()
+    return {"status": "ok", "saved_count": len(items)}
+
+
+async def reset_audit_decisions(db: AsyncSession) -> dict:
+    await db.execute(text("TRUNCATE TABLE price_audit_decisions;"))
+    await db.commit()
+    return {"status": "ok", "message": "Auditoría reiniciada correctamente en el servidor."}
+
+
+async def apply_audit_decisions(db: AsyncSession, company_id: str, usuario_nombre: str = "Auditoría Estratégica Precios") -> dict:
+    from uuid import uuid4
+    from datetime import datetime, timezone
+    from decimal import Decimal
+
+    q = await db.execute(text("""
+        SELECT 
+            d.product_id, d.sku, d.precio_aprobado, d.status,
+            p.nombre as product_nombre, p.codigo_barra as product_barcode,
+            p.precio_venta as precio_actual,
+            c.nombre as categoria_nombre
+        FROM price_audit_decisions d
+        JOIN products p ON p.id = d.product_id
+        LEFT JOIN product_categories c ON c.id = p.categoria_id
+        WHERE d.status IN ('MODIFIED', 'ACCEPTED')
+          AND d.precio_aprobado > 0
+          AND d.precio_aprobado != p.precio_venta;
+    """))
+    rows = q.mappings().all()
+
+    if not rows:
+        return {
+            "status": "ok",
+            "message": "No hay cambios de precios pendientes para aplicar.",
+            "updated_products": 0,
+            "updated_tiers": 0,
+            "logs_created": 0,
+        }
+
+    now_utc = datetime.now(timezone.utc)
+    updated_products = 0
+    updated_tiers = 0
+    logs_created = 0
+
+    def redondear_pyg(val):
+        if val is None or val <= 0:
+            return 0
+        val_int = int(round(val))
+        resto = val_int % 50
+        return val_int + (50 - resto) if resto >= 25 else val_int - resto
+
+    pids = [r["product_id"] for r in rows]
+    q_tiers = await db.execute(text("""
+        SELECT id, product_id, min_qty, precio_unitario
+        FROM sp_tiered_prices
+        WHERE product_id = ANY(:pids) AND activo = true;
+    """), {"pids": pids})
+    tiers_by_pid = {}
+    for t in q_tiers.mappings().all():
+        pid_str = str(t["product_id"])
+        if pid_str not in tiers_by_pid:
+            tiers_by_pid[pid_str] = []
+        tiers_by_pid[pid_str].append(t)
+
+    for r in rows:
+        pid = r["product_id"]
+        p_act = float(r["precio_actual"] or 0)
+        p_new = float(r["precio_aprobado"])
+        factor = p_new / p_act if p_act > 0 else 1.0
+
+        diff_monto = p_new - p_act
+        diff_pct = round(((p_new - p_act) / p_act * 100), 2) if p_act > 0 else 0
+
+        # 1. Update product
+        await db.execute(text("""
+            UPDATE products
+            SET precio_venta = :p_new,
+                updated_at = :now
+            WHERE id = :pid;
+        """), {"p_new": p_new, "now": now_utc, "pid": pid})
+        updated_products += 1
+
+        # 2. Log minorista
+        log_id = str(uuid4())
+        await db.execute(text("""
+            INSERT INTO price_variation_logs (
+                id, company_id, product_id, product_nombre, product_sku, product_barcode,
+                categoria_nombre, tipo, precio_anterior, precio_nuevo, diferencia_monto,
+                diferencia_pct, origen, usuario_id, usuario_nombre, motivo, created_at,
+                precio_minorista_anterior, precio_minorista_nuevo, precio_escala_anterior, precio_escala_nuevo
+            ) VALUES (
+                :id, :company_id, :product_id, :nom, :sku, :bar,
+                :cat, 'unitario', :p_ant, :p_nue, :diff_m,
+                :diff_pct, 'auditoria_rentabilidad', NULL, :usr, 'Ajuste de margen aprobado en auditoría interactiva', :created_at,
+                :p_ant, :p_nue, 0, 0
+            );
+        """), {
+            "id": log_id,
+            "company_id": company_id,
+            "product_id": pid,
+            "nom": (r["product_nombre"] or "")[:255],
+            "sku": (r["product_sku"] or "")[:100],
+            "bar": (r["product_barcode"] or "")[:100],
+            "cat": (r["categoria_nombre"] or "")[:150] if r["categoria_nombre"] else None,
+            "p_ant": Decimal(str(int(round(p_act)))),
+            "p_nue": Decimal(str(int(round(p_new)))),
+            "diff_m": Decimal(str(int(round(diff_monto)))),
+            "diff_pct": Decimal(str(diff_pct)),
+            "usr": usuario_nombre[:150],
+            "created_at": now_utc,
+        })
+        logs_created += 1
+
+        # 3. Tiers
+        active_tiers = tiers_by_pid.get(str(pid), [])
+        for t in active_tiers:
+            tid = t["id"]
+            min_q = t["min_qty"]
+            t_ant = float(t["precio_unitario"] or 0)
+            t_nue = redondear_pyg(t_ant * factor)
+            if t_nue != t_ant:
+                await db.execute(text("""
+                    UPDATE sp_tiered_prices
+                    SET precio_unitario = :p_tier,
+                        updated_at = :now
+                    WHERE id = :tid;
+                """), {"p_tier": t_nue, "now": now_utc, "tid": tid})
+                updated_tiers += 1
+
+                t_diff_m = t_nue - t_ant
+                t_diff_pct = round(((t_nue - t_ant) / t_ant * 100), 2) if t_ant > 0 else 0
+                tier_log_id = str(uuid4())
+                await db.execute(text("""
+                    INSERT INTO price_variation_logs (
+                        id, company_id, product_id, product_nombre, product_sku, product_barcode,
+                        categoria_nombre, tipo, escala_min_qty, precio_anterior, precio_nuevo, diferencia_monto,
+                        diferencia_pct, origen, usuario_id, usuario_nombre, motivo, created_at,
+                        precio_minorista_anterior, precio_minorista_nuevo, precio_escala_anterior, precio_escala_nuevo
+                    ) VALUES (
+                        :id, :company_id, :product_id, :nom, :sku, :bar,
+                        :cat, 'escala', :min_qty, :p_ant, :p_nue, :diff_m,
+                        :diff_pct, 'auditoria_rentabilidad', NULL, :usr,
+                        :motivo, :created_at,
+                        :p_min_ant, :p_min_nue, :p_ant, :p_nue
+                    );
+                """), {
+                    "id": tier_log_id,
+                    "company_id": company_id,
+                    "product_id": pid,
+                    "nom": (r["product_nombre"] or "")[:255],
+                    "sku": (r["product_sku"] or "")[:100],
+                    "bar": (r["product_barcode"] or "")[:100],
+                    "cat": (r["categoria_nombre"] or "")[:150] if r["categoria_nombre"] else None,
+                    "min_qty": min_q,
+                    "p_ant": Decimal(str(int(round(t_ant)))),
+                    "p_nue": Decimal(str(int(round(t_nue)))),
+                    "diff_m": Decimal(str(int(round(t_diff_m)))),
+                    "diff_pct": Decimal(str(t_diff_pct)),
+                    "usr": usuario_nombre[:150],
+                    "motivo": f"Ajuste de margen aprobado en auditoría interactiva (Escala {min_q}u)",
+                    "created_at": now_utc,
+                    "p_min_ant": Decimal(str(int(round(p_act)))),
+                    "p_min_nue": Decimal(str(int(round(p_new)))),
+                })
+                logs_created += 1
+
+    await db.commit()
+    return {
+        "status": "ok",
+        "message": "Cambios de precios aplicados exitosamente en producción.",
+        "updated_products": updated_products,
+        "updated_tiers": updated_tiers,
+        "logs_created": logs_created,
+        "timestamp": now_utc.isoformat(),
+    }
+
+
+
