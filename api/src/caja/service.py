@@ -3490,8 +3490,8 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
             CashRegister.company_id == uuid.UUID(company_id),
             CashSession.estado.in_(["cerrada", "verificada"]),
             CashSession.id.not_in(LEGACY_SESSION_IDS),
-            CashSession.fecha_cierre >= fecha_desde,
-            CashSession.fecha_cierre <= fecha_hasta,
+            CashSession.fecha_apertura >= fecha_desde,
+            CashSession.fecha_apertura <= fecha_hasta,
             or_(
                 func.coalesce(
                     (
@@ -3504,7 +3504,7 @@ async def get_arqueo_diario(db: AsyncSession, company_id: str, fecha_desde: date
                 func.extract("epoch", CashSession.fecha_cierre - CashSession.fecha_apertura) >= 120,
             ),
         )
-        .order_by(CashSession.fecha_cierre.desc())
+        .order_by(CashSession.fecha_apertura.asc())
     )
     result = await db.execute(query)
     rows = result.all()
@@ -4108,10 +4108,27 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
 
     # Agrupar pagos por venta para calcular con exactitud la porción del ticket en Guaraníes
     sale_payments_map: dict[uuid.UUID, list] = {}
+    sales_index: dict[str, dict] = {}
     for r in rows:
         if r.sale_id not in sale_payments_map:
             sale_payments_map[r.sale_id] = []
         sale_payments_map[r.sale_id].append(r)
+
+        t_key = r.numero_venta or r.numero_interno or str(r.sale_id)
+        if t_key not in sales_index:
+            sales_index[t_key] = {
+                "sale_id": str(r.sale_id),
+                "numero": r.numero_venta,
+                "numero_interno": r.numero_interno,
+                "total": float(r.sale_total or 0),
+                "cliente": r.cliente_nombre or "Consumidor Final",
+                "medios": [],
+            }
+        sales_index[t_key]["medios"].append({
+            "forma_pago": r.forma_pago,
+            "moneda": r.moneda,
+            "monto": float(r.monto or 0),
+        })
 
     # 3. Transacciones POS huérfanas de la sesión (ej. Dinelco o caídas temporales de red antes de vincular sale_id)
     unlinked_pos_txns: list[PosTerminalTransaction] = []
@@ -4810,6 +4827,7 @@ async def get_session_punteo_data(db: AsyncSession, session_id: str, company_id:
         "total_vouchers_sistema_gs": float(tot_vouchers_sistema_gs),
         "total_vouchers_fisico_gs": float(tot_vouchers_fisico_gs),
         "diferencia_vouchers_gs": float(dif_vouchers_gs),
+        "sales_index": sales_index,
     }
 
 
@@ -4865,6 +4883,79 @@ async def create_payment_adjustment(
     m_gs = Decimal(str(data.get("monto_gs") or 0))
     if m_gs <= 0:
         raise ValueError("El monto de la reclasificación debe ser mayor a 0 Gs.")
+
+    origen_fp = (data.get("origen_forma_pago") or "EFECTIVO").upper().strip()
+
+    # 🛡️ Validación de Ticket y Origen Real en POS
+    ticket_num = (data.get("ticket_numero") or "").strip()
+    sale_id_str = data.get("sale_id")
+    if sale_id_str or ticket_num:
+        s_query = select(Sale).where(Sale.session_id == sid)
+        if sale_id_str:
+            try:
+                s_query = s_query.where(Sale.id == uuid.UUID(sale_id_str))
+            except Exception:
+                pass
+        else:
+            s_query = s_query.where(
+                or_(
+                    Sale.numero == ticket_num,
+                    Sale.numero.ilike(f"%{ticket_num}"),
+                    Sale.numero_interno == ticket_num,
+                    Sale.numero_interno.ilike(f"%{ticket_num}"),
+                )
+            ).order_by(Sale.created_at.desc())
+        s_res = await db.execute(s_query)
+        sale_obj = s_res.scalar_one_or_none()
+        if sale_obj:
+            data["sale_id"] = str(sale_obj.id)
+            if not data.get("ticket_numero"):
+                data["ticket_numero"] = sale_obj.numero
+            sp_res = await db.execute(select(SalePayment).where(SalePayment.sale_id == sale_obj.id))
+            sale_pays = list(sp_res.scalars().all())
+            is_cash_sale = any("EFECTIVO" in (p.forma_pago or "").upper() for p in sale_pays)
+
+            # Si la factura fue cobrada en POS como EFECTIVO y se envía un origen no-efectivo:
+            if is_cash_sale and origen_fp not in ["EFECTIVO", "EFECTIVO_PYG"]:
+                raise ValueError(
+                    f"La factura N° {sale_obj.numero} fue cobrada en POS como EFECTIVO. "
+                    f"El origen no puede ser '{origen_fp}'. Si el cliente pagó con comprobante físico pero "
+                    f"la cajera presionó Efectivo, debe seleccionarse 'Efectivo en Gaveta' como origen para descontar el efectivo esperado."
+                )
+
+    # 🛡️ Validación de Origen No Efectivo contra cobros reales del turno
+    if origen_fp not in ["EFECTIVO", "EFECTIVO_PYG"]:
+        punteo_info = await get_session_punteo_data(db, session_id, company_id)
+        if punteo_info:
+            summary = punteo_info.get("summary_by_method", {})
+            matched_ch = None
+            if origen_fp in summary:
+                matched_ch = summary[origen_fp]
+            else:
+                for k, v in summary.items():
+                    if (
+                        ("DINELCO" in origen_fp and "DINELCO" in k)
+                        or ("BANCARD" in origen_fp and "BANCARD" in k)
+                        or ("DEBITO" in origen_fp and "DEBITO" in k)
+                        or ("CREDITO" in origen_fp and "CREDITO" in k)
+                        or ("QR" in origen_fp and "QR" in k)
+                        or ("PIX" in origen_fp and "PIX" in k)
+                        or ("EXTRA_CLUB" in origen_fp and "EXTRA_CLUB" in k)
+                    ):
+                        matched_ch = v
+                        break
+
+            if not matched_ch or float(matched_ch.get("monto_gs") or 0) <= 0:
+                raise ValueError(
+                    f"No es posible reclasificar desde '{origen_fp}': este turno no tiene "
+                    f"ningún cobro registrado en ese canal electrónico."
+                )
+            disponible_ch = Decimal(str(matched_ch.get("monto_gs") or 0))
+            if m_gs > disponible_ch:
+                raise ValueError(
+                    f"El monto a reclasificar (₲ {m_gs:,.0f}) supera el total disponible "
+                    f"en '{matched_ch.get('label') or origen_fp}' (₲ {disponible_ch:,.0f})."
+                )
 
     # 🎟️ CANJE ATÓMICO DE VALE DE CONVENIO SI EL DESTINO ES VALE_CONVENIO
     voucher_id_str = data.get("voucher_id")
