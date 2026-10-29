@@ -177,18 +177,15 @@ export async function getCachedCatalog(): Promise<{
 }
 
 export function getRetryDelay(retryCount: number): number {
-  return Math.min(BASE_DELAY_MS * Math.pow(2, retryCount), 5 * 60 * 1000)
+  return Math.min(BASE_DELAY_MS * Math.pow(1.5, Math.min(retryCount, 8)), 60 * 1000)
 }
 
-// Ventas que quedaron trabadas (status "syncing" porque la app se recargo en
-// medio del envio, "error" o retry_count agotado) se rescatan UNA vez por sesion
-// de la app: vuelven a "pending" y se reintentan. Si el servidor las vuelve a
-// rechazar quedan en "error" (con el mensaje) y no se reintentan en bucle.
-const ventasRescatadas = new Set<string>()
+// Ventas que quedaron trabadas se rescatan periódicamente con backoff.
+// Las ventas al contado NUNCA se abandonan permanentemente.
 const rechazosReportados = new Set<string>()
 
 export function resetVentasRescatadas(): void {
-  ventasRescatadas.clear()
+  // Mantener compatibilidad de export
 }
 
 async function rescatarVentasAtascadas(forceAll: boolean = false): Promise<void> {
@@ -197,17 +194,17 @@ async function rescatarVentasAtascadas(forceAll: boolean = false): Promise<void>
     const ahora = Date.now()
     for (const v of todas) {
       if (!v || v.status === "synced") continue
-      const syncingViejo = v.status === "syncing" && ahora - new Date(v.last_retry).getTime() > 60000
-      const agotada = v.retry_count >= MAX_RETRIES
+      const syncingViejo = v.status === "syncing" && ahora - new Date(v.last_retry).getTime() > 45000
       const enError = v.status === "error"
       const errorRecuperable = /sesión activa|inicie sesión|token|401|unauthorized|conflict|409|duplicat/i.test(v.error || "")
-      if (syncingViejo || agotada || (enError && (forceAll || errorRecuperable || !ventasRescatadas.has(v.id)))) {
-        ventasRescatadas.add(v.id)
+      // Las ventas al contado siempre se recuperan; las de crédito solo si el error es recuperable o forceAll
+      const esContado = (v.data as any)?.condicion === "contado"
+      if (syncingViejo || forceAll || (enError && (esContado || errorRecuperable))) {
         await offlineDB.pendingSales.update({
           ...v,
           status: "pending" as const,
-          retry_count: 0,
-          next_retry: new Date(ahora).toISOString(),
+          retry_count: forceAll ? 0 : v.retry_count,
+          next_retry: forceAll ? new Date(ahora).toISOString() : v.next_retry,
         })
       }
     }
@@ -218,11 +215,10 @@ export async function syncPendingSales(
   forceRetryErrors: boolean = false,
   onProgress?: (synced: number, total: number) => void
 ): Promise<{ synced: number; failed: number; lastError?: string }> {
-  if (forceRetryErrors) {
-    ventasRescatadas.clear()
-  }
   await rescatarVentasAtascadas(forceRetryErrors)
-  const pending = await offlineDB.pendingSales.getPending()
+  // Obtenemos todas las ventas no sincronizadas directamente de la base local
+  const todas = await offlineDB.pendingSales.getAll()
+  const pending = todas.filter(s => s && s.status !== "synced")
   if (pending.length === 0) return { synced: 0, failed: 0 }
 
   let synced = 0
@@ -230,16 +226,13 @@ export async function syncPendingSales(
   let lastError: string | undefined
 
   for (const sale of pending) {
-    if (sale.retry_count >= MAX_RETRIES) continue
-
     const now = Date.now()
     const nextRetry = new Date(sale.next_retry).getTime()
-    if (now < nextRetry) continue
+    if (!forceRetryErrors && now < nextRetry) continue
 
     await offlineDB.pendingSales.update({
       ...sale,
       status: "syncing",
-      retry_count: sale.retry_count + 1,
       last_retry: new Date(now).toISOString(),
       next_retry: new Date(now + getRetryDelay(sale.retry_count)).toISOString(),
     })
@@ -248,25 +241,40 @@ export async function syncPendingSales(
       await api.sales.create(sale.data as Parameters<typeof api.sales.create>[0])
       await offlineDB.pendingSales.update({ ...sale, status: "synced" as const })
       // Si esta venta tenia un consumo Extra Club anotado en la malla LAN
-      // (ver OfflineContext.recordExtraClubOfflineConsumption, misma
-      // convencion de id: "xc-" + id de la venta local), avisar que ya se
-      // confirmo -- para que deje de descontarse del saldo offline de las
-      // demas cajas. No rompe el sync si falla (ej. ya no es Electron).
       ;(window as any).electronAPI?.peerMesh?.confirmSynced?.(`xc-${sale.id}`)?.catch?.(() => {})
       synced++
     } catch (err) {
       failed++
       const msg = err instanceof Error ? err.message : "Sync failed"
       lastError = msg
-      // Corte de red / servidor caido / sesión pendiente = transitorio, se reintenta con backoff.
-      // Cualquier otra respuesta (ej. 400 "Linea de credito insuficiente") es un
-      // rechazo de negocio: reintentar identico jamas va a funcionar, asi que se
-      // aparta como "error" (NO se borra: queda guardada para revision) en vez de
-      // martillar al servidor cada 10s para siempre.
-      const transitorio = /failed to fetch|network|load failed|abort|timeout|reiniciando|HTTP 5\d\d|HTTP 408|HTTP 429|sesión activa|inicie sesión|token|401|unauthorized/i.test(msg)
+
+      // Si el servidor responde que el recurso ya existe o conflicto 409:
+      // Verificar si la venta YA está grabada en la base de datos central de forma idempotente.
+      const saleId = (sale.data as any)?.id
+      let yaConfirmada = false
+      if (saleId && /ya existe|conflict|409|duplicat/i.test(msg)) {
+        try {
+          const check = await api.sales.get(saleId)
+          if (check && check.id === saleId) {
+            yaConfirmada = true
+          }
+        } catch {}
+      }
+
+      if (yaConfirmada) {
+        await offlineDB.pendingSales.update({ ...sale, status: "synced" as const })
+        synced++
+        failed--
+        continue
+      }
+
+      // En ventas al contado (efectivo, tarjetas, vouchers), CUALQUIER fallo es transitorio
+      // (corte de red, servidor reiniciando o bug temporal de base de datos) porque
+      // no existe rechazo por línea de crédito. Siempre se reintenta con backoff.
+      const esContado = (sale.data as any)?.condicion === "contado"
+      const transitorio = esContado || /failed to fetch|network|load failed|abort|timeout|reiniciando|HTTP 5\d\d|HTTP 408|HTTP 429|HTTP 409|conflict|sesión activa|inicie sesión|token|401|unauthorized/i.test(msg)
+
       if (!transitorio && !rechazosReportados.has(sale.id)) {
-        // Avisa al servidor (auditoria) QUE venta y POR QUE fue rechazada, para
-        // que administracion la vea sin depender de que la cajera mire la caja.
         rechazosReportados.add(sale.id)
         try {
           const d = sale.data as any
@@ -275,8 +283,6 @@ export async function syncPendingSales(
             user_id: d?.user_id,
             accion: "venta_offline_rechazada",
             entidad: "venta_pendiente",
-            // sale.id NO es UUID (ej. "off-1758...-ab12c"): entidad_id es uuid
-            // en audit_logs, asi que va dentro de datos_nuevos.
             datos_nuevos: {
               id_local: sale.id,
               error: msg,
@@ -291,6 +297,7 @@ export async function syncPendingSales(
           } as any).catch(() => {})
         } catch {}
       }
+
       await offlineDB.pendingSales.update({
         ...sale,
         status: transitorio ? ("pending" as const) : ("error" as const),
@@ -305,7 +312,7 @@ export async function syncPendingSales(
   if (synced > 0) {
     await offlineDB.syncState.set({
       last_sale_sync: new Date().toISOString(),
-      pending_count: (await offlineDB.pendingSales.getPending()).length,
+      pending_count: (await offlineDB.pendingSales.getAll()).filter(s => s && s.status !== "synced").length,
     })
   }
 
@@ -422,21 +429,19 @@ export async function getOfflineReceipt(saleId: string): Promise<CachedReceipt |
 export function scheduleSyncRetry(onSyncComplete: () => void) {
   if (syncTimer) clearTimeout(syncTimer)
   syncTimer = setTimeout(async () => {
-    const [salesResult, cuponesResult] = await Promise.allSettled([
-      syncPendingSales(),
-      syncPendingCupones()
-    ])
-    const salesSynced = salesResult.status === "fulfilled" ? salesResult.value.synced : 0
-    const salesFailed = salesResult.status === "fulfilled" ? salesResult.value.failed : 0
-    const cuponesSynced = cuponesResult.status === "fulfilled" ? cuponesResult.value.synced : 0
-    const cuponesFailed = cuponesResult.status === "fulfilled" ? cuponesResult.value.failed : 0
-
-    let quedanPendientes = false
-    try { quedanPendientes = (await offlineDB.pendingSales.getPending()).length > 0 } catch {}
-    if (salesSynced > 0 || salesFailed > 0 || cuponesSynced > 0 || cuponesFailed > 0 || quedanPendientes) {
+    try {
+      await Promise.allSettled([
+        syncPendingSales(),
+        syncPendingCupones()
+      ])
+    } catch (e) {
+      console.warn("[SyncManager] Error en ciclo periódico de sincronización:", e)
+    } finally {
+      try { onSyncComplete() } catch {}
+      // Mantener SIEMPRE vivo el ciclo de sincronización en segundo plano (cada 10 segundos)
+      // para que las ventas offline se sincronicen apenas haya red sin depender de eventos
       scheduleSyncRetry(onSyncComplete)
     }
-    onSyncComplete()
   }, 10000)
 }
 

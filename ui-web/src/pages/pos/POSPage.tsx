@@ -536,6 +536,7 @@ export default function POSPage() {
   const [cierreResult, setCierreResult] = useState<{ monto_cierre_esperado: number; diferencia: number; requiere_revision: boolean; diferencia_usd: number; diferencia_brl: number; desglose_formas_pago: { forma_pago: string; moneda: string; monto: number }[]; contado: number; contado_usd: number; contado_brl: number } | null>(null)
   const [preCloseData, setPreCloseData] = useState<any>(null)
   const [loadingPreClose, setLoadingPreClose] = useState(false)
+  const [syncingCierrePendientes, setSyncingCierrePendientes] = useState(false)
   const [cierreTab, setCierreTab] = useState<"conteo" | "conciliacion">("conteo")
   const [lastClosedSessionId, setLastClosedSessionId] = useState<string | null>(null)
   const [lastCierreTicketHtml, setLastCierreTicketHtml] = useState<string | null>(null)
@@ -4079,6 +4080,13 @@ export default function POSPage() {
   const handleConfirmCierreCaja = async () => {
     if (!cashSessionId) {
       toast.warning("No hay sesión de caja activa", "")
+      return
+    }
+    if (pendingSalesCount > 0) {
+      toast.error(
+        "Cierre Bloqueado: Ventas Pendientes",
+        `Esta terminal tiene ${pendingSalesCount} venta(s) guardadas en memoria local pendientes de sincronizar con el servidor central. Sincronícelas para que el arqueo de efectivo coincida.`
+      )
       return
     }
     const parseForeignCurr = (v: string): number => {
@@ -17501,6 +17509,65 @@ export default function POSPage() {
 
             {!cierreResult ? (
               <>
+                {/* Alerta bloqueante si hay ventas pendientes */}
+                {pendingSalesCount > 0 && (
+                  <div className="mb-3 p-3 bg-red-500/10 border-2 border-red-500 rounded-xl text-red-600 dark:text-red-400 shrink-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2 font-black text-xs">
+                        <AlertTriangle className="w-4 h-4 text-red-500 animate-pulse" />
+                        <span>CIERRE BLOQUEADO: {pendingSalesCount} VENTA(S) PENDIENTES</span>
+                      </div>
+                      <span className="text-[10px] bg-red-500 text-white font-black px-1.5 py-0.5 rounded uppercase">
+                        Obligatorio
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300 mb-2 leading-relaxed">
+                      Esta caja tiene ventas guardadas en memoria local que aún no impactaron en el servidor central. Si cierra la caja ahora, el dinero físico en la gaveta NO coincidirá con el esperado del sistema.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={syncingCierrePendientes}
+                      onClick={async () => {
+                        setSyncingCierrePendientes(true)
+                        try {
+                          const res = await syncPendingSales(true)
+                          if (res.synced > 0) {
+                            toast.success("Sincronización Exitosa", `Se sincronizaron ${res.synced} venta(s) correctamente.`)
+                            if (cashSessionId) {
+                              setLoadingPreClose(true)
+                              try {
+                                const data = await api.caja.sessions.preCloseSummary(cashSessionId)
+                                setPreCloseData(data)
+                              } finally {
+                                setLoadingPreClose(false)
+                              }
+                            }
+                          } else if (res.failed > 0) {
+                            toast.error("Error al Sincronizar", res.lastError || "Verifique la conexión al servidor central.")
+                          }
+                        } catch (err: any) {
+                          toast.error("Error al sincronizar", err?.message || "No se pudo comunicar con el servidor.")
+                        } finally {
+                          setSyncingCierrePendientes(false)
+                        }
+                      }}
+                      className="w-full py-2 px-3 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                    >
+                      {syncingCierrePendientes ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Sincronizando con el servidor central...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Sincronizar Ventas Ahora ({pendingSalesCount})</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
                 {/* Selector de pestañas */}
                 <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl mb-4 shrink-0">
                   <button
@@ -17660,11 +17727,27 @@ export default function POSPage() {
                   <button
                     type="button"
                     onClick={handleConfirmCierreCaja}
-                    disabled={submittingCierre || !montoCierreReal}
-                    className="w-2/3 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 disabled:opacity-60 shadow-lg shadow-amber-600/20"
+                    disabled={submittingCierre || !montoCierreReal || pendingSalesCount > 0 || syncingCierrePendientes}
+                    title={pendingSalesCount > 0 ? "Debe sincronizar las ventas pendientes antes de cerrar el turno" : undefined}
+                    className={`w-2/3 py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition-all ${
+                      pendingSalesCount > 0
+                        ? "bg-slate-400 dark:bg-slate-700 text-slate-200 cursor-not-allowed shadow-none"
+                        : "bg-amber-600 hover:bg-amber-700 text-white shadow-amber-600/20 disabled:opacity-60"
+                    }`}
                   >
-                    {submittingCierre ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                    Confirmar Cierre de Turno
+                    {submittingCierre ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : pendingSalesCount > 0 ? (
+                      <>
+                        <Lock className="w-4 h-4" />
+                        Bloqueado ({pendingSalesCount} ventas pend.)
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-4 h-4" />
+                        Confirmar Cierre de Turno
+                      </>
+                    )}
                   </button>
                 </div>
               </>

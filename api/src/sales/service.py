@@ -478,6 +478,19 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
                         sess_row.estado = "abierta"
                     if reg_id and sess_row.register_id != reg_id:
                         sess_row.register_id = reg_id
+        elif sess_row and sess_row.estado == "cerrada":
+            # Si la sesión enviada ya está cerrada pero pertenece al mismo usuario (o sin user_id específico):
+            # Es una venta offline sincronizada tardíamente (ej. corte de red o reinicio del POS al día siguiente).
+            # Se vincula a esa sesión cerrada histórica para no abrir turnos nómadas fantasmas hoy
+            # y para que los totales de la jornada histórica coincidan con el arqueo físico entregado en sobre.
+            if not data.user_id or sess_row.user_id == data.user_id:
+                effective_session_id = sess_row.id
+                logger.info(
+                    "Asignando venta offline sincronizada %s a la sesión cerrada histórica %s (%s)",
+                    data.id or data.numero,
+                    sess_row.id,
+                    sess_row.cajero_nombre,
+                )
 
     is_admin_invoice = bool(
         getattr(data, "es_administrativa", False)
@@ -486,6 +499,37 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
 
     # Si aún no tiene sesión y tenemos user_id, auto-abrir la sesión de jornada para el cajero
     # No aplica a facturas administrativas (se liquidan directo en Bóveda / Banco sin crear sesión de cajero nómada)
+    if not effective_session_id and data.user_id and not is_admin_invoice:
+        # Verificar si es una venta con fecha histórica (ej. offline sincronizada tarde)
+        sale_dt = getattr(data, "fecha", None)
+        is_historical = False
+        if sale_dt:
+            if sale_dt.tzinfo is None:
+                sale_dt = sale_dt.replace(tzinfo=timezone.utc)
+            if sale_dt.astimezone(TZ_ASUNCION).date() < datetime.now(TZ_ASUNCION).date():
+                is_historical = True
+
+        if is_historical:
+            # Buscar la sesión cerrada más reciente de este cajero para no abrir turnos nómadas hoy
+            hist_sess_res = await db.execute(
+                select(CashSession)
+                .where(
+                    CashSession.user_id == data.user_id,
+                    CashSession.estado.in_(["cerrada", "abierta", "pausada"]),
+                )
+                .order_by(CashSession.fecha_apertura.desc())
+                .limit(1)
+            )
+            hist_sess = hist_sess_res.scalar_one_or_none()
+            if hist_sess:
+                effective_session_id = hist_sess.id
+                logger.info(
+                    "Asignando venta histórica %s a sesión previa %s (%s)",
+                    data.id or data.numero,
+                    hist_sess.id,
+                    hist_sess.cajero_nombre,
+                )
+
     if not effective_session_id and data.user_id and not is_admin_invoice:
         if not reg_id:
             reg_res = await db.execute(
@@ -1411,7 +1455,15 @@ async def build_sale_receipt_escpos(
     lines.append(f"{tipo_doc} No: {sale.numero or ''}")
     if sale.numero_interno:
         lines.append(f"No Venta: {sale.numero_interno}")
-    fecha_str = sale.fecha.strftime("%d/%m/%Y %H:%M:%S") if sale.fecha else datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    asuncion_tz = ZoneInfo("America/Asuncion")
+    if sale.fecha:
+        sale_dt = sale.fecha
+        if sale_dt.tzinfo is None:
+            sale_dt = sale_dt.replace(tzinfo=timezone.utc)
+        sale_dt = sale_dt.astimezone(asuncion_tz)
+        fecha_str = sale_dt.strftime("%d/%m/%Y %H:%M:%S")
+    else:
+        fecha_str = datetime.now(asuncion_tz).strftime("%d/%m/%Y %H:%M:%S")
     lines.append(f"Fecha/Hora: {fecha_str}")
     lines.append(f"Condicion: {'CREDITO' if is_credito else 'CONTADO'}")
     lines.append(f"Cajero: {cajero_nombre}")

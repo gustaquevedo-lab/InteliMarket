@@ -34,7 +34,11 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                 _mon().capture_http_error_bg(request, exc.status_code, str(exc.detail))
             return self._json(exc.status_code, "HTTP_ERROR", str(exc.detail))
         except IntegrityError as exc:
-            logger.warning("IntegrityError: %s", str(exc.orig)[:200])
+            orig_msg = str(getattr(exc, "orig", exc))
+            logger.warning("IntegrityError: %s", orig_msg[:200])
+            if "not-null" in orig_msg.lower() or "notnull" in orig_msg.lower():
+                _mon().capture_exception_bg(exc, request)
+                return self._json(500, "DATABASE_ERROR", "Error de base de datos: violación de campo obligatorio")
             return self._json(409, "CONFLICT", "El recurso ya existe o tiene dependencias")
         except SQLAlchemyError as exc:
             logger.error("Database error: %s", str(exc)[:300])
