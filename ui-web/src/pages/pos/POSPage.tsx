@@ -3264,6 +3264,23 @@ export default function POSPage() {
       }
     }
     loadCompanyDataAndTemplate()
+
+    // ── CONSULTAR COTIZACIÓN AUTOMÁTICAMENTE CADA 10 MINUTOS Y ANTE FOCO ──
+    const intervalCurrencies = setInterval(() => {
+      loadCompanyDataAndTemplate()
+    }, 10 * 60 * 1000)
+
+    const handleSyncOnFocusOrOnline = () => {
+      loadCompanyDataAndTemplate()
+    }
+    window.addEventListener("focus", handleSyncOnFocusOrOnline)
+    window.addEventListener("online", handleSyncOnFocusOrOnline)
+
+    return () => {
+      clearInterval(intervalCurrencies)
+      window.removeEventListener("focus", handleSyncOnFocusOrOnline)
+      window.removeEventListener("online", handleSyncOnFocusOrOnline)
+    }
   }, [])
 
   // ── AGREGAR AL CARRITO ────────────────────────────────────────────────────
@@ -4033,6 +4050,16 @@ export default function POSPage() {
     if (pendingSalesCount > 0) {
       toast.warning("Ventas Pendientes", `Hay ${pendingSalesCount} venta(s) guardadas localmente sin sincronizar. Sincronícelas antes de cerrar para asegurar el arqueo correcto.`)
     }
+    // Refrescar cotizaciones de la empresa para asegurar que la cotización oficial más reciente rija en el cierre
+    api.companies.list().then(comps => {
+      if (Array.isArray(comps) && comps.length > 0 && (comps[0].config as any)?.currencies) {
+        const currs = (comps[0].config as any).currencies
+        const brl = Number(currs.BRL?.venta || currs.BRL || 1080)
+        const usd = Number(currs.USD?.venta || currs.USD || 5725)
+        setRates({ BRL: brl, USD: usd })
+        localStorage.setItem("pos_currency_rates", JSON.stringify({ BRL: brl, USD: usd }))
+      }
+    }).catch(() => {})
     setShowCierreTurnoModal(true)
     setCierreTab("conteo")
     if (cashSessionId) {
@@ -17523,7 +17550,9 @@ export default function POSPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado US$</label>
+                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">
+                            Contado US$ {rates.USD > 0 && <span className="text-[10px] text-blue-500 font-mono font-bold">(1 U$ = {rates.USD.toLocaleString("es-PY")})</span>}
+                          </label>
                           <input
                             type="text"
                             inputMode="decimal"
@@ -17534,7 +17563,9 @@ export default function POSPage() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">Contado R$</label>
+                          <label className="block text-xs font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider mb-1">
+                            Contado R$ {rates.BRL > 0 && <span className="text-[10px] text-amber-500 font-mono font-bold">(1 R$ = {rates.BRL.toLocaleString("es-PY")})</span>}
+                          </label>
                           <input
                             type="text"
                             inputMode="decimal"

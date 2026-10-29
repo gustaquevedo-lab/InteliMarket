@@ -717,8 +717,9 @@ async def get_effective_exchange_rates_for_session(db: AsyncSession, session_id:
             tasa_usd_er = Decimal(str(eru[0]))
 
     # ── 4. Resolución final con prioridades estrictas ──
-    tasa_brl = tasa_brl_ventas or tasa_brl_cfg or tasa_brl_er or Decimal("1080.00")
-    tasa_usd = tasa_usd_ventas or tasa_usd_cfg or tasa_usd_er or Decimal("5725.00")
+    # La cotización oficial fijada por la empresa en companies.config rige de forma soberana para el cierre
+    tasa_brl = tasa_brl_cfg or tasa_brl_ventas or tasa_brl_er or Decimal("1080.00")
+    tasa_usd = tasa_usd_cfg or tasa_usd_ventas or tasa_usd_er or Decimal("5725.00")
 
     return tasa_brl, tasa_usd
 
