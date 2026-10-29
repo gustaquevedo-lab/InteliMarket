@@ -181,16 +181,24 @@ export default function SupplierSearchInput({
         </label>
       )}
 
-      {/* Si ya hay un beneficiario/proveedor seleccionado y no estamos buscando */}
-      {value && !isOpen ? (
-        <div className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl">
+      {/* Si ya hay un proveedor/beneficiario específico seleccionado y no estamos buscando */}
+      {value && !isOpen && (!allowAllOption || !isAll) ? (
+        <div 
+          onClick={() => {
+            if (!disabled) {
+              setIsOpen(true)
+            }
+          }}
+          className="flex items-center justify-between p-2.5 bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-xl cursor-pointer hover:border-purple-400 dark:hover:border-purple-500 transition shadow-xs group"
+          title="Hacé clic para buscar o cambiar de proveedor"
+        >
           <div className="flex items-center gap-2.5 overflow-hidden">
             <div
               className={`p-2 rounded-lg shrink-0 ${
                 isAll
                   ? "bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400"
                   : supplierId || selectedSupplierObj
-                  ? "bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400"
+                  ? "bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 group-hover:scale-105 transition"
                   : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
               }`}
             >
@@ -228,12 +236,13 @@ export default function SupplierSearchInput({
           {!disabled && (
             <button
               type="button"
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation()
                 handleClear()
                 setIsOpen(true)
               }}
-              className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700 transition"
-              title="Cambiar proveedor o beneficiario"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-200/60 dark:hover:bg-slate-700 transition"
+              title="Limpiar proveedor (Ver todos)"
             >
               <X className="w-4 h-4" />
             </button>
@@ -253,7 +262,7 @@ export default function SupplierSearchInput({
                 if (!isOpen) setIsOpen(true)
               }}
               onFocus={() => setIsOpen(true)}
-              placeholder={placeholder}
+              placeholder={placeholder || (allowAllOption ? "Buscar proveedor o RUC... (Todos)" : "Buscar proveedor...")}
               className="input-field pl-9 pr-8 text-xs font-medium"
             />
             {loading && <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin absolute right-3" />}

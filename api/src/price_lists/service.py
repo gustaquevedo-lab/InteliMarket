@@ -630,7 +630,7 @@ async def get_price_variations_for_export(
 
 async def get_audit_state(db: AsyncSession) -> dict:
     res = await db.execute(text("""
-        SELECT product_id, sku, precio_aprobado, margen_modo, margen_aprobado, status, usuario, updated_at
+        SELECT product_id, sku, precio_aprobado, margen_modo, margen_aprobado, status, usuario, updated_at, escalas_aprobadas
         FROM price_audit_decisions;
     """))
     rows = res.mappings().all()
@@ -642,6 +642,7 @@ async def get_audit_state(db: AsyncSession) -> dict:
             "margin": float(r["margen_aprobado"]) if r["margen_aprobado"] is not None else None,
             "status": r["status"],
             "usuario": r["usuario"],
+            "custom_tiers": r["escalas_aprobadas"] or [],
             "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
         }
     return {
@@ -655,6 +656,8 @@ async def save_audit_decisions(db: AsyncSession, items: list[dict]) -> dict:
     if not items:
         return {"status": "ok", "saved_count": 0}
 
+    import json
+
     for it in items:
         pid = it.get("product_id")
         if not pid:
@@ -666,12 +669,15 @@ async def save_audit_decisions(db: AsyncSession, items: list[dict]) -> dict:
         status = it.get("status") or "MODIFIED"
         sku = str(it.get("sku") or "")
         usuario = str(it.get("usuario") or "")
+        
+        custom_tiers = it.get("custom_tiers") or it.get("escalas_aprobadas") or []
+        custom_tiers_json = json.dumps(custom_tiers) if custom_tiers else None
 
         await db.execute(text("""
             INSERT INTO price_audit_decisions (
-                product_id, sku, precio_aprobado, margen_modo, margen_aprobado, status, usuario, updated_at
+                product_id, sku, precio_aprobado, margen_modo, margen_aprobado, status, usuario, escalas_aprobadas, updated_at
             ) VALUES (
-                :pid, :sku, :p_aprobado, :m_modo, :m_aprobado, :status, :usuario, NOW()
+                :pid, :sku, :p_aprobado, :m_modo, :m_aprobado, :status, :usuario, :custom_tiers::jsonb, NOW()
             )
             ON CONFLICT (product_id) DO UPDATE SET
                 sku = COALESCE(NULLIF(EXCLUDED.sku, ''), price_audit_decisions.sku),
@@ -680,6 +686,7 @@ async def save_audit_decisions(db: AsyncSession, items: list[dict]) -> dict:
                 margen_aprobado = EXCLUDED.margen_aprobado,
                 status = EXCLUDED.status,
                 usuario = EXCLUDED.usuario,
+                escalas_aprobadas = COALESCE(EXCLUDED.escalas_aprobadas, price_audit_decisions.escalas_aprobadas),
                 updated_at = NOW();
         """), {
             "pid": pid,
@@ -689,6 +696,7 @@ async def save_audit_decisions(db: AsyncSession, items: list[dict]) -> dict:
             "m_aprobado": m_aprobado,
             "status": status,
             "usuario": usuario,
+            "custom_tiers": custom_tiers_json,
         })
     await db.commit()
     return {"status": "ok", "saved_count": len(items)}
@@ -707,16 +715,17 @@ async def apply_audit_decisions(db: AsyncSession, company_id: str, usuario_nombr
 
     q = await db.execute(text("""
         SELECT 
-            d.product_id, d.sku, d.precio_aprobado, d.status,
+            d.product_id, d.sku, d.precio_aprobado, d.status, d.escalas_aprobadas,
             p.nombre as product_nombre, p.codigo_barra as product_barcode,
             p.precio_venta as precio_actual,
             c.nombre as categoria_nombre
         FROM price_audit_decisions d
         JOIN products p ON p.id = d.product_id
         LEFT JOIN product_categories c ON c.id = p.categoria_id
-        WHERE d.status IN ('MODIFIED', 'ACCEPTED')
-          AND d.precio_aprobado > 0
-          AND d.precio_aprobado != p.precio_venta;
+        WHERE (
+            (d.status IN ('MODIFIED', 'ACCEPTED') AND d.precio_aprobado > 0 AND d.precio_aprobado != p.precio_venta)
+            OR (d.escalas_aprobadas IS NOT NULL AND jsonb_array_length(d.escalas_aprobadas) > 0)
+        );
     """))
     rows = q.mappings().all()
 
@@ -763,53 +772,74 @@ async def apply_audit_decisions(db: AsyncSession, company_id: str, usuario_nombr
         diff_monto = p_new - p_act
         diff_pct = round(((p_new - p_act) / p_act * 100), 2) if p_act > 0 else 0
 
-        # 1. Update product
-        await db.execute(text("""
-            UPDATE products
-            SET precio_venta = :p_new,
-                updated_at = :now
-            WHERE id = :pid;
-        """), {"p_new": p_new, "now": now_utc, "pid": pid})
-        updated_products += 1
+        # Mapeo de escalas personalizadas por ID o min_qty
+        custom_tier_map = {}
+        if r.get("escalas_aprobadas") and isinstance(r["escalas_aprobadas"], list):
+            for ct in r["escalas_aprobadas"]:
+                if ct.get("id"):
+                    custom_tier_map[str(ct["id"])] = float(ct["precio"])
+                if ct.get("min_qty"):
+                    custom_tier_map[int(ct["min_qty"])] = float(ct["precio"])
 
-        # 2. Log minorista
-        log_id = str(uuid4())
-        await db.execute(text("""
-            INSERT INTO price_variation_logs (
-                id, company_id, product_id, product_nombre, product_sku, product_barcode,
-                categoria_nombre, tipo, precio_anterior, precio_nuevo, diferencia_monto,
-                diferencia_pct, origen, usuario_id, usuario_nombre, motivo, created_at,
-                precio_minorista_anterior, precio_minorista_nuevo, precio_escala_anterior, precio_escala_nuevo
-            ) VALUES (
-                :id, :company_id, :product_id, :nom, :sku, :bar,
-                :cat, 'unitario', :p_ant, :p_nue, :diff_m,
-                :diff_pct, 'auditoria_rentabilidad', NULL, :usr, 'Ajuste de margen aprobado en auditoría interactiva', :created_at,
-                :p_ant, :p_nue, 0, 0
-            );
-        """), {
-            "id": log_id,
-            "company_id": company_id,
-            "product_id": pid,
-            "nom": (r["product_nombre"] or "")[:255],
-            "sku": (r["product_sku"] or "")[:100],
-            "bar": (r["product_barcode"] or "")[:100],
-            "cat": (r["categoria_nombre"] or "")[:150] if r["categoria_nombre"] else None,
-            "p_ant": Decimal(str(int(round(p_act)))),
-            "p_nue": Decimal(str(int(round(p_new)))),
-            "diff_m": Decimal(str(int(round(diff_monto)))),
-            "diff_pct": Decimal(str(diff_pct)),
-            "usr": usuario_nombre[:150],
-            "created_at": now_utc,
-        })
-        logs_created += 1
+        # 1. Update product si cambió el precio minorista
+        if p_new > 0 and p_new != p_act:
+            await db.execute(text("""
+                UPDATE products
+                SET precio_venta = :p_new,
+                    updated_at = :now
+                WHERE id = :pid;
+            """), {"p_new": p_new, "now": now_utc, "pid": pid})
+            updated_products += 1
 
-        # 3. Tiers
+            # 2. Log minorista
+            log_id = str(uuid4())
+            await db.execute(text("""
+                INSERT INTO price_variation_logs (
+                    id, company_id, product_id, product_nombre, product_sku, product_barcode,
+                    categoria_nombre, tipo, precio_anterior, precio_nuevo, diferencia_monto,
+                    diferencia_pct, origen, usuario_id, usuario_nombre, motivo, created_at,
+                    precio_minorista_anterior, precio_minorista_nuevo, precio_escala_anterior, precio_escala_nuevo
+                ) VALUES (
+                    :id, :company_id, :product_id, :nom, :sku, :bar,
+                    :cat, 'unitario', :p_ant, :p_nue, :diff_m,
+                    :diff_pct, 'auditoria_rentabilidad', NULL, :usr, 'Ajuste de margen aprobado en auditoría interactiva', :created_at,
+                    :p_ant, :p_nue, 0, 0
+                );
+            """), {
+                "id": log_id,
+                "company_id": company_id,
+                "product_id": pid,
+                "nom": (r["product_nombre"] or "")[:255],
+                "sku": (r["product_sku"] or "")[:100],
+                "bar": (r["product_barcode"] or "")[:100],
+                "cat": (r["categoria_nombre"] or "")[:150] if r["categoria_nombre"] else None,
+                "p_ant": Decimal(str(int(round(p_act)))),
+                "p_nue": Decimal(str(int(round(p_new)))),
+                "diff_m": Decimal(str(int(round(diff_monto)))),
+                "diff_pct": Decimal(str(diff_pct)),
+                "usr": usuario_nombre[:150],
+                "created_at": now_utc,
+            })
+            logs_created += 1
+
+        # 3. Tiers (Escalas por cantidad)
         active_tiers = tiers_by_pid.get(str(pid), [])
         for t in active_tiers:
             tid = t["id"]
             min_q = t["min_qty"]
             t_ant = float(t["precio_unitario"] or 0)
-            t_nue = redondear_pyg(t_ant * factor)
+            
+            # Si el usuario modificó manualmente la escala, usar ese valor
+            if str(tid) in custom_tier_map:
+                t_nue = redondear_pyg(custom_tier_map[str(tid)])
+                motivo_escala = f"Ajuste manual de escala {min_q}u en auditoría interactiva"
+            elif min_q in custom_tier_map:
+                t_nue = redondear_pyg(custom_tier_map[min_q])
+                motivo_escala = f"Ajuste manual de escala {min_q}u en auditoría interactiva"
+            else:
+                t_nue = redondear_pyg(t_ant * factor)
+                motivo_escala = f"Escalado proporcional de escala {min_q}u"
+
             if t_nue != t_ant:
                 await db.execute(text("""
                     UPDATE sp_tiered_prices
@@ -849,7 +879,7 @@ async def apply_audit_decisions(db: AsyncSession, company_id: str, usuario_nombr
                     "diff_m": Decimal(str(int(round(t_diff_m)))),
                     "diff_pct": Decimal(str(t_diff_pct)),
                     "usr": usuario_nombre[:150],
-                    "motivo": f"Ajuste de margen aprobado en auditoría interactiva (Escala {min_q}u)",
+                    "motivo": motivo_escala,
                     "created_at": now_utc,
                     "p_min_ant": Decimal(str(int(round(p_act)))),
                     "p_min_nue": Decimal(str(int(round(p_new)))),
