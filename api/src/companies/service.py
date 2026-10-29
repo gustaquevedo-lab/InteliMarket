@@ -1,7 +1,9 @@
 """Company service"""
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from decimal import Decimal
+from datetime import date
 
 from api.src.companies.models import Company
 from api.src.companies.schemas import CompanyCreate, CompanyUpdate
@@ -46,6 +48,33 @@ async def update_company(db: AsyncSession, company_id: str, data: CompanyUpdate)
     for key, value in update_data.items():
         if hasattr(company, key):
             setattr(company, key, value)
+
+    # ── Sincronización bidireccional automática de cotizaciones en exchange_rates ──
+    if "config" in update_data and isinstance(update_data["config"], dict):
+        currs = update_data["config"].get("currencies")
+        if isinstance(currs, dict):
+            today = date.today()
+            for c_code, c_vals in currs.items():
+                if c_code in ("BRL", "USD", "ARS") and isinstance(c_vals, dict):
+                    t_compra = c_vals.get("compra") or c_vals.get("venta")
+                    t_venta = c_vals.get("venta") or c_vals.get("compra")
+                    if t_compra and t_venta:
+                        try:
+                            await db.execute(
+                                text("""
+                                    INSERT INTO exchange_rates (id, company_id, moneda, tasa_compra, tasa_venta, fuente, fecha, created_at)
+                                    VALUES (gen_random_uuid(), :cid, :mon, :tc, :tv, 'empresa_config', :f, NOW())
+                                """),
+                                {
+                                    "cid": company.id,
+                                    "mon": c_code,
+                                    "tc": Decimal(str(t_compra)),
+                                    "tv": Decimal(str(t_venta)),
+                                    "f": today,
+                                }
+                            )
+                        except Exception:
+                            pass
 
     await db.flush()
     await db.refresh(company)

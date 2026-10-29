@@ -10,6 +10,9 @@ import uuid
 import base64
 import re
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
 
@@ -616,36 +619,106 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
 
 
 async def get_effective_exchange_rates_for_session(db: AsyncSession, session_id: uuid.UUID, fecha_apertura: datetime) -> tuple[Decimal, Decimal]:
-    """Retorna (tasa_brl, tasa_usd) para la sesión basándose en las cotizaciones
-    oficiales registradas en exchange_rates para la fecha de la sesión (o la vigente
-    anterior más cercana). NUNCA inventa tasas dividiendo montos de ventas."""
+    """Retorna (tasa_brl, tasa_usd) para la sesión garantizando coherencia absoluta entre el cobro y el arqueo:
+    1. Si hubo ventas en moneda extranjera en este turno, calcula la tasa efectiva ponderada
+       real con la que ingresó el dinero a la gaveta (SUM(monto_pyg) / SUM(monto)).
+    2. Si no hubo ventas en esa divisa en el turno, obtiene la cotización oficial vigente configurada
+       por la administración del supermercado en companies.config['currencies'].
+    3. Fallback secundario a exchange_rates (fecha de la sesión o anterior más cercana).
+    4. Fallback final por defecto de mercado paraguayo (BRL 1.080, USD 5.725).
+    """
     f_ref = fecha_apertura.date() if fecha_apertura else datetime.now(timezone.utc).date()
 
-    # 1. Tasa BRL oficial de exchange_rates
-    er_b = await db.execute(
-        text("""
-            SELECT tasa_venta FROM exchange_rates
-            WHERE moneda = 'BRL' AND fecha <= :f_ape
-            ORDER BY fecha DESC, created_at DESC
-            LIMIT 1
-        """),
-        {"f_ape": f_ref}
-    )
-    erb = er_b.first()
-    tasa_brl = Decimal(str(erb[0])) if erb and erb[0] else Decimal("1105.00")
+    # ── 1. Tasa efectiva real ponderada de ventas en la sesión ──
+    # Si la cajera cobró en BRL o USD, el dinero físico en su gaveta entró exactamente a esa tasa.
+    # Valuarlo a otra tasa generaría un sobrante o faltante ficticio e inexistente.
+    tasa_brl_ventas: Decimal | None = None
+    tasa_usd_ventas: Decimal | None = None
 
-    # 2. Tasa USD oficial de exchange_rates
-    er_u = await db.execute(
-        text("""
-            SELECT tasa_venta FROM exchange_rates
-            WHERE moneda = 'USD' AND fecha <= :f_ape
-            ORDER BY fecha DESC, created_at DESC
-            LIMIT 1
-        """),
-        {"f_ape": f_ref}
-    )
-    eru = er_u.first()
-    tasa_usd = Decimal(str(eru[0])) if eru and eru[0] else Decimal("5840.00")
+    if session_id:
+        try:
+            r_ventas = await db.execute(
+                text("""
+                    SELECT 
+                        sp.moneda,
+                        SUM(sp.monto_pyg) as sum_pyg,
+                        SUM(sp.monto) as sum_divisa
+                    FROM sale_payments sp
+                    JOIN sales s ON s.id = sp.sale_id
+                    WHERE s.session_id = :sid 
+                      AND s.estado IN ('confirmado', 'completada', 'completado', 'pagado')
+                      AND sp.forma_pago ILIKE '%EFECTIVO%' 
+                      AND sp.moneda IN ('BRL', 'USD')
+                      AND sp.monto > 0
+                    GROUP BY sp.moneda
+                """),
+                {"sid": session_id}
+            )
+            for r_mon, s_pyg, s_div in r_ventas.fetchall():
+                if s_div and Decimal(str(s_div)) > 0:
+                    t_eff = Decimal(str(s_pyg)) / Decimal(str(s_div))
+                    if r_mon == "BRL":
+                        tasa_brl_ventas = Decimal(str(round(t_eff, 2)))
+                    elif r_mon == "USD":
+                        tasa_usd_ventas = Decimal(str(round(t_eff, 2)))
+        except Exception as e:
+            logger.warning("Error calculando tasa efectiva de ventas para sesión %s: %s", session_id, e)
+
+    # ── 2. Cotización oficial configurada por la administración de la empresa (companies.config) ──
+    tasa_brl_cfg: Decimal | None = None
+    tasa_usd_cfg: Decimal | None = None
+    try:
+        comp_res = await db.execute(text("SELECT config FROM companies LIMIT 1"))
+        comp_row = comp_res.first()
+        if comp_row and comp_row[0]:
+            cfg_currs = comp_row[0].get("currencies", {})
+            if "BRL" in cfg_currs:
+                b_val = cfg_currs["BRL"]
+                t_b = (b_val.get("venta") or b_val.get("compra") or 0) if isinstance(b_val, dict) else b_val
+                if t_b and Decimal(str(t_b)) > 0:
+                    tasa_brl_cfg = Decimal(str(t_b))
+            if "USD" in cfg_currs:
+                u_val = cfg_currs["USD"]
+                t_u = (u_val.get("venta") or u_val.get("compra") or 0) if isinstance(u_val, dict) else u_val
+                if t_u and Decimal(str(t_u)) > 0:
+                    tasa_usd_cfg = Decimal(str(t_u))
+    except Exception as e:
+        logger.warning("Error leyendo cotizaciones de companies.config: %s", e)
+
+    # ── 3. Fallback a tabla exchange_rates (solo si no se definió en ventas ni en empresa) ──
+    tasa_brl_er: Decimal | None = None
+    tasa_usd_er: Decimal | None = None
+    if tasa_brl_ventas is None and tasa_brl_cfg is None:
+        er_b = await db.execute(
+            text("""
+                SELECT tasa_venta FROM exchange_rates
+                WHERE moneda = 'BRL' AND fecha <= :f_ape
+                ORDER BY fecha DESC, created_at DESC
+                LIMIT 1
+            """),
+            {"f_ape": f_ref}
+        )
+        erb = er_b.first()
+        if erb and erb[0]:
+            tasa_brl_er = Decimal(str(erb[0]))
+
+    if tasa_usd_ventas is None and tasa_usd_cfg is None:
+        er_u = await db.execute(
+            text("""
+                SELECT tasa_venta FROM exchange_rates
+                WHERE moneda = 'USD' AND fecha <= :f_ape
+                ORDER BY fecha DESC, created_at DESC
+                LIMIT 1
+            """),
+            {"f_ape": f_ref}
+        )
+        eru = er_u.first()
+        if eru and eru[0]:
+            tasa_usd_er = Decimal(str(eru[0]))
+
+    # ── 4. Resolución final con prioridades estrictas ──
+    tasa_brl = tasa_brl_ventas or tasa_brl_cfg or tasa_brl_er or Decimal("1080.00")
+    tasa_usd = tasa_usd_ventas or tasa_usd_cfg or tasa_usd_er or Decimal("5725.00")
 
     return tasa_brl, tasa_usd
 
