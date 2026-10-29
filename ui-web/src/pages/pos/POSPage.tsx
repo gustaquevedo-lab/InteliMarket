@@ -5248,9 +5248,20 @@ export default function POSPage() {
     // HTML por Chromium. recibo_html queda solo como respaldo/lectura para
     // ventas viejas, de antes de que existiera el ESC/POS guardado.
     try {
-      if (sale.recibo_escpos_b64 && (window as any).electronAPI?.printEscPos) {
+      let b64 = sale.recibo_escpos_b64
+      if (!b64 && sale.id) {
+        try {
+          const full = await api.sales.get(sale.id)
+          if (full?.recibo_escpos_b64) {
+            b64 = full.recibo_escpos_b64
+            sale.recibo_escpos_b64 = b64
+          }
+        } catch (_) {}
+      }
+
+      if (b64 && (window as any).electronAPI?.printEscPos) {
         const tpl = JSON.parse(localStorage.getItem("pos_receipt_template_config") || "{}")
-        const result = await (window as any).electronAPI.printEscPos(sale.recibo_escpos_b64, tpl.nombre_impresora_windows || "ZKP8008")
+        const result = await (window as any).electronAPI.printEscPos(b64, tpl.nombre_impresora_windows || "ZKP8008")
         if (!result?.success) {
           toast.warning("No se pudo reimprimir", result?.error || "Revise la impresora.")
           return
@@ -5279,7 +5290,11 @@ export default function POSPage() {
         return
       }
       await printNotaCreditoTicket(
-        { numero: full.numero, nota_credito_numero: full.nota_credito_numero },
+        {
+          numero: full.numero,
+          nota_credito_numero: full.nota_credito_numero,
+          fecha: full.created_at || full.fecha,
+        },
         (full.items || []).map((it: any) => ({ descripcion: it.descripcion || it.product_name, cantidad: Number(it.cantidad), precio_unitario: Number(it.precio_unitario) })),
         full.sale_numero ? { numero: full.sale_numero } : null,
         "(ver registro original)",
@@ -6852,7 +6867,10 @@ export default function POSPage() {
     t += ESCPOS_ALIGN_LEFT
     t += ESCPOS_BOLD_ON + `NC No: ${approved.nota_credito_numero}` + ESCPOS_BOLD_OFF + '\n'
     t += `Devolucion No: ${approved.numero || ''}\n`
-    t += `Fecha/Hora: ${escposFormatDateTime(new Date())}\n`
+    const fechaNC = (approved.fecha || (approved as any).created_at)
+      ? new Date(approved.fecha || (approved as any).created_at)
+      : new Date()
+    t += `Fecha/Hora: ${escposFormatDateTime(fechaNC)}\n`
     // Referencia a la factura que se devuelve -- destacada en su propio
     // recuadro, no una línea más entre las demás, porque es el dato que
     // vincula legalmente la NC a la factura original.
