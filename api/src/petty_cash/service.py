@@ -568,6 +568,20 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
     elif fund and fund.cost_center_id:
         cost_center_id = fund.cost_center_id
 
+    # Auto-resolución de supplier_id por RUC si no vino explícito
+    resolved_supplier_id = _safe_uuid(data.supplier_id)
+    if not resolved_supplier_id and data.ruc and data.ruc.strip():
+        from api.src.purchases.models import Supplier
+        clean_ruc = data.ruc.strip()
+        sup_match = (await db.execute(
+            select(Supplier.id).where(
+                Supplier.company_id == cid,
+                Supplier.ruc == clean_ruc
+            ).limit(1)
+        )).scalar_one_or_none()
+        if sup_match:
+            resolved_supplier_id = sup_match
+
     exp = Expense(
         company_id=cid,
         branch_id=_safe_uuid(data.branch_id) if data.branch_id else (fund.branch_id if fund else None),
@@ -593,7 +607,7 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         vida_util_meses=data.vida_util_meses if data.es_inversion else None,
         categoria_activo=data.categoria_activo if data.es_inversion else None,
         es_pago_proveedor=bool(data.es_pago_proveedor),
-        supplier_id=_safe_uuid(data.supplier_id),
+        supplier_id=resolved_supplier_id,
         supplier_invoice_id=_safe_uuid(data.supplier_invoice_id),
         es_anticipo_sueldo=bool(data.es_anticipo_sueldo),
         employee_id=str(data.employee_id) if data.employee_id else None,
@@ -1883,6 +1897,20 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
         if field in update_data:
             val = update_data[field]
             update_data[field] = _safe_uuid(val)
+
+    # Auto-resolución de supplier_id por RUC si no vino explícito en el update
+    target_ruc = update_data.get("ruc") or exp.ruc
+    if not update_data.get("supplier_id") and not exp.supplier_id and target_ruc and target_ruc.strip():
+        from api.src.purchases.models import Supplier
+        clean_ruc = target_ruc.strip()
+        sup_match = (await db.execute(
+            select(Supplier.id).where(
+                Supplier.company_id == exp.company_id,
+                Supplier.ruc == clean_ruc
+            ).limit(1)
+        )).scalar_one_or_none()
+        if sup_match:
+            update_data["supplier_id"] = sup_match
 
     if "employee_id" in update_data:
         val = update_data["employee_id"]
