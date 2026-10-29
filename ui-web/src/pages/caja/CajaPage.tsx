@@ -1,5 +1,5 @@
 import { copyToClipboard } from "../../utils/clipboard"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import {
   Plus, Search, Loader2, Wallet, Banknote, Award, TrendingUp, ArrowUpRight, ArrowDownRight,
   DollarSign, CheckCircle, XCircle, AlertCircle, CreditCard, AlertTriangle,
@@ -312,6 +312,16 @@ export default function CajaPage() {
   const [adjMotivo, setAdjMotivo] = useState("")
   const [savingAdjustment, setSavingAdjustment] = useState(false)
   const [deletingAdjustmentId, setDeletingAdjustmentId] = useState<string | null>(null)
+
+  const matchedSale = useMemo(() => {
+    if (!adjTicketNumero || !punteoData?.sales_index) return null
+    const q = adjTicketNumero.trim().toLowerCase()
+    const entries = Object.entries(punteoData.sales_index)
+    const exact = entries.find(([k]) => k.toLowerCase() === q)
+    if (exact) return exact[1] as any
+    const partial = entries.find(([k]) => k.toLowerCase().endsWith(q) || k.toLowerCase().includes(q))
+    return partial ? (partial[1] as any) : null
+  }, [adjTicketNumero, punteoData?.sales_index])
 
   // ── Selector de Notas de Crédito para Reclasificación ──
   const [ncSelectorOpen, setNcSelectorOpen] = useState(false)
@@ -7417,15 +7427,14 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2 focus:ring-2 focus:ring-amber-500 font-medium"
                     required
                   >
-                    <option value="EFECTIVO">💵 Efectivo en Gaveta (Deduce de Efectivo)</option>
-                    <option value="DINELCO_DEBITO">💳 Dinelco Tarjeta Débito / POS Dinelco</option>
-                    <option value="DINELCO_CREDITO">💳 Dinelco Tarjeta Crédito</option>
-                    <option value="BANCARD_DEBITO">💳 Bancard Tarjeta Débito</option>
-                    <option value="BANCARD_CREDITO">💳 Bancard Tarjeta Crédito</option>
-                    <option value="BANCARD_QR">📱 Bancard QR</option>
-                    <option value="PLUGPAY_PIX">🌐 Plug Pay PIX Brasil</option>
-                    <option value="EXTRA_CLUB">🏷️ Extra Club / Crédito Casa</option>
-                    <option value="OTROS">📄 Otros Canales</option>
+                    <option value="EFECTIVO">💵 Efectivo en Gaveta (Deduce de Efectivo · Cobrado en efectivo en POS)</option>
+                    {Object.entries(punteoData?.summary_by_method || {})
+                      .filter(([k, v]: [string, any]) => !["EFECTIVO", "EFECTIVO_PYG"].includes(k) && Number(v.monto_gs || 0) > 0)
+                      .map(([k, v]: [string, any]) => (
+                        <option key={k} value={k}>
+                          💳 {v.label || k} (Cobrado en Turno: ₲ {formatPYG(v.monto_gs)})
+                        </option>
+                      ))}
                   </select>
                 </div>
 
@@ -7467,6 +7476,25 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                     </optgroup>
                   </select>
                 </div>
+              </div>
+
+              {/* ⚡ IMPACT PREVIEW (Explicación didáctica en vivo) */}
+              <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-300/60 dark:border-amber-700/50 text-[11px] space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-amber-900 dark:text-amber-200">
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>Impacto en la Conciliación del Turno:</span>
+                </div>
+                {adjOrigenCanal === "EFECTIVO" ? (
+                  <p className="text-amber-800 dark:text-amber-300">
+                    📉 <b>Efectivo de Gaveta:</b> Se descontarán <b>₲ {formatPYG(adjMontoGs)}</b> del efectivo esperado a entregar en sobre (porque el dinero vino en comprobante).<br />
+                    📈 <b>{adjDestinoCanal}:</b> Se sumará a los comprobantes a rendir. <b>No genera faltante de caja a la cajera.</b>
+                  </p>
+                ) : (
+                  <p className="text-amber-800 dark:text-amber-300">
+                    🔄 <b>Reasignación entre Medios Electrónicos:</b> Se trasladarán <b>₲ {formatPYG(adjMontoGs)}</b> desde <b>{adjOrigenCanal}</b> hacia <b>{adjDestinoCanal}</b>.<br />
+                    ⚠️ <b>El efectivo en gaveta NO se altera.</b> Utilizar únicamente si la cajera digitó un POS o medio electrónico erróneo.
+                  </p>
+                )}
               </div>
 
               <div>
@@ -7581,15 +7609,44 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Ticket Asociado (Opcional)
+                    Ticket / Factura Asociada (Opcional)
                   </label>
                   <input
                     type="text"
-                    placeholder="ej. 001-015-0002280"
+                    placeholder="ej. 001-014-0002029 o 2029"
                     value={adjTicketNumero}
                     onChange={(e) => setAdjTicketNumero(e.target.value)}
                     className="w-full text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white px-3 py-2"
                   />
+                  {matchedSale && (
+                    <div className="p-2 mt-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-[11px] text-blue-900 dark:text-blue-200 space-y-1 animate-fade-in">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <span className="font-bold">Factura #{matchedSale.numero || matchedSale.numero_interno}</span>
+                        <span className="font-mono font-bold text-blue-700 dark:text-blue-300">₲ {formatPYG(matchedSale.total)}</span>
+                      </div>
+                      <div className="text-[10px] text-blue-700 dark:text-blue-300">
+                        Cobrado en POS como: <b>{matchedSale.medios.map((m: any) => `${m.forma_pago} (₲ ${formatPYG(m.monto)})`).join(", ")}</b>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdjMontoGs(matchedSale.total)
+                          setAdjMontoGsStr(matchedSale.total.toLocaleString("es-PY"))
+                          const isCash = matchedSale.medios.some((m: any) => (m.forma_pago || "").toUpperCase().includes("EFECTIVO"))
+                          if (isCash) {
+                            setAdjOrigenCanal("EFECTIVO")
+                          }
+                          if (matchedSale.numero) {
+                            setAdjTicketNumero(matchedSale.numero)
+                          }
+                          toast.success("Factura Autocompletada", `Monto ₲ ${formatPYG(matchedSale.total)} y origen ${isCash ? "EFECTIVO" : "No-Efectivo"} fijados.`)
+                        }}
+                        className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold text-[10px] transition"
+                      >
+                        ⚡ Aplicar Monto y Origen de esta Factura
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
