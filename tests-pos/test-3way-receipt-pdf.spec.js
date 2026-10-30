@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0OWFmODEyMi0wODc1LTRkNGItYTkwZS05YjI1YmM1MmYzMTAiLCJlbWFpbCI6ImRldkBzdXBlcmV4dHJhLmNvbS5weSIsInJvbCI6ImFkbWluIiwiaXNfc3VwZXJhZG1pbiI6dHJ1ZSwiZXhwIjoxNzkyMzc4NzE4LCJ0eXBlIjoiYWNjZXNzIn0.SCOlOHdL_ePbTnYwROxxCra4SVwuVfTEGx3emQ9vVsc';
+const TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0OWFmODEyMi0wODc1LTRkNGItYTkwZS05YjI1YmM1MmYzMTAiLCJpZCI6IjQ5YWY4MTIyLTA4NzUtNGQ0Yi1hOTBlLTliMjViYzUyZjMxMCIsImVtYWlsIjoiZGV2QHN1cGVyZXh0cmEuY29tLnB5Iiwicm9sIjoiYWRtaW4iLCJpc19zdXBlcmFkbWluIjp0cnVlLCJjb21wYW55X2lkIjoiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDEwIiwiZXhwIjoxODI0OTI1MDYzLCJ0eXBlIjoiYWNjZXNzIn0.T85px8J_7SWqbhim5qRS1CgB7Ro-etKFBq354EKcizw';
 
 test.describe('Procure-to-Pay (P2P): Acta de Recepción, Cotejo 3-Way y Cierre con Márgenes', () => {
   test.beforeEach(async ({ page }) => {
@@ -51,6 +51,13 @@ test.describe('Procure-to-Pay (P2P): Acta de Recepción, Cotejo 3-Way y Cierre c
   test('Módulo de Compras (/compras) tiene botón de descarga de Acta 3-Way con Márgenes', async ({ page }) => {
     await page.goto('/compras', { waitUntil: 'networkidle', timeout: 35000 });
     await page.waitForTimeout(3000);
+
+    // Cambiar a la pestaña "Órdenes de Compra" si está disponible
+    const ordenesTab = page.locator('button:has-text("Órdenes de Compra")').first();
+    if (await ordenesTab.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await ordenesTab.click();
+      await page.waitForTimeout(2500);
+    }
 
     // Verificar que la tabla de órdenes de compra cargue
     const table = page.locator('table').first();
