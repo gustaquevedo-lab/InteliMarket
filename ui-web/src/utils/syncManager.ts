@@ -29,6 +29,40 @@ export async function restoreCart(): Promise<Array<{ id: string; nombre: string;
   return offlineDB.cart.getAll()
 }
 
+const DELTA_OVERLAP_MS = 30 * 1000
+let lastPriceDeltaAt: string | null = null
+
+// Delta liviano SOLO de productos (precios/promos), pensado para correr cada
+// pocos segundos: la balanza recibe un precio nuevo en ~3 s, la caja tardaba
+// hasta 5 min (y hasta 35 si el cambio caia en la ventana de commit). No toca
+// clientes, PINs, terminales ni creditos -- eso sigue en syncFullCatalog.
+export async function syncProductPriceDelta(): Promise<any[]> {
+  const syncState = await offlineDB.syncState.get()
+  const base = lastPriceDeltaAt || syncState?.last_full_sync
+  if (!base) return []
+  const startedAt = new Date().toISOString()
+  const since = new Date(new Date(base).getTime() - DELTA_OVERLAP_MS).toISOString()
+  const products = await api.products.list({ limit: 2000, include_inactive: true, updated_since: since })
+  const cached = (products || []).map((p: any) => ({
+    ...p,
+    id: p.id,
+    sku: p.sku,
+    codigo_barra: p.codigo_barra ?? null,
+    nombre: p.nombre,
+    category_id: p.categoria_id ?? null,
+    iva_tasa: p.iva_tasa || 10,
+    activo: p.activo !== false,
+    precio: Number(p.precio ?? p.precio_venta ?? 0),
+    stock: p.stock ?? 0,
+    categoria_nombre: p.categoria?.nombre || null,
+    data: p,
+    cached_at: new Date().toISOString(),
+  }))
+  if (cached.length > 0) await offlineDB.products.upsertMany(cached)
+  lastPriceDeltaAt = startedAt
+  return cached
+}
+
 export async function syncFullCatalog(forceFull = false): Promise<{ products: number; customers: number; success: boolean }> {
   try {
     const syncState = await offlineDB.syncState.get()
@@ -42,16 +76,21 @@ export async function syncFullCatalog(forceFull = false): Promise<{ products: nu
 
     // Si ya hay catálogo local y no es forceFull, hacemos sincronización DELTA (solo novedades)
     const isDelta = !forceFull && hasLocalProducts && !!lastSync && !cacheSinPrecioVenta
+    // Solape: el servidor marca updated_at con la hora de INICIO de su transaccion
+    // (now()), asi que un cambio puede commitear despues de que esta caja ya
+    // sincronizo con un last_sync posterior a ese updated_at -> el delta lo
+    // salteaba para siempre (hasta el proximo toque de la promo, hasta 30 min).
+    const sinceDelta = lastSync ? new Date(new Date(lastSync).getTime() - DELTA_OVERLAP_MS).toISOString() : undefined
 
     const [products, customers] = await Promise.all([
       api.products.list({
         limit: isDelta ? 2000 : 15000,
         include_inactive: true,
-        updated_since: isDelta ? lastSync : undefined,
+        updated_since: isDelta ? sinceDelta : undefined,
       }),
       api.customers.list({
         limit: isDelta ? 2000 : 15000,
-        updated_since: isDelta ? lastSync : undefined,
+        updated_since: isDelta ? sinceDelta : undefined,
       }),
     ])
 

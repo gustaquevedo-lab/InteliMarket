@@ -194,6 +194,49 @@ async def run_promotions_daily_sync():
             logger.error("Error en sincronización periódica de promociones: %s", e)
 
 
+_promo_vigencia_prev: dict = {}
+
+
+async def run_promotions_window_watch():
+    """Cada minuto: si una promo con horario/dia/vigencia entra o sale de ventana,
+    toca sus productos para que el delta de las cajas la recoja en segundos.
+    Sin esto, una promo que ARRANCA a una hora (o al cambiar el dia) llegaba a
+    las cajas recien en la siguiente corrida de promotions_sync (:01/:31), hasta
+    30 min tarde; la balanza, en cambio, la recibe sola por su vigilante."""
+    from api.src.promotions.models import Promotion
+    from api.src.promotions.service import _touch_products_for_promo
+
+    now_dt = datetime.now(ZoneInfo("America/Asuncion"))
+    today, now_time, dow = now_dt.date(), now_dt.time(), (now_dt.weekday() + 1) % 7
+    async with async_session_factory() as db:
+        try:
+            res = await db.execute(select(Promotion).where(Promotion.activo == True, Promotion.estado == "activa"))
+            flipped = []
+            seen = set()
+            for pr in res.scalars().all():
+                vigente = bool(
+                    (pr.valido_desde is None or pr.valido_desde <= today)
+                    and (pr.valido_hasta is None or pr.valido_hasta >= today)
+                    and (not pr.dias_semana or dow in pr.dias_semana)
+                    and (not (pr.horario_desde and pr.horario_hasta) or pr.horario_desde <= now_time <= pr.horario_hasta)
+                )
+                seen.add(pr.id)
+                prev = _promo_vigencia_prev.get(pr.id)
+                _promo_vigencia_prev[pr.id] = vigente
+                if prev is not None and prev != vigente:
+                    flipped.append(pr)
+            for gone in [k for k in _promo_vigencia_prev if k not in seen]:
+                _promo_vigencia_prev.pop(gone, None)
+            for pr in flipped:
+                await _touch_products_for_promo(db, pr)
+            if flipped:
+                await db.commit()
+                logger.info("Vigia de promos: %d promo(s) cambiaron de vigencia, productos tocados.", len(flipped))
+        except Exception as e:
+            await db.rollback()
+            logger.error("Error en vigia de ventanas de promociones: %s", e)
+
+
 async def export_delivery_pdf_for_tenant(db: AsyncSession, company_id: str, days: int) -> bytes | None:
     """Helper to generate PDF report bytes for a given tenant."""
     try:
@@ -346,6 +389,15 @@ def update_schedule(config: dict):
             trigger=CronTrigger(minute="1,31", timezone=py_tz),
             id="promotions_sync",
             name="Promotions & Price Sync (America/Asuncion)",
+            replace_existing=True,
+        )
+
+    if not scheduler.get_job("promotions_window_watch"):
+        scheduler.add_job(
+            run_promotions_window_watch,
+            trigger=CronTrigger(minute="*", timezone=py_tz),
+            id="promotions_window_watch",
+            name="Promotions window watch (cada minuto)",
             replace_existing=True,
         )
 
