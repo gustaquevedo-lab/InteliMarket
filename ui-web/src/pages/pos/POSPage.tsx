@@ -22,7 +22,7 @@ import { formatPYG, formatInputDecimal, parseInputDecimal } from "../../utils/fo
 import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
 import { offlineDB } from "../../utils/offlineDB"
-import { syncPendingSales, syncPendingCupones, syncFullCatalog } from "../../utils/syncManager"
+import { syncPendingSales, syncPendingCupones, syncFullCatalog, syncProductPriceDelta } from "../../utils/syncManager"
 import { verifySupervisorPinLocal, syncSupervisorPins } from "../../utils/localAuth"
 import QRCode from "qrcode"
 import { imDinelco, imBancard } from "../../monitor/integrations"
@@ -2782,6 +2782,34 @@ export default function POSPage() {
     }
   }, [])
 
+
+  // Precios/promos casi en vivo: delta liviano de productos cada 10 s (la
+  // balanza los recibe en ~3 s; antes la caja esperaba al ciclo de 5 min).
+  useEffect(() => {
+    let busy = false
+    const tick = async () => {
+      if (busy || document.hidden) return
+      busy = true
+      try {
+        const changed = await syncProductPriceDelta()
+        if (changed.length > 0) {
+          const byId = new Map(changed.map((c: any) => [c.id, c]))
+          setProducts((prev) => {
+            const merged = prev.map((p: any) => (byId.has(p.id) ? { ...p, ...byId.get(p.id) } : p))
+            const known = new Set(prev.map((p: any) => p.id))
+            for (const c of changed) if (!known.has(c.id)) merged.push(c as any)
+            return merged as Product[]
+          })
+        }
+      } catch {
+        // sin red: se reintenta en el proximo tick, el cache local sigue valido
+      } finally {
+        busy = false
+      }
+    }
+    const t = setInterval(tick, 10 * 1000)
+    return () => clearInterval(t)
+  }, [])
 
   // Búsqueda remota de productos con debounce
   useEffect(() => {
