@@ -261,7 +261,7 @@
   </div>
 
   <!-- SECONDARY FILTER & SEARCH TOOLBAR -->
-  <div class="bg-slate-900/80 border-b border-slate-800/80 px-4 py-2.5 shrink-0 backdrop-blur">
+  <div class="bg-slate-900/80 border-b border-slate-800/80 px-4 py-2.5 shrink-0 backdrop-blur relative z-30">
     <div class="max-w-[1920px] mx-auto flex flex-wrap items-center justify-between gap-3">
       
       <!-- Left Filters -->
@@ -290,7 +290,7 @@
         </div>
 
         <!-- Searchable Supplier Input with Dynamic Dropdown -->
-        <div class="relative w-64" id="supplier-combobox">
+        <div class="relative w-64 z-40" id="supplier-combobox">
           <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-500">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
@@ -303,6 +303,7 @@
             class="input-clean pl-8 pr-7 py-1.5 rounded-lg text-xs w-full font-medium"
             onfocus="openSupplierMenu()"
             oninput="handleSupplierFilterInput(this.value)"
+            onkeydown="handleSupplierKeyDown(event)"
             autocomplete="off"
           />
           <button 
@@ -318,7 +319,7 @@
           <!-- Dropdown menu -->
           <div 
             id="supplier-dropdown-menu" 
-            class="hidden absolute left-0 right-0 top-full mt-1 max-h-64 overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 py-1 divide-y divide-slate-800"
+            class="hidden absolute left-0 top-full mt-1 w-80 max-h-72 overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 py-1 divide-y divide-slate-800"
           >
             <!-- Items rendered by JS -->
           </div>
@@ -630,12 +631,12 @@
       return Math.round(Number(num)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
     }
 
-    function round50(val) {
-      if (!val || val <= 0) return 0;
-      const intVal = Math.round(val);
-      const remainder = intVal % 50;
-      return remainder >= 25 ? intVal + (50 - remainder) : intVal - remainder;
+    // Precios libres: Entero absoluto exacto en Guaraníes (sin forzar redondeos automáticos)
+    function roundPrice(val) {
+      if (!val || isNaN(val) || val <= 0) return 0;
+      return Math.round(Number(val));
     }
+    const round50 = roundPrice; // Alias de compatibilidad sin forzar múltiplos de 50
 
     // --- SINCRONIZACIÓN PERSISTENTE CON EL SERVIDOR ---
     async function loadDecisionsFromServer() {
@@ -818,10 +819,36 @@
     function handleSupplierFilterInput(val) {
       document.getElementById('supplier-dropdown-menu').classList.remove('hidden');
       renderSupplierMenu(val);
-      if (!val.trim()) {
+      
+      const valClean = (val || '').trim().toUpperCase();
+      const exactMatch = SUPPLIERS_LIST.find(s => s.name.toUpperCase() === valClean);
+      if (exactMatch) {
+        document.getElementById('filter-supplier').value = exactMatch.name;
+        document.getElementById('clear-supplier-btn').classList.remove('hidden');
+      } else {
         document.getElementById('filter-supplier').value = '';
-        document.getElementById('clear-supplier-btn').classList.add('hidden');
-        applyFilters();
+        if (valClean) {
+          document.getElementById('clear-supplier-btn').classList.remove('hidden');
+        } else {
+          document.getElementById('clear-supplier-btn').classList.add('hidden');
+        }
+      }
+      applyFilters();
+    }
+
+    function handleSupplierKeyDown(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const val = e.target.value.trim().toUpperCase();
+        const matches = SUPPLIERS_LIST.filter(s => !val || s.name.toUpperCase().includes(val));
+        if (matches.length > 0) {
+          selectSupplier(matches[0].name);
+        } else {
+          closeSupplierMenu();
+          applyFilters();
+        }
+      } else if (e.key === 'Escape') {
+        closeSupplierMenu();
       }
     }
 
@@ -902,7 +929,14 @@
         }
 
         // 2. Filtro proveedor y categoría
-        if (selectedSupplier && item.prv !== selectedSupplier) return false;
+        if (selectedSupplier) {
+          if (item.prv !== selectedSupplier) return false;
+        } else {
+          const suppSearchText = (document.getElementById('supplier-search-input') ? document.getElementById('supplier-search-input').value : '').trim().toUpperCase();
+          if (suppSearchText && (!item.prv || !item.prv.toUpperCase().includes(suppSearchText))) {
+            return false;
+          }
+        }
         if (selectedCategory && item.cat !== selectedCategory) return false;
 
         // 3. Determinar precio activo aprobado y estado
@@ -1682,6 +1716,9 @@
       const row = document.getElementById(`row-${itemId}`);
       if (!row) return;
 
+      const activeEl = document.activeElement;
+      const activeElId = (activeEl && row.contains(activeEl)) ? activeEl.id : null;
+
       const tempTable = document.createElement('tbody');
       tempTable.innerHTML = renderRowHTML(item, index);
       const newRow = tempTable.firstElementChild;
@@ -1689,6 +1726,13 @@
       row.replaceWith(newRow);
       if (focusedIndex === index) {
         highlightFocusedRow();
+      }
+
+      if (activeElId) {
+        const restoredEl = document.getElementById(activeElId);
+        if (restoredEl) {
+          restoredEl.focus();
+        }
       }
     }
 

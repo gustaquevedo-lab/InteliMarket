@@ -677,7 +677,7 @@ async def save_audit_decisions(db: AsyncSession, items: list[dict]) -> dict:
             INSERT INTO price_audit_decisions (
                 product_id, sku, precio_aprobado, margen_modo, margen_aprobado, status, usuario, escalas_aprobadas, updated_at
             ) VALUES (
-                :pid, :sku, :p_aprobado, :m_modo, :m_aprobado, :status, :usuario, :custom_tiers::jsonb, NOW()
+                :pid, :sku, :p_aprobado, :m_modo, :m_aprobado, :status, :usuario, CAST(:custom_tiers AS JSONB), NOW()
             )
             ON CONFLICT (product_id) DO UPDATE SET
                 sku = COALESCE(NULLIF(EXCLUDED.sku, ''), price_audit_decisions.sku),
