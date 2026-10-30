@@ -1,6 +1,6 @@
 """Purchases service — suppliers, orders, receipts, requisitions, forecasting, suggestions, budgets, reports"""
 
-from sqlalchemy import select, text, case, func
+from sqlalchemy import select, text, case, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone, date, timedelta
@@ -3848,5 +3848,249 @@ async def auto_link_receipts_to_invoices(db: AsyncSession, company_id: str) -> d
         "vinculadas": vinculadas,
         "detalles": detalles,
     }
+
+
+async def get_3way_receipt_data(
+    db: AsyncSession,
+    order_id: Optional[str] = None,
+    invoice_id: Optional[str] = None,
+    receipt_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Compila toda la información de la tríada P2P (Orden de Compra, Recepción en Muelle, Factura Fiscal)
+    y los precios/costos de los productos (Costo Factura, Costo Promedio PPP, PVP Salón, PVP Mayorista)
+    para alimentar el comprobante oficial 'Acta de Recepción y Cierre de Compras'.
+    """
+    from api.src.financial.models import SupplierInvoice
+    from api.src.purchases.models import PurchaseOrder, PurchaseOrderItem, PurchaseReceipt, PurchaseReceiptItem, Supplier
+    from api.src.products.models import Product
+    from api.src.inventory.models import Warehouse
+    from api.src.auth.models import User
+    from api.src.purchases.matching_service import perform_3way_match
+
+    order = None
+    receipt = None
+    invoice = None
+
+    # 1. Resolver por invoice_id si viene provisto
+    if invoice_id:
+        inv_uuid = uuid.UUID(str(invoice_id))
+        inv_res = await db.execute(select(SupplierInvoice).where(SupplierInvoice.id == inv_uuid))
+        invoice = inv_res.scalar_one_or_none()
+        if invoice:
+            if not order_id and invoice.purchase_order_id:
+                order_id = str(invoice.purchase_order_id)
+            if not receipt_id and invoice.receipt_id:
+                receipt_id = str(invoice.receipt_id)
+
+    # 2. Resolver por receipt_id si viene provisto
+    if receipt_id and not receipt:
+        rec_uuid = uuid.UUID(str(receipt_id))
+        rec_res = await db.execute(
+            select(PurchaseReceipt).options(selectinload(PurchaseReceipt.items)).where(PurchaseReceipt.id == rec_uuid)
+        )
+        receipt = rec_res.scalar_one_or_none()
+        if receipt and not order_id and receipt.purchase_order_id:
+            order_id = str(receipt.purchase_order_id)
+
+    # 3. Resolver por order_id
+    if order_id:
+        po_uuid = uuid.UUID(str(order_id))
+        po_res = await db.execute(
+            select(PurchaseOrder).options(selectinload(PurchaseOrder.items)).where(PurchaseOrder.id == po_uuid)
+        )
+        order = po_res.scalar_one_or_none()
+
+    # Si no teníamos receipt pero tenemos orden, buscar la recepción de esa orden
+    if order and not receipt:
+        rec_q = select(PurchaseReceipt).options(
+            selectinload(PurchaseReceipt.items)
+        ).where(
+            PurchaseReceipt.purchase_order_id == order.id,
+            PurchaseReceipt.estado != "cancelado"
+        ).order_by(PurchaseReceipt.created_at.desc())
+        rec_res = await db.execute(rec_q)
+        receipt = rec_res.scalars().first()
+
+    # Si no teníamos invoice pero tenemos orden o recepción, buscar la factura asociada
+    if not invoice and (order or receipt):
+        conditions = []
+        if order:
+            conditions.append(SupplierInvoice.purchase_order_id == order.id)
+        if receipt:
+            conditions.append(SupplierInvoice.receipt_id == receipt.id)
+        if conditions:
+            inv_res = await db.execute(
+                select(SupplierInvoice).where(
+                    or_(*conditions),
+                    SupplierInvoice.estado.notin_(("cancelada", "cancelado", "anulada"))
+                ).order_by(SupplierInvoice.created_at.desc())
+            )
+            invoice = inv_res.scalars().first()
+
+    if not order and not receipt and not invoice:
+        raise ValueError("No se encontró ningún comprobante para generar el acta de recepción")
+
+    # 4. Datos del Proveedor
+    supplier_obj = None
+    sup_id = (order.supplier_id if order else None) or (receipt.supplier_id if receipt else None) or (invoice.supplier_id if invoice else None)
+    if sup_id:
+        sup_res = await db.execute(select(Supplier).where(Supplier.id == sup_id))
+        supplier_obj = sup_res.scalar_one_or_none()
+
+    # 5. Datos de Depósito y Receptor
+    wh_name = "Depósito Central / Muelle"
+    if receipt and receipt.warehouse_id:
+        wh_res = await db.execute(select(Warehouse.nombre).where(Warehouse.id == receipt.warehouse_id))
+        wh_val = wh_res.scalar_one_or_none()
+        if wh_val:
+            wh_name = wh_val
+
+    receptor_name = "Juan Gabriel Ruiz (Muelle)"
+    if receipt and receipt.user_id:
+        u_res = await db.execute(select(User.nombre).where(User.id == receipt.user_id))
+        u_val = u_res.scalar_one_or_none()
+        if u_val:
+            receptor_name = f"{u_val} (Muelle)"
+
+    # 6. Datos del 3-Way Match
+    match_info = {}
+    if invoice:
+        try:
+            match_info = await perform_3way_match(db, str(invoice.id))
+        except Exception as e:
+            logger.warning(f"Error calculando 3-way match para PDF de {invoice.id}: {e}")
+            match_info = {
+                "estado_matching": "conforme" if not invoice.bloqueada_para_pago else "discrepancia",
+                "bloqueada_para_pago": invoice.bloqueada_para_pago,
+                "total_factura": float(invoice.total or 0),
+                "total_recibido": float(receipt.total if receipt else (order.total if order else invoice.total)),
+                "diferencia_redondeo": 0,
+            }
+    else:
+        tot_rec = float(receipt.total) if receipt else (float(order.total) if order else 0)
+        match_info = {
+            "estado_matching": "match_perfecto",
+            "bloqueada_para_pago": False,
+            "total_recibido": tot_rec,
+            "total_factura": tot_rec,
+            "diferencia_redondeo": 0,
+        }
+
+    # 7. Compilación de Renglones e Información de Productos
+    raw_items = []
+    if receipt and receipt.items:
+        raw_items = receipt.items
+    elif order and order.items:
+        raw_items = order.items
+
+    prod_ids = [it.product_id for it in raw_items if it.product_id]
+    prod_map = {}
+    tier_map = {}
+    if prod_ids:
+        p_res = await db.execute(
+            select(Product).where(Product.id.in_(prod_ids))
+        )
+        for p in p_res.scalars().all():
+            prod_map[p.id] = p
+
+        tier_res = await db.execute(
+            text("""
+                SELECT DISTINCT ON (product_id)
+                    product_id, min_qty, precio_unitario
+                FROM sp_tiered_prices
+                WHERE product_id = ANY(:p_ids) AND activo = true
+                ORDER BY product_id, min_qty ASC
+            """),
+            {"p_ids": prod_ids}
+        )
+        for r in tier_res:
+            tier_map[r.product_id] = float(r.precio_unitario)
+
+    items_list = []
+    for it in raw_items:
+        pid = it.product_id
+        prod = prod_map.get(pid)
+
+        cant = getattr(it, "cantidad_recibida", None)
+        if cant is None:
+            cant = getattr(it, "cantidad", 0)
+
+        costo_u = getattr(it, "costo_unitario", None)
+        if costo_u is None:
+            costo_u = getattr(it, "precio_unitario", 0)
+
+        sku_val = (prod.sku if prod else None) or getattr(it, "sku", None) or "—"
+        barcode_val = (prod.codigo_barra if prod else None) or getattr(it, "codigo_barra", None) or "—"
+        desc_val = (prod.nombre if prod else None) or getattr(it, "descripcion", None) or "Ítem"
+        um_val = (prod.unidad_medida if prod else None) or getattr(it, "unidad_medida", None) or "UN"
+
+        costo_ppp_val = (float(prod.costo_promedio) if prod and prod.costo_promedio and prod.costo_promedio > 0 else None) or (float(prod.ultimo_costo) if prod and prod.ultimo_costo and prod.ultimo_costo > 0 else None) or float(costo_u or 0)
+        pvp_val = float(prod.precio_venta or 0) if prod else 0.0
+        pvp_may_val = tier_map.get(pid, 0.0)
+
+        tasa_val = int(prod.iva_tasa) if prod and prod.iva_tasa else int(getattr(it, "iva_tasa", 10) or 10)
+
+        items_list.append({
+            "sku": sku_val,
+            "codigo_barra": barcode_val,
+            "descripcion": desc_val,
+            "unidad_medida": um_val,
+            "cantidad_recibida": float(cant or 0),
+            "costo_factura": float(costo_u or 0),
+            "costo_promedio": float(costo_ppp_val),
+            "precio_venta": pvp_val,
+            "precio_mayorista": pvp_may_val,
+            "iva_tasa": tasa_val,
+            "subtotal": float(Decimal(str(cant or 0)) * Decimal(str(costo_u or 0))),
+        })
+
+    order_dict = {
+        "numero": order.numero if order else (f"OC-{receipt.numero}" if receipt else "S/N"),
+        "fecha": order.fecha if order else (receipt.fecha if receipt else None),
+        "created_at": order.created_at if order else (receipt.created_at if receipt else None),
+        "condiciones_pago": order.condiciones_pago if order else "30 Días",
+        "moneda": order.moneda if order else "PYG",
+        "created_by_name": order.created_by_name if order else "Juan Gabriel Ruiz",
+        "total": float(order.total or 0) if order else (float(receipt.total or 0) if receipt else 0),
+        "observaciones": order.observaciones if order else None,
+    }
+
+    receipt_dict = {
+        "numero": receipt.numero if receipt else "S/N",
+        "proveedor_ref": receipt.proveedor_ref if receipt else (invoice.numero_factura if invoice else "—"),
+        "fecha": receipt.fecha if receipt else None,
+        "created_at": receipt.created_at if receipt else None,
+        "warehouse_nombre": wh_name,
+        "user_name": receptor_name,
+        "total": float(receipt.total or 0) if receipt else (float(order.total or 0) if order else 0),
+        "observaciones": receipt.observaciones if receipt else None,
+    }
+
+    invoice_dict = {
+        "numero_factura": invoice.numero_factura if invoice else (receipt.proveedor_ref if receipt and receipt.proveedor_ref else "Pendiente de Asignación"),
+        "timbrado": invoice.timbrado if invoice else "—",
+        "fecha_emision": invoice.fecha_emision if invoice else None,
+        "condicion": invoice.condicion if invoice else (order.condiciones_pago if order else "Crédito 30 Días"),
+        "total": float(invoice.total or 0) if invoice else (float(receipt.total or 0) if receipt else 0),
+        "total_factura_impreso": float(invoice.total or 0) if invoice else (float(receipt.total or 0) if receipt else 0),
+        "bloqueada_para_pago": invoice.bloqueada_para_pago if invoice else False,
+    }
+
+    supplier_dict = {
+        "razon_social": supplier_obj.razon_social if supplier_obj else (order.supplier_name if order else "—"),
+        "ruc": supplier_obj.ruc if supplier_obj else "—",
+        "telefono": supplier_obj.telefono if supplier_obj else "—",
+        "email": supplier_obj.email if supplier_obj else "—",
+    }
+
+    return {
+        "order": order_dict,
+        "receipt": receipt_dict,
+        "invoice": invoice_dict,
+        "supplier": supplier_dict,
+        "matching": match_info,
+        "items": items_list,
+    }
+
 
 

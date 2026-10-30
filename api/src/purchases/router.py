@@ -687,6 +687,46 @@ async def export_purchase_order_pdf(order_id: str, db: AsyncSession = Depends(ge
     )
 
 
+# ── Acta de Recepción, Cotejo 3-Way Match & Cierre de Compras ──────────────────
+
+@router.get("/purchases/orders/{order_id}/3way-receipt-pdf")
+@router.get("/purchase-orders/{order_id}/3way-receipt-pdf")
+async def export_order_3way_receipt_pdf(order_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        data = await service.get_3way_receipt_data(db, order_id=order_id)
+        order_dict = data.get("order") or {}
+        company = await _get_company_info(db, str(order_dict.get("company_id") or "00000000-0000-0000-0000-000000000010"))
+        pdf_bytes = purchases_pdf_reports.generate_purchase_3way_receipt_pdf(company, data)
+        po_num = str(order_dict.get("numero") or order_id[:8]).replace("/", "_").replace(" ", "_")
+        filename = f"Acta_Recepcion_3Way_{po_num}.pdf"
+        return StreamingResponse(
+            iter([pdf_bytes]), media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"', "Content-Length": str(len(pdf_bytes))},
+        )
+    except Exception as e:
+        logger.error(f"Error generando Acta 3-Way para orden {order_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/purchases/invoices/{invoice_id}/3way-receipt-pdf")
+async def export_invoice_3way_receipt_pdf(invoice_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        data = await service.get_3way_receipt_data(db, invoice_id=invoice_id)
+        invoice_dict = data.get("invoice") or {}
+        company = await _get_company_info(db, str(invoice_dict.get("company_id") or "00000000-0000-0000-0000-000000000010"))
+        pdf_bytes = purchases_pdf_reports.generate_purchase_3way_receipt_pdf(company, data)
+        inv_num = str(invoice_dict.get("numero_factura") or invoice_id[:8]).replace("/", "_").replace(" ", "_")
+        filename = f"Acta_Recepcion_3Way_{inv_num}.pdf"
+        return StreamingResponse(
+            iter([pdf_bytes]), media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"', "Content-Length": str(len(pdf_bytes))},
+        )
+    except Exception as e:
+        logger.error(f"Error generando Acta 3-Way para factura {invoice_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+
 # ── RFQ / Cotizacion comparativa ────────────────────────────────────────────────
 
 @router.post("/purchase-rfqs", response_model=RfqWithDetail, status_code=status.HTTP_201_CREATED)
@@ -1029,14 +1069,18 @@ async def receive_invoice_for_order(
     file: Optional[UploadFile] = File(None),
     invoice_id: Optional[str] = Form(None),
     user_id: Optional[str] = Form(None),
+    total_factura_impreso: Optional[Decimal] = Form(None),
     db: AsyncSession = Depends(get_db)
 ):
     try:
         import uuid
+        from decimal import Decimal
         from api.src.financial.models import SupplierInvoice
+        from api.src.purchases.models import PurchaseReceipt
         from sqlalchemy import select
 
         po_uuid = uuid.UUID(order_id)
+        diff_redondeo_aplicado = Decimal("0")
 
         if file:
             content = await file.read()
@@ -1052,8 +1096,19 @@ async def receive_invoice_for_order(
                 user_id=user_id,
                 purchase_order_id=order_id
             )
+            inv_obj = await db.get(SupplierInvoice, uuid.UUID(res["id"]))
+            if total_factura_impreso and total_factura_impreso > 0 and inv_obj:
+                diff_redondeo = (total_factura_impreso - (inv_obj.total or Decimal("0"))).quantize(Decimal("1"))
+                if abs(diff_redondeo) <= Decimal("5000"):
+                    diff_redondeo_aplicado = diff_redondeo
+                    inv_obj.total = total_factura_impreso.quantize(Decimal("1"))
+                    inv_obj.saldo_pendiente = total_factura_impreso.quantize(Decimal("1"))
+                    inv_obj.notas = f"{(inv_obj.notas or '').strip()} [Ajuste de redondeo impreso: {diff_redondeo:+,} ₲]".strip()
+                    res["total"] = float(inv_obj.total)
             await db.commit()
             match_res = await matching_service.perform_3way_match(db, res["id"], user_id)
+            if diff_redondeo_aplicado != Decimal("0") and isinstance(match_res, dict):
+                match_res["diferencia_redondeo"] = float(diff_redondeo_aplicado)
             return {
                 "success": True,
                 "factura_id": res["id"],
@@ -1068,9 +1123,18 @@ async def receive_invoice_for_order(
             invoice = inv_res.scalar_one_or_none()
             if not invoice:
                 raise HTTPException(status_code=404, detail="Factura no encontrada.")
+            if total_factura_impreso and total_factura_impreso > 0:
+                diff_redondeo = (total_factura_impreso - (invoice.total or Decimal("0"))).quantize(Decimal("1"))
+                if abs(diff_redondeo) <= Decimal("5000"):
+                    diff_redondeo_aplicado = diff_redondeo
+                    invoice.total = total_factura_impreso.quantize(Decimal("1"))
+                    invoice.saldo_pendiente = total_factura_impreso.quantize(Decimal("1"))
+                    invoice.notas = f"{(invoice.notas or '').strip()} [Ajuste de redondeo impreso: {diff_redondeo:+,} ₲]".strip()
             invoice.purchase_order_id = po_uuid
             await db.commit()
             match_res = await matching_service.perform_3way_match(db, invoice_id, user_id)
+            if diff_redondeo_aplicado != Decimal("0") and isinstance(match_res, dict):
+                match_res["diferencia_redondeo"] = float(diff_redondeo_aplicado)
             return {
                 "success": True,
                 "factura_id": str(invoice.id),

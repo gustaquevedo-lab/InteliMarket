@@ -3163,6 +3163,10 @@ export const api = {
     },
     downloadOrderPdf: (orderId: string, orderNumber?: string) =>
       downloadAuthenticated(`/v1/purchases/orders/${orderId}/pdf`, undefined, `OC_${orderNumber || orderId.slice(0, 8)}.pdf`),
+    download3WayReceiptPdf: (orderId: string, orderNumber?: string) =>
+      downloadAuthenticated(`/v1/purchase-orders/${orderId}/3way-receipt-pdf`, undefined, `Acta_Recepcion_3Way_${orderNumber || orderId.slice(0, 8)}.pdf`),
+    downloadInvoice3WayReceiptPdf: (invoiceId: string, invoiceNumber?: string) =>
+      downloadAuthenticated(`/v1/purchases/invoices/${invoiceId}/3way-receipt-pdf`, undefined, `Acta_Recepcion_3Way_${invoiceNumber || invoiceId.slice(0, 8)}.pdf`),
     smartReplenishmentPreview: (data: SmartReplenishmentRequest) =>
       client.post<SmartReplenishmentResponse>("/v1/purchases/smart-replenishment-preview", { ...data, company_id: COMPANY_ID }),
     generatePOFromReplenishment: (data: {
@@ -3220,11 +3224,14 @@ export const api = {
     },
     associateInvoiceToPO: (invoiceId: string, purchaseOrderId: string, userId?: string) =>
       client.post<any>(`/v1/purchases/invoices/${invoiceId}/associate-po`, { purchase_order_id: purchaseOrderId, user_id: userId }),
-    receiveInvoiceForOrder: (orderId: string, data: { file?: File; invoice_id?: string; user_id?: string }, companyId?: string) => {
+    receiveInvoiceForOrder: (orderId: string, data: { file?: File; invoice_id?: string; user_id?: string; total_factura_impreso?: number }, companyId?: string) => {
       const formData = new FormData()
       if (data.file) formData.append("file", data.file)
       if (data.invoice_id) formData.append("invoice_id", data.invoice_id)
       if (data.user_id) formData.append("user_id", data.user_id)
+      if (data.total_factura_impreso !== undefined && data.total_factura_impreso !== null) {
+        formData.append("total_factura_impreso", String(data.total_factura_impreso))
+      }
       return requestMultipart<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-orders/${orderId}/receive-invoice`, formData)
     },
     reconcile3WayMatch: (invoiceId: string, userId?: string) =>

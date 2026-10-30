@@ -15,6 +15,7 @@ import { useToast } from "../../context/ToastContext"
 import { useTheme } from "../../context/ThemeContext"
 import { formatPYG, formatDate } from "../../utils/format"
 import { soundAlerts } from "../../utils/audioAlerts"
+import CurrencyInput from "../../components/CurrencyInput"
 
 interface ReceptionItemDraft {
   draft_id: string
@@ -139,6 +140,7 @@ export default function DepositoRecepcionPage() {
   const [itemsDraft, setItemsDraft] = useState<ReceptionItemDraft[]>([])
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null)
   const [proveedorRef, setProveedorRef] = useState("")
+  const [totalFacturaImpreso, setTotalFacturaImpreso] = useState<number | undefined>(undefined)
   const [detectedSifenInvoice, setDetectedSifenInvoice] = useState<{ id: string; numero: string; total: number; cdc?: string } | null>(null)
   const [showOverrideInvoiceModal, setShowOverrideInvoiceModal] = useState(false)
   const [observaciones, setObservaciones] = useState("")
@@ -836,6 +838,7 @@ export default function DepositoRecepcionPage() {
         supplier_id: selectedPO.supplier_id,
         warehouse_id: targetWarehouseId,
         proveedor_ref: proveedorRef.trim() || `REMITO-${todayISO}`,
+        total_factura_impreso: totalFacturaImpreso && totalFacturaImpreso > 0 ? totalFacturaImpreso : undefined,
         observaciones: `Recepción móvil de muelle por ${user?.nombre || "Encargado de Depósito"}. ${observaciones}`.trim(),
         items: itemsDraft
           .filter((it) => (it.cantidad_recibir || 0) > 0 || (it.cantidad_rechazada || 0) > 0)
@@ -1099,29 +1102,48 @@ export default function DepositoRecepcionPage() {
               <button
                 onClick={async () => {
                   try {
+                    await api.purchases.download3WayReceiptPdf(selectedPO.id, selectedPO.numero)
+                    toast.success("Acta Descargada", `Se descargó el Acta de Recepción y Cierre 3-Way con Márgenes de la orden ${selectedPO.numero}.`)
+                  } catch (e: any) {
+                    toast.error("Error al descargar Acta", e.message)
+                  }
+                }}
+                className="w-full py-4 rounded-2xl font-black text-sm bg-indigo-600 hover:bg-indigo-700 text-white active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-indigo-600/25"
+              >
+                <Download className="w-5 h-5" /> Imprimir Acta de Recepción & Cierre 3-Way (con Márgenes)
+              </button>
+            )}
+
+            {selectedPO?.id && (
+              <button
+                onClick={async () => {
+                  try {
                     await api.purchases.downloadOrderPdf(selectedPO.id, selectedPO.numero)
                     toast.success("PDF Descargado", `Se descargó la OC ${selectedPO.numero} con la referencia a la recepción ${lastReceiptCreated?.numero || ""}.`)
                   } catch (e: any) {
                     toast.error("Error al descargar PDF", e.message)
                   }
                 }}
-                className="w-full py-3.5 rounded-2xl font-bold text-sm bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                className="w-full py-3 rounded-2xl font-bold text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
               >
-                <Download className="w-4 h-4 text-indigo-600 dark:text-indigo-400" /> Descargar / Imprimir OC con AUTO-REC
+                <FileText className="w-4 h-4" /> Descargar Orden de Compra (OC Básica)
               </button>
             )}
 
             <button
               onClick={() => window.print()}
-              className="w-full py-3.5 rounded-2xl font-bold text-sm bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+              className="w-full py-3 rounded-2xl font-bold text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
             >
-              <Printer className="w-4 h-4 text-slate-600 dark:text-slate-400" /> Imprimir Comprobante de Recepción
+              <Printer className="w-4 h-4 text-slate-600 dark:text-slate-400" /> Imprimir Ticket Rápido Muelle
             </button>
 
             <button
               onClick={() => {
                 setSelectedPO(null)
                 setItemsDraft([])
+                setProveedorRef("")
+                setTotalFacturaImpreso(undefined)
+                setObservaciones("")
                 setViewState("orders")
                 fetchOrders()
               }}
@@ -1641,8 +1663,8 @@ export default function DepositoRecepcionPage() {
                 </div>
               </div>
 
-              {/* Campos Remito & Observaciones */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+              {/* Campos Remito, Total Impreso & Observaciones */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase">
@@ -1650,7 +1672,7 @@ export default function DepositoRecepcionPage() {
                     </label>
                     {detectedSifenInvoice && (
                       <span className="text-[10px] font-bold text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 rounded-full border border-teal-200 dark:border-teal-800 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Factura e-mail / SIFEN
+                        <CheckCircle2 className="w-3 h-3" /> SIFEN
                       </span>
                     )}
                   </div>
@@ -1665,11 +1687,14 @@ export default function DepositoRecepcionPage() {
                     <div className="mt-1.5 p-2 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 rounded-lg text-[11px] text-amber-800 dark:text-amber-200 flex items-start gap-1.5">
                       <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
                       <div>
-                        <span className="font-bold">¡Atención!</span> La factura recibida por correo para esta orden es{" "}
+                        <span className="font-bold">¡Atención!</span> La factura recibida por correo es{" "}
                         <strong className="font-mono text-indigo-600 dark:text-indigo-400">{detectedSifenInvoice.numero}</strong> ({formatPYG(detectedSifenInvoice.total)}).
                         <button
                           type="button"
-                          onClick={() => setProveedorRef(detectedSifenInvoice.numero)}
+                          onClick={() => {
+                            setProveedorRef(detectedSifenInvoice.numero)
+                            if (!totalFacturaImpreso) setTotalFacturaImpreso(detectedSifenInvoice.total)
+                          }}
                           className="ml-2 underline font-bold text-amber-900 dark:text-amber-100 hover:text-amber-700"
                         >
                           Usar {detectedSifenInvoice.numero}
@@ -1678,6 +1703,23 @@ export default function DepositoRecepcionPage() {
                     </div>
                   )}
                 </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block uppercase mb-1">
+                    Total Impreso Factura (Ajuste)
+                  </label>
+                  <CurrencyInput
+                    currency="PYG"
+                    placeholder="Ej. 10.699.317"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:border-amber-500 font-mono font-semibold"
+                    value={totalFacturaImpreso !== undefined ? String(totalFacturaImpreso) : ""}
+                    onChangeValue={(val) => setTotalFacturaImpreso(val ? Number(val) : undefined)}
+                  />
+                  <span className="text-[10px] text-slate-400 block mt-1">
+                    Completar si la factura difiere por redondeo de centavos.
+                  </span>
+                </div>
+
                 <div>
                   <label className="text-xs font-bold text-slate-600 dark:text-slate-400 block uppercase mb-1">
                     Observaciones Muelle

@@ -398,6 +398,7 @@ export default function PurchasesPage() {
   const [receivingInvoiceMode, setReceivingInvoiceMode] = useState<"xml" | "existente">("xml")
   const [receivingInvoiceFile, setReceivingInvoiceFile] = useState<File | null>(null)
   const [selectedExistingInvoiceId, setSelectedExistingInvoiceId] = useState<string>("")
+  const [receivingInvoiceTotalImpreso, setReceivingInvoiceTotalImpreso] = useState<string>("")
   const [processingInvoiceReceipt, setProcessingInvoiceReceipt] = useState(false)
   const [receiptMatchingResult, setReceiptMatchingResult] = useState<any | null>(null)
   const [dragOverOrderXml, setDragOverOrderXml] = useState(false)
@@ -1047,6 +1048,17 @@ export default function PurchasesPage() {
       toast.success("PDF Descargado", `Se descargó la OC N° ${po.numero || "S/N"} en formato PDF oficial.`)
     } catch (e: any) {
       toast.error("Error al descargar PDF", e.message)
+    }
+  }
+
+  // Descargar Acta Oficial de Recepción y Cierre 3-Way con Fijación de Márgenes
+  const handleDownload3WayReceiptPdf = async (po: PurchaseOrder) => {
+    if (!po.id) return
+    try {
+      await api.purchases.download3WayReceiptPdf(po.id, po.numero)
+      toast.success("Acta Descargada", `Se descargó el Acta de Recepción y Cierre 3-Way con Márgenes de la OC N° ${po.numero || "S/N"}.`)
+    } catch (e: any) {
+      toast.error("Error al descargar Acta 3-Way", e.message)
     }
   }
 
@@ -1999,6 +2011,7 @@ export default function PurchasesPage() {
           file: receivingInvoiceFile || undefined,
           invoice_id: selectedExistingInvoiceId || undefined,
           user_id: user?.id,
+          total_factura_impreso: receivingInvoiceTotalImpreso ? Number(receivingInvoiceTotalImpreso) : undefined,
         }
       )
 
@@ -5140,10 +5153,20 @@ export default function PurchasesPage() {
                               <button
                                 onClick={() => handleDownloadPOAsPdf(po)}
                                 className="p-1.5 rounded-lg bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-400 hover:bg-red-100 transition-colors"
-                                title="Descargar PDF Oficial"
+                                title="Descargar PDF Oficial (OC Básica)"
                               >
                                 <Download className="w-3.5 h-3.5" />
                               </button>
+
+                              {po.estado !== "borrador" && (
+                                <button
+                                  onClick={() => handleDownload3WayReceiptPdf(po)}
+                                  className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400 hover:bg-indigo-100 transition-colors"
+                                  title="Descargar Acta de Recepción y Cierre 3-Way (con Márgenes)"
+                                >
+                                  <Scale className="w-3.5 h-3.5" />
+                                </button>
+                              )}
 
                               <button
                                 onClick={async () => {
@@ -7492,6 +7515,14 @@ export default function PurchasesPage() {
                 </button>
 
                 <button
+                  onClick={() => handleDownload3WayReceiptPdf(selectedPO)}
+                  className="btn-secondary text-xs flex items-center gap-1.5 px-3 py-1.5 font-bold text-indigo-700 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/60 hover:bg-indigo-50"
+                  title="Descargar Acta Oficial de Recepción y Cierre 3-Way con fijación de márgenes"
+                >
+                  <Scale className="w-4 h-4 text-indigo-600" /> Acta 3-Way & Márgenes
+                </button>
+
+                <button
                   onClick={() => handleExportSinglePOToExcel(selectedPO, poDetailItems)}
                   className="btn-secondary text-xs flex items-center gap-1.5 px-3 py-1.5 font-bold text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-50"
                   title="Descargar planilla en formato Excel (.xlsx)"
@@ -9341,13 +9372,33 @@ export default function PurchasesPage() {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowMatchModal(false)}
-                className="btn-primary text-xs px-6 py-2"
-              >
-                Cerrar Auditoría
-              </button>
+              <div className="flex items-center gap-2">
+                {matchResult?.invoice_id && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await api.purchases.downloadInvoice3WayReceiptPdf(matchResult.invoice_id, matchResult.numero_factura)
+                        toast.success("Acta Descargada", "Se descargó el Acta de Recepción y Cierre 3-Way con Márgenes.")
+                      } catch (e: any) {
+                        toast.error("Error al descargar Acta 3-Way", e.message)
+                      }
+                    }}
+                    className="btn-secondary text-xs px-4 py-2 flex items-center gap-1.5 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 font-bold rounded-xl hover:bg-indigo-100"
+                    title="Descargar Acta Oficial de Auditoría 3-Way & Cierre de Compras con fijación de márgenes"
+                  >
+                    <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>Descargar Acta 3-Way & Márgenes (PDF)</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowMatchModal(false)}
+                  className="btn-primary text-xs px-6 py-2"
+                >
+                  Cerrar Auditoría
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -9660,6 +9711,27 @@ export default function PurchasesPage() {
                     </select>
                   </div>
                 )}
+
+                <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                      Monto Total Impreso en Factura (Física / Papel)
+                    </label>
+                    <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">
+                      Ajuste por Redondeo Decimal
+                    </span>
+                  </div>
+                  <CurrencyInput
+                    currency="PYG"
+                    placeholder="Ej. 10.699.317"
+                    className="input-field text-xs font-mono font-bold w-full"
+                    value={receivingInvoiceTotalImpreso}
+                    onChangeValue={(val) => setReceivingInvoiceTotalImpreso(val ? String(val) : "")}
+                  />
+                  <p className="text-[10px] text-gray-400 leading-tight">
+                    Si el proveedor calcula con decimales de IVA y el papel impreso difiere en unos guaraníes, ingrese el total exacto del papel para que coincida 100% y no genere retenciones erróneas.
+                  </p>
+                </div>
 
                 <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
                   <button
