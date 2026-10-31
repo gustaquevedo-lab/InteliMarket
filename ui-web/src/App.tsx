@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react"
+import { lazy, Suspense, useEffect } from "react"
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
 import { ThemeProvider } from "./context/ThemeContext"
 import { AuthProvider, useAuth } from "./context/AuthContext"
@@ -55,11 +55,8 @@ const UsuariosPage = lazy(() => import("./pages/usuarios/UsuariosPage"))
 const CrmPage = lazy(() => import("./pages/crm/CrmPage"))
 const WhatsAppPage = lazy(() => import("./pages/whatsapp/WhatsAppPage"))
 const NotificationsPage = lazy(() => import("./pages/notifications/NotificationsPage"))
-const PharmaPage = lazy(() => import("./pages/pharma/PharmaPage"))
-const PharmaPOSPage = lazy(() => import("./pages/pharma/PharmaPOSPage"))
 const InteliEntregasPage = lazy(() => import("./pages/intelientregas/InteliEntregasPage"))
 const DriverAppPage = lazy(() => import("./pages/driverapp/DriverAppPage"))
-const BoutiquePage = lazy(() => import("./pages/boutique/BoutiquePage"))
 const ServiciosPage = lazy(() => import("./pages/servicios/ServiciosPage"))
 const InteliContPage = lazy(() => import("./pages/intelicont/InteliContPage"))
 const IntegrationsPage = lazy(() => import("./pages/integrations/IntegrationsPage"))
@@ -79,8 +76,6 @@ const PaymentsPage = lazy(() => import("./pages/payments/PaymentsPage"))
 const SupplierLogin = lazy(() => import("./pages/supplier-portal/SupplierLogin"))
 const SupplierDashboard = lazy(() => import("./pages/supplier-portal/SupplierDashboard"))
 const CustomerAgreementsPage = lazy(() => import("./pages/customer-agreements/CustomerAgreementsPage"))
-const DistribuidoraPage = lazy(() => import("./pages/distribuidora/DistribuidoraPage"))
-const SupermerPage = lazy(() => import("./pages/supermer/SupermerPage"))
 const CarniceriaDespostePage = lazy(() => import("./pages/operations/CarniceriaDespostePage"))
 const VerduleriaFrescosPage = lazy(() => import("./pages/operations/VerduleriaFrescosPage"))
 const PanaderiaRotiseriaPage = lazy(() => import("./pages/operations/PanaderiaRotiseriaPage"))
@@ -103,7 +98,6 @@ const MapaPage = lazy(() => import("./pages/mapa-tiempo-real/MapaPage"))
 const RutasPage = lazy(() => import("./pages/rutas/RutasPage"))
 const VisitasPage = lazy(() => import("./pages/visitas/VisitasPage"))
 const GeocercasPage = lazy(() => import("./pages/geocercas/GeocercasPage"))
-const RendimientoPage = lazy(() => import("./pages/rendimiento/RendimientoPage"))
 const InventoryAdvancedPage = lazy(() => import("./pages/inventory/InventoryAdvancedPage"))
 const IntegratedFinancePage = lazy(() => import("./pages/integrated-finance/IntegratedFinancePage"))
 const DemandForecastPage = lazy(() => import("./pages/demand-forecast/DemandForecastPage"))
@@ -115,7 +109,6 @@ const AsistenteVirtualPage = lazy(() => import("./pages/asistente-virtual/Asiste
 const ClientesPage = lazy(() => import("./pages/clientes/ClientesPage"))
 const ScanAndGoPage = lazy(() => import("./pages/scanandgo/ScanAndGoPage"))
 const Customer360Page = lazy(() => import("./pages/customer360/Customer360Page"))
-const CreditScoringPage = lazy(() => import("./pages/credit-scoring/CreditScoringPage"))
 const SchedulePage = lazy(() => import("./pages/schedule/SchedulePage"))
 const ProductividadPage = lazy(() => import("./pages/productividad/ProductividadPage"))
 const CapacitacionPage = lazy(() => import("./pages/capacitacion/CapacitacionPage"))
@@ -124,7 +117,6 @@ const ShrinkagePage = lazy(() => import("./pages/shrinkage/ShrinkagePage"))
 const ForecastAvanzadoPage = lazy(() => import("./pages/forecast-avanzado/ForecastAvanzadoPage"))
 const BenchmarkingPage = lazy(() => import("./pages/benchmarking/BenchmarkingPage"))
 const EcommerceSmPage = lazy(() => import("./pages/ecommerce-sm/EcommerceSmPage"))
-const DeliveryIntegrationsPage = lazy(() => import("./pages/delivery-integrations/DeliveryIntegrationsPage"))
 const SuscripcionesPage = lazy(() => import("./pages/suscripciones/SuscripcionesPage"))
 const RetailPage = lazy(() => import("./pages/retail/RetailPage"))
 const EcommerceLogin = lazy(() => import("./pages/ecommerce/EcommerceLogin"))
@@ -146,7 +138,6 @@ const BancardPage = lazy(() => import("./pages/bancard/BancardPage"))
 // const DinelcoPage = lazy(() => import("./pages/dinelco/DinelcoPage"))  // DESACTIVADO: checkout viejo apuntando a un host fantasma -- el terminal fisico real de Dinelco va por electron/dinelco-client.cjs, no toca esta pagina. Ver auditoria 2026-09-02
 const LoyaltyPage = lazy(() => import("./pages/loyalty/LoyaltyPage"))
 const PortalPage = lazy(() => import("./pages/portal/PortalPage"))
-const ClientAppPage = lazy(() => import("./pages/client-app/ClientAppPage"))
 const SifenAvanzadoPage = lazy(() => import("./pages/sifen-avanzado/SifenAvanzadoPage"))
 const SupplierPortalHubPage = lazy(() => import("./pages/supplier-portal/SupplierPortalHubPage"))
 const ManualPage = lazy(() => import("./pages/manual/ManualPage"))
@@ -247,10 +238,18 @@ function DashboardRouter() {
   return <Suspense fallback={<PageLoader />}><Dashboard /></Suspense>
 }
 
+function AuditoriaRedirect() {
+  useEffect(() => {
+    window.location.replace("/auditoria/index.html")
+  }, [])
+  return null
+}
+
 function AppRoutes() {
   const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
   return (
     <Routes>
+      <Route path="/auditoria" element={<AuditoriaRedirect />} />
       <Route path="/login" element={<Suspense fallback={<PageLoader />}><Login /></Suspense>} />
       <Route path="/portal/proveedores/login" element={<Suspense fallback={<PageLoader />}><SupplierLogin /></Suspense>} />
       <Route path="/portal/proveedores/dashboard" element={<Suspense fallback={<PageLoader />}><SupplierDashboard /></Suspense>} />
@@ -348,13 +347,11 @@ function AppRoutes() {
           ["contratos-proveedores", <SupplierContractsPage />],
           ["portal/proveedores", <SupplierPortalHubPage />],
           ["acuerdos-clientes", <CustomerAgreementsPage />],
-          ["distribuidora", <DistribuidoraPage />],
           ["sellers", <SellersPage />],
           ["mapa-tiempo-real", <MapaPage />],
           ["rutas", <RutasPage />],
           ["visitas", <VisitasPage />],
           ["geocercas", <GeocercasPage />],
-          ["rendimiento", <RendimientoPage />],
         ].map(([path, el]) => (
           <Route key={path as string} path={path as string} element={<Suspense fallback={<PageLoader />}>{el as React.ReactNode}</Suspense>} />
         ))}
@@ -369,12 +366,8 @@ function AppRoutes() {
         <Route path="logistics" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="logistics"><LogisticsPage /></FeatureRoute></Suspense>} />
         <Route path="rbac" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="rbac"><RbacPage /></FeatureRoute></Suspense>} />
         <Route path="usuarios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="rbac"><UsuariosPage /></FeatureRoute></Suspense>} />
-        <Route path="pharma" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pharma"><PharmaPage /></FeatureRoute></Suspense>} />
-        <Route path="pharma-pos" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="pharma"><PharmaPOSPage /></FeatureRoute></Suspense>} />
         <Route path="intelientregas" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="intelientregas"><InteliEntregasPage /></FeatureRoute></Suspense>} />
-        <Route path="boutique" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="boutique_pedidos"><BoutiquePage /></FeatureRoute></Suspense>} />
         <Route path="servicios" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="servicios"><ServiciosPage /></FeatureRoute></Suspense>} />
-        <Route path="supermer" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="supermercado"><SupermerPage /></FeatureRoute></Suspense>} />
         <Route path="operaciones-salon" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="salon:manage"><SalonOperacionesPwaPage /></PermissionRoute></Suspense>} />
         <Route path="conteo-vencimientos" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="inventory:cycle_count"><ConteoVencimientosPage /></PermissionRoute></Suspense>} />
         <Route path="deposito" element={<Suspense fallback={<PageLoader />}><PermissionRoute permission="purchases:receive"><DepositoRecepcionPage /></PermissionRoute></Suspense>} />
@@ -386,7 +379,6 @@ function AppRoutes() {
         <Route path="dsd" element={<Suspense fallback={<PageLoader />}><DsdPage /></Suspense>} />
         <Route path="esl" element={<Suspense fallback={<PageLoader />}><EslPage /></Suspense>} />
         <Route path="escalas" element={<Suspense fallback={<PageLoader />}><ScalesPage /></Suspense>} />
-        <Route path="distribuidora" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="distribuidora"><DistribuidoraPage /></FeatureRoute></Suspense>} />
         <Route path="advanced-inventory" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="advanced_inventory"><PermissionRoute permission="inventory:cycle_count"><InventoryAdvancedPage /></PermissionRoute></FeatureRoute></Suspense>} />
         <Route path="integrated-finance" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="integrated_finance"><IntegratedFinancePage /></FeatureRoute></Suspense>} />
         <Route path="smart-pricing" element={<Navigate to="/price-lists" replace />} />
@@ -399,7 +391,6 @@ function AppRoutes() {
         <Route path="clientes" element={<Suspense fallback={<PageLoader />}><ClientesPage /></Suspense>} />
         <Route path="scanandgo" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="scanandgo"><ScanAndGoPage /></FeatureRoute></Suspense>} />
         <Route path="customer360" element={<Suspense fallback={<PageLoader />}><Customer360Page /></Suspense>} />
-        <Route path="credit-scoring" element={<Suspense fallback={<PageLoader />}><CreditScoringPage /></Suspense>} />
         <Route path="schedule" element={<Suspense fallback={<PageLoader />}><SchedulePage /></Suspense>} />
         <Route path="productividad" element={<Suspense fallback={<PageLoader />}><ProductividadPage /></Suspense>} />
         <Route path="capacitacion" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="capacitacion"><CapacitacionPage /></FeatureRoute></Suspense>} />
@@ -408,7 +399,6 @@ function AppRoutes() {
         <Route path="forecast-avanzado" element={<Suspense fallback={<PageLoader />}><ForecastAvanzadoPage /></Suspense>} />
         <Route path="benchmarking" element={<Suspense fallback={<PageLoader />}><BenchmarkingPage /></Suspense>} />
         <Route path="ecommerce-sm" element={<Suspense fallback={<PageLoader />}><EcommerceSmPage /></Suspense>} />
-        <Route path="delivery-integrations" element={<Suspense fallback={<PageLoader />}><DeliveryIntegrationsPage /></Suspense>} />
         <Route path="suscripciones" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="suscripciones"><SuscripcionesPage /></FeatureRoute></Suspense>} />
         <Route path="retail" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="retail"><RetailPage /></FeatureRoute></Suspense>} />
         <Route path="sifen-avanzado" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="sifen_avanzado"><SifenAvanzadoPage /></FeatureRoute></Suspense>} />
@@ -422,7 +412,6 @@ function AppRoutes() {
         <Route path="loyalty" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="loyalty"><LoyaltyPage /></FeatureRoute></Suspense>} />
         <Route path="tarjetas-extra-club" element={<Navigate to="/crm?tab=tarjetas" replace />} />
         <Route path="portal" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="portal"><PortalPage /></FeatureRoute></Suspense>} />
-        <Route path="client-app" element={<Suspense fallback={<PageLoader />}><FeatureRoute feature="client_app"><ClientAppPage /></FeatureRoute></Suspense>} />
         <Route path="manual" element={<Suspense fallback={<PageLoader />}><ManualPage /></Suspense>} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
@@ -431,6 +420,59 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // Política Canónica Universal: Textos en MAYÚSCULAS en inputs y textareas
+  useEffect(() => {
+    const handleGlobalInput = (e: Event) => {
+      const target = e.target as HTMLInputElement | HTMLTextAreaElement;
+      if (!target || !(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+
+      // Blindaje de POS antes de las 22:00 hs (hora local Paraguay)
+      const isPosRoute = window.location.pathname.startsWith("/pos");
+      const now = new Date();
+      const pyHour = parseInt(now.toLocaleTimeString("en-US", { timeZone: "America/Asuncion", hour12: false, hour: "2-digit" }), 10);
+      if (isPosRoute && pyHour < 22) return;
+
+      if (
+        target.type === "password" ||
+        target.type === "email" ||
+        target.type === "file" ||
+        target.type === "checkbox" ||
+        target.type === "radio" ||
+        target.type === "range" ||
+        target.type === "color" ||
+        target.classList.contains("keep-case")
+      ) {
+        return;
+      }
+
+      const val = target.value;
+      if (typeof val !== "string") return;
+      const upper = val.toUpperCase();
+      if (val !== upper) {
+        const start = target.selectionStart;
+        const end = target.selectionEnd;
+
+        const proto = target instanceof HTMLInputElement ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+        if (setter) {
+          setter.call(target, upper);
+        } else {
+          target.value = upper;
+        }
+        if (start !== null && end !== null) {
+          try {
+            target.setSelectionRange(start, end);
+          } catch {
+            // Algunos tipos de inputs numéricos o especiales no soportan setSelectionRange
+          }
+        }
+      }
+    };
+
+    window.addEventListener("input", handleGlobalInput, true);
+    return () => window.removeEventListener("input", handleGlobalInput, true);
+  }, []);
+
   return (
     <ThemeProvider>
       <AuthProvider>
