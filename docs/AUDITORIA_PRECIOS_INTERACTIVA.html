@@ -1520,7 +1520,7 @@
                 value="${formatNumber(t.precio)}"
                 onclick="event.stopPropagation()"
                 onfocus="onTierFocus(event, ${index})"
-                onkeydown="handleTierKey(event, '${item.id}', '${tierKey}', ${index}, ${t.min_qty})"
+                onkeydown="handleTierKey(event, '${item.id}', '${tierKey}', ${index}, ${t.min_qty}, ${t_idx})"
                 onblur="handleTierBlur('${item.id}', '${tierKey}', this.value, ${t.min_qty})"
                 title="Editar precio para escala de ${t.min_qty} unidades"
               />
@@ -1889,13 +1889,21 @@
         e.preventDefault();
         e.target.blur();
         setTimeout(() => {
+          if (fieldType === 'PRICE') {
+            const tierInputs = document.querySelectorAll('#row-' + itemId + ' .tier-input');
+            if (tierInputs && tierInputs.length > 0) {
+              tierInputs[0].focus();
+              tierInputs[0].select();
+              return;
+            }
+          }
           moveFocus(1);
           if (fieldType === 'PRICE') {
             focusPriceInput(focusedIndex);
           } else {
             focusMarginInput(focusedIndex);
           }
-        }, 30);
+        }, 50);
       } else if (e.key === 'Escape') {
         e.preventDefault();
         e.target.blur();
@@ -1903,13 +1911,21 @@
       }
     }
 
-    function handleTierKey(e, itemId, tierKey, index, minQty) {
+    function handleTierKey(e, itemId, tierKey, index, minQty, tierIndex = 0) {
       if (e.key === 'Enter') {
         e.preventDefault();
         e.target.blur();
         setTimeout(() => {
-          moveFocus(1);
-        }, 30);
+          const tierInputs = document.querySelectorAll('#row-' + itemId + ' .tier-input');
+          const nextTierIdx = tierIndex + 1;
+          if (tierInputs && nextTierIdx < tierInputs.length) {
+            tierInputs[nextTierIdx].focus();
+            tierInputs[nextTierIdx].select();
+          } else {
+            moveFocus(1);
+            focusPriceInput(focusedIndex);
+          }
+        }, 50);
       } else if (e.key === 'Escape') {
         e.preventDefault();
         e.target.blur();
