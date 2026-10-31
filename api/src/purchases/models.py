@@ -63,6 +63,7 @@ class Supplier(Base):
     contracts = relationship("SupplierContract", back_populates="supplier", primaryjoin="SupplierContract.supplier_id == Supplier.id", foreign_keys="SupplierContract.supplier_id")
     evaluations = relationship("SupplierEvaluation", back_populates="supplier", primaryjoin="SupplierEvaluation.supplier_id == Supplier.id", foreign_keys="SupplierEvaluation.supplier_id")
     price_history = relationship("SupplierPriceHistory", back_populates="supplier", primaryjoin="SupplierPriceHistory.supplier_id == Supplier.id", foreign_keys="SupplierPriceHistory.supplier_id")
+    representatives = relationship("Representative", secondary="supplier_representatives", back_populates="suppliers")
 
 
 class PurchaseOrder(Base):

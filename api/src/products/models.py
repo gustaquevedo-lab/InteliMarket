@@ -10,18 +10,70 @@ from api.src.db import Base
 from api.src.purchases.models import Supplier
 
 
+class ProductSection(Base):
+    __tablename__ = "product_sections"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    nombre = Column(String(100), nullable=False)
+    orden = Column(Integer, default=0, server_default=text("0"))
+    activo = Column(Boolean, default=True, server_default=text("true"))
+
+    categories = relationship("ProductCategory", back_populates="section")
+
+
+class Representative(Base):
+    __tablename__ = "representatives"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    nombre = Column(String(150), nullable=False)
+    contacto = Column(String(200), nullable=True)
+    telefono = Column(String(50), nullable=True)
+    activo = Column(Boolean, default=True, server_default=text("true"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    brands = relationship("ProductBrand", back_populates="representative")
+    products = relationship("Product", back_populates="representative")
+    suppliers = relationship("Supplier", secondary="supplier_representatives", back_populates="representatives")
+
+
+class SupplierRepresentative(Base):
+    __tablename__ = "supplier_representatives"
+
+    supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="CASCADE"), primary_key=True)
+    representative_id = Column(UUID(as_uuid=True), ForeignKey("representatives.id", ondelete="CASCADE"), primary_key=True)
+    es_principal = Column(Boolean, default=False, server_default=text("false"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProductBrand(Base):
+    __tablename__ = "product_brands"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    nombre = Column(String(120), nullable=False)
+    representative_id = Column(UUID(as_uuid=True), ForeignKey("representatives.id", ondelete="SET NULL"), nullable=True)
+    activo = Column(Boolean, default=True, server_default=text("true"))
+
+    representative = relationship("Representative", back_populates="brands")
+    products = relationship("Product", back_populates="brand")
+
+
 class ProductCategory(Base):
     __tablename__ = "product_categories"
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     parent_id = Column(UUID(as_uuid=True), ForeignKey("product_categories.id"))
+    section_id = Column(UUID(as_uuid=True), ForeignKey("product_sections.id", ondelete="SET NULL"), nullable=True)
     nombre = Column(String(100), nullable=False)
     codigo = Column(String(20), unique=True)
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     children = relationship("ProductCategory", backref="parent", remote_side=[id])
+    section = relationship("ProductSection", back_populates="categories")
 
 
 class Product(Base):
@@ -31,6 +83,9 @@ class Product(Base):
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     categoria_id = Column(UUID(as_uuid=True), ForeignKey("product_categories.id"))  # nombre real de la columna en la tabla (antes mapeada como category_id, que no existe)
     supplier_id = Column(UUID(as_uuid=True), ForeignKey("suppliers.id"), nullable=True, index=True)
+    representative_id = Column(UUID(as_uuid=True), ForeignKey("representatives.id", ondelete="SET NULL"), nullable=True, index=True)
+    brand_id = Column(UUID(as_uuid=True), ForeignKey("product_brands.id", ondelete="SET NULL"), nullable=True, index=True)
+    tipo_variante = Column(String(100), nullable=True)
     sku = Column(String(50), nullable=False)
     codigo_barra = Column(String(50), index=True)
     nombre = Column(String(200), nullable=False)
@@ -61,6 +116,16 @@ class Product(Base):
 
     categoria = relationship("ProductCategory")
     supplier = relationship("Supplier", foreign_keys=[supplier_id], lazy="select")
+    representative = relationship("Representative", back_populates="products")
+    brand = relationship("ProductBrand", back_populates="products")
+
+    @property
+    def brand_nombre(self) -> str | None:
+        return self.brand.nombre if self.brand else None
+
+    @property
+    def representative_nombre(self) -> str | None:
+        return self.representative.nombre if self.representative else None
 
     @property
     def categoria_nombre(self) -> str | None:

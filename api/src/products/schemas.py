@@ -7,9 +7,87 @@ from uuid import UUID
 from decimal import Decimal
 
 
+class ProductSectionCreate(BaseModel):
+    company_id: UUID
+    nombre: str = Field(min_length=1, max_length=100)
+    orden: int = 0
+    activo: bool = True
+
+
+class ProductSectionUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, max_length=100)
+    orden: Optional[int] = None
+    activo: Optional[bool] = None
+
+
+class ProductSectionResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    nombre: str
+    orden: int = 0
+    activo: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RepresentativeCreate(BaseModel):
+    company_id: UUID
+    nombre: str = Field(min_length=1, max_length=150)
+    contacto: Optional[str] = Field(default=None, max_length=200)
+    telefono: Optional[str] = Field(default=None, max_length=50)
+    activo: bool = True
+    supplier_ids: Optional[list[UUID]] = None
+
+
+class RepresentativeUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, max_length=150)
+    contacto: Optional[str] = Field(default=None, max_length=200)
+    telefono: Optional[str] = Field(default=None, max_length=50)
+    activo: Optional[bool] = None
+    supplier_ids: Optional[list[UUID]] = None
+
+
+class RepresentativeResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    nombre: str
+    contacto: Optional[str] = None
+    telefono: Optional[str] = None
+    activo: bool = True
+    created_at: datetime
+    supplier_ids: Optional[list[UUID]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductBrandCreate(BaseModel):
+    company_id: UUID
+    nombre: str = Field(min_length=1, max_length=120)
+    representative_id: Optional[UUID] = None
+    activo: bool = True
+
+
+class ProductBrandUpdate(BaseModel):
+    nombre: Optional[str] = Field(default=None, max_length=120)
+    representative_id: Optional[UUID] = None
+    activo: Optional[bool] = None
+
+
+class ProductBrandResponse(BaseModel):
+    id: UUID
+    company_id: UUID
+    nombre: str
+    representative_id: Optional[UUID] = None
+    activo: bool = True
+    representative: Optional[RepresentativeResponse] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class CategoryCreate(BaseModel):
     company_id: UUID
     parent_id: Optional[UUID] = None
+    section_id: Optional[UUID] = None
     nombre: str = Field(min_length=1, max_length=100)
     codigo: Optional[str] = Field(default=None, max_length=20)
 
@@ -18,6 +96,7 @@ class CategoryResponse(BaseModel):
     id: UUID
     company_id: UUID
     parent_id: Optional[UUID] = None
+    section_id: Optional[UUID] = None
     nombre: str
     codigo: Optional[str] = None
     activo: bool
@@ -30,6 +109,10 @@ class ProductCreate(BaseModel):
     company_id: UUID
     categoria_id: Optional[UUID] = None
     supplier_id: Optional[UUID] = None
+    representative_id: Optional[UUID] = None
+    brand_id: Optional[UUID] = None
+    tipo_variante: Optional[str] = None
+    section_id: Optional[UUID] = None
     sku: Optional[str] = Field(default=None, max_length=50)
     codigo_barra: Optional[str] = Field(default=None, max_length=50)
     nombre: str = Field(min_length=1, max_length=200)
@@ -59,6 +142,10 @@ class ProductUpdate(BaseModel):
     sku: Optional[str] = None
     categoria_id: Optional[UUID] = None
     supplier_id: Optional[UUID] = None
+    representative_id: Optional[UUID] = None
+    brand_id: Optional[UUID] = None
+    tipo_variante: Optional[str] = None
+    section_id: Optional[UUID] = None
     codigo_barra: Optional[str] = None
     nombre: Optional[str] = None
     descripcion: Optional[str] = None
@@ -89,7 +176,13 @@ class ProductResponse(BaseModel):
     company_id: UUID
     categoria_id: Optional[UUID] = None
     supplier_id: Optional[UUID] = None
+    representative_id: Optional[UUID] = None
+    brand_id: Optional[UUID] = None
+    tipo_variante: Optional[str] = None
+    section_id: Optional[UUID] = None
     supplier_nombre: Optional[str] = None
+    representative_nombre: Optional[str] = None
+    brand_nombre: Optional[str] = None
     proveedor_oficial_id: Optional[UUID] = None
     proveedor_oficial_nombre: Optional[str] = None
     ultimo_proveedor_id: Optional[UUID] = None
@@ -124,6 +217,8 @@ class ProductResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     categoria: Optional[CategoryResponse] = None
+    representative: Optional[RepresentativeResponse] = None
+    brand: Optional[ProductBrandResponse] = None
     # Campos de promoción vigente (si aplica hoy)
     precio_regular: Optional[Decimal] = None
     precio_promo: Optional[Decimal] = None
