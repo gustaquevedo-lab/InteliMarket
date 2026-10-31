@@ -1,0 +1,2253 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auditor de Precios & Rentabilidad — Extra Supermercado</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+              900: '#1e3a8a',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom scrollbars */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #090d16; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+    
+    .row-focused {
+      background-color: rgba(30, 58, 138, 0.25) !important;
+      outline: 2px solid #3b82f6 !important;
+      outline-offset: -2px;
+    }
+    .input-clean {
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      font-variant-numeric: tabular-nums;
+    }
+    .input-clean:focus {
+      background: #1e293b;
+      border-color: #3b82f6;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+    }
+    .tier-input {
+      background: #090d16;
+      border: 1px solid #1e293b;
+      color: #93c5fd;
+      font-variant-numeric: tabular-nums;
+    }
+    .tier-input:focus {
+      background: #0f172a;
+      border-color: #60a5fa;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.3);
+    }
+    .kpi-card {
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      backdrop-filter: blur(8px);
+    }
+    .filter-tab-active {
+      background-color: #2563eb !important;
+      color: #ffffff !important;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+    }
+  </style>
+  <!-- Carga de datos de catálogo (sin problemas de CORS) -->
+  <script src="auditoria_data.js"></script>
+</head>
+<body class="h-full flex flex-col overflow-hidden text-sm select-none">
+
+  <!-- TOP BAR: KPI METRICS & ACTIONS -->
+  <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 shrink-0 shadow-lg">
+    <div class="max-w-[1920px] mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      
+      <!-- Brand & Title -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-lg text-white shadow-md shadow-blue-500/20">
+          ES
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-base font-bold text-white tracking-wide">Auditor de Precios & Rentabilidad</h1>
+            <!-- Server Sync Badge -->
+            <span id="server-sync-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1.5 transition-all">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span id="server-sync-text">Conectando al servidor...</span>
+            </span>
+          </div>
+          <p class="text-xs text-slate-400">
+            Ajuste fino de PVP y Escalas Mayoristas persistido en PostgreSQL — Extra Supermercado (PYG)
+          </p>
+        </div>
+      </div>
+
+      <!-- Live KPIs -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 flex-1 max-w-4xl">
+        <!-- Audit Progress -->
+        <div class="kpi-card rounded-xl p-2.5">
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+            <span>SKUs Auditados</span>
+            <span id="kpi-audit-pct" class="font-bold text-blue-400">0%</span>
+          </div>
+          <div class="text-base font-black text-white" id="kpi-audit-count">0 / 0</div>
+          <div class="w-full bg-slate-800 rounded-full h-1.5 mt-1 overflow-hidden">
+            <div id="kpi-progress-bar" class="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Margin Before vs After -->
+        <div class="kpi-card rounded-xl p-2.5">
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
+            <span>Margen Global Real</span>
+            <span id="kpi-margin-delta" class="font-bold text-emerald-400">+0.0%</span>
+          </div>
+          <div class="flex items-baseline gap-1.5">
+            <span class="text-xs line-through text-slate-500 font-medium" id="kpi-margin-orig">17.6%</span>
+            <span class="text-base font-black text-emerald-400" id="kpi-margin-proj">17.6%</span>
+          </div>
+          <div class="text-[10px] text-slate-400 truncate">Ponderado ventas Octubre</div>
+        </div>
+
+        <!-- Profit Delta -->
+        <div class="kpi-card rounded-xl p-2.5">
+          <div class="text-xs text-slate-400 mb-1">Ganancia Adicional</div>
+          <div class="text-base font-black text-emerald-400 truncate" id="kpi-profit-delta">+₲ 0</div>
+          <div class="text-[10px] text-slate-400 truncate">Margen bruto / mes est.</div>
+        </div>
+
+        <!-- Price Increases Count -->
+        <div class="kpi-card rounded-xl p-2.5">
+          <div class="text-xs text-slate-400 mb-1">Aumentos Aprobados</div>
+          <div class="text-base font-black text-indigo-400 truncate" id="kpi-increases-count">0 SKUs</div>
+          <div class="text-[10px] text-slate-400 truncate" id="kpi-protected-count">0 protegidos de tráfico</div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center gap-2 shrink-0">
+        <!-- Shortcuts modal button -->
+        <button onclick="toggleShortcutsModal()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors" title="Ver atajos de teclado (?)">
+          <kbd class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-400">?</kbd>
+          <span class="hidden sm:inline">Atajos</span>
+        </button>
+
+        <!-- Reset Button -->
+        <button onclick="confirmReset()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-red-950/60 text-slate-400 hover:text-red-300 text-xs font-medium border border-slate-700 hover:border-red-800 transition-colors" title="Restaurar toda la auditoría a valores originales">
+          Reiniciar
+        </button>
+
+        <!-- Export Dropdown / Button -->
+        <button onclick="exportApprovedDecisions()" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition-all" title="Descargar copia JSON/CSV de respaldo (Ctrl+S)">
+          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+          </svg>
+          <span class="hidden sm:inline">Exportar</span>
+        </button>
+
+        <!-- Primary Action: Apply in Production -->
+        <button onclick="openApplyModal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-900/30 flex items-center gap-2 transition-all" title="Aplicar los precios aprobados en la base de datos de producción">
+          <span>🚀 Aplicar en Producción</span>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- QUICK STRATEGY TABS: MODIFICAR VS NO MODIFICAR -->
+  <div class="bg-slate-950 border-b border-slate-800/90 px-4 py-2 shrink-0">
+    <div class="max-w-[1920px] mx-auto flex flex-wrap items-center justify-between gap-3">
+      <!-- Strategy Selector Buttons -->
+      <div class="flex flex-wrap items-center gap-1.5 text-xs font-semibold">
+        <span class="text-slate-400 font-medium mr-1 text-[11px] uppercase tracking-wider">Filtrar por:</span>
+        
+        <!-- Tab: Todos -->
+        <button 
+          id="tab-ALL" 
+          onclick="setQuickTab('ALL')" 
+          class="filter-tab-active px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 text-slate-300 hover:text-white transition-all flex items-center gap-1.5"
+        >
+          <span>Todos los Productos</span>
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono" id="badge-count-all">11.154</span>
+        </button>
+
+        <!-- Tab: A Modificar / Con Suba -->
+        <button 
+          id="tab-WILL_CHANGE" 
+          onclick="setQuickTab('WILL_CHANGE')" 
+          class="px-3 py-1.5 rounded-lg border border-emerald-900/60 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-900/50 hover:text-emerald-100 transition-all flex items-center gap-1.5"
+        >
+          <span>⚡ A Modificar (Con Aumento)</span>
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-900/80 text-emerald-200 font-mono font-bold" id="badge-count-will-change">0</span>
+        </button>
+
+        <!-- Tab: Sin Modificación / 0% -->
+        <button 
+          id="tab-NO_CHANGE" 
+          onclick="setQuickTab('NO_CHANGE')" 
+          class="px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-all flex items-center gap-1.5"
+        >
+          <span>🛡️ Sin Modificar (Mantener 0%)</span>
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-400 font-mono" id="badge-count-no-change">0</span>
+        </button>
+
+        <!-- Tab: Tráfico Blindados -->
+        <button 
+          id="tab-TRAFFIC" 
+          onclick="setQuickTab('TRAFFIC')" 
+          class="px-3 py-1.5 rounded-lg border border-indigo-900/50 bg-indigo-950/30 text-indigo-300 hover:bg-indigo-900/40 hover:text-indigo-100 transition-all flex items-center gap-1.5"
+        >
+          <span>🛒 Tráfico & Mascotas Blindados</span>
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-900/70 text-indigo-200 font-mono" id="badge-count-traffic">378</span>
+        </button>
+
+        <!-- Tab: Con Escalas Mayoristas -->
+        <button 
+          id="tab-WITH_TIERS" 
+          onclick="setQuickTab('WITH_TIERS')" 
+          class="px-3 py-1.5 rounded-lg border border-amber-900/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 hover:text-amber-100 transition-all flex items-center gap-1.5"
+        >
+          <span>📦 Con Escalas Mayoristas</span>
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-900/70 text-amber-200 font-mono" id="badge-count-tiers">0</span>
+        </button>
+
+        <!-- Tab: Modificados Manualmente -->
+        <button 
+          id="tab-MODIFIED" 
+          onclick="setQuickTab('MODIFIED')" 
+          class="px-3 py-1.5 rounded-lg border border-blue-900/50 bg-blue-950/30 text-blue-300 hover:bg-blue-900/40 hover:text-blue-100 transition-all flex items-center gap-1.5"
+        >
+          <span>✏️ Editados Manualmente</span>
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-900/70 text-blue-200 font-mono" id="badge-count-modified">0</span>
+        </button>
+      </div>
+
+      <!-- Batch Action for Current Tab -->
+      <div class="flex items-center gap-2">
+        <button 
+          onclick="batchAcceptVisible()" 
+          class="px-3 py-1.5 rounded-lg bg-blue-900/40 hover:bg-blue-800/60 text-blue-200 text-xs font-semibold border border-blue-700/50 transition-colors flex items-center gap-1.5" 
+          title="Aceptar todas las sugerencias de la vista actual"
+        >
+          <span>✓ Aceptar Todos los Visibles</span>
+        </button>
+        <button 
+          onclick="batchProtectVisible()" 
+          class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-colors flex items-center gap-1.5" 
+          title="Marcar todos los visibles como Protegidos sin aumento"
+        >
+          <span>🔒 Proteger Visibles (0%)</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECONDARY FILTER & SEARCH TOOLBAR -->
+  <div class="bg-slate-900/80 border-b border-slate-800/80 px-4 py-2.5 shrink-0 backdrop-blur relative z-30">
+    <div class="max-w-[1920px] mx-auto flex flex-wrap items-center justify-between gap-3">
+      
+      <!-- Left Filters -->
+      <div class="flex flex-wrap items-center gap-2.5 flex-1 min-w-[320px]">
+        <!-- Search Input -->
+        <div class="relative w-72">
+          <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-500">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+          </div>
+          <input 
+            type="text" 
+            id="search-input" 
+            placeholder="Buscar SKU, código o nombre... (/)" 
+            class="input-clean pl-8 pr-7 py-1.5 rounded-lg text-xs w-full"
+            oninput="handleSearch(this.value)"
+          />
+          <button 
+            id="clear-search-btn" 
+            onclick="clearSearch()" 
+            class="hidden absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-500 hover:text-white"
+          >
+            ✕
+          </button>
+        </div>
+
+        <!-- Searchable Supplier Input with Dynamic Dropdown -->
+        <div class="relative w-64 z-40" id="supplier-combobox">
+          <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-500">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+            </svg>
+          </div>
+          <input 
+            type="text" 
+            id="supplier-search-input" 
+            placeholder="Buscar proveedor... (tipear o ver)" 
+            class="input-clean pl-8 pr-7 py-1.5 rounded-lg text-xs w-full font-medium"
+            onfocus="openSupplierMenu()"
+            oninput="handleSupplierFilterInput(this.value)"
+            onkeydown="handleSupplierKeyDown(event)"
+            autocomplete="off"
+          />
+          <button 
+            id="clear-supplier-btn" 
+            onclick="clearSupplierFilter()" 
+            class="hidden absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-500 hover:text-white"
+            title="Limpiar proveedor"
+          >
+            ✕
+          </button>
+          <input type="hidden" id="filter-supplier" value="" />
+          
+          <!-- Dropdown menu -->
+          <div 
+            id="supplier-dropdown-menu" 
+            class="hidden absolute left-0 top-full mt-1 w-80 max-h-72 overflow-y-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 py-1 divide-y divide-slate-800"
+          >
+            <!-- Items rendered by JS -->
+          </div>
+        </div>
+
+        <!-- Category Select -->
+        <select 
+          id="filter-category" 
+          onchange="applyFilters()" 
+          class="input-clean px-2.5 py-1.5 rounded-lg text-xs max-w-[180px] truncate"
+        >
+          <option value="">Todas las Categorías</option>
+        </select>
+
+        <!-- Order by -->
+        <select 
+          id="filter-order" 
+          onchange="applyFilters()" 
+          class="input-clean px-2.5 py-1.5 rounded-lg text-xs text-indigo-300 font-medium"
+        >
+          <option value="VTA_DESC">Ordenar: Mayor Venta Octubre (Facturación)</option>
+          <option value="IMPACT_DESC">Ordenar: Mayor Impacto ₲ Ganancia Potencial</option>
+          <option value="MARGIN_ASC">Ordenar: Menor Margen Actual (Críticos)</option>
+          <option value="MARGIN_DESC">Ordenar: Mayor Margen Actual</option>
+          <option value="DELTA_DESC">Ordenar: Mayor % de Suba Sugerida</option>
+          <option value="NAME_ASC">Ordenar: Alfabético Nombre</option>
+          <option value="SKU_ASC">Ordenar: SKU Numérico</option>
+        </select>
+      </div>
+
+      <!-- Right Controls: Margin mode & Pagination -->
+      <div class="flex items-center gap-3 shrink-0">
+        <!-- Target margin indicator -->
+        <div class="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 text-[11px] text-emerald-400 font-semibold shadow-sm">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>Margen Góndola 100% Bidireccional</span>
+        </div>
+
+        <!-- Rows per page -->
+        <div class="flex items-center gap-1 text-xs text-slate-400">
+          <span>Ver:</span>
+          <select id="page-size-select" onchange="changePageSize(this.value)" class="input-clean px-1.5 py-1 rounded text-xs">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="250">250</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="flex items-center gap-1 text-xs">
+          <button onclick="prevPage()" id="btn-prev-page" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:pointer-events-none">◀</button>
+          <span class="px-2 font-mono text-slate-300" id="pagination-indicator">1 / 1</span>
+          <button onclick="nextPage()" id="btn-next-page" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:pointer-events-none">▶</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MAIN TABLE CONTAINER -->
+  <main class="flex-1 overflow-auto relative bg-slate-950 focus:outline-none" id="table-scroll-container" tabindex="0">
+    <table class="w-full text-left border-collapse" id="products-table">
+      <!-- Fixed Table Header -->
+      <thead class="sticky top-0 z-10 bg-slate-900 border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider shadow-sm">
+        <tr>
+          <th class="py-2.5 px-3 w-10 text-center">#</th>
+          <th class="py-2.5 px-3 w-28">SKU / Barra</th>
+          <th class="py-2.5 px-3 min-w-[280px]">Artículo & Proveedor</th>
+          <th class="py-2.5 px-3 w-24 text-right">Costo Prom.</th>
+          <th class="py-2.5 px-3 w-28 text-right">PVP Actual</th>
+          <th class="py-2.5 px-3 w-28 text-right">Margen Actual</th>
+          <th class="py-2.5 px-3 w-28 text-right bg-slate-900/90 text-blue-300">Sugerencia IA</th>
+          <th class="py-2.5 px-3 w-40 text-center bg-blue-950/40 border-l border-r border-blue-900/50 text-blue-200">
+            PVP Aprobado (Gs)
+          </th>
+          <th class="py-2.5 px-3 w-32 text-center bg-blue-950/40 border-r border-blue-900/50 text-blue-200">
+            Margen %
+          </th>
+          <th class="py-2.5 px-3 min-w-[250px] bg-slate-900/70 border-r border-slate-800 text-amber-200">
+            Escalas Mayoristas (Editables)
+          </th>
+          <th class="py-2.5 px-3 w-28 text-right">Venta Octubre</th>
+          <th class="py-2.5 px-3 w-32 text-right">Δ Ganancia Est.</th>
+          <th class="py-2.5 px-3 w-36 text-center">Estado / Atajos</th>
+        </tr>
+      </thead>
+      <!-- Dynamic Rows -->
+      <tbody id="table-body" class="divide-y divide-slate-800/60 font-normal text-xs">
+        <!-- Rendered by JavaScript -->
+      </tbody>
+    </table>
+    
+    <!-- Empty state -->
+    <div id="empty-state" class="hidden py-20 text-center text-slate-500">
+      <svg class="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+      </svg>
+      <p class="text-sm font-medium">No se encontraron productos con los filtros seleccionados.</p>
+      <button onclick="resetFilters()" class="mt-2 text-xs text-blue-400 hover:underline">Limpiar todos los filtros</button>
+    </div>
+  </main>
+
+  <!-- FOOTER STATUS BAR -->
+  <footer class="bg-slate-900 border-t border-slate-800 px-4 py-2 shrink-0 flex items-center justify-between text-xs text-slate-400">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span id="footer-status-text">Listo. Cambios sincronizados de forma persistente en el servidor.</span>
+      </div>
+      <span class="text-slate-600">|</span>
+      <span id="footer-filtered-count">Mostrando 0 de 11.154 productos</span>
+    </div>
+    
+    <div class="flex items-center gap-3 font-mono text-[11px]">
+      <span><kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700">↑</kbd><kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700">↓</kbd> Navegar</span>
+      <span><kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700">Enter</kbd> Confirmar y Siguiente</span>
+      <span><kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700">A</kbd> Aceptar Sug.</span>
+      <span><kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700">P</kbd> Proteger</span>
+      <span><kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700">R</kbd> Revertir</span>
+      <span><kbd class="px-1 py-0.5 rounded bg-slate-800 border border-slate-700">/</kbd> Buscar</span>
+    </div>
+  </footer>
+
+  <!-- APPLY IN PRODUCTION CONFIRMATION MODAL -->
+  <div id="apply-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+      <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+        <h3 class="text-base font-bold text-white flex items-center gap-2">
+          <span>🚀</span> Confirmar y Aplicar Cambios en Producción
+        </h3>
+        <button onclick="closeApplyModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+
+      <div class="py-4 space-y-4 text-xs text-slate-300">
+        <p class="leading-relaxed">
+          Estás a punto de aplicar las decisiones de precios y escalas auditadas directamente en la base de datos de producción de <b>Extra Supermercado</b>.
+        </p>
+
+        <div class="bg-slate-950 rounded-xl p-3 border border-slate-800 space-y-2">
+          <div class="flex justify-between">
+            <span class="text-slate-400">Total productos a modificar:</span>
+            <span class="font-bold text-white" id="modal-apply-count">0 SKUs</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Margen consolidado resultante:</span>
+            <span class="font-bold text-emerald-400" id="modal-apply-margin">0%</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-slate-400">Ganancia adicional mensual proyectada:</span>
+            <span class="font-bold text-emerald-400" id="modal-apply-profit">+₲ 0</span>
+          </div>
+        </div>
+
+        <div class="bg-blue-950/40 p-3 rounded-xl border border-blue-900/50 text-blue-200">
+          <b>Acciones automáticas que ejecutará el servidor:</b>
+          <ul class="list-disc list-inside mt-1 space-y-0.5 text-[11px] text-blue-300">
+            <li>Actualizará <code>products.precio_venta</code> para cada artículo aprobado.</li>
+            <li>Actualizará cada escala en <code>sp_tiered_prices</code> con los valores personalizados y escalados.</li>
+            <li>Registrará la auditoría completa en <code>price_variation_logs</code>.</li>
+          </ul>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 font-medium mb-1">
+            Para confirmar, escribí <b class="text-white">CONFIRMAR</b> a continuación:
+          </label>
+          <input 
+            type="text" 
+            id="modal-confirm-input" 
+            placeholder="Escribí CONFIRMAR aquí..." 
+            class="input-clean px-3 py-2 rounded-lg text-sm w-full font-bold uppercase tracking-wider"
+            oninput="checkConfirmWord(this.value)"
+          />
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-slate-800 flex items-center justify-end gap-2">
+        <button onclick="closeApplyModal()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold">
+          Cancelar
+        </button>
+        <button 
+          id="btn-confirm-apply" 
+          disabled 
+          onclick="executeApplyInProduction()" 
+          class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-bold shadow-lg shadow-emerald-900/40 transition-all flex items-center gap-2"
+        >
+          <span id="apply-btn-spinner" class="hidden animate-spin">⏳</span>
+          <span id="apply-btn-label">Confirmar y Aplicar en Producción</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- KEYBOARD SHORTCUTS MODAL -->
+  <div id="shortcuts-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl">
+      <div class="flex items-center justify-between pb-4 border-b border-slate-800">
+        <h3 class="text-base font-bold text-white flex items-center gap-2">
+          <span>⌨️</span> Atajos de Teclado para Auditoría Rápida
+        </h3>
+        <button onclick="toggleShortcutsModal()" class="text-slate-400 hover:text-white">✕</button>
+      </div>
+      <div class="space-y-3 py-4 text-xs text-slate-300">
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Navegar entre filas de productos</span>
+          <div class="flex gap-1">
+            <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">↑</kbd>
+            <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">↓</kbd> o 
+            <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">j</kbd>
+            <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">k</kbd>
+          </div>
+        </div>
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Editar Precio Minorista de fila seleccionada</span>
+          <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">E</kbd>
+        </div>
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Editar Margen % de fila seleccionada</span>
+          <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">M</kbd>
+        </div>
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Confirmar valor y saltar a la siguiente fila</span>
+          <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">Enter</kbd>
+        </div>
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Alternar entre Precio y Margen en la misma fila</span>
+          <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">Tab</kbd>
+        </div>
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Aceptar sugerencia de IA para el producto</span>
+          <div class="flex gap-1">
+            <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">A</kbd> o 
+            <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">Espacio</kbd>
+          </div>
+        </div>
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Marcar como Protegido de Tráfico (0% aumento)</span>
+          <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">P</kbd>
+        </div>
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Revertir producto al precio actual original</span>
+          <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">R</kbd>
+        </div>
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Enfocar el buscador de artículos</span>
+          <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">/</kbd>
+        </div>
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Cancelar edición / Desenfocar buscador</span>
+          <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">Esc</kbd>
+        </div>
+        <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
+          <span>Página Anterior / Siguiente</span>
+          <div class="flex gap-1">
+            <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">PgUp</kbd>
+            <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">PgDn</kbd>
+          </div>
+        </div>
+        <div class="flex items-center justify-between py-1">
+          <span>Exportar archivo JSON y CSV para el servidor</span>
+          <kbd class="px-2 py-1 rounded bg-emerald-800 text-white font-mono">Ctrl+S / Cmd+S</kbd>
+        </div>
+      </div>
+      <div class="pt-4 border-t border-slate-800 text-center">
+        <button onclick="toggleShortcutsModal()" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold">
+          Entendido, Volver a la Auditoría
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPLICATION LOGIC & SERVER SYNCHRONIZATION -->
+  <script>
+    // --- ESTADO GLOBAL ---
+    const RAW_DATA = window.AUDITORIA_DATA || [];
+    const STORAGE_KEY = 'extra_supermercado_auditoria_decisiones_v1';
+    const API_BASE = '/api/v1/price-lists';
+    
+    // Diccionario de decisiones del usuario:
+    // { [product_id]: { price: number, margin_mode: 'eff'|'min', margin: number, status: 'MODIFIED'|'ACCEPTED'|'PROTECTED'|'REVERTED', custom_tiers: [{ id, min_qty, precio }] } }
+    let userDecisions = {};
+    
+    let filteredList = [];
+    let focusedIndex = 0;
+    let currentPage = 1;
+    let pageSize = 100;
+    let activeMarginMode = 'retail';
+    let activeQuickTab = 'ALL'; // 'ALL', 'WILL_CHANGE', 'NO_CHANGE', 'TRAFFIC', 'WITH_TIERS', 'MODIFIED'
+    let searchDebounceTimeout = null;
+    let serverSyncDebounce = null;
+    let pendingServerQueue = [];
+
+    // --- FORMATEO CANÓNICO DE MONEDAS (PARAGUAY ENTEROS ABSOLUTOS) ---
+    function formatPYG(num) {
+      if (num === null || num === undefined || isNaN(num)) return '₲ 0';
+      const rounded = Math.round(Number(num));
+      return '₲ ' + rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    }
+
+    function formatNumber(num) {
+      if (num === null || num === undefined || isNaN(num)) return '0';
+      return Math.round(Number(num)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    }
+
+    // Precios libres: Entero absoluto exacto en Guaraníes (sin forzar redondeos automáticos)
+    function roundPrice(val) {
+      if (!val || isNaN(val) || val <= 0) return 0;
+      return Math.round(Number(val));
+    }
+    const round50 = roundPrice; // Alias de compatibilidad sin forzar múltiplos de 50
+
+    // --- SINCRONIZACIÓN PERSISTENTE CON EL SERVIDOR ---
+    async function loadDecisionsFromServer() {
+      setSyncStatus('loading', 'Cargando datos del servidor...');
+      try {
+        const res = await fetch(`${API_BASE}/audit-state`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        if (data.status === 'ok' && data.decisiones) {
+          const serverCount = Object.keys(data.decisiones).length;
+          
+          let localDecisions = {};
+          try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) localDecisions = JSON.parse(saved);
+          } catch (e) {}
+
+          userDecisions = { ...localDecisions, ...data.decisiones };
+          saveDecisionsToLocalStorage();
+
+          if (serverCount > 0) {
+            setSyncStatus('synced', `${serverCount} decisiones sincronizadas`);
+          } else {
+            setSyncStatus('synced', `Listo (Servidor conectado)`);
+          }
+        }
+      } catch (err) {
+        console.warn('No se pudo conectar al servidor, usando almacenamiento local:', err);
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved) userDecisions = JSON.parse(saved);
+        } catch (e) {}
+        setSyncStatus('offline', 'Modo Local (Servidor no disponible)');
+      }
+
+      applyFilters();
+      recalculateGlobalKPIs();
+    }
+
+    function saveDecisionsToLocalStorage() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(userDecisions));
+      } catch (e) {}
+    }
+
+    function queueServerSync(itemPayload) {
+      pendingServerQueue.push(itemPayload);
+      setSyncStatus('saving', 'Guardando en servidor...');
+
+      clearTimeout(serverSyncDebounce);
+      serverSyncDebounce = setTimeout(async () => {
+        if (pendingServerQueue.length === 0) return;
+        const batch = [...pendingServerQueue];
+        pendingServerQueue = [];
+
+        try {
+          const res = await fetch(`${API_BASE}/audit-save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ decisiones: batch })
+          });
+
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const totalSaved = Object.keys(userDecisions).filter(k => userDecisions[k].status !== 'PENDING').length;
+          setSyncStatus('synced', `${totalSaved} decisiones guardadas en servidor`);
+        } catch (err) {
+          console.error('Error al guardar en el servidor:', err);
+          setSyncStatus('error', 'Error al sincronizar con servidor');
+        }
+      }, 350);
+    }
+
+    function setSyncStatus(state, msg) {
+      const badge = document.getElementById('server-sync-badge');
+      const text = document.getElementById('server-sync-text');
+      if (!badge || !text) return;
+
+      text.textContent = msg;
+
+      if (state === 'synced') {
+        badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1.5 transition-all';
+        badge.firstElementChild.className = 'w-2 h-2 rounded-full bg-emerald-400';
+      } else if (state === 'saving' || state === 'loading') {
+        badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-950/80 text-amber-300 border border-amber-700/60 flex items-center gap-1.5 transition-all';
+        badge.firstElementChild.className = 'w-2 h-2 rounded-full bg-amber-400 animate-spin';
+      } else if (state === 'error') {
+        badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-950/80 text-rose-300 border border-rose-700/60 flex items-center gap-1.5 transition-all';
+        badge.firstElementChild.className = 'w-2 h-2 rounded-full bg-rose-400';
+      } else {
+        badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1.5 transition-all';
+        badge.firstElementChild.className = 'w-2 h-2 rounded-full bg-slate-500';
+      }
+    }
+
+    // --- INICIALIZACIÓN ---
+    window.addEventListener('DOMContentLoaded', () => {
+      populateDropdowns();
+      loadDecisionsFromServer();
+      setupKeyboardNavigation();
+      document.getElementById('table-scroll-container').focus();
+    });
+
+    let SUPPLIERS_LIST = [];
+
+    function populateDropdowns() {
+      const suppMap = {};
+      const catMap = {};
+
+      RAW_DATA.forEach(item => {
+        const s = item.prv || 'SIN PROVEEDOR';
+        suppMap[s] = (suppMap[s] || 0) + 1;
+
+        const c = item.cat || 'SIN CATEGORIA';
+        catMap[c] = (catMap[c] || 0) + 1;
+      });
+
+      SUPPLIERS_LIST = Object.keys(suppMap).sort().map(s => ({ name: s, count: suppMap[s] }));
+      renderSupplierMenu('');
+
+      const catSelect = document.getElementById('filter-category');
+      const sortedCategories = Object.keys(catMap).sort();
+      sortedCategories.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = `${c} (${catMap[c]})`;
+        catSelect.appendChild(opt);
+      });
+    }
+
+    function renderSupplierMenu(query = '') {
+      const menu = document.getElementById('supplier-dropdown-menu');
+      if (!menu) return;
+      const q = (query || '').trim().toUpperCase();
+      const currentSelected = document.getElementById('filter-supplier') ? document.getElementById('filter-supplier').value : '';
+
+      let html = `
+        <div 
+          onmousedown="selectSupplier('')" 
+          class="px-3 py-2 hover:bg-slate-800 cursor-pointer flex items-center justify-between text-xs font-bold transition ${!currentSelected ? 'text-indigo-400 bg-indigo-950/40' : 'text-slate-300'}"
+        >
+          <span>🏢 Todos los Proveedores</span>
+          <span class="text-[10px] text-slate-400 font-mono">(${RAW_DATA.length.toLocaleString('es-PY')})</span>
+        </div>
+      `;
+
+      const matches = SUPPLIERS_LIST.filter(s => !q || s.name.toUpperCase().includes(q));
+      if (matches.length === 0) {
+        html += `<div class="px-3 py-3 text-center text-xs text-slate-500">No hay proveedores con "${query}"</div>`;
+      } else {
+        matches.forEach(s => {
+          const isSelected = currentSelected === s.name;
+          const escapedName = s.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          html += `
+            <div 
+              onmousedown="selectSupplier('${escapedName}')" 
+              class="px-3 py-2 hover:bg-slate-800 cursor-pointer flex items-center justify-between text-xs transition ${isSelected ? 'text-indigo-300 bg-indigo-950/40 font-bold' : 'text-slate-200'}"
+            >
+              <span class="truncate pr-2">${s.name}</span>
+              <span class="text-[10px] text-slate-400 font-mono shrink-0">${s.count} prods</span>
+            </div>
+          `;
+        });
+      }
+      menu.innerHTML = html;
+    }
+
+    function openSupplierMenu() {
+      const menu = document.getElementById('supplier-dropdown-menu');
+      if (!menu) return;
+      menu.classList.remove('hidden');
+      renderSupplierMenu(document.getElementById('supplier-search-input').value);
+    }
+
+    function closeSupplierMenu() {
+      const menu = document.getElementById('supplier-dropdown-menu');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    function handleSupplierFilterInput(val) {
+      document.getElementById('supplier-dropdown-menu').classList.remove('hidden');
+      renderSupplierMenu(val);
+      
+      const valClean = (val || '').trim().toUpperCase();
+      const exactMatch = SUPPLIERS_LIST.find(s => s.name.toUpperCase() === valClean);
+      if (exactMatch) {
+        document.getElementById('filter-supplier').value = exactMatch.name;
+        document.getElementById('clear-supplier-btn').classList.remove('hidden');
+      } else {
+        document.getElementById('filter-supplier').value = '';
+        if (valClean) {
+          document.getElementById('clear-supplier-btn').classList.remove('hidden');
+        } else {
+          document.getElementById('clear-supplier-btn').classList.add('hidden');
+        }
+      }
+      applyFilters();
+    }
+
+    function handleSupplierKeyDown(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const val = e.target.value.trim().toUpperCase();
+        const matches = SUPPLIERS_LIST.filter(s => !val || s.name.toUpperCase().includes(val));
+        if (matches.length > 0) {
+          selectSupplier(matches[0].name);
+        } else {
+          closeSupplierMenu();
+          applyFilters();
+        }
+      } else if (e.key === 'Escape') {
+        closeSupplierMenu();
+      }
+    }
+
+    function selectSupplier(name) {
+      const hiddenInput = document.getElementById('filter-supplier');
+      if (hiddenInput) hiddenInput.value = name;
+      const input = document.getElementById('supplier-search-input');
+      if (input) input.value = name;
+      const clearBtn = document.getElementById('clear-supplier-btn');
+      if (clearBtn) {
+        if (name) {
+          clearBtn.classList.remove('hidden');
+        } else {
+          clearBtn.classList.add('hidden');
+        }
+      }
+      closeSupplierMenu();
+      applyFilters();
+    }
+
+    function clearSupplierFilter() {
+      selectSupplier('');
+    }
+
+    // Cerrar dropdown al hacer click fuera
+    document.addEventListener('click', function(e) {
+      const box = document.getElementById('supplier-combobox');
+      if (box && !box.contains(e.target)) {
+        closeSupplierMenu();
+      }
+    });
+
+    // --- PESTAÑAS RÁPIDAS DE ESTRATEGIA (MODIFICAR VS NO MODIFICAR) ---
+    function setQuickTab(tabKey) {
+      activeQuickTab = tabKey;
+
+      const tabs = ['ALL', 'WILL_CHANGE', 'NO_CHANGE', 'TRAFFIC', 'WITH_TIERS', 'MODIFIED'];
+      tabs.forEach(t => {
+        const btn = document.getElementById(`tab-${t}`);
+        if (btn) {
+          if (t === tabKey) {
+            btn.classList.add('filter-tab-active');
+          } else {
+            btn.classList.remove('filter-tab-active');
+          }
+        }
+      });
+
+      applyFilters();
+      flashStatus(`Filtro activo: ${getTabDescription(tabKey)}`);
+    }
+
+    function getTabDescription(tabKey) {
+      switch (tabKey) {
+        case 'WILL_CHANGE': return 'Productos que cambian de precio (con suba sugerida o custom)';
+        case 'NO_CHANGE': return 'Productos que NO cambian de precio (mantienen precio actual)';
+        case 'TRAFFIC': return 'Productos de Tráfico & Mascotas blindados (0% aumento)';
+        case 'WITH_TIERS': return 'Productos con escalas mayoristas por cantidad';
+        case 'MODIFIED': return 'Productos con modificaciones manuales personalizadas';
+        default: return 'Todos los productos';
+      }
+    }
+
+    // --- FILTRADO Y ORDEN ---
+    function applyFilters() {
+      const searchTerm = document.getElementById('search-input').value.trim().toUpperCase();
+      const selectedSupplier = document.getElementById('filter-supplier').value;
+      const selectedCategory = document.getElementById('filter-category').value;
+      const selectedOrder = document.getElementById('filter-order').value;
+
+      filteredList = RAW_DATA.filter(item => {
+        // 1. Filtro textual
+        if (searchTerm) {
+          const matchSku = item.sku && item.sku.toUpperCase().includes(searchTerm);
+          const matchBar = item.bar && item.bar.toUpperCase().includes(searchTerm);
+          const matchNom = item.nom && item.nom.toUpperCase().includes(searchTerm);
+          if (!matchSku && !matchBar && !matchNom) return false;
+        }
+
+        // 2. Filtro proveedor y categoría
+        if (selectedSupplier) {
+          if (item.prv !== selectedSupplier) return false;
+        } else {
+          const suppSearchText = (document.getElementById('supplier-search-input') ? document.getElementById('supplier-search-input').value : '').trim().toUpperCase();
+          if (suppSearchText && (!item.prv || !item.prv.toUpperCase().includes(suppSearchText))) {
+            return false;
+          }
+        }
+        if (selectedCategory && item.cat !== selectedCategory) return false;
+
+        // 3. Determinar precio activo aprobado y estado
+        const dec = userDecisions[item.id];
+        const isTraffic = (item.est === 'PROTEGIDO');
+        let activeRetail = item.p_act;
+
+        if (dec) {
+          activeRetail = dec.price;
+        } else if (isTraffic) {
+          activeRetail = item.p_act;
+        } else {
+          // Pendiente: si no se decidió, su sugerencia es p_sug
+          activeRetail = item.p_sug;
+        }
+
+        // ¿Tiene cambio de precio aprobado/sugerido?
+        const hasRetailChange = (activeRetail !== item.p_act);
+        const hasCustomTiers = dec && dec.custom_tiers && dec.custom_tiers.length > 0;
+        const willChange = hasRetailChange || hasCustomTiers;
+
+        // 4. Filtro por Pestaña Rápida
+        if (activeQuickTab === 'WILL_CHANGE') {
+          if (!willChange) return false;
+        } else if (activeQuickTab === 'NO_CHANGE') {
+          if (willChange) return false;
+        } else if (activeQuickTab === 'TRAFFIC') {
+          if (!isTraffic) return false;
+        } else if (activeQuickTab === 'WITH_TIERS') {
+          if (!item.tiers || item.tiers.length === 0) return false;
+        } else if (activeQuickTab === 'MODIFIED') {
+          if (!dec || (dec.status !== 'MODIFIED' && !hasCustomTiers)) return false;
+        }
+
+        return true;
+      });
+
+      sortFilteredList(selectedOrder);
+
+      currentPage = 1;
+      focusedIndex = 0;
+      renderTable();
+      updatePaginationControls();
+      updateTabBadges();
+    }
+
+    function updateTabBadges() {
+      let countWillChange = 0;
+      let countNoChange = 0;
+      let countTraffic = 0;
+      let countTiers = 0;
+      let countModified = 0;
+
+      RAW_DATA.forEach(item => {
+        const dec = userDecisions[item.id];
+        const isTraffic = (item.est === 'PROTEGIDO');
+        let activeRetail = item.p_act;
+
+        if (dec) {
+          activeRetail = dec.price;
+        } else if (isTraffic) {
+          activeRetail = item.p_act;
+        } else {
+          activeRetail = item.p_sug;
+        }
+
+        const hasRetailChange = (activeRetail !== item.p_act);
+        const hasCustomTiers = dec && dec.custom_tiers && dec.custom_tiers.length > 0;
+        const willChange = hasRetailChange || hasCustomTiers;
+
+        if (willChange) countWillChange++;
+        else countNoChange++;
+
+        if (isTraffic) countTraffic++;
+        if (item.tiers && item.tiers.length > 0) countTiers++;
+        if (dec && (dec.status === 'MODIFIED' || hasCustomTiers)) countModified++;
+      });
+
+      const bWill = document.getElementById('badge-count-will-change');
+      const bNo = document.getElementById('badge-count-no-change');
+      const bTraf = document.getElementById('badge-count-traffic');
+      const bTiers = document.getElementById('badge-count-tiers');
+      const bMod = document.getElementById('badge-count-modified');
+
+      if (bWill) bWill.textContent = countWillChange.toLocaleString('es-PY');
+      if (bNo) bNo.textContent = countNoChange.toLocaleString('es-PY');
+      if (bTraf) bTraf.textContent = countTraffic.toLocaleString('es-PY');
+      if (bTiers) bTiers.textContent = countTiers.toLocaleString('es-PY');
+      if (bMod) bMod.textContent = countModified.toLocaleString('es-PY');
+    }
+
+    function sortFilteredList(orderType) {
+      filteredList.sort((a, b) => {
+        const decA = userDecisions[a.id];
+        const decB = userDecisions[b.id];
+
+        const priceA = decA ? decA.price : (a.est === 'PROTEGIDO' ? a.p_act : a.p_sug);
+        const priceB = decB ? decB.price : (b.est === 'PROTEGIDO' ? b.p_act : b.p_sug);
+
+        switch (orderType) {
+          case 'VTA_DESC':
+            return (b.vta_oct || 0) - (a.vta_oct || 0);
+          case 'IMPACT_DESC': {
+            const deltaA = ((priceA - a.p_act) * (a.cant_oct || 0));
+            const deltaB = ((priceB - b.p_act) * (b.cant_oct || 0));
+            return deltaB - deltaA;
+          }
+          case 'MARGIN_ASC':
+            return (a.m_eff_act || 0) - (b.m_eff_act || 0);
+          case 'MARGIN_DESC':
+            return (b.m_eff_act || 0) - (a.m_eff_act || 0);
+          case 'DELTA_DESC': {
+            const pctA = a.p_act > 0 ? (a.p_sug - a.p_act) / a.p_act : 0;
+            const pctB = b.p_act > 0 ? (b.p_sug - b.p_act) / b.p_act : 0;
+            return pctB - pctA;
+          }
+          case 'NAME_ASC':
+            return (a.nom || '').localeCompare(b.nom || '');
+          case 'SKU_ASC':
+            return (parseInt(a.sku) || 0) - (parseInt(b.sku) || 0);
+          default:
+            return 0;
+        }
+      });
+    }
+
+    function handleSearch(val) {
+      document.getElementById('clear-search-btn').classList.toggle('hidden', !val);
+      clearTimeout(searchDebounceTimeout);
+      searchDebounceTimeout = setTimeout(() => {
+        applyFilters();
+      }, 150);
+    }
+
+    function clearSearch() {
+      const input = document.getElementById('search-input');
+      input.value = '';
+      document.getElementById('clear-search-btn').classList.add('hidden');
+      applyFilters();
+      input.focus();
+    }
+
+    function resetFilters() {
+      document.getElementById('search-input').value = '';
+      document.getElementById('clear-search-btn').classList.add('hidden');
+      const suppInput = document.getElementById('supplier-search-input');
+      if (suppInput) suppInput.value = '';
+      const clearSuppBtn = document.getElementById('clear-supplier-btn');
+      if (clearSuppBtn) clearSuppBtn.classList.add('hidden');
+      const hiddenSupp = document.getElementById('filter-supplier');
+      if (hiddenSupp) hiddenSupp.value = '';
+      document.getElementById('filter-category').value = '';
+      document.getElementById('filter-order').value = 'VTA_DESC';
+      setQuickTab('ALL');
+    }
+
+    // --- CÁLCULOS MATEMÁTICOS BIDIRECCIONALES (PURO RETAIL SUPERMERCADO) ---
+    function computeMetricsFromPrice(item, newRetailPrice, customTiersList = null) {
+      const cost = Number(item.cst) || 0;
+      const pAct = Number(item.p_act) || 0;
+      const pRetail = Math.round(Number(newRetailPrice)) || 0;
+
+      // Mapeo de escalas personalizadas del usuario
+      const customMap = {};
+      if (customTiersList && Array.isArray(customTiersList)) {
+        customTiersList.forEach(ct => {
+          if (ct.id) customMap[String(ct.id)] = Math.round(Number(ct.precio));
+          if (ct.min_qty) customMap[String(ct.min_qty)] = Math.round(Number(ct.precio));
+        });
+      }
+
+      // Calcular precio y margen de cada tier (respetando si el usuario lo personalizó)
+      const scaledTiers = (item.tiers || []).map(t => {
+        const tid = String(t.id || t.min_qty);
+        let tierPrice;
+        let isCustom = false;
+
+        if (customMap[tid] !== undefined) {
+          tierPrice = customMap[tid];
+          isCustom = true;
+        } else if (customMap[String(t.min_qty)] !== undefined) {
+          tierPrice = customMap[String(t.min_qty)];
+          isCustom = true;
+        } else {
+          tierPrice = Math.round(Number(t.precio));
+        }
+
+        const tierMargin = (tierPrice > 0 && cost > 0) ? ((tierPrice - cost) / tierPrice) * 100 : 0;
+
+        return {
+          id: t.id,
+          min_qty: t.min_qty,
+          precio: tierPrice,
+          margin: Number(tierMargin.toFixed(1)),
+          isCustom: isCustom
+        };
+      });
+
+      // Margen Góndola Puro: (PVP - Costo) / PVP
+      const margin = (pRetail > 0 && cost > 0) ? ((pRetail - cost) / pRetail) * 100 : 0;
+
+      return {
+        pRetail,
+        margin: Number(margin.toFixed(1)),
+        marginMin: Number(margin.toFixed(1)),
+        marginEff: Number(margin.toFixed(1)),
+        scaledTiers
+      };
+    }
+
+    function computePriceFromMargin(item, targetMarginPct) {
+      const cost = Number(item.cst) || 0;
+      const pAct = Number(item.p_act) || 0;
+      const m = Number(targetMarginPct) / 100.0;
+
+      if (m >= 1.0 || cost <= 0) return pAct;
+
+      // PVP = Costo / (1 - Margen)
+      const pRetailRaw = cost / (1.0 - m);
+      return Math.round(pRetailRaw);
+    }
+
+    // --- ACCIONES Y SINCRONIZACIÓN AL SERVIDOR ---
+    function updateProductPrice(itemId, newPrice, source = 'USER_PRICE') {
+      const item = RAW_DATA.find(x => x.id === itemId);
+      if (!item) return;
+
+      const pRetail = Math.round(Number(newPrice));
+      const existingDec = userDecisions[itemId] || {};
+      const customTiers = existingDec.custom_tiers || [];
+
+      const metrics = computeMetricsFromPrice(item, pRetail, customTiers);
+
+      let status = 'MODIFIED';
+      if (pRetail === item.p_act && customTiers.length === 0) {
+        status = item.est === 'PROTEGIDO' ? 'PROTECTED' : 'REVERTED';
+      } else if (pRetail === item.p_sug && customTiers.length === 0) {
+        status = 'ACCEPTED';
+      }
+
+      const decisionObj = {
+        product_id: itemId,
+        sku: item.sku,
+        precio_aprobado: pRetail,
+        price: pRetail,
+        margen_modo: 'retail',
+        margin_mode: 'retail',
+        margen_aprobado: metrics.margin,
+        margin: metrics.margin,
+        margin_min: metrics.margin,
+        margin_eff: metrics.margin,
+        custom_tiers: customTiers,
+        status: status,
+        updated_at: new Date().toISOString()
+      };
+
+      userDecisions[itemId] = decisionObj;
+      saveDecisionsToLocalStorage();
+      queueServerSync(decisionObj);
+
+      updateRowDOM(itemId);
+      recalculateGlobalKPIs();
+      updateTabBadges();
+    }
+
+    function updateProductMargin(itemId, newMarginPct) {
+      const item = RAW_DATA.find(x => x.id === itemId);
+      if (!item) return;
+
+      const pRetail = computePriceFromMargin(item, newMarginPct);
+      updateProductPrice(itemId, pRetail, 'USER_MARGIN');
+    }
+
+    // MODIFICACIÓN MANUAL DIRECTA DE PRECIO DE ESCALA
+    function updateProductTierPrice(itemId, tierIdOrQty, newTierPriceRaw, minQty) {
+      const item = RAW_DATA.find(x => x.id === itemId);
+      if (!item) return;
+
+      const cleanVal = String(newTierPriceRaw).replace(/[^\d]/g, '');
+      const parsedNum = parseInt(cleanVal, 10);
+      if (isNaN(parsedNum) || parsedNum <= 0) {
+        updateRowDOM(itemId);
+        return;
+      }
+
+      const newTierPrice = Math.round(parsedNum);
+      const existingDec = userDecisions[itemId] || {};
+      const pRetail = existingDec.price !== undefined ? existingDec.price : item.p_act;
+
+      // Actualizar lista de custom_tiers
+      let customTiers = existingDec.custom_tiers ? [...existingDec.custom_tiers] : [];
+      const matchIdx = customTiers.findIndex(ct => String(ct.id) === String(tierIdOrQty) || Number(ct.min_qty) === Number(minQty));
+
+      if (matchIdx >= 0) {
+        customTiers[matchIdx].precio = newTierPrice;
+      } else {
+        customTiers.push({
+          id: tierIdOrQty,
+          min_qty: minQty,
+          precio: newTierPrice
+        });
+      }
+
+      const metrics = computeMetricsFromPrice(item, pRetail, customTiers);
+
+      const decisionObj = {
+        product_id: itemId,
+        sku: item.sku,
+        precio_aprobado: pRetail,
+        price: pRetail,
+        margen_modo: 'retail',
+        margin_mode: 'retail',
+        margen_aprobado: metrics.margin,
+        margin: metrics.margin,
+        margin_min: metrics.margin,
+        margin_eff: metrics.margin,
+        custom_tiers: customTiers,
+        status: 'MODIFIED',
+        updated_at: new Date().toISOString()
+      };
+
+      userDecisions[itemId] = decisionObj;
+      saveDecisionsToLocalStorage();
+      queueServerSync(decisionObj);
+
+      updateRowDOM(itemId);
+      recalculateGlobalKPIs();
+      updateTabBadges();
+      const currentTier = metrics.scaledTiers.find(t => t.min_qty === minQty);
+      flashStatus(`Escala ${minQty}u actualizada a ₲ ${formatPYG(newTierPrice)} (${currentTier ? currentTier.margin : 0}%) para ${item.nom}`);
+    }
+
+    function acceptSuggestion(itemId) {
+      const item = RAW_DATA.find(x => x.id === itemId);
+      if (!item) return;
+
+      const pRetail = item.p_sug;
+      const metrics = computeMetricsFromPrice(item, pRetail, []);
+
+      const decisionObj = {
+        product_id: itemId,
+        sku: item.sku,
+        precio_aprobado: pRetail,
+        price: pRetail,
+        margen_modo: 'retail',
+        margin_mode: 'retail',
+        margen_aprobado: metrics.margin,
+        margin: metrics.margin,
+        margin_min: metrics.margin,
+        margin_eff: metrics.margin,
+        custom_tiers: [],
+        status: 'ACCEPTED',
+        updated_at: new Date().toISOString()
+      };
+
+      userDecisions[itemId] = decisionObj;
+      saveDecisionsToLocalStorage();
+      queueServerSync(decisionObj);
+
+      updateRowDOM(itemId);
+      recalculateGlobalKPIs();
+      updateTabBadges();
+      flashStatus(`Sugerencia aceptada: ${item.nom} ➔ ₲ ${formatPYG(pRetail)}`);
+    }
+
+    function protectProduct(itemId) {
+      const item = RAW_DATA.find(x => x.id === itemId);
+      if (!item) return;
+
+      const pRetail = item.p_act;
+      const metrics = computeMetricsFromPrice(item, pRetail, []);
+
+      const decisionObj = {
+        product_id: itemId,
+        sku: item.sku,
+        precio_aprobado: pRetail,
+        price: pRetail,
+        margen_modo: 'retail',
+        margin_mode: 'retail',
+        margen_aprobado: metrics.margin,
+        margin: metrics.margin,
+        margin_min: metrics.margin,
+        margin_eff: metrics.margin,
+        custom_tiers: [],
+        status: 'PROTECTED',
+        updated_at: new Date().toISOString()
+      };
+
+      userDecisions[itemId] = decisionObj;
+      saveDecisionsToLocalStorage();
+      queueServerSync(decisionObj);
+
+      updateRowDOM(itemId);
+      recalculateGlobalKPIs();
+      updateTabBadges();
+      flashStatus(`Producto blindado sin aumento: ${item.nom}`);
+    }
+
+    function revertProduct(itemId) {
+      const item = RAW_DATA.find(x => x.id === itemId);
+      if (!item) return;
+
+      delete userDecisions[itemId];
+      saveDecisionsToLocalStorage();
+      
+      queueServerSync({
+        product_id: itemId,
+        sku: item.sku,
+        precio_aprobado: item.p_act,
+        price: item.p_act,
+        custom_tiers: [],
+        status: 'REVERTED',
+        updated_at: new Date().toISOString()
+      });
+
+      updateRowDOM(itemId);
+      recalculateGlobalKPIs();
+      updateTabBadges();
+      flashStatus(`Valores restaurados: ${item.nom}`);
+    }
+
+    function batchAcceptVisible() {
+      const pageItems = getPageItems();
+      let count = 0;
+      const batch = [];
+
+      pageItems.forEach(item => {
+        if (!userDecisions[item.id] || userDecisions[item.id].status === 'PENDING') {
+          const metrics = computeMetricsFromPrice(item, item.p_sug, []);
+          const dec = {
+            product_id: item.id,
+            sku: item.sku,
+            precio_aprobado: item.p_sug,
+            price: item.p_sug,
+            margen_modo: 'retail',
+            margin_mode: 'retail',
+            margen_aprobado: metrics.margin,
+            margin: metrics.margin,
+            margin_eff: metrics.margin,
+            margin_min: metrics.margin,
+            custom_tiers: [],
+            status: item.est === 'PROTEGIDO' ? 'PROTECTED' : 'ACCEPTED',
+            updated_at: new Date().toISOString()
+          };
+          userDecisions[item.id] = dec;
+          batch.push(dec);
+          count++;
+        }
+      });
+
+      saveDecisionsToLocalStorage();
+      if (batch.length > 0) {
+        batch.forEach(b => pendingServerQueue.push(b));
+        queueServerSync(batch[0]);
+      }
+
+      renderTable();
+      recalculateGlobalKPIs();
+      updateTabBadges();
+      flashStatus(`Se aceptaron ${count} sugerencias en la vista actual.`);
+    }
+
+    function batchProtectVisible() {
+      const pageItems = getPageItems();
+      let count = 0;
+      const batch = [];
+
+      pageItems.forEach(item => {
+        const metrics = computeMetricsFromPrice(item, item.p_act, []);
+        const dec = {
+          product_id: item.id,
+          sku: item.sku,
+          precio_aprobado: item.p_act,
+          price: item.p_act,
+          margen_modo: 'retail',
+          margin_mode: 'retail',
+          margen_aprobado: metrics.margin,
+          margin: metrics.margin,
+          margin_eff: metrics.margin,
+          margin_min: metrics.margin,
+          custom_tiers: [],
+          status: 'PROTECTED',
+          updated_at: new Date().toISOString()
+        };
+        userDecisions[item.id] = dec;
+        batch.push(dec);
+        count++;
+      });
+
+      saveDecisionsToLocalStorage();
+      if (batch.length > 0) {
+        batch.forEach(b => pendingServerQueue.push(b));
+        queueServerSync(batch[0]);
+      }
+
+      renderTable();
+      recalculateGlobalKPIs();
+      updateTabBadges();
+      flashStatus(`Se protegieron ${count} productos en la vista actual (0% aumento).`);
+    }
+
+    // --- RENDERIZADO DE TABLA ---
+    function getPageItems() {
+      const start = (currentPage - 1) * pageSize;
+      const end = start + pageSize;
+      return filteredList.slice(start, end);
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('table-body');
+      const emptyState = document.getElementById('empty-state');
+      const pageItems = getPageItems();
+
+      if (filteredList.length === 0) {
+        tbody.innerHTML = '';
+        emptyState.classList.remove('hidden');
+        document.getElementById('footer-filtered-count').textContent = 'Mostrando 0 de 11.154 productos';
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+      document.getElementById('footer-filtered-count').textContent = 
+        `Mostrando ${pageItems.length} de ${filteredList.length.toLocaleString('es-PY')} productos filtrados (Total general: 11.154)`;
+
+      let html = '';
+      pageItems.forEach((item, index) => {
+        html += renderRowHTML(item, index);
+      });
+
+      tbody.innerHTML = html;
+      highlightFocusedRow();
+    }
+
+    function renderRowHTML(item, index) {
+      const globalIndex = (currentPage - 1) * pageSize + index + 1;
+      const dec = userDecisions[item.id];
+      
+      const currentRetail = item.p_act;
+      const cost = item.cst;
+
+      let activeRetail = currentRetail;
+      let status = 'PENDING';
+      let customTiers = [];
+      
+      if (dec) {
+        activeRetail = dec.price;
+        status = dec.status;
+        customTiers = dec.custom_tiers || [];
+      } else if (item.est === 'PROTEGIDO') {
+        activeRetail = item.p_act;
+        status = 'PROTECTED';
+      }
+
+      const metrics = computeMetricsFromPrice(item, activeRetail, customTiers);
+      const diffAmount = activeRetail - currentRetail;
+      const diffPct = currentRetail > 0 ? (diffAmount / currentRetail) * 100 : 0;
+      const deltaEstimatedGain = Math.round(diffAmount * (item.cant_oct || 0));
+
+      const mColor = getMarginColorClass(metrics.margin);
+
+      let statusBadge = '';
+      if (status === 'MODIFIED') {
+        statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-900/60 text-amber-300 border border-amber-700/60">MODIFICADO</span>`;
+      } else if (status === 'ACCEPTED') {
+        statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-900/60 text-blue-300 border border-blue-700/60">SUG. ACEPTADO</span>`;
+      } else if (status === 'PROTECTED') {
+        statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">PROTEGIDO</span>`;
+      } else {
+        statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800/60 text-slate-500 border border-slate-800">PENDIENTE</span>`;
+      }
+
+      // Renderizado interactivo y editable de escalas mayoristas con margen directo
+      let tiersHtml = '<span class="text-slate-600">-</span>';
+      if (metrics.scaledTiers && metrics.scaledTiers.length > 0) {
+        tiersHtml = metrics.scaledTiers.map((t, t_idx) => {
+          const tierKey = t.id || t.min_qty;
+          const isCustom = t.isCustom;
+          return `
+            <div class="inline-flex items-center ${isCustom ? 'bg-amber-950/40 border-amber-600/70' : 'bg-slate-900 border-slate-700/80'} border rounded px-1.5 py-0.5 gap-1 text-[11px] shadow-sm">
+              <span class="${isCustom ? 'text-amber-300' : 'text-slate-400'} font-bold">${t.min_qty}u:</span>
+              <span class="text-slate-500 font-mono text-[10px]">₲</span>
+              <input 
+                type="text" 
+                id="tier-input-${item.id}-${tierKey}"
+                class="tier-input w-16 text-right font-bold ${isCustom ? 'text-amber-300 font-black' : 'text-blue-300'} bg-slate-950 px-1 py-0.5 rounded border border-slate-800 focus:border-blue-500 focus:bg-slate-900 focus:outline-none transition-colors"
+                value="${formatNumber(t.precio)}"
+                onclick="event.stopPropagation()"
+                onfocus="onTierFocus(event, ${index})"
+                onkeydown="handleTierKey(event, '${item.id}', '${tierKey}', ${index}, ${t.min_qty})"
+                onblur="handleTierBlur('${item.id}', '${tierKey}', this.value, ${t.min_qty})"
+                title="Editar precio para escala de ${t.min_qty} unidades"
+              />
+              <span class="text-[10px] font-mono ${getMarginColorClass(t.margin)} font-semibold">(${t.margin}%)</span>
+            </div>
+          `;
+        }).join(' ');
+      }
+
+      const sugDiff = item.p_sug - item.p_act;
+      const sugDiffPct = item.p_act > 0 ? (sugDiff / item.p_act) * 100 : 0;
+      const sugHtml = `
+        <div class="font-bold text-slate-200">${formatPYG(item.p_sug)}</div>
+        <div class="text-[10px] ${sugDiff > 0 ? 'text-blue-400' : 'text-slate-500'}">
+          ${sugDiff > 0 ? '+' : ''}${sugDiffPct.toFixed(1)}% | Margen: ${item.m_sug}%
+        </div>
+      `;
+
+      return `
+        <tr 
+          id="row-${item.id}" 
+          class="hover:bg-slate-900/60 transition-colors group cursor-pointer"
+          onclick="setFocusRowByIndex(${index})"
+        >
+          <!-- # -->
+          <td class="py-2 px-3 text-center text-slate-500 font-mono text-[11px]">
+            <span class="row-indicator hidden text-blue-400 font-bold mr-1">▶</span>${globalIndex}
+          </td>
+
+          <!-- SKU / Barcode -->
+          <td class="py-2 px-3 font-mono">
+            <div class="font-bold text-slate-200">${item.sku}</div>
+            <div class="text-[10px] text-slate-500 truncate max-w-[100px]">${item.bar || '-'}</div>
+          </td>
+
+          <!-- Producto & Proveedor -->
+          <td class="py-2 px-3">
+            <div class="font-semibold text-slate-100 group-hover:text-blue-300 transition-colors line-clamp-1" title="${item.nom}">
+              ${item.nom}
+            </div>
+            <div class="flex items-center gap-2 mt-0.5 text-[10px]">
+              <span class="text-slate-400 truncate max-w-[180px]">${item.prv}</span>
+              <span class="text-slate-600">•</span>
+              <span class="text-indigo-400 font-medium">${item.cat}</span>
+            </div>
+          </td>
+
+          <!-- Costo Promedio -->
+          <td class="py-2 px-3 text-right font-mono text-slate-300">
+            ${formatPYG(cost)}
+          </td>
+
+          <!-- PVP Actual Minorista -->
+          <td class="py-2 px-3 text-right font-mono">
+            <div class="font-medium text-slate-300">${formatPYG(item.p_act)}</div>
+            ${item.p_eff_act && item.p_eff_act !== item.p_act ? `<div class="text-[10px] text-slate-500" title="Precio promedio efectivo en ventas de octubre">P.Prom Oct: ${formatPYG(item.p_eff_act)}</div>` : ''}
+          </td>
+
+          <!-- Margen Actual -->
+          <td class="py-2 px-3 text-right font-mono">
+            <div class="font-semibold ${getMarginColorClass(item.m_min_act)}">
+              ${item.m_min_act}% <span class="text-[10px] text-slate-400 font-normal">góndola</span>
+            </div>
+            ${item.m_eff_act !== undefined && item.m_eff_act !== item.m_min_act ? `
+              <div class="text-[10px] text-slate-500" title="Margen promedio ponderado en ventas de octubre">
+                ${item.m_eff_act}% prom. oct
+              </div>
+            ` : ''}
+          </td>
+
+          <!-- Sugerencia IA -->
+          <td class="py-2 px-3 text-right font-mono bg-slate-900/30">
+            ${sugHtml}
+          </td>
+
+          <!-- PVP APROBADO (EDITABLE INPUT) -->
+          <td class="py-1 px-2 text-center bg-blue-950/20 border-l border-r border-blue-900/30">
+            <div class="relative flex items-center">
+              <span class="absolute left-2 text-slate-500 font-bold text-xs pointer-events-none">₲</span>
+              <input 
+                type="text" 
+                id="input-price-${item.id}" 
+                value="${formatNumber(activeRetail)}" 
+                class="input-clean text-right font-bold text-white text-xs py-1.5 pl-6 pr-2 rounded-lg w-full focus:bg-slate-900"
+                onfocus="onInputFocus(${index})"
+                onkeydown="handleInputKey(event, '${item.id}', 'PRICE', ${index})"
+                onblur="handlePriceBlur('${item.id}', this.value)"
+              />
+            </div>
+            ${diffAmount !== 0 ? `
+              <div class="text-[10px] font-mono mt-0.5 ${diffAmount > 0 ? 'text-emerald-400' : 'text-rose-400'}">
+                ${diffAmount > 0 ? '+' : ''}${formatPYG(diffAmount)} (${diffPct > 0 ? '+' : ''}${diffPct.toFixed(1)}%)
+              </div>
+            ` : '<div class="text-[10px] text-slate-600 mt-0.5">Mantener precio</div>'}
+          </td>
+
+          <!-- MARGEN APROBADO % (EDITABLE INPUT) -->
+          <td class="py-1 px-2 text-center bg-blue-950/20 border-r border-blue-900/30">
+            <div class="relative flex items-center">
+              <input 
+                type="text" 
+                id="input-margin-${item.id}" 
+                value="${metrics.margin.toFixed(1)}" 
+                class="input-clean text-right font-bold ${mColor} text-xs py-1.5 pl-2 pr-5 rounded-lg w-full focus:bg-slate-900"
+                onfocus="onInputFocus(${index})"
+                onkeydown="handleInputKey(event, '${item.id}', 'MARGIN', ${index})"
+                onblur="handleMarginBlur('${item.id}', this.value)"
+              />
+              <span class="absolute right-2 text-slate-500 font-bold text-xs pointer-events-none">%</span>
+            </div>
+            <div class="text-[10px] text-slate-400 mt-0.5">
+              Margen Góndola
+            </div>
+          </td>
+
+          <!-- ESCALAS MAYORISTAS EDITABLES -->
+          <td class="py-2 px-3 font-mono bg-slate-900/30 border-r border-slate-800">
+            <div class="flex flex-wrap gap-1.5 max-w-sm">
+              ${tiersHtml}
+            </div>
+          </td>
+
+          <!-- Venta Octubre -->
+          <td class="py-2 px-3 text-right font-mono text-slate-300">
+            <div>${formatPYG(item.vta_oct)}</div>
+            <div class="text-[10px] text-slate-500">${formatNumber(item.cant_oct)} u/kg</div>
+          </td>
+
+          <!-- Delta Ganancia Proyectada -->
+          <td class="py-2 px-3 text-right font-mono">
+            <div class="font-bold ${deltaEstimatedGain > 0 ? 'text-emerald-400' : (deltaEstimatedGain < 0 ? 'text-rose-400' : 'text-slate-500')}">
+              ${deltaEstimatedGain > 0 ? '+' : ''}${formatPYG(deltaEstimatedGain)}
+            </div>
+            <div class="text-[10px] text-slate-500">mensual est.</div>
+          </td>
+
+          <!-- Estado & Acciones -->
+          <td class="py-2 px-3 text-center">
+            <div class="flex items-center justify-center gap-1">
+              ${statusBadge}
+              <button 
+                onclick="event.stopPropagation(); acceptSuggestion('${item.id}')" 
+                class="p-1 rounded hover:bg-blue-900/50 text-blue-400 hover:text-white transition-colors"
+                title="Aceptar sugerencia de IA (Atajo: A o Espacio)"
+              >
+                ✓
+              </button>
+              <button 
+                onclick="event.stopPropagation(); protectProduct('${item.id}')" 
+                class="p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                title="Proteger sin aumento (Atajo: P)"
+              >
+                🔒
+              </button>
+              <button 
+                onclick="event.stopPropagation(); revertProduct('${item.id}')" 
+                class="p-1 rounded hover:bg-red-950/60 text-slate-500 hover:text-red-400 transition-colors"
+                title="Revertir a original (Atajo: R)"
+              >
+                ↺
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    function updateRowDOM(itemId) {
+      const pageItems = getPageItems();
+      const index = pageItems.findIndex(x => x.id === itemId);
+      if (index === -1) return;
+
+      const item = pageItems[index];
+      const row = document.getElementById(`row-${itemId}`);
+      if (!row) return;
+
+      const activeEl = document.activeElement;
+      const activeElId = (activeEl && row.contains(activeEl)) ? activeEl.id : null;
+
+      const tempTable = document.createElement('tbody');
+      tempTable.innerHTML = renderRowHTML(item, index);
+      const newRow = tempTable.firstElementChild;
+      
+      row.replaceWith(newRow);
+      if (focusedIndex === index) {
+        highlightFocusedRow();
+      }
+
+      if (activeElId) {
+        const restoredEl = document.getElementById(activeElId);
+        if (restoredEl) {
+          restoredEl.focus();
+        }
+      }
+    }
+
+    function getMarginColorClass(margin) {
+      if (margin === null || margin === undefined) return 'text-slate-400';
+      if (margin < 10) return 'text-rose-400 font-bold';
+      if (margin < 18) return 'text-amber-400';
+      if (margin < 25) return 'text-lime-400';
+      return 'text-emerald-400 font-bold';
+    }
+
+    // --- MANEJO DE TECLADO Y NAVEGACIÓN ---
+    function setupKeyboardNavigation() {
+      window.addEventListener('keydown', (e) => {
+        const activeEl = document.activeElement;
+        const isInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'SELECT');
+
+        if (e.key === '/' && !isInput) {
+          e.preventDefault();
+          const searchInput = document.getElementById('search-input');
+          searchInput.focus();
+          searchInput.select();
+          return;
+        }
+
+        if (e.key === '?' && !isInput) {
+          e.preventDefault();
+          toggleShortcutsModal();
+          return;
+        }
+
+        if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+          e.preventDefault();
+          exportApprovedDecisions();
+          return;
+        }
+
+        if (isInput && activeEl.id === 'search-input' && e.key === 'Escape') {
+          activeEl.blur();
+          document.getElementById('table-scroll-container').focus();
+          return;
+        }
+
+        if (!isInput) {
+          const pageItems = getPageItems();
+          if (pageItems.length === 0) return;
+
+          switch (e.key) {
+            case 'ArrowDown':
+            case 'j':
+              e.preventDefault();
+              moveFocus(1);
+              break;
+            case 'ArrowUp':
+            case 'k':
+              e.preventDefault();
+              moveFocus(-1);
+              break;
+            case 'PageDown':
+              e.preventDefault();
+              nextPage();
+              break;
+            case 'PageUp':
+              e.preventDefault();
+              prevPage();
+              break;
+            case 'e':
+            case 'E':
+              e.preventDefault();
+              focusPriceInput(focusedIndex);
+              break;
+            case 'm':
+            case 'M':
+              e.preventDefault();
+              focusMarginInput(focusedIndex);
+              break;
+            case 'a':
+            case 'A':
+            case ' ':
+              e.preventDefault();
+              if (pageItems[focusedIndex]) {
+                acceptSuggestion(pageItems[focusedIndex].id);
+              }
+              break;
+            case 'p':
+            case 'P':
+              e.preventDefault();
+              if (pageItems[focusedIndex]) {
+                protectProduct(pageItems[focusedIndex].id);
+              }
+              break;
+            case 'r':
+            case 'R':
+              e.preventDefault();
+              if (pageItems[focusedIndex]) {
+                revertProduct(pageItems[focusedIndex].id);
+              }
+              break;
+          }
+        }
+      });
+    }
+
+    function moveFocus(delta) {
+      const pageItems = getPageItems();
+      const newIndex = focusedIndex + delta;
+      
+      if (newIndex >= 0 && newIndex < pageItems.length) {
+        focusedIndex = newIndex;
+        highlightFocusedRow();
+      } else if (newIndex >= pageItems.length && currentPage * pageSize < filteredList.length) {
+        nextPage();
+        focusedIndex = 0;
+        highlightFocusedRow();
+      } else if (newIndex < 0 && currentPage > 1) {
+        prevPage();
+        focusedIndex = pageSize - 1;
+        highlightFocusedRow();
+      }
+    }
+
+    function setFocusRowByIndex(index) {
+      focusedIndex = index;
+      highlightFocusedRow();
+    }
+
+    function onInputFocus(index) {
+      focusedIndex = index;
+      highlightFocusedRow();
+    }
+
+    function onTierFocus(e, index) {
+      focusedIndex = index;
+      highlightFocusedRow();
+    }
+
+    function highlightFocusedRow() {
+      const rows = document.querySelectorAll('#table-body tr');
+      rows.forEach((r, idx) => {
+        const isCurrent = (idx === focusedIndex);
+        r.classList.toggle('row-focused', isCurrent);
+        const indicator = r.querySelector('.row-indicator');
+        if (indicator) indicator.classList.toggle('hidden', !isCurrent);
+
+        if (isCurrent) {
+          r.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      });
+    }
+
+    function focusPriceInput(index) {
+      const pageItems = getPageItems();
+      if (!pageItems[index]) return;
+      const input = document.getElementById(`input-price-${pageItems[index].id}`);
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
+
+    function focusMarginInput(index) {
+      const pageItems = getPageItems();
+      if (!pageItems[index]) return;
+      const input = document.getElementById(`input-margin-${pageItems[index].id}`);
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
+
+    function handleInputKey(e, itemId, fieldType, index) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.target.blur();
+        setTimeout(() => {
+          moveFocus(1);
+          if (fieldType === 'PRICE') {
+            focusPriceInput(focusedIndex);
+          } else {
+            focusMarginInput(focusedIndex);
+          }
+        }, 30);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.target.blur();
+        document.getElementById('table-scroll-container').focus();
+      }
+    }
+
+    function handleTierKey(e, itemId, tierKey, index, minQty) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.target.blur();
+        setTimeout(() => {
+          moveFocus(1);
+        }, 30);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.target.blur();
+        document.getElementById('table-scroll-container').focus();
+      }
+    }
+
+    function handlePriceBlur(itemId, rawValue) {
+      const cleanVal = rawValue.replace(/[^\d]/g, '');
+      const parsedNum = parseInt(cleanVal, 10);
+      if (!isNaN(parsedNum) && parsedNum > 0) {
+        updateProductPrice(itemId, parsedNum, 'USER_PRICE');
+      } else {
+        updateRowDOM(itemId);
+      }
+    }
+
+    function handleMarginBlur(itemId, rawValue) {
+      const cleanVal = rawValue.replace(',', '.').replace(/[^\d.]/g, '');
+      const parsedNum = parseFloat(cleanVal);
+      if (!isNaN(parsedNum) && parsedNum >= 0 && parsedNum < 100) {
+        updateProductMargin(itemId, parsedNum);
+      } else {
+        updateRowDOM(itemId);
+      }
+    }
+
+    function handleTierBlur(itemId, tierKey, rawValue, minQty) {
+      updateProductTierPrice(itemId, tierKey, rawValue, minQty);
+    }
+
+    // --- RECALCULO DE KPIS GLOBALES EN VIVO ---
+    function recalculateGlobalKPIs() {
+      let totalVtaOct = 0;
+      let totalCostOct = 0;
+      let totalVtaProj = 0;
+      let auditedCount = 0;
+      let increasesCount = 0;
+      let protectedCount = 0;
+
+      RAW_DATA.forEach(item => {
+        const dec = userDecisions[item.id];
+        const cost = item.cst || 0;
+        const cantOct = item.cant_oct || 0;
+        const pAct = item.p_act || 0;
+        const pEffAct = item.p_eff_act || pAct;
+
+        const itemVtaOct = item.vta_oct || (cantOct * pEffAct);
+        const itemCostOct = cantOct * cost;
+        totalVtaOct += itemVtaOct;
+        totalCostOct += itemCostOct;
+
+        let chosenRetail = pAct;
+        let isAudited = false;
+        let customTiers = [];
+
+        if (dec) {
+          chosenRetail = dec.price;
+          isAudited = (dec.status !== 'PENDING');
+          customTiers = dec.custom_tiers || [];
+          if (dec.status === 'PROTECTED') protectedCount++;
+        } else if (item.est === 'PROTEGIDO') {
+          chosenRetail = pAct;
+          protectedCount++;
+        }
+
+        if (isAudited) auditedCount++;
+        if (chosenRetail > pAct || customTiers.length > 0) increasesCount++;
+
+        const metrics = computeMetricsFromPrice(item, chosenRetail, customTiers);
+        const k = (pAct > 0 && pEffAct > 0) ? (pEffAct / pAct) : 1.0;
+        const itemVtaProj = cantOct * (chosenRetail * k);
+
+        totalVtaProj += itemVtaProj;
+      });
+
+      const origMargin = totalVtaOct > 0 ? ((totalVtaOct - totalCostOct) / totalVtaOct) * 100 : 17.6;
+      const projMargin = totalVtaProj > 0 ? ((totalVtaProj - totalCostOct) / totalVtaProj) * 100 : origMargin;
+      const profitDelta = totalVtaProj - totalVtaOct;
+      const marginDelta = projMargin - origMargin;
+
+      const auditPct = ((auditedCount / RAW_DATA.length) * 100).toFixed(1);
+
+      document.getElementById('kpi-audit-count').textContent = `${auditedCount.toLocaleString('es-PY')} / ${RAW_DATA.length.toLocaleString('es-PY')}`;
+      document.getElementById('kpi-audit-pct').textContent = `${auditPct}%`;
+      document.getElementById('kpi-progress-bar').style.width = `${auditPct}%`;
+
+      document.getElementById('kpi-margin-orig').textContent = `${origMargin.toFixed(1)}%`;
+      document.getElementById('kpi-margin-proj').textContent = `${projMargin.toFixed(1)}%`;
+      
+      const marginDeltaEl = document.getElementById('kpi-margin-delta');
+      marginDeltaEl.textContent = `${marginDelta >= 0 ? '+' : ''}${marginDelta.toFixed(1)}%`;
+      marginDeltaEl.className = `font-bold ${marginDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+
+      const profitDeltaEl = document.getElementById('kpi-profit-delta');
+      profitDeltaEl.textContent = `${profitDelta >= 0 ? '+' : ''}${formatPYG(profitDelta)}`;
+      profitDeltaEl.className = `text-base font-black truncate ${profitDelta >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+
+      document.getElementById('kpi-increases-count').textContent = `${increasesCount.toLocaleString('es-PY')} SKUs`;
+      document.getElementById('kpi-protected-count').textContent = `${protectedCount.toLocaleString('es-PY')} protegidos de tráfico`;
+
+      const modalApplyCount = document.getElementById('modal-apply-count');
+      const modalApplyMargin = document.getElementById('modal-apply-margin');
+      const modalApplyProfit = document.getElementById('modal-apply-profit');
+      if (modalApplyCount) modalApplyCount.textContent = `${increasesCount.toLocaleString('es-PY')} productos con aumento / ajustes`;
+      if (modalApplyMargin) modalApplyMargin.textContent = `${projMargin.toFixed(1)}% (sube ${marginDelta >= 0 ? '+' : ''}${marginDelta.toFixed(1)}%)`;
+      if (modalApplyProfit) modalApplyProfit.textContent = `${profitDelta >= 0 ? '+' : ''}${formatPYG(profitDelta)} / mes`;
+    }
+
+    // --- PAGINACIÓN ---
+    function updatePaginationControls() {
+      const totalPages = Math.ceil(filteredList.length / pageSize) || 1;
+      document.getElementById('pagination-indicator').textContent = `${currentPage} / ${totalPages}`;
+      document.getElementById('btn-prev-page').disabled = (currentPage <= 1);
+      document.getElementById('btn-next-page').disabled = (currentPage >= totalPages);
+    }
+
+    function prevPage() {
+      if (currentPage > 1) {
+        currentPage--;
+        focusedIndex = 0;
+        renderTable();
+        updatePaginationControls();
+        document.getElementById('table-scroll-container').scrollTop = 0;
+      }
+    }
+
+    function nextPage() {
+      const totalPages = Math.ceil(filteredList.length / pageSize) || 1;
+      if (currentPage < totalPages) {
+        currentPage++;
+        focusedIndex = 0;
+        renderTable();
+        updatePaginationControls();
+        document.getElementById('table-scroll-container').scrollTop = 0;
+      }
+    }
+
+    function changePageSize(val) {
+      pageSize = parseInt(val, 10);
+      currentPage = 1;
+      focusedIndex = 0;
+      renderTable();
+      updatePaginationControls();
+    }
+
+    function setMarginMode(mode) {
+      flashStatus(`Modo Margen Góndola activo`);
+    }
+
+    function toggleShortcutsModal() {
+      const modal = document.getElementById('shortcuts-modal');
+      modal.classList.toggle('hidden');
+    }
+
+    function flashStatus(msg) {
+      const el = document.getElementById('footer-status-text');
+      el.textContent = msg;
+      el.classList.add('text-blue-300');
+      setTimeout(() => {
+        el.classList.remove('text-blue-300');
+        el.textContent = 'Listo. Cambios sincronizados de forma persistente en el servidor.';
+      }, 3500);
+    }
+
+    async function confirmReset() {
+      if (confirm('¿Está seguro de reiniciar toda la auditoría? Se restablecerán todos los precios a sus valores originales y se limpiará el servidor.')) {
+        userDecisions = {};
+        localStorage.removeItem(STORAGE_KEY);
+        try {
+          await fetch(`${API_BASE}/audit-reset`, { method: 'POST' });
+        } catch (e) {}
+        renderTable();
+        recalculateGlobalKPIs();
+        updateTabBadges();
+        setSyncStatus('synced', 'Auditoría reiniciada en servidor');
+        flashStatus('Auditoría reiniciada correctamente.');
+      }
+    }
+
+    // --- MODAL Y EJECUCIÓN EN PRODUCCIÓN ---
+    function openApplyModal() {
+      document.getElementById('modal-confirm-input').value = '';
+      document.getElementById('btn-confirm-apply').disabled = true;
+      document.getElementById('apply-modal').classList.remove('hidden');
+      recalculateGlobalKPIs();
+      setTimeout(() => {
+        document.getElementById('modal-confirm-input').focus();
+      }, 50);
+    }
+
+    function closeApplyModal() {
+      document.getElementById('apply-modal').classList.add('hidden');
+    }
+
+    function checkConfirmWord(val) {
+      const btn = document.getElementById('btn-confirm-apply');
+      btn.disabled = (val.trim().toUpperCase() !== 'CONFIRMAR');
+    }
+
+    async function executeApplyInProduction() {
+      const btn = document.getElementById('btn-confirm-apply');
+      const spinner = document.getElementById('apply-btn-spinner');
+      const label = document.getElementById('apply-btn-label');
+
+      btn.disabled = true;
+      spinner.classList.remove('hidden');
+      label.textContent = 'Aplicando en Producción...';
+
+      try {
+        const res = await fetch(`${API_BASE}/audit-apply`, { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const result = await res.json();
+
+        alert(`✅ ¡CAMBIOS APLICADOS CON ÉXITO EN PRODUCCIÓN!\n\n` +
+              `• Productos actualizados: ${result.updated_products.toLocaleString('es-PY')}\n` +
+              `• Escalas actualizadas: ${result.updated_tiers.toLocaleString('es-PY')}\n` +
+              `• Registros de auditoría creados: ${result.logs_created.toLocaleString('es-PY')}\n\n` +
+              `Las cajas y el sistema ya están operando con la nueva política de precios.`);
+        
+        closeApplyModal();
+        window.location.reload();
+      } catch (err) {
+        console.error('Error al aplicar en producción:', err);
+        alert('❌ Error al aplicar cambios en producción: ' + err.message);
+      } finally {
+        spinner.classList.add('hidden');
+        label.textContent = 'Confirmar y Aplicar en Producción';
+        btn.disabled = false;
+      }
+    }
+
+    // --- EXPORTACIÓN DE ARCHIVOS DE RESPALDO ---
+    function exportApprovedDecisions() {
+      const exportList = [];
+      let totalChanges = 0;
+
+      RAW_DATA.forEach(item => {
+        const dec = userDecisions[item.id];
+        const pAct = item.p_act;
+        let chosenRetail = pAct;
+        let status = 'SIN_CAMBIO';
+        let customTiers = [];
+
+        if (dec) {
+          chosenRetail = dec.price;
+          status = dec.status;
+          customTiers = dec.custom_tiers || [];
+        } else if (item.est === 'PROTEGIDO') {
+          chosenRetail = pAct;
+          status = 'PROTECTED';
+        }
+
+        const metrics = computeMetricsFromPrice(item, chosenRetail, customTiers);
+        const changed = (chosenRetail !== pAct || customTiers.length > 0);
+        if (changed) totalChanges++;
+
+        exportList.push({
+          product_id: item.id,
+          sku: item.sku,
+          codigo_barra: item.bar || '',
+          nombre: item.nom,
+          proveedor: item.prv,
+          categoria: item.cat,
+          costo_promedio: item.cst,
+          precio_actual: pAct,
+          precio_nuevo: chosenRetail,
+          diferencia_monto: chosenRetail - pAct,
+          diferencia_pct: pAct > 0 ? Number(((chosenRetail - pAct) / pAct * 100).toFixed(1)) : 0,
+          margen_minorista_nuevo_pct: metrics.marginMin,
+          margen_efectivo_nuevo_pct: metrics.marginEff,
+          escalas_nuevas: metrics.scaledTiers,
+          custom_tiers: customTiers,
+          estado: status,
+          cambio_aplicable: changed
+        });
+      });
+
+      // 1. Descargar JSON
+      const jsonStr = JSON.stringify({
+        metadata: {
+          fecha_exportacion: new Date().toISOString(),
+          empresa: "Extra Supermercado (Grupo Santa Teresa E.A.S.)",
+          total_skus: exportList.length,
+          skus_con_cambio: totalChanges,
+          origen: "auditoria_rentabilidad_octubre_2026"
+        },
+        decisiones: exportList
+      }, null, 2);
+
+      downloadBlob(jsonStr, 'precios_aprobados_extra_supermercado.json', 'application/json');
+
+      // 2. Descargar CSV
+      const csvHeader = [
+        'sku', 'codigo_barra', 'nombre', 'proveedor', 'categoria', 
+        'costo_promedio', 'precio_actual', 'precio_nuevo', 'diferencia_monto', 'diferencia_pct',
+        'margen_minorista_nuevo_pct', 'margen_efectivo_nuevo_pct', 'escalas_nuevas', 'estado', 'cambio_aplicable', 'product_id'
+      ].join(';');
+
+      const csvRows = exportList.map(row => {
+        const tiersStr = (row.escalas_nuevas || []).map(t => `${t.min_qty}u: ₲${t.precio}${t.isCustom ? ' (manual)' : ''}`).join(' | ');
+        return [
+          row.sku,
+          row.codigo_barra,
+          `"${(row.nombre || '').replace(/"/g, '""')}"`,
+          `"${(row.proveedor || '').replace(/"/g, '""')}"`,
+          `"${(row.categoria || '').replace(/"/g, '""')}"`,
+          row.costo_promedio,
+          row.precio_actual,
+          row.precio_nuevo,
+          row.diferencia_monto,
+          row.diferencia_pct,
+          row.margen_minorista_nuevo_pct,
+          row.margen_efectivo_nuevo_pct,
+          `"${tiersStr}"`,
+          row.estado,
+          row.cambio_aplicable,
+          row.product_id
+        ].join(';');
+      });
+
+      const csvContent = '\uFEFF' + [csvHeader, ...csvRows].join('\r\n');
+      downloadBlob(csvContent, 'precios_aprobados_extra_supermercado.csv', 'text/csv;charset=utf-8');
+
+      flashStatus(`Se exportaron exitosamente ${exportList.length} productos (${totalChanges} con cambios de precio).`);
+    }
+
+    function downloadBlob(content, filename, mimeType) {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  </script>
+</body>
+</html>

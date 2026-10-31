@@ -352,15 +352,10 @@
 
       <!-- Right Controls: Margin mode & Pagination -->
       <div class="flex items-center gap-3 shrink-0">
-        <!-- Target margin mode switcher -->
-        <div class="flex items-center gap-1.5 bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[11px]">
-          <span class="text-slate-400 px-1.5 font-medium">Margen editable aplica a:</span>
-          <button id="mode-eff-btn" onclick="setMarginMode('eff')" class="px-2 py-0.5 rounded bg-blue-600 text-white font-semibold">
-            Real Efectivo
-          </button>
-          <button id="mode-min-btn" onclick="setMarginMode('min')" class="px-2 py-0.5 rounded text-slate-400 hover:text-white">
-            Minorista Góndola
-          </button>
+        <!-- Target margin indicator -->
+        <div class="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800 text-[11px] text-emerald-400 font-semibold shadow-sm">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>Margen Góndola 100% Bidireccional</span>
         </div>
 
         <!-- Rows per page -->
@@ -613,7 +608,7 @@
     let focusedIndex = 0;
     let currentPage = 1;
     let pageSize = 100;
-    let activeMarginMode = 'eff';
+    let activeMarginMode = 'retail';
     let activeQuickTab = 'ALL'; // 'ALL', 'WILL_CHANGE', 'NO_CHANGE', 'TRAFFIC', 'WITH_TIERS', 'MODIFIED'
     let searchDebounceTimeout = null;
     let serverSyncDebounce = null;
@@ -775,11 +770,11 @@
 
       let html = `
         <div 
-          onclick="selectSupplier('')" 
+          onmousedown="selectSupplier('')" 
           class="px-3 py-2 hover:bg-slate-800 cursor-pointer flex items-center justify-between text-xs font-bold transition ${!currentSelected ? 'text-indigo-400 bg-indigo-950/40' : 'text-slate-300'}"
         >
           <span>🏢 Todos los Proveedores</span>
-          <span class="text-[10px] text-slate-400 font-mono">(${RAW_DATA.length})</span>
+          <span class="text-[10px] text-slate-400 font-mono">(${RAW_DATA.length.toLocaleString('es-PY')})</span>
         </div>
       `;
 
@@ -792,7 +787,7 @@
           const escapedName = s.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
           html += `
             <div 
-              onclick="selectSupplier('${escapedName}')" 
+              onmousedown="selectSupplier('${escapedName}')" 
               class="px-3 py-2 hover:bg-slate-800 cursor-pointer flex items-center justify-between text-xs transition ${isSelected ? 'text-indigo-300 bg-indigo-950/40 font-bold' : 'text-slate-200'}"
             >
               <span class="truncate pr-2">${s.name}</span>
@@ -1093,90 +1088,70 @@
       setQuickTab('ALL');
     }
 
-    // --- CÁLCULOS MATEMÁTICOS BIDIRECCIONALES (CON SOPORTE DE ESCALAS PERSONALIZADAS) ---
+    // --- CÁLCULOS MATEMÁTICOS BIDIRECCIONALES (PURO RETAIL SUPERMERCADO) ---
     function computeMetricsFromPrice(item, newRetailPrice, customTiersList = null) {
       const cost = Number(item.cst) || 0;
       const pAct = Number(item.p_act) || 0;
-      const pEffAct = Number(item.p_eff_act) || pAct;
-
-      const pRetail = round50(newRetailPrice);
-      const factorScale = pAct > 0 ? (pRetail / pAct) : 1.0;
+      const pRetail = Math.round(Number(newRetailPrice)) || 0;
 
       // Mapeo de escalas personalizadas del usuario
       const customMap = {};
       if (customTiersList && Array.isArray(customTiersList)) {
         customTiersList.forEach(ct => {
-          if (ct.id) customMap[String(ct.id)] = Number(ct.precio);
-          if (ct.min_qty) customMap[String(ct.min_qty)] = Number(ct.precio);
+          if (ct.id) customMap[String(ct.id)] = Math.round(Number(ct.precio));
+          if (ct.min_qty) customMap[String(ct.min_qty)] = Math.round(Number(ct.precio));
         });
       }
 
-      // Calcular precio de cada tier (respetando si el usuario lo personalizó)
+      // Calcular precio y margen de cada tier (respetando si el usuario lo personalizó)
       const scaledTiers = (item.tiers || []).map(t => {
         const tid = String(t.id || t.min_qty);
         let tierPrice;
         let isCustom = false;
 
         if (customMap[tid] !== undefined) {
-          tierPrice = round50(customMap[tid]);
+          tierPrice = customMap[tid];
           isCustom = true;
         } else if (customMap[String(t.min_qty)] !== undefined) {
-          tierPrice = round50(customMap[String(t.min_qty)]);
+          tierPrice = customMap[String(t.min_qty)];
           isCustom = true;
         } else {
-          tierPrice = round50(t.precio * factorScale);
+          tierPrice = Math.round(Number(t.precio));
         }
+
+        const tierMargin = (tierPrice > 0 && cost > 0) ? ((tierPrice - cost) / tierPrice) * 100 : 0;
 
         return {
           id: t.id,
           min_qty: t.min_qty,
           precio: tierPrice,
+          margin: Number(tierMargin.toFixed(1)),
           isCustom: isCustom
         };
       });
 
-      // Calcular precio efectivo promedio ponderado
-      let pEffNew;
-      if (scaledTiers.length > 0) {
-        // Promedio entre minorista y primer tier para reflejar escalas mayoristas
-        const t1 = scaledTiers[0].precio;
-        pEffNew = Math.round((pRetail + t1) / 2.0);
-      } else {
-        const k = (pAct > 0 && pEffAct > 0) ? (pEffAct / pAct) : 1.0;
-        pEffNew = Math.round(pRetail * k);
-      }
-
-      const marginMin = pRetail > 0 ? ((pRetail - cost) / pRetail) * 100 : 0;
-      const marginEff = pEffNew > 0 ? ((pEffNew - cost) / pEffNew) * 100 : 0;
+      // Margen Góndola Puro: (PVP - Costo) / PVP
+      const margin = (pRetail > 0 && cost > 0) ? ((pRetail - cost) / pRetail) * 100 : 0;
 
       return {
         pRetail,
-        pEffNew,
-        marginMin: Number(marginMin.toFixed(1)),
-        marginEff: Number(marginEff.toFixed(1)),
+        margin: Number(margin.toFixed(1)),
+        marginMin: Number(margin.toFixed(1)),
+        marginEff: Number(margin.toFixed(1)),
         scaledTiers
       };
     }
 
-    function computePriceFromMargin(item, targetMarginPct, mode = 'eff') {
+    function computePriceFromMargin(item, targetMarginPct) {
       const cost = Number(item.cst) || 0;
       const pAct = Number(item.p_act) || 0;
-      const pEffAct = Number(item.p_eff_act) || pAct;
       const m = Number(targetMarginPct) / 100.0;
 
       if (m >= 1.0 || cost <= 0) return pAct;
 
-      const k = (pAct > 0 && pEffAct > 0) ? (pEffAct / pAct) : 1.0;
-
-      let pRetailRaw;
-      if (mode === 'eff') {
-        const pEffReq = cost / (1.0 - m);
-        pRetailRaw = pEffReq / k;
-      } else {
-        pRetailRaw = cost / (1.0 - m);
-      }
-
-      return round50(pRetailRaw);
+      // PVP = Costo / (1 - Margen)
+      const pRetailRaw = cost / (1.0 - m);
+      return Math.round(pRetailRaw);
     }
 
     // --- ACCIONES Y SINCRONIZACIÓN AL SERVIDOR ---
@@ -1184,7 +1159,7 @@
       const item = RAW_DATA.find(x => x.id === itemId);
       if (!item) return;
 
-      const pRetail = round50(newPrice);
+      const pRetail = Math.round(Number(newPrice));
       const existingDec = userDecisions[itemId] || {};
       const customTiers = existingDec.custom_tiers || [];
 
@@ -1202,11 +1177,12 @@
         sku: item.sku,
         precio_aprobado: pRetail,
         price: pRetail,
-        margen_modo: activeMarginMode,
-        margin_mode: activeMarginMode,
-        margen_aprobado: activeMarginMode === 'eff' ? metrics.marginEff : metrics.marginMin,
-        margin_eff: metrics.marginEff,
-        margin_min: metrics.marginMin,
+        margen_modo: 'retail',
+        margin_mode: 'retail',
+        margen_aprobado: metrics.margin,
+        margin: metrics.margin,
+        margin_min: metrics.margin,
+        margin_eff: metrics.margin,
         custom_tiers: customTiers,
         status: status,
         updated_at: new Date().toISOString()
@@ -1225,7 +1201,7 @@
       const item = RAW_DATA.find(x => x.id === itemId);
       if (!item) return;
 
-      const pRetail = computePriceFromMargin(item, newMarginPct, activeMarginMode);
+      const pRetail = computePriceFromMargin(item, newMarginPct);
       updateProductPrice(itemId, pRetail, 'USER_MARGIN');
     }
 
@@ -1241,9 +1217,9 @@
         return;
       }
 
-      const newTierPrice = round50(parsedNum);
+      const newTierPrice = Math.round(parsedNum);
       const existingDec = userDecisions[itemId] || {};
-      const pRetail = existingDec.price || item.p_act;
+      const pRetail = existingDec.price !== undefined ? existingDec.price : item.p_act;
 
       // Actualizar lista de custom_tiers
       let customTiers = existingDec.custom_tiers ? [...existingDec.custom_tiers] : [];
@@ -1266,11 +1242,12 @@
         sku: item.sku,
         precio_aprobado: pRetail,
         price: pRetail,
-        margen_modo: activeMarginMode,
-        margin_mode: activeMarginMode,
-        margen_aprobado: activeMarginMode === 'eff' ? metrics.marginEff : metrics.marginMin,
-        margin_eff: metrics.marginEff,
-        margin_min: metrics.marginMin,
+        margen_modo: 'retail',
+        margin_mode: 'retail',
+        margen_aprobado: metrics.margin,
+        margin: metrics.margin,
+        margin_min: metrics.margin,
+        margin_eff: metrics.margin,
         custom_tiers: customTiers,
         status: 'MODIFIED',
         updated_at: new Date().toISOString()
@@ -1283,7 +1260,8 @@
       updateRowDOM(itemId);
       recalculateGlobalKPIs();
       updateTabBadges();
-      flashStatus(`Escala ${minQty}u actualizada a ${formatPYG(newTierPrice)} para ${item.nom}`);
+      const currentTier = metrics.scaledTiers.find(t => t.min_qty === minQty);
+      flashStatus(`Escala ${minQty}u actualizada a ₲ ${formatPYG(newTierPrice)} (${currentTier ? currentTier.margin : 0}%) para ${item.nom}`);
     }
 
     function acceptSuggestion(itemId) {
@@ -1298,11 +1276,12 @@
         sku: item.sku,
         precio_aprobado: pRetail,
         price: pRetail,
-        margen_modo: activeMarginMode,
-        margin_mode: activeMarginMode,
-        margen_aprobado: activeMarginMode === 'eff' ? metrics.marginEff : metrics.marginMin,
-        margin_eff: metrics.marginEff,
-        margin_min: metrics.marginMin,
+        margen_modo: 'retail',
+        margin_mode: 'retail',
+        margen_aprobado: metrics.margin,
+        margin: metrics.margin,
+        margin_min: metrics.margin,
+        margin_eff: metrics.margin,
         custom_tiers: [],
         status: 'ACCEPTED',
         updated_at: new Date().toISOString()
@@ -1315,7 +1294,7 @@
       updateRowDOM(itemId);
       recalculateGlobalKPIs();
       updateTabBadges();
-      flashStatus(`Sugerencia aceptada: ${item.nom} ➔ ${formatPYG(pRetail)}`);
+      flashStatus(`Sugerencia aceptada: ${item.nom} ➔ ₲ ${formatPYG(pRetail)}`);
     }
 
     function protectProduct(itemId) {
@@ -1330,11 +1309,12 @@
         sku: item.sku,
         precio_aprobado: pRetail,
         price: pRetail,
-        margen_modo: activeMarginMode,
-        margin_mode: activeMarginMode,
-        margen_aprobado: activeMarginMode === 'eff' ? metrics.marginEff : metrics.marginMin,
-        margin_eff: metrics.marginEff,
-        margin_min: metrics.marginMin,
+        margen_modo: 'retail',
+        margin_mode: 'retail',
+        margen_aprobado: metrics.margin,
+        margin: metrics.margin,
+        margin_min: metrics.margin,
+        margin_eff: metrics.margin,
         custom_tiers: [],
         status: 'PROTECTED',
         updated_at: new Date().toISOString()
@@ -1386,11 +1366,12 @@
             sku: item.sku,
             precio_aprobado: item.p_sug,
             price: item.p_sug,
-            margen_modo: activeMarginMode,
-            margin_mode: activeMarginMode,
-            margen_aprobado: activeMarginMode === 'eff' ? metrics.marginEff : metrics.marginMin,
-            margin_eff: metrics.marginEff,
-            margin_min: metrics.marginMin,
+            margen_modo: 'retail',
+            margin_mode: 'retail',
+            margen_aprobado: metrics.margin,
+            margin: metrics.margin,
+            margin_eff: metrics.margin,
+            margin_min: metrics.margin,
             custom_tiers: [],
             status: item.est === 'PROTEGIDO' ? 'PROTECTED' : 'ACCEPTED',
             updated_at: new Date().toISOString()
@@ -1425,11 +1406,12 @@
           sku: item.sku,
           precio_aprobado: item.p_act,
           price: item.p_act,
-          margen_modo: activeMarginMode,
-          margin_mode: activeMarginMode,
-          margen_aprobado: activeMarginMode === 'eff' ? metrics.marginEff : metrics.marginMin,
-          margin_eff: metrics.marginEff,
-          margin_min: metrics.marginMin,
+          margen_modo: 'retail',
+          margin_mode: 'retail',
+          margen_aprobado: metrics.margin,
+          margin: metrics.margin,
+          margin_eff: metrics.margin,
+          margin_min: metrics.margin,
           custom_tiers: [],
           status: 'PROTECTED',
           updated_at: new Date().toISOString()
@@ -1508,9 +1490,7 @@
       const diffPct = currentRetail > 0 ? (diffAmount / currentRetail) * 100 : 0;
       const deltaEstimatedGain = Math.round(diffAmount * (item.cant_oct || 0));
 
-      const mEffColor = getMarginColorClass(metrics.marginEff);
-      const mMinColor = getMarginColorClass(metrics.marginMin);
-      const origEffColor = getMarginColorClass(item.m_eff_act);
+      const mColor = getMarginColorClass(metrics.margin);
 
       let statusBadge = '';
       if (status === 'MODIFIED') {
@@ -1523,7 +1503,7 @@
         statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800/60 text-slate-500 border border-slate-800">PENDIENTE</span>`;
       }
 
-      // Renderizado interactivo y editable de escalas mayoristas
+      // Renderizado interactivo y editable de escalas mayoristas con margen directo
       let tiersHtml = '<span class="text-slate-600">-</span>';
       if (metrics.scaledTiers && metrics.scaledTiers.length > 0) {
         tiersHtml = metrics.scaledTiers.map((t, t_idx) => {
@@ -1544,6 +1524,7 @@
                 onblur="handleTierBlur('${item.id}', '${tierKey}', this.value, ${t.min_qty})"
                 title="Editar precio para escala de ${t.min_qty} unidades"
               />
+              <span class="text-[10px] font-mono ${getMarginColorClass(t.margin)} font-semibold">(${t.margin}%)</span>
             </div>
           `;
         }).join(' ');
@@ -1554,11 +1535,9 @@
       const sugHtml = `
         <div class="font-bold text-slate-200">${formatPYG(item.p_sug)}</div>
         <div class="text-[10px] ${sugDiff > 0 ? 'text-blue-400' : 'text-slate-500'}">
-          ${sugDiff > 0 ? '+' : ''}${sugDiffPct.toFixed(1)}% | M.Real: ${item.m_sug}%
+          ${sugDiff > 0 ? '+' : ''}${sugDiffPct.toFixed(1)}% | Margen: ${item.m_sug}%
         </div>
       `;
-
-      const displayMargin = activeMarginMode === 'eff' ? metrics.marginEff : metrics.marginMin;
 
       return `
         <tr 
@@ -1597,17 +1576,19 @@
           <!-- PVP Actual Minorista -->
           <td class="py-2 px-3 text-right font-mono">
             <div class="font-medium text-slate-300">${formatPYG(item.p_act)}</div>
-            <div class="text-[10px] text-slate-500">P.Prom: ${formatPYG(item.p_eff_act)}</div>
+            ${item.p_eff_act && item.p_eff_act !== item.p_act ? `<div class="text-[10px] text-slate-500" title="Precio promedio efectivo en ventas de octubre">P.Prom Oct: ${formatPYG(item.p_eff_act)}</div>` : ''}
           </td>
 
           <!-- Margen Actual -->
           <td class="py-2 px-3 text-right font-mono">
-            <div class="font-semibold ${origEffColor}">
-              ${item.m_eff_act}% <span class="text-[10px] text-slate-400 font-normal">real</span>
+            <div class="font-semibold ${getMarginColorClass(item.m_min_act)}">
+              ${item.m_min_act}% <span class="text-[10px] text-slate-400 font-normal">góndola</span>
             </div>
-            <div class="text-[10px] text-slate-500">
-              ${item.m_min_act}% min.
-            </div>
+            ${item.m_eff_act !== undefined && item.m_eff_act !== item.m_min_act ? `
+              <div class="text-[10px] text-slate-500" title="Margen promedio ponderado en ventas de octubre">
+                ${item.m_eff_act}% prom. oct
+              </div>
+            ` : ''}
           </td>
 
           <!-- Sugerencia IA -->
@@ -1633,7 +1614,7 @@
               <div class="text-[10px] font-mono mt-0.5 ${diffAmount > 0 ? 'text-emerald-400' : 'text-rose-400'}">
                 ${diffAmount > 0 ? '+' : ''}${formatPYG(diffAmount)} (${diffPct > 0 ? '+' : ''}${diffPct.toFixed(1)}%)
               </div>
-            ` : '<div class="text-[10px] text-slate-600 mt-0.5">Sin variación</div>'}
+            ` : '<div class="text-[10px] text-slate-600 mt-0.5">Mantener precio</div>'}
           </td>
 
           <!-- MARGEN APROBADO % (EDITABLE INPUT) -->
@@ -1642,8 +1623,8 @@
               <input 
                 type="text" 
                 id="input-margin-${item.id}" 
-                value="${displayMargin.toFixed(1)}" 
-                class="input-clean text-right font-bold ${mEffColor} text-xs py-1.5 pl-2 pr-5 rounded-lg w-full focus:bg-slate-900"
+                value="${metrics.margin.toFixed(1)}" 
+                class="input-clean text-right font-bold ${mColor} text-xs py-1.5 pl-2 pr-5 rounded-lg w-full focus:bg-slate-900"
                 onfocus="onInputFocus(${index})"
                 onkeydown="handleInputKey(event, '${item.id}', 'MARGIN', ${index})"
                 onblur="handleMarginBlur('${item.id}', this.value)"
@@ -1651,7 +1632,7 @@
               <span class="absolute right-2 text-slate-500 font-bold text-xs pointer-events-none">%</span>
             </div>
             <div class="text-[10px] text-slate-400 mt-0.5">
-              ${activeMarginMode === 'eff' ? 'M. Real Efectivo' : 'M. Góndola'}
+              Margen Góndola
             </div>
           </td>
 
@@ -1999,7 +1980,8 @@
         if (chosenRetail > pAct || customTiers.length > 0) increasesCount++;
 
         const metrics = computeMetricsFromPrice(item, chosenRetail, customTiers);
-        const itemVtaProj = cantOct * metrics.pEffNew;
+        const k = (pAct > 0 && pEffAct > 0) ? (pEffAct / pAct) : 1.0;
+        const itemVtaProj = cantOct * (chosenRetail * k);
 
         totalVtaProj += itemVtaProj;
       });
@@ -2075,13 +2057,7 @@
     }
 
     function setMarginMode(mode) {
-      activeMarginMode = mode;
-      document.getElementById('mode-eff-btn').className = mode === 'eff' ? 
-        'px-2 py-0.5 rounded bg-blue-600 text-white font-semibold' : 'px-2 py-0.5 rounded text-slate-400 hover:text-white';
-      document.getElementById('mode-min-btn').className = mode === 'min' ? 
-        'px-2 py-0.5 rounded bg-blue-600 text-white font-semibold' : 'px-2 py-0.5 rounded text-slate-400 hover:text-white';
-      renderTable();
-      flashStatus(`Modo margen activo: ${mode === 'eff' ? 'Real Efectivo (Ponderado ventas)' : 'Minorista Góndola'}`);
+      flashStatus(`Modo Margen Góndola activo`);
     }
 
     function toggleShortcutsModal() {
