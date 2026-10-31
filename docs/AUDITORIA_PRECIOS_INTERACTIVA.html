@@ -344,6 +344,20 @@
           <option value="">Todas las Categorías</option>
         </select>
 
+        <!-- Filtro Estado / Tipo de Ajuste Dropdown -->
+        <select 
+          id="filter-strategy-dropdown" 
+          onchange="setQuickTab(this.value)" 
+          class="input-clean px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-300 bg-slate-900 border border-emerald-850"
+        >
+          <option value="ALL">Filtro: Todos los Productos (11.154)</option>
+          <option value="WILL_CHANGE">⚡ Filtro: Con Aumento Sugerido (Excluye Tráfico 0%)</option>
+          <option value="TRAFFIC">🛒 Filtro: Tráfico & Canasta Blindados (0% Mantener)</option>
+          <option value="NO_CHANGE">🛡️ Filtro: Sin Modificación (0% Mantener)</option>
+          <option value="WITH_TIERS">📦 Filtro: Con Escalas Mayoristas</option>
+          <option value="MODIFIED">✏️ Filtro: Modificados Manualmente</option>
+        </select>
+
         <!-- Order by -->
         <select 
           id="filter-order" 
@@ -607,7 +621,12 @@
   <script>
     // --- ESTADO GLOBAL ---
     const RAW_DATA = window.AUDITORIA_DATA || [];
-    const STORAGE_KEY = 'extra_supermercado_auditoria_decisiones_v1';
+    const STORAGE_KEY = 'extra_supermercado_auditoria_decisiones_v3';
+    // Limpieza proactiva de claves residuales de prueba
+    try {
+      localStorage.removeItem('extra_supermercado_auditoria_decisiones_v1');
+      localStorage.removeItem('extra_supermercado_auditoria_decisiones_v2');
+    } catch (e) {}
     const API_BASE = '/api/v1/price-lists';
     
     // Diccionario de decisiones del usuario:
@@ -654,19 +673,14 @@
         if (data.status === 'ok' && data.decisiones) {
           const serverCount = Object.keys(data.decisiones).length;
           
-          let localDecisions = {};
-          try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) localDecisions = JSON.parse(saved);
-          } catch (e) {}
-
-          userDecisions = { ...localDecisions, ...data.decisiones };
+          // La base de datos del servidor es la fuente canónica de verdad
+          userDecisions = { ...data.decisiones };
           saveDecisionsToLocalStorage();
 
           if (serverCount > 0) {
             setSyncStatus('synced', `${serverCount} decisiones sincronizadas`);
           } else {
-            setSyncStatus('synced', `Listo (Servidor conectado)`);
+            setSyncStatus('synced', `Listo (Servidor conectado - Catálogo Inicial)`);
           }
         }
       } catch (err) {
@@ -902,6 +916,11 @@
         }
       });
 
+      const stratDropdown = document.getElementById('filter-strategy-dropdown');
+      if (stratDropdown) {
+        stratDropdown.value = tabKey;
+      }
+
       applyFilters();
       flashStatus(`Filtro activo: ${getTabDescription(tabKey)}`);
     }
@@ -944,7 +963,7 @@
         }
         if (selectedCategory && item.cat !== selectedCategory) return false;
 
-        // 3. Determinar precio activo aprobado y estado
+        // 3. Determinar precio activo y estado
         const dec = userDecisions[item.id];
         const isTraffic = (item.est === 'PROTEGIDO');
         let activeRetail = item.p_act;
@@ -958,17 +977,22 @@
         }
 
         const hasCustomTiers = dec && dec.custom_tiers && dec.custom_tiers.length > 0;
-        
-        // Con Aumento: productos con sugerencia de suba o modificados al alza, NUNCA productos protegidos sin modificación
-        const isSuggestedIncrease = !isTraffic && (item.p_sug > item.p_act);
-        const isManualIncrease = dec && (dec.price > item.p_act);
-        const willChange = isManualIncrease || (!dec && isSuggestedIncrease) || hasCustomTiers;
 
-        // 4. Filtro por Pestaña Rápida
+        // 4. Filtro por Pestaña Rápida / Estrategia
         if (activeQuickTab === 'WILL_CHANGE') {
-          if (!willChange) return false;
+          // REGLA INMUTABLE: Los productos protegidos de tráfico (Brahmita, Coca Cola PET, Azúcar, Costilla, etc.)
+          // NUNCA forman parte de la lista de productos que deben tener aumento. Tienen 0% por elección.
+          if (isTraffic) return false;
+          
+          const targetPrice = dec ? dec.price : item.p_sug;
+          if (targetPrice <= item.p_act) return false;
         } else if (activeQuickTab === 'NO_CHANGE') {
-          if (willChange) return false;
+          if (isTraffic) {
+            if (dec && dec.price > item.p_act) return false;
+          } else {
+            const targetPrice = dec ? dec.price : item.p_sug;
+            if (targetPrice > item.p_act) return false;
+          }
         } else if (activeQuickTab === 'TRAFFIC') {
           if (!isTraffic) return false;
         } else if (activeQuickTab === 'WITH_TIERS') {
@@ -1010,11 +1034,11 @@
         }
 
         const hasCustomTiers = dec && dec.custom_tiers && dec.custom_tiers.length > 0;
-        const isSuggestedIncrease = !isTraffic && (item.p_sug > item.p_act);
-        const isManualIncrease = dec && (dec.price > item.p_act);
-        const willChange = isManualIncrease || (!dec && isSuggestedIncrease) || hasCustomTiers;
+        
+        // Con Aumento Sugerido: Estrictamente NO protegidos y con precio mayor al actual
+        const isIncrease = !isTraffic && (activeRetail > item.p_act);
 
-        if (willChange) countWillChange++;
+        if (isIncrease) countWillChange++;
         else countNoChange++;
 
         if (isTraffic) countTraffic++;
