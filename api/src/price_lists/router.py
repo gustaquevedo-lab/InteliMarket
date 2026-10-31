@@ -20,6 +20,13 @@ class AuditSaveRequest(BaseModel):
     decisiones: list[dict]
 
 
+@router.get("/audit-catalog")
+async def get_audit_catalog(fresh: bool = Query(False), db: AsyncSession = Depends(get_db)):
+    """Retorna el catálogo completo de productos con costos y precios actualizados en tiempo real."""
+    data = await service.get_audit_catalog(db, fresh=fresh)
+    return Response(content=data, media_type="application/json")
+
+
 @router.get("/audit-state")
 async def get_audit_state(db: AsyncSession = Depends(get_db)):
     """Obtiene el estado de decisiones de la auditoría de precios guardado en el servidor."""

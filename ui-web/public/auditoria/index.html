@@ -150,6 +150,14 @@
           <span class="hidden sm:inline">Atajos</span>
         </button>
 
+        <!-- Live Refresh Button -->
+        <button onclick="loadLiveCatalog(true)" id="btn-refresh-catalog" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors" title="Actualizar en vivo costos y precios desde la base de datos">
+          <svg id="refresh-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+          </svg>
+          <span class="hidden sm:inline">Actualizar Precios</span>
+        </button>
+
         <!-- Reset Button -->
         <button onclick="confirmReset()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-red-950/60 text-slate-400 hover:text-red-300 text-xs font-medium border border-slate-700 hover:border-red-800 transition-colors" title="Restaurar toda la auditoría a valores originales">
           Reiniciar
@@ -620,7 +628,8 @@
   <!-- APPLICATION LOGIC & SERVER SYNCHRONIZATION -->
   <script>
     // --- ESTADO GLOBAL ---
-    const RAW_DATA = window.AUDITORIA_DATA || [];
+    let RAW_DATA = window.AUDITORIA_DATA || [];
+    let isLoadingLiveCatalog = false;
     const STORAGE_KEY = 'extra_supermercado_auditoria_decisiones_v3';
     // Limpieza proactiva de claves residuales de prueba
     try {
@@ -754,10 +763,44 @@
     // --- INICIALIZACIÓN ---
     window.addEventListener('DOMContentLoaded', () => {
       populateDropdowns();
-      loadDecisionsFromServer();
+      loadDecisionsFromServer().then(() => {
+        // Carga dinámica en vivo desde la base de datos (segundo plano)
+        loadLiveCatalog(false);
+      });
       setupKeyboardNavigation();
       document.getElementById('table-scroll-container').focus();
     });
+
+    async function loadLiveCatalog(force = false) {
+      if (isLoadingLiveCatalog) return;
+      isLoadingLiveCatalog = true;
+      const refreshIcon = document.getElementById('refresh-icon');
+      if (refreshIcon) refreshIcon.classList.add('animate-spin');
+      setSyncStatus('loading', force ? 'Actualizando costos y precios desde la BD...' : 'Verificando catálogo en vivo...');
+
+      try {
+        const url = `${API_BASE}/audit-catalog${force ? '?fresh=true' : ''}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const liveItems = await res.json();
+
+        if (Array.isArray(liveItems) && liveItems.length > 0) {
+          RAW_DATA = liveItems;
+          populateDropdowns();
+          applyFilters();
+          updateTabBadges();
+          recalculateGlobalKPIs();
+          setSyncStatus('synced', `Precios y costos actualizados en vivo (${liveItems.length.toLocaleString('es-PY')} SKUs)`);
+          if (force) flashStatus('Precios y costos del sistema actualizados correctamente.');
+        }
+      } catch (err) {
+        console.warn('No se pudo sincronizar el catálogo dinámico en vivo:', err);
+        setSyncStatus('synced', 'Modo offline / datos locales');
+      } finally {
+        isLoadingLiveCatalog = false;
+        if (refreshIcon) refreshIcon.classList.remove('animate-spin');
+      }
+    }
 
     let SUPPLIERS_LIST = [];
 
@@ -777,13 +820,18 @@
       renderSupplierMenu('');
 
       const catSelect = document.getElementById('filter-category');
-      const sortedCategories = Object.keys(catMap).sort();
-      sortedCategories.forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c;
-        opt.textContent = `${c} (${catMap[c]})`;
-        catSelect.appendChild(opt);
-      });
+      if (catSelect) {
+        const prevCat = catSelect.value || '';
+        catSelect.innerHTML = '<option value="">📂 Todas las Categorías</option>';
+        const sortedCategories = Object.keys(catMap).sort();
+        sortedCategories.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c;
+          opt.textContent = `${c} (${catMap[c]})`;
+          if (c === prevCat) opt.selected = true;
+          catSelect.appendChild(opt);
+        });
+      }
     }
 
     function renderSupplierMenu(query = '') {
