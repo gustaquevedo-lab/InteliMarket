@@ -67,22 +67,42 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
                 COALESCE(SUM(saldo), 0) as saldo_pendiente
             FROM filtered_sales
         ),
-        items_totals AS (
+        por_venta AS (
+            -- una fila por venta: venta, IVA y costo de sus lineas
             SELECT
-                COALESCE(SUM(vi.cantidad), 0) as total_items,
-                COALESCE(SUM(
+                fs.total as total_cab,
+                SUM(ABS(vi.total)) as importe_lineas,
+                SUM(vi.cantidad) as cantidad,
+                SUM(vi.total) as venta,
+                SUM(COALESCE(vi.iva_monto, 0)) as iva,
+                SUM(
                     (CASE WHEN fs.tipo_comprobante = 'notacredito' OR vi.total < 0 THEN -1 ELSE 1 END) *
                     COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), NULLIF(p.ultimo_costo, 0), NULLIF(p.costo_landed, 0), 0) * vi.cantidad
-                ), 0) as costo_total,
-                COUNT(*) FILTER (WHERE COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), NULLIF(p.ultimo_costo, 0), NULLIF(p.costo_landed, 0)) IS NULL) as items_sin_costo,
-                -- cajas unitarias PARESA (las notas de credito restan); en esta misma pasada, que ya filtra por fecha
-                COALESCE(SUM(
+                ) as costo,
+                COUNT(*) FILTER (WHERE COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), NULLIF(p.ultimo_costo, 0), NULLIF(p.costo_landed, 0)) IS NULL) as sin_costo,
+                -- cajas unitarias PARESA (las notas de credito restan)
+                SUM(
                     (CASE WHEN fs.tipo_comprobante = 'notacredito' THEN -1 ELSE 1 END) * vi.cantidad * COALESCE(p.caja_unitaria_factor, 0)
-                ) FILTER (WHERE sp.razon_social ILIKE '%PARAGUAY REFRESCOS%'), 0) as paresa_uc
+                ) FILTER (WHERE sp.razon_social ILIKE '%PARAGUAY REFRESCOS%') as uc
             FROM sale_items vi
             JOIN filtered_sales fs ON fs.id = vi.sale_id
             LEFT JOIN products p ON p.id = vi.product_id
             LEFT JOIN suppliers sp ON sp.id = p.supplier_id
+            GROUP BY vi.sale_id, fs.total
+        ),
+        items_totals AS (
+            -- Utilidad: venta y costo de LAS MISMAS lineas. Se excluye solo la venta con total en la
+            -- factura pero sin importe en ninguna linea (migradas antes de 2021: el legacy no guardaba
+            -- el importe por linea). Las entregas sin cargo (total 0) si cuentan, con su costo.
+            SELECT
+                COALESCE(SUM(cantidad), 0) as total_items,
+                COALESCE(SUM(venta) FILTER (WHERE NOT falta), 0) as venta_lineas,
+                COALESCE(SUM(iva) FILTER (WHERE NOT falta), 0) as iva_lineas,
+                COALESCE(SUM(costo) FILTER (WHERE NOT falta), 0) as costo_total,
+                COUNT(*) FILTER (WHERE falta) as ventas_sin_importe,
+                COALESCE(SUM(sin_costo), 0) as items_sin_costo,
+                COALESCE(SUM(uc), 0) as paresa_uc
+            FROM (SELECT *, (total_cab <> 0 AND importe_lineas = 0) as falta FROM por_venta) pv
         )
         SELECT
             st.total_ventas,
@@ -94,6 +114,9 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
             it.total_items,
             it.costo_total,
             it.items_sin_costo,
+            it.venta_lineas,
+            it.iva_lineas,
+            it.ventas_sin_importe,
             it.paresa_uc
         FROM sales_totals st
         CROSS JOIN items_totals it
@@ -104,7 +127,7 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
     monto_total = float(result["monto_total"] or 0)
     monto_iva_10 = float(result["monto_iva_10"] or 0)
     monto_iva_5 = float(result["monto_iva_5"] or 0)
-    m = margen_bruto(monto_total, monto_iva_10 + monto_iva_5, float(result["costo_total"] or 0))
+    m = margen_bruto(float(result["venta_lineas"] or 0), float(result["iva_lineas"] or 0), float(result["costo_total"] or 0))
     costo_total, margen_bruto_gs, margen_bruto_pct = m["costo_total"], m["margen_bruto_gs"], m["margen_bruto_pct"]
 
     # meta del mes cargada en Metas PARESA
@@ -128,6 +151,7 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
         "monto_sin_iva": m["monto_sin_iva"],
         "costo_total": costo_total,
         "items_sin_costo": int(result["items_sin_costo"] or 0),
+        "ventas_sin_importe": int(result["ventas_sin_importe"] or 0),
         "paresa_uc": round(float(result["paresa_uc"] or 0)),
         "paresa_meta_uc": float(meta["meta"]) if meta and meta["meta"] else None,
         "margen_bruto_gs": margen_bruto_gs,

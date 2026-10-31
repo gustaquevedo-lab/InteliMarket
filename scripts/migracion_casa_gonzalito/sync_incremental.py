@@ -35,7 +35,7 @@ import os
 import sys
 import time
 import uuid
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import pymysql
@@ -786,6 +786,103 @@ def sync_items_ventas(pg, my):
     log(f"  item_ventas: {n} filas nuevas (ID {last_id} -> {max_id}{', ' + str(saltados) + ' saltadas sin factura' if saltados else ''})")
     set_watermark(pg, "item_ventas", last_id=max_id)
     return max_id
+
+
+def ventas_a_reparar(legacy, im):
+    """legacy / im: {IDFACVENTAS: (lineas, importe, costo, total_factura)}.
+    Devuelve las facturas del legacy que en InteliMarket faltan o no coinciden. Tolerancia de
+    1 Gs. por linea (redondeo de costos con decimales)."""
+    malas = set()
+    for idf, (n, imp, costo, tot) in legacy.items():
+        otro = im.get(idf)
+        tol = max(2, n)
+        if (otro is None or otro[0] != n
+                or any(abs(a - b) > tol for a, b in zip((imp, costo, tot), otro[1:]))):
+            malas.add(idf)
+    return malas
+
+
+def reconciliar_ventas(pg, my, desde, hasta):
+    """Vuelve a traer del legacy las facturas del rango que en InteliMarket no coinciden:
+    lineas que el incremental salteo (llegaron antes que su cabecera) o facturas editadas
+    despues de sincronizadas. Consultas por indices FECHA / IDVENTAS. Guarda antes una copia
+    de las lineas reemplazadas (reversible)."""
+    with my.cursor() as cur:
+        cur.execute("SELECT IDFACVENTAS, MONTO FROM fac_ventas WHERE FECHA BETWEEN %s AND %s",
+                    (desde, hasta))
+        legacy = {idf: (0, 0, 0, money(m)) for idf, m in cur.fetchall()}
+        if not legacy:
+            return 0
+        # por numero de factura (indice IDVENTAS), no por la FECHA de la linea: hay lineas
+        # fechadas un dia despues que su factura
+        cur.execute("SELECT IDVENTAS, COUNT(*), SUM(ROUND(SUBTOTAL)), SUM(CANTIDAD*ROUND(COSTOPROMEDIO)) "
+                    "FROM item_ventas WHERE IDVENTAS BETWEEN %s AND %s GROUP BY IDVENTAS",
+                    (min(legacy), max(legacy)))
+        for idv, n, imp, costo in cur.fetchall():
+            if idv in legacy:
+                legacy[idv] = (n, money(imp), money(costo), legacy[idv][3])
+    with pg.cursor() as cur:
+        cur.execute("""SELECT v.numero, count(vi.id), coalesce(round(sum(vi.total)), 0),
+                              coalesce(round(sum(vi.cantidad * vi.costo_unitario)), 0), round(v.total)
+                       FROM sales v LEFT JOIN sale_items vi ON vi.sale_id = v.id
+                       WHERE v.company_id = %s AND v.tipo_comprobante = 'factura'
+                         AND v.fecha >= %s AND v.fecha < %s::date + 1
+                       GROUP BY v.id, v.numero, v.total""", (COMPANY_ID, desde, hasta))
+        im = {int(num): (n, int(imp), int(costo), int(tot)) for num, n, imp, costo, tot in cur.fetchall()
+              if str(num).isdigit()}
+    malas = sorted(ventas_a_reparar(legacy, im))
+    if not malas:
+        log(f"  reconciliacion ventas {desde}..{hasta}: {len(legacy)} facturas, todas coinciden")
+        return 0
+    if DRY_RUN:
+        log(f"  reconciliacion ventas {desde}..{hasta}: {len(malas)} de {len(legacy)} a reparar [DRY RUN]")
+        return len(malas)
+    respaldo = os.path.expanduser(f"~/casa-gonzalito/reconciliacion/ventas_{datetime.now():%Y%m%d_%H%M%S}.csv")
+    os.makedirs(os.path.dirname(respaldo), exist_ok=True)
+    clientes_validos = {txt_keep(c, 15) for c in legacy_id_set(my, "clientes", "IDCLIENTES")}
+    for i in range(0, len(malas), 500):
+        lote = malas[i:i + 500]
+        marcas = ",".join(["%s"] * len(lote))
+        with my.cursor() as cur:
+            cur.execute("SELECT IDFACVENTAS, IDCLIENTE, NUMFAC, MONTO, FECHA, IDTIPO_VENTA, TIMBRADO, RENDIDO, "
+                        f"IDVENDEDOR FROM fac_ventas WHERE IDFACVENTAS IN ({marcas})", lote)
+            cabeceras = cur.fetchall()
+            cur.execute("SELECT ID, IDVENTAS, IDPRODUCTOS, CANTIDAD, PRECVENTA, SUBTOTAL, COSTOPROMEDIO, "
+                        f"GRAV10, GRAV5, EXENTAS FROM item_ventas WHERE IDVENTAS IN ({marcas})", lote)
+            lineas = cur.fetchall()
+        ventas, items = [], []
+        for (idfac, idcli, numfac, monto, fecha, tipo_venta, timbrado, rendido, idvend) in cabeceras:
+            idc = txt_keep(idcli, 15)
+            cust = uuid.uuid5(NS, f"cli:{idc}") if (idc and idc in clientes_validos) else None
+            total = money(monto)
+            obs = f"NUMFAC={money(numfac)} TIMB={txt_keep(timbrado) or ''}".strip()
+            ventas.append((uuid.uuid5(NS, f"fac:{idfac}"), COMPANY_ID, cust, str(idfac)[:20],
+                           safe_dt(fecha) or datetime.now(), "factura", condicion_venta(tipo_venta),
+                           "PYG", "completado", total, total, total if rendido else 0,
+                           0 if rendido else total, obs[:500], txt_keep(idvend, 10)))
+        for (iid, idv, idprod, cant, precv, subt, costo, g10, g5, ex) in lineas:
+            cod = txt_keep(idprod, 50)
+            pid = uuid.uuid5(NS, f"prod:{cod}") if cod else PLACEHOLDER_PROD_ID
+            tasa = iva_tasa(g10, g5, ex)
+            total = money(subt)
+            items.append((uuid.uuid5(NS, f"item:{iid}"), uuid.uuid5(NS, f"fac:{idv}"), pid, num3(cant),
+                          money(precv), 0, tasa, iva_monto_incluido(total, tasa), total, money(costo)))
+        sale_ids = [r[0] for r in ventas]
+        with pg.cursor() as cur, open(respaldo, "a") as f:
+            cur.execute("SELECT * FROM sale_items WHERE sale_id = ANY(%s)", (sale_ids,))
+            for r in cur.fetchall():
+                f.write("\t".join("" if c is None else str(c) for c in r) + "\n")
+        upsert(pg, "sales", ["id", "company_id", "customer_id", "numero", "fecha", "tipo_comprobante",
+                             "condicion", "moneda", "estado", "subtotal", "total", "total_pagado",
+                             "saldo", "observaciones", "vendedor_codigo"], ventas)
+        upsert(pg, "sale_items", ["id", "sale_id", "product_id", "cantidad", "precio_unitario",
+                                  "descuento_monto", "iva_tasa", "iva_monto", "total", "costo_unitario"], items)
+        with pg.cursor() as cur:
+            cur.execute("DELETE FROM sale_items WHERE sale_id = ANY(%s) AND NOT (id = ANY(%s))",
+                        (sale_ids, [r[0] for r in items]))
+        pg.commit()
+    log(f"  reconciliacion ventas {desde}..{hasta}: {len(malas)} de {len(legacy)} reparadas (respaldo {respaldo})")
+    return len(malas)
 
 
 def sync_notas(pg, my):
@@ -2105,6 +2202,7 @@ def main():
         "pedidos_ruta": lambda: sync_pedidos(pg, my),
         "limite_credito": lambda: sync_limite_credito(pg, my),
         "saldo_credito": lambda: sync_saldo_credito(pg, my),
+        "reconciliar": None,  # a mano, ver mas abajo
     }
     if ONLY and ONLY not in entities:
         log(f"ERROR: entidad desconocida '{ONLY}'. Opciones: {', '.join(entities)}")
@@ -2134,6 +2232,12 @@ def main():
         facturas, _ = sync_ventas(pg, my)
         sale_ids |= facturas
         sync_items_ventas(pg, my)
+        # lineas salteadas o facturas editadas despues de sincronizadas: ultimos 7 dias
+        hoy = date.today()
+        reconciliar_ventas(pg, my, hoy - timedelta(days=7), hoy)
+    if ONLY == "reconciliar":  # a mano: --once=reconciliar --desde=AAAA-MM-DD --hasta=AAAA-MM-DD
+        arg = {a.split("=", 1)[0]: a.split("=", 1)[1] for a in sys.argv if a.startswith("--") and "=" in a}
+        reconciliar_ventas(pg, my, arg["--desde"], arg["--hasta"])
     if not ONLY or ONLY == "notas":
         notas_ids = set()
         max_id = sync_notas(pg, my)
