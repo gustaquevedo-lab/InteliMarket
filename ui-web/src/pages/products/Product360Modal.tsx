@@ -1045,9 +1045,31 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
             <div className="space-y-6">
               {/* Comparador de Precios y Márgenes Ponderados */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
-                  <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Precio Unitario de Lista</span>
-                  <p className="text-2xl font-black font-mono text-indigo-700 dark:text-indigo-300">{formatPYG(m.precio_venta)}</p>
+                <div className={`p-4 rounded-2xl border transition-all ${
+                  hasPromo || (m.precio_regular && m.precio_regular > m.precio_venta)
+                    ? "bg-gradient-to-br from-rose-50/80 via-amber-50/60 to-rose-50/40 dark:from-rose-950/40 dark:via-amber-950/30 dark:to-slate-900 border-2 border-rose-400 dark:border-rose-600 shadow-md shadow-rose-500/10"
+                    : "bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800"
+                }`}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                      {hasPromo || (m.precio_regular && m.precio_regular > m.precio_venta) ? "🔥 PVP Promocional Oferta" : "Precio Unitario de Lista"}
+                    </span>
+                    {(hasPromo || (m.precio_regular && m.precio_regular > m.precio_venta)) && (
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-rose-600 text-white animate-pulse">
+                        EN PROMO
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <p className={`text-2xl font-black font-mono ${hasPromo || (m.precio_regular && m.precio_regular > m.precio_venta) ? "text-rose-600 dark:text-rose-400" : "text-indigo-700 dark:text-indigo-300"}`}>
+                      {formatPYG(m.precio_venta)}
+                    </p>
+                    {m.precio_regular && m.precio_regular > m.precio_venta && (
+                      <span className="line-through text-xs font-bold text-slate-400">
+                        {formatPYG(m.precio_regular)}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] text-slate-500 mt-1">Margen teórico: <strong>{margenPond.margen_lista_nominal_pct}%</strong></p>
                 </div>
 

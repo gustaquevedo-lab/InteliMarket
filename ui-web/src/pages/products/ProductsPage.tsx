@@ -619,27 +619,35 @@ export default function ProductsPage() {
 
       for (const pid of Array.from(new Set(pids))) {
         const prod = products.find(p => p.id === pid)
-        const precioRegular = prod ? Number(prod.precio_venta || 0) : 0
+        const pv = prod ? Number(prod.precio_venta || 0) : 0
+        const pr = prod && (prod as any).precio_regular ? Number((prod as any).precio_regular) : 0
 
         let precioPromo: number | null = null
         if (promo.precios_por_producto && promo.precios_por_producto[pid] != null) {
           precioPromo = Math.round(Number(promo.precios_por_producto[pid]))
         } else if (promo.precio_fijo_promocional != null && Number(promo.precio_fijo_promocional) > 0) {
           precioPromo = Math.round(Number(promo.precio_fijo_promocional))
-        } else if (precioRegular > 0) {
-          if (promo.tipo === "porcentaje" && promo.valor) {
-            precioPromo = Math.round(precioRegular * (1 - Number(promo.valor) / 100))
-          } else if (promo.tipo === "monto_fijo" && promo.valor) {
-            precioPromo = Math.max(0, Math.round(precioRegular - Number(promo.valor)))
-          } else if (promo.tipo === "dos_por_uno") {
-            precioPromo = Math.round(precioRegular / 2)
-          } else if (promo.tipo === "tres_por_dos") {
-            precioPromo = Math.round((precioRegular * 2) / 3)
+        } else {
+          const baseCalc = pr > 0 ? pr : pv
+          if (baseCalc > 0) {
+            if (promo.tipo === "porcentaje" && promo.valor) {
+              precioPromo = Math.round(baseCalc * (1 - Number(promo.valor) / 100))
+            } else if (promo.tipo === "monto_fijo" && promo.valor) {
+              precioPromo = Math.max(0, Math.round(baseCalc - Number(promo.valor)))
+            } else if (promo.tipo === "dos_por_uno") {
+              precioPromo = Math.round(baseCalc / 2)
+            } else if (promo.tipo === "tres_por_dos") {
+              precioPromo = Math.round((baseCalc * 2) / 3)
+            }
           }
         }
 
-        if (precioPromo != null && precioPromo > 0 && (precioRegular === 0 || precioPromo < precioRegular)) {
-          const descPct = precioRegular > 0 ? Math.round(((precioRegular - precioPromo) / precioRegular) * 100) : 0
+        // Determinar precio regular base para mostrar tachado
+        const precioRegularFinal = pr > 0 ? pr : (precioPromo != null && precioPromo < pv ? pv : (pv > 0 ? pv : (precioPromo || 0)))
+
+        // Es una promo activa válida para este producto si está explícitamente en el mapa de precios o si precioPromo < base
+        if (precioPromo != null && precioPromo > 0) {
+          const descPct = precioRegularFinal > precioPromo ? Math.round(((precioRegularFinal - precioPromo) / precioRegularFinal) * 100) : (promo.valor ? Math.round(Number(promo.valor)) : 0)
           const existing = map.get(pid)
           if (!existing || precioPromo < existing.precioPromo) {
             map.set(pid, {
@@ -647,7 +655,7 @@ export default function ProductsPage() {
               nombre: promo.nombre,
               tipo: promo.tipo,
               precioPromo,
-              precioRegular,
+              precioRegular: precioRegularFinal,
               descuentoPct: descPct,
               badge: badgeText,
             })
@@ -660,18 +668,21 @@ export default function ProductsPage() {
         const catSet = new Set(promo.categoria_ids.map(c => String(c)))
         for (const prod of products) {
           if (prod.categoria_id && catSet.has(String(prod.categoria_id))) {
-            const precioRegular = Number(prod.precio_venta || 0)
-            if (precioRegular <= 0) continue
+            const pv = Number(prod.precio_venta || 0)
+            const pr = (prod as any).precio_regular ? Number((prod as any).precio_regular) : 0
+            const baseCalc = pr > 0 ? pr : pv
+            if (baseCalc <= 0) continue
 
             let precioPromo: number | null = null
             if (promo.tipo === "porcentaje" && promo.valor) {
-              precioPromo = Math.round(precioRegular * (1 - Number(promo.valor) / 100))
+              precioPromo = Math.round(baseCalc * (1 - Number(promo.valor) / 100))
             } else if (promo.tipo === "monto_fijo" && promo.valor) {
-              precioPromo = Math.max(0, Math.round(precioRegular - Number(promo.valor)))
+              precioPromo = Math.max(0, Math.round(baseCalc - Number(promo.valor)))
             }
 
-            if (precioPromo != null && precioPromo > 0 && precioPromo < precioRegular) {
-              const descPct = Math.round(((precioRegular - precioPromo) / precioRegular) * 100)
+            if (precioPromo != null && precioPromo > 0) {
+              const precioRegularFinal = pr > 0 ? pr : pv
+              const descPct = precioRegularFinal > precioPromo ? Math.round(((precioRegularFinal - precioPromo) / precioRegularFinal) * 100) : (promo.valor ? Math.round(Number(promo.valor)) : 0)
               const existing = map.get(prod.id)
               if (!existing || precioPromo < existing.precioPromo) {
                 map.set(prod.id, {
@@ -679,7 +690,7 @@ export default function ProductsPage() {
                   nombre: promo.nombre,
                   tipo: promo.tipo,
                   precioPromo,
-                  precioRegular,
+                  precioRegular: precioRegularFinal,
                   descuentoPct: descPct,
                   badge: badgeText,
                 })
@@ -687,6 +698,32 @@ export default function ProductsPage() {
             }
           }
         }
+      }
+    }
+
+    // 3. Complementar con productos con en_promocion=true o precio_regular > precio_venta (convención canónica del ERP)
+    for (const prod of products) {
+      if (map.has(prod.id)) continue
+      const pr = Number(prod.precio_regular || (prod as any).precio_regular) || 0
+      const pv = Number(prod.precio_venta) || 0
+      const pp = Number((prod as any).precio_promo) || 0
+      const isPromoBackend = Boolean((prod as any).en_promocion) || (pr > 0 && pv > 0 && pr > pv)
+
+      if (isPromoBackend) {
+        const precioRegularFinal = pr > 0 ? pr : (pv > pp && pp > 0 ? pv : 0)
+        const precioPromoFinal = pp > 0 ? pp : (pv > 0 ? pv : 0)
+        const descPct = precioRegularFinal > precioPromoFinal && precioRegularFinal > 0
+          ? Math.round(((precioRegularFinal - precioPromoFinal) / precioRegularFinal) * 100)
+          : 0
+        map.set(prod.id, {
+          promoId: (prod as any).promocion_id || "promo_vigente",
+          nombre: (prod as any).promocion_nombre || "Promoción Vigente",
+          tipo: "oferta",
+          precioPromo: precioPromoFinal,
+          precioRegular: precioRegularFinal,
+          descuentoPct: descPct,
+          badge: descPct > 0 ? `-${descPct}%` : "OFERTA",
+        })
       }
     }
 
@@ -1705,13 +1742,13 @@ export default function ProductsPage() {
                           key={p.id}
                           className={`transition-colors duration-150 border-b border-slate-100 dark:border-slate-800/60 ${
                             promoInfo
-                              ? "bg-rose-50/40 dark:bg-rose-950/25 border-l-4 border-l-rose-500 shadow-sm"
+                              ? "bg-gradient-to-r from-amber-50/80 via-rose-50/50 to-transparent dark:from-amber-950/30 dark:via-rose-950/20 dark:to-transparent border-l-4 border-l-rose-500 shadow-sm"
                               : p.activo === false
                               ? "bg-rose-50/20 dark:bg-rose-950/10 opacity-75"
                               : isEven
                               ? "bg-white dark:bg-slate-900"
                               : "bg-slate-50/70 dark:bg-slate-800/40"
-                          } hover:!bg-rose-100/40 dark:hover:!bg-rose-950/30 cursor-pointer group`}
+                          } hover:!bg-rose-100/50 dark:hover:!bg-rose-950/40 cursor-pointer group`}
                           onClick={() => openProduct360(p.id)}
                         >
                           {/* Producto & SKU */}
@@ -1719,11 +1756,11 @@ export default function ProductsPage() {
                             <div className="flex items-center gap-2">
                               <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 transition-colors ${
                                 promoInfo
-                                  ? "bg-rose-100 dark:bg-rose-950/60 text-rose-600 ring-2 ring-rose-400/50"
+                                  ? "bg-gradient-to-br from-amber-400 to-rose-600 text-white shadow-sm ring-2 ring-rose-400/50"
                                   : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-950/50 group-hover:text-indigo-600"
                               }`}>
                                 {promoInfo ? (
-                                  <Flame className="w-4 h-4 text-rose-600 fill-rose-500 animate-bounce" />
+                                  <Flame className="w-4 h-4 text-white fill-amber-200 animate-bounce" />
                                 ) : esPesable ? (
                                   <Scale className="w-3.5 h-3.5 text-amber-500" />
                                 ) : (
@@ -1886,19 +1923,33 @@ export default function ProductsPage() {
                           <td className="py-2 px-1.5 text-right font-mono whitespace-nowrap">
                             {promoInfo ? (
                               <div className="flex flex-col items-end leading-tight">
-                                <span className="line-through text-[10px] text-slate-400 font-semibold" title="Precio Regular">
-                                  {formatPYG(precio > 0 ? precio : promoInfo.precioRegular)}
-                                </span>
-                                <span
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md font-black text-xs bg-rose-600 text-white shadow-md shadow-rose-500/40 animate-pulse ring-1 ring-rose-300"
-                                  title={`Precio Oferta: ${promoInfo.nombre}`}
-                                >
-                                  <Flame className="w-3 h-3 text-amber-300 fill-amber-300" />
-                                  {formatPYG(promoInfo.precioPromo)}
-                                </span>
+                                {promoInfo.precioRegular > promoInfo.precioPromo ? (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[9px] text-slate-400 uppercase font-semibold">Antes:</span>
+                                    <span className="line-through text-[10.5px] text-slate-400 dark:text-slate-500 font-bold decoration-rose-500 decoration-1" title="Precio Regular Anterior">
+                                      {formatPYG(promoInfo.precioRegular)}
+                                    </span>
+                                  </div>
+                                ) : precio > promoInfo.precioPromo ? (
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[9px] text-slate-400 uppercase font-semibold">Antes:</span>
+                                    <span className="line-through text-[10.5px] text-slate-400 dark:text-slate-500 font-bold decoration-rose-500 decoration-1" title="Precio Regular Anterior">
+                                      {formatPYG(precio)}
+                                    </span>
+                                  </div>
+                                ) : null}
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  <span
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-black text-xs bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 text-white shadow-md shadow-rose-500/30 ring-1 ring-rose-300/80 tracking-wide"
+                                    title={`Precio Oferta Vigente: ${promoInfo.nombre}`}
+                                  >
+                                    <Flame className="w-3 h-3 text-amber-300 fill-amber-300 animate-pulse" />
+                                    <span>{formatPYG(promoInfo.precioPromo)}</span>
+                                  </span>
+                                </div>
                                 {promoInfo.descuentoPct > 0 && (
-                                  <span className="text-[8px] font-extrabold text-rose-600 dark:text-rose-400">
-                                    -{promoInfo.descuentoPct}% OFF
+                                  <span className="text-[9px] font-black text-rose-600 dark:text-rose-400 tracking-tight mt-0.5">
+                                    AHORRO -{promoInfo.descuentoPct}%
                                   </span>
                                 )}
                               </div>
