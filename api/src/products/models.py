@@ -37,6 +37,10 @@ class Representative(Base):
     products = relationship("Product", back_populates="representative")
     suppliers = relationship("Supplier", secondary="supplier_representatives", back_populates="representatives")
 
+    @property
+    def supplier_ids(self) -> list:
+        return [s.id for s in self.suppliers] if self.suppliers else []
+
 
 class SupplierRepresentative(Base):
     __tablename__ = "supplier_representatives"
@@ -53,7 +57,7 @@ class ProductBrand(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     nombre = Column(String(120), nullable=False)
-    representative_id = Column(UUID(as_uuid=True), ForeignKey("representatives.id", ondelete="SET NULL"), nullable=True)
+    representative_id = Column(UUID(as_uuid=True), ForeignKey("representatives.id", ondelete="SET NULL"), nullable=True, index=True)
     activo = Column(Boolean, default=True, server_default=text("true"))
 
     representative = relationship("Representative", back_populates="brands")
@@ -66,7 +70,7 @@ class ProductCategory(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     company_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     parent_id = Column(UUID(as_uuid=True), ForeignKey("product_categories.id"))
-    section_id = Column(UUID(as_uuid=True), ForeignKey("product_sections.id", ondelete="SET NULL"), nullable=True)
+    section_id = Column(UUID(as_uuid=True), ForeignKey("product_sections.id", ondelete="SET NULL"), nullable=True, index=True)
     nombre = Column(String(100), nullable=False)
     codigo = Column(String(20), unique=True)
     activo = Column(Boolean, default=True)
@@ -118,6 +122,10 @@ class Product(Base):
     supplier = relationship("Supplier", foreign_keys=[supplier_id], lazy="select")
     representative = relationship("Representative", back_populates="products")
     brand = relationship("ProductBrand", back_populates="products")
+
+    @property
+    def section_id(self):
+        return self.categoria.section_id if self.categoria else None
 
     @property
     def brand_nombre(self) -> str | None:
