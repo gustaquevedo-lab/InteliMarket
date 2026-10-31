@@ -260,6 +260,8 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
     iva_10 = Decimal("0")
     iva_5 = Decimal("0")
     total_gral = Decimal("0")
+    total_cant_kg = Decimal("0")
+    total_cant_un = Decimal("0")
 
     for idx, it in enumerate(items, 1):
         cant = Decimal(str(it.get("cantidad") or 0))
@@ -267,6 +269,12 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
         tasa = int(it.get("iva_tasa") or 10)
         sub = cant * precio
         total_gral += sub
+
+        um = str(it.get("unidad_medida") or (it.get("producto") or {}).get("unidad_medida") or "").strip().upper()
+        if um in ("KG", "KGS", "KILOGRAMO", "KILOGRAMOS"):
+            total_cant_kg += cant
+        else:
+            total_cant_un += cant
 
         if tasa == 10:
             subtotal_10 += sub
@@ -281,7 +289,6 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
         sku_code = it.get("sku") or (it.get("producto") or {}).get("sku") or "—"
         barcode = it.get("codigo_barra") or (it.get("producto") or {}).get("codigo_barra") or "—"
 
-        um = str(it.get("unidad_medida") or (it.get("producto") or {}).get("unidad_medida") or "").strip().upper()
         if cant % 1 == 0:
             cant_str = f"{int(cant):,}".replace(",", ".")
         else:
@@ -299,6 +306,30 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
             _cell(f"{tasa}%"),
             _num(_fmt_gs(sub), bold=True),
         ])
+
+    # Fila de Totales en OC
+    cant_tot_parts = []
+    if total_cant_kg > Decimal("0"):
+        kg_str = f"{total_cant_kg:,.3f}".rstrip("0").rstrip(".").replace(",", "X").replace(".", ",").replace("X", ".")
+        cant_tot_parts.append(f"{kg_str} KG")
+    if total_cant_un > Decimal("0") or not cant_tot_parts:
+        if total_cant_un % 1 == 0:
+            un_str = f"{int(total_cant_un):,}".replace(",", ".")
+        else:
+            un_str = f"{total_cant_un:,.2f}".rstrip("0").rstrip(".").replace(",", "X").replace(".", ",").replace("X", ".")
+        cant_tot_parts.append(f"{un_str} un.")
+    tot_cant_display = " / ".join(cant_tot_parts)
+
+    data.append([
+        _cell("TOTAL", bold=True),
+        _cell(""),
+        _cell(""),
+        _cell(f"{len(items)} Renglones", bold=True),
+        _num(tot_cant_display, bold=True),
+        _cell(""),
+        _cell(""),
+        _num(_fmt_gs(total_gral), bold=True),
+    ])
 
     items_table = Table(data, colWidths=[9 * mm, 21 * mm, 26 * mm, 51 * mm, 16 * mm, 26 * mm, 11 * mm, 26 * mm], repeatRows=1)
     items_table.setStyle(_table_style(3))
@@ -562,6 +593,8 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
     data_rows = [head_row]
 
     total_unidades = Decimal("0")
+    total_cant_kg = Decimal("0")
+    total_cant_un = Decimal("0")
     total_costo_factura = Decimal("0")
     subtotal_10 = Decimal("0")
     subtotal_5 = Decimal("0")
@@ -581,6 +614,11 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
 
         sub = cant * costo_fact
         total_unidades += cant
+        um = str(it.get("unidad_medida") or "").strip().upper()
+        if um in ("KG", "KGS", "KILOGRAMO", "KILOGRAMOS"):
+            total_cant_kg += cant
+        else:
+            total_cant_un += cant
         total_costo_factura += sub
 
         tasa = int(it.get("iva_tasa") or 10)
@@ -650,17 +688,24 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
         ])
 
     # Fila de Totales
-    if total_unidades % 1 == 0:
-        tot_cant_str = f"{int(total_unidades):,}".replace(",", ".")
-    else:
-        tot_cant_str = f"{total_unidades:.2f}".replace(".", ",")
+    cant_tot_parts = []
+    if total_cant_kg > Decimal("0"):
+        kg_str = f"{total_cant_kg:,.3f}".rstrip("0").rstrip(".").replace(",", "X").replace(".", ",").replace("X", ".")
+        cant_tot_parts.append(f"{kg_str} KG")
+    if total_cant_un > Decimal("0") or not cant_tot_parts:
+        if total_cant_un % 1 == 0:
+            un_str = f"{int(total_cant_un):,}".replace(",", ".")
+        else:
+            un_str = f"{total_cant_un:,.2f}".rstrip("0").rstrip(".").replace(",", "X").replace(".", ",").replace("X", ".")
+        cant_tot_parts.append(f"{un_str} un.")
+    tot_cant_str = " / ".join(cant_tot_parts)
 
     data_rows.append([
         Paragraph("TOTAL", c_head),
         Paragraph("", c_head),
         Paragraph("", c_head),
         Paragraph(f"{len(items)} Renglones Recibidos", c_head),
-        Paragraph(f"{tot_cant_str} un.", c_head_right),
+        Paragraph(tot_cant_str, c_head_right),
         Paragraph(_fmt_gs(total_costo_factura), c_head_right),
         Paragraph("", c_head),
         Paragraph("", c_head),
