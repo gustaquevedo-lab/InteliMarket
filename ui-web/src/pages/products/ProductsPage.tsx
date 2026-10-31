@@ -376,9 +376,9 @@ export default function ProductsPage() {
         api.categories.list(),
         api.purchases.suppliers(),
         api.promotions.list({ estado: "activa" }).catch(() => []),
-        api.representatives.list().catch(() => []),
-        api.sections.list().catch(() => []),
-        api.brands.list().catch(() => []),
+        api.representatives.list(),
+        api.sections.list(),
+        api.brands.list(),
       ])
 
       if (promosRes.status === "fulfilled" && Array.isArray(promosRes.value)) {
@@ -780,11 +780,11 @@ export default function ProductsPage() {
         codigo_barra: form.codigo_barra?.trim() || undefined,
         descripcion: form.descripcion?.trim() || null,
         categoria_id: form.categoria_id && form.categoria_id.trim() !== "" ? form.categoria_id : null,
-        supplier_id: form.supplier_id && form.supplier_id.trim() !== "" ? form.supplier_id : undefined,
-        representative_id: form.representative_id && form.representative_id.trim() !== "" ? form.representative_id : undefined,
-        brand_id: form.brand_id && form.brand_id.trim() !== "" ? form.brand_id : undefined,
-        tipo_variante: form.tipo_variante?.trim() || undefined,
-        section_id: form.section_id && form.section_id.trim() !== "" ? form.section_id : undefined,
+        supplier_id: form.supplier_id && form.supplier_id.trim() !== "" ? form.supplier_id : null,
+        representative_id: form.representative_id && form.representative_id.trim() !== "" ? form.representative_id : null,
+        brand_id: form.brand_id && form.brand_id.trim() !== "" ? form.brand_id : null,
+        tipo_variante: form.tipo_variante?.trim() || null,
+        section_id: form.section_id && form.section_id.trim() !== "" ? form.section_id : null,
         tipo: form.tipo || "producto",
         tipo_producto: form.tipo_producto || "producto",
         activo: form.activo !== false,
@@ -3265,6 +3265,10 @@ export default function ProductsPage() {
                             autoFocus
                             value={quickAddName}
                             onChange={(e) => setQuickAddName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { e.preventDefault(); handleInlineQuickCreate() }
+                              if (e.key === "Escape") setQuickAddType(null)
+                            }}
                             placeholder="Nombre (ej. Juan Pérez - Distribuidora)..."
                             className="input-field w-full text-xs py-1 font-semibold"
                           />
@@ -3273,6 +3277,10 @@ export default function ProductsPage() {
                               type="text"
                               value={quickAddPhone}
                               onChange={(e) => setQuickAddPhone(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); handleInlineQuickCreate() }
+                                if (e.key === "Escape") setQuickAddType(null)
+                              }}
                               placeholder="Teléfono / Celular (opcional)"
                               className="input-field text-xs py-1"
                             />
@@ -3280,6 +3288,10 @@ export default function ProductsPage() {
                               type="text"
                               value={quickAddContact}
                               onChange={(e) => setQuickAddContact(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); handleInlineQuickCreate() }
+                                if (e.key === "Escape") setQuickAddType(null)
+                              }}
                               placeholder="Contacto / Email (opcional)"
                               className="input-field text-xs py-1"
                             />
