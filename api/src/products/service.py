@@ -1004,6 +1004,7 @@ def _build_products_where_clause(
     tipo_producto: Optional[str] = None,
     include_inactive: bool = False,
     updated_since: Optional[datetime] = None,
+    solo_promociones: bool = False,
 ) -> list:
     conds = []
 
@@ -1114,6 +1115,37 @@ def _build_products_where_clause(
     if updated_since is not None:
         conds.append(Product.updated_at >= updated_since)
 
+    if solo_promociones:
+        promo_subquery = (
+            select(text("pid"))
+            .select_from(
+                text("""
+                    (
+                        SELECT unnest(producto_ids)::uuid as pid
+                        FROM promotions
+                        WHERE company_id = :c_uuid AND estado = 'activa'
+                          AND (valido_desde IS NULL OR valido_desde::date <= CURRENT_DATE)
+                          AND (valido_hasta IS NULL OR valido_hasta::date >= CURRENT_DATE)
+                          AND producto_ids IS NOT NULL
+                        UNION
+                        SELECT jsonb_object_keys(precios_por_producto)::uuid as pid
+                        FROM promotions
+                        WHERE company_id = :c_uuid AND estado = 'activa'
+                          AND (valido_desde IS NULL OR valido_desde::date <= CURRENT_DATE)
+                          AND (valido_hasta IS NULL OR valido_hasta::date >= CURRENT_DATE)
+                          AND precios_por_producto IS NOT NULL
+                    ) pids_sub
+                """)
+            )
+            .params(c_uuid=c_uuid)
+        )
+        conds.append(
+            or_(
+                Product.id.in_(promo_subquery),
+                and_(Product.precio_regular.isnot(None), Product.precio_regular > Product.precio_venta),
+            )
+        )
+
     return conds
 
 
@@ -1129,6 +1161,7 @@ async def list_products(
     tipo_producto: Optional[str] = None,
     include_inactive: bool = False,
     updated_since: Optional[datetime] = None,
+    solo_promociones: bool = False,
 ) -> list[Product]:
     try:
         c_uuid = UUID(company_id)
@@ -1144,6 +1177,7 @@ async def list_products(
         tipo_producto=tipo_producto,
         include_inactive=include_inactive,
         updated_since=updated_since,
+        solo_promociones=solo_promociones,
     )
 
     query = (
@@ -1185,6 +1219,7 @@ async def list_products_paginated(
     tipo_producto: Optional[str] = None,
     include_inactive: bool = False,
     updated_since: Optional[datetime] = None,
+    solo_promociones: bool = False,
 ) -> dict:
     try:
         c_uuid = UUID(company_id)
@@ -1200,6 +1235,7 @@ async def list_products_paginated(
         tipo_producto=tipo_producto,
         include_inactive=include_inactive,
         updated_since=updated_since,
+        solo_promociones=solo_promociones,
     )
 
     # 1. Total matching count

@@ -135,7 +135,7 @@ export default function ProductsPage() {
   const [filterStockTag, setFilterStockTag] = useState<"todos" | "con_stock" | "quiebre" | "bajo_stock" | "pesables" | "perecederos" | "en_promo">("todos")
   const [filterTipoProducto, setFilterTipoProducto] = useState<"todos" | "producto" | "materia_prima" | "insumo" | "servicio">("todos")
   const [filterEstado, setFilterEstado] = useState<"todos" | "activos" | "inactivos">("activos")
-  const [sortBy, setSortBy] = useState<"nombre" | "precio_desc" | "precio_asc" | "margen_desc">("nombre")
+  const [sortBy, setSortBy] = useState<"nombre" | "precio_desc" | "precio_asc" | "margen_desc" | "promo_primero">("nombre")
   
   // Paginación Catálogo Server-Side
   const [page, setPage] = useState(1)
@@ -370,6 +370,7 @@ export default function ProductsPage() {
           tipo_producto: filterTipoProducto !== "todos" ? filterTipoProducto : undefined,
           activo: isActivoOnly ? true : isInactivoOnly ? false : undefined,
           include_inactive: !isActivoOnly,
+          solo_promociones: filterStockTag === "en_promo" ? true : undefined,
           limit: pageSize,
           offset: (page - 1) * pageSize,
         }),
@@ -429,7 +430,7 @@ export default function ProductsPage() {
     } finally {
       setLoading(false)
     }
-  }, [debouncedSearch, selectedCategory, filterTipoProducto, filterEstado, page, pageSize, selectedParentProductId])
+  }, [debouncedSearch, selectedCategory, filterTipoProducto, filterEstado, filterStockTag, page, pageSize, selectedParentProductId])
 
   const filteredCategories = useMemo(() => {
     if (!form.section_id) return categories
@@ -736,7 +737,8 @@ export default function ProductsPage() {
 
     // Filtro por Tags de Estado de Stock
     if (filterStockTag === "en_promo") {
-      list = list.filter(p => activePromosMap.has(p.id))
+      // Los productos ya vienen filtrados exclusivamente por el servidor (solo_promociones=true)
+      list = list.filter(p => activePromosMap.has(p.id) || Boolean(p.precio_regular && p.precio_venta && p.precio_regular > p.precio_venta) || Boolean((p as any).en_promocion))
     } else if (filterStockTag === "con_stock") {
       list = list.filter(p => (Number((p as any).stock_actual) || 0) > 0)
     } else if (filterStockTag === "quiebre") {
@@ -767,6 +769,12 @@ export default function ProductsPage() {
 
     // Ordenación
     list.sort((a, b) => {
+      if (sortBy === "promo_primero") {
+        const aPromo = activePromosMap.has(a.id) ? 1 : 0
+        const bPromo = activePromosMap.has(b.id) ? 1 : 0
+        if (aPromo !== bPromo) return bPromo - aPromo
+        return (a.nombre || "").localeCompare(b.nombre || "")
+      }
       if (sortBy === "nombre") return (a.nombre || "").localeCompare(b.nombre || "")
       if (sortBy === "precio_desc") return Number(b.precio_venta || 0) - Number(a.precio_venta || 0)
       if (sortBy === "precio_asc") return Number(a.precio_venta || 0) - Number(b.precio_venta || 0)
@@ -1539,6 +1547,7 @@ export default function ProductsPage() {
                   className="input-field w-full text-xs font-semibold py-2.5"
                 >
                   <option value="nombre">Ordenar: Nombre (A-Z)</option>
+                  <option value="promo_primero">🔥 En Promoción Primero</option>
                   <option value="precio_desc">Mayor Precio Venta</option>
                   <option value="precio_asc">Menor Precio Venta</option>
                   <option value="margen_desc">Mayor Margen %</option>
