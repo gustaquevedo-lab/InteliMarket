@@ -60,6 +60,10 @@ class RepresentativeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SupplierRepresentativesPayload(BaseModel):
+    representative_ids: list[UUID] = Field(default_factory=list)
+
+
 class ProductBrandCreate(BaseModel):
     company_id: Optional[UUID] = None
     nombre: str = Field(min_length=1, max_length=120)

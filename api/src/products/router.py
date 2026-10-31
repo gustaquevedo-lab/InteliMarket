@@ -15,6 +15,7 @@ from api.src.products.schemas import (
     ProductCreate, ProductUpdate, ProductResponse, PaginatedProductResponse,
     CategoryCreate, CategoryResponse,
     RepresentativeCreate, RepresentativeUpdate, RepresentativeResponse,
+    SupplierRepresentativesPayload,
     ProductSectionCreate, ProductSectionUpdate, ProductSectionResponse,
     ProductBrandCreate, ProductBrandUpdate, ProductBrandResponse,
 )
@@ -117,14 +118,14 @@ async def get_supplier_representatives(
 @router.put("/suppliers/{supplier_id}/representatives", response_model=list[RepresentativeResponse])
 async def assign_supplier_representatives(
     supplier_id: uuid.UUID,
-    body: Union[list[uuid.UUID], dict],
+    body: Union[list[uuid.UUID], SupplierRepresentativesPayload],
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
     if isinstance(body, list):
-        rep_ids = [uuid.UUID(str(x)) for x in body]
-    elif isinstance(body, dict):
-        rep_ids = [uuid.UUID(str(x)) for x in body.get("representative_ids", [])]
+        rep_ids = body
+    elif isinstance(body, SupplierRepresentativesPayload):
+        rep_ids = body.representative_ids
     else:
         rep_ids = []
     return await service.assign_supplier_representatives(db, supplier_id=supplier_id, representative_ids=rep_ids)

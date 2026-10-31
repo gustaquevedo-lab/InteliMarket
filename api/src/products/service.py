@@ -132,7 +132,7 @@ async def create_representative(
     await db.flush()
 
     if data.supplier_ids:
-        for s_id in data.supplier_ids:
+        for s_id in dict.fromkeys(data.supplier_ids):
             db.add(SupplierRepresentative(supplier_id=_ensure_uuid(s_id), representative_id=rep.id))
         await db.flush()
 
@@ -174,7 +174,7 @@ async def update_representative(
         await db.execute(
             delete(SupplierRepresentative).where(SupplierRepresentative.representative_id == rid)
         )
-        for s_id in data.supplier_ids:
+        for s_id in dict.fromkeys(data.supplier_ids):
             db.add(SupplierRepresentative(supplier_id=_ensure_uuid(s_id), representative_id=rid))
 
     await db.flush()
@@ -217,7 +217,7 @@ async def assign_supplier_representatives(
     await db.execute(
         delete(SupplierRepresentative).where(SupplierRepresentative.supplier_id == sid)
     )
-    for rep_id in representative_ids:
+    for rep_id in dict.fromkeys(representative_ids):
         db.add(SupplierRepresentative(supplier_id=sid, representative_id=_ensure_uuid(rep_id)))
     await db.flush()
     return await get_supplier_representatives(db, sid)
