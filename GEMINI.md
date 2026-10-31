@@ -107,3 +107,9 @@
      3. `ExpenseDisbursement` (desembolso hijo con `medio_pago='fondo_fijo'` y `petty_cash_fund_id`).
    - **Blindaje de Rendición y Arqueo:** Ningún egreso por fondo fijo debe quedar huérfano de custodio, fondo o clasificador, garantizando que el expediente de rendición de cuentas siempre estire el 100% de los egresos generados.
 
+17. **INMUTABILIDAD DE VENTAS LEGACY Y REGLA DE CALIBRACIÓN DE PESABLES (ANTI-DOBLE DESCUENTO HISTÓRICO):**
+   - **Aislamiento Estricto de Truncamiento Decimal:** Todo cálculo de desfase de stock por redondeo o truncamiento decimal `int()` en ventas de balanza/pesables aplica EXCLUSIVAMENTE a comprobantes tipo `ticket` emitidos en el POS de InteliMarket (`s.tipo_comprobante = 'ticket'`).
+   - **Prohibición de Sumar Ventas Legacy a Calibraciones de Stock:** Queda TERMINANTEMENTE PROHIBIDO computar ventas históricas importadas de sistemas anteriores (tipo `factura`, `salida_venta_legacy` o saldos de migración 2025/2026) como 'déficit no descontado'. Esas ventas ya están consolidadas en el stock de apertura.
+   - **Validación Multivariante y Anti-Sesgo de Muestra:** Toda auditoría o ajuste masivo de Kardex debe validarse tanto en productos nuevos (sin historial legacy) como en productos tradicionales de alta rotación (verdulería, carnicería, panadería) antes de aplicar cambios transaccionales.
+
+
