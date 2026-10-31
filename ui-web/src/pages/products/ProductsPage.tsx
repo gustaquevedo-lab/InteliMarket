@@ -14,6 +14,9 @@ import {
   COMPANY_ID,
   type Product,
   type Category,
+  type Representative,
+  type ProductSection,
+  type ProductBrand,
   type ProductVariant,
   type PackBarcode,
   type Supplier,
@@ -153,6 +156,17 @@ export default function ProductsPage() {
   const [costoUnlocked, setCostoUnlocked] = useState(false)
   const [formTab, setFormTab] = useState<"general" | "empaque" | "precios" | "inventario">("general")
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [representatives, setRepresentatives] = useState<Representative[]>([])
+  const [sections, setSections] = useState<ProductSection[]>([])
+  const [brands, setBrands] = useState<ProductBrand[]>([])
+
+  type QuickAddType = "section" | "category" | "representative" | "brand" | null
+  const [quickAddType, setQuickAddType] = useState<QuickAddType>(null)
+  const [quickAddName, setQuickAddName] = useState("")
+  const [quickAddContact, setQuickAddContact] = useState("")
+  const [quickAddPhone, setQuickAddPhone] = useState("")
+  const [quickAddSaving, setQuickAddSaving] = useState(false)
+
   interface LocalProductTier {
     id?: string
     min_qty: number
@@ -170,6 +184,10 @@ export default function ProductsPage() {
     codigo_barra: "",
     categoria_id: "",
     supplier_id: "",
+    representative_id: "",
+    brand_id: "",
+    tipo_variante: "",
+    section_id: "",
     tipo: "producto",
     tipo_producto: "producto" as "producto" | "materia_prima" | "insumo" | "servicio",
     activo: true,
@@ -323,12 +341,29 @@ export default function ProductsPage() {
     }
   }, [])
 
+  const reloadTaxonomy = useCallback(async () => {
+    try {
+      const [repsRes, sectsRes, brandsRes, catsRes] = await Promise.allSettled([
+        api.representatives.list(),
+        api.sections.list(),
+        api.brands.list(),
+        api.categories.list(),
+      ])
+      if (repsRes.status === "fulfilled" && Array.isArray(repsRes.value)) setRepresentatives(repsRes.value)
+      if (sectsRes.status === "fulfilled" && Array.isArray(sectsRes.value)) setSections(sectsRes.value)
+      if (brandsRes.status === "fulfilled" && Array.isArray(brandsRes.value)) setBrands(brandsRes.value)
+      if (catsRes.status === "fulfilled" && Array.isArray(catsRes.value)) setCategories(catsRes.value)
+    } catch (e) {
+      console.warn("Error recargando taxonomía:", e)
+    }
+  }, [])
+
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
       const isActivoOnly = filterEstado === "activos"
       const isInactivoOnly = filterEstado === "inactivos"
-      const [prodsRes, catsRes, suppsRes, promosRes] = await Promise.allSettled([
+      const [prodsRes, catsRes, suppsRes, promosRes, repsRes, sectsRes, brandsRes] = await Promise.allSettled([
         api.products.listPaginated({
           search: debouncedSearch || undefined,
           categoria_id: selectedCategory || undefined,
@@ -341,6 +376,9 @@ export default function ProductsPage() {
         api.categories.list(),
         api.purchases.suppliers(),
         api.promotions.list({ estado: "activa" }).catch(() => []),
+        api.representatives.list().catch(() => []),
+        api.sections.list().catch(() => []),
+        api.brands.list().catch(() => []),
       ])
 
       if (promosRes.status === "fulfilled" && Array.isArray(promosRes.value)) {
@@ -374,12 +412,107 @@ export default function ProductsPage() {
       if (suppsRes.status === "fulfilled" && Array.isArray(suppsRes.value)) {
         setSuppliers(suppsRes.value)
       }
+
+      if (repsRes.status === "fulfilled" && Array.isArray(repsRes.value)) {
+        setRepresentatives(repsRes.value)
+      }
+
+      if (sectsRes.status === "fulfilled" && Array.isArray(sectsRes.value)) {
+        setSections(sectsRes.value)
+      }
+
+      if (brandsRes.status === "fulfilled" && Array.isArray(brandsRes.value)) {
+        setBrands(brandsRes.value)
+      }
     } catch (e: any) {
       toast.error("Error al cargar productos", e.message)
     } finally {
       setLoading(false)
     }
   }, [debouncedSearch, selectedCategory, filterTipoProducto, filterEstado, page, pageSize, selectedParentProductId])
+
+  const filteredCategories = useMemo(() => {
+    if (!form.section_id) return categories
+    const bySection = categories.filter((c) => c.section_id === form.section_id)
+    if (form.categoria_id && !bySection.some((c) => c.id === form.categoria_id)) {
+      const cur = categories.find((c) => c.id === form.categoria_id)
+      if (cur) return [cur, ...bySection]
+    }
+    return bySection.length > 0 ? bySection : categories
+  }, [categories, form.section_id, form.categoria_id])
+
+  const filteredRepresentatives = useMemo(() => {
+    let list = representatives
+    if (form.supplier_id) {
+      const linked = representatives.filter((r) => r.supplier_ids?.includes(form.supplier_id))
+      if (linked.length > 0) list = linked
+    }
+    if (form.representative_id && !list.some((r) => r.id === form.representative_id)) {
+      const cur = representatives.find((r) => r.id === form.representative_id)
+      if (cur) list = [cur, ...list]
+    }
+    return list
+  }, [representatives, form.supplier_id, form.representative_id])
+
+  const filteredBrands = useMemo(() => {
+    let list = brands
+    if (form.representative_id) {
+      const byRep = brands.filter((b) => b.representative_id === form.representative_id)
+      if (byRep.length > 0) list = byRep
+    }
+    if (form.brand_id && !list.some((b) => b.id === form.brand_id)) {
+      const cur = brands.find((b) => b.id === form.brand_id)
+      if (cur) list = [cur, ...list]
+    }
+    return list
+  }, [brands, form.representative_id, form.brand_id])
+
+  const handleInlineQuickCreate = async () => {
+    if (!quickAddName.trim()) return
+    setQuickAddSaving(true)
+    try {
+      if (quickAddType === "section") {
+        const created = await api.sections.create({ nombre: quickAddName.trim() })
+        setSections((prev) => [...prev, created])
+        setForm((prev) => ({ ...prev, section_id: created.id }))
+        toast.success("Sección creada", `Sección "${created.nombre}" creada y seleccionada.`)
+      } else if (quickAddType === "category") {
+        const created = await api.categories.create({
+          nombre: quickAddName.trim(),
+          section_id: form.section_id || undefined,
+        })
+        setCategories((prev) => [...prev, created])
+        setForm((prev) => ({ ...prev, categoria_id: created.id }))
+        toast.success("Categoría creada", `Categoría "${created.nombre}" creada y seleccionada.`)
+      } else if (quickAddType === "representative") {
+        const created = await api.representatives.create({
+          nombre: quickAddName.trim(),
+          contacto: quickAddContact.trim() || undefined,
+          telefono: quickAddPhone.trim() || undefined,
+          supplier_ids: form.supplier_id ? [form.supplier_id] : undefined,
+        })
+        setRepresentatives((prev) => [...prev, created])
+        setForm((prev) => ({ ...prev, representative_id: created.id }))
+        toast.success("Representante creado", `Representante "${created.nombre}" creado y seleccionado.`)
+      } else if (quickAddType === "brand") {
+        const created = await api.brands.create({
+          nombre: quickAddName.trim(),
+          representative_id: form.representative_id || undefined,
+        })
+        setBrands((prev) => [...prev, created])
+        setForm((prev) => ({ ...prev, brand_id: created.id }))
+        toast.success("Marca creada", `Marca "${created.nombre}" creada y seleccionada.`)
+      }
+      setQuickAddType(null)
+      setQuickAddName("")
+      setQuickAddContact("")
+      setQuickAddPhone("")
+    } catch (err: any) {
+      toast.error("Error al crear", err.message || "No se pudo crear el elemento.")
+    } finally {
+      setQuickAddSaving(false)
+    }
+  }
 
   // Resetear a página 1 al cambiar filtros o búsqueda
   useEffect(() => {
@@ -648,6 +781,10 @@ export default function ProductsPage() {
         descripcion: form.descripcion?.trim() || null,
         categoria_id: form.categoria_id && form.categoria_id.trim() !== "" ? form.categoria_id : null,
         supplier_id: form.supplier_id && form.supplier_id.trim() !== "" ? form.supplier_id : undefined,
+        representative_id: form.representative_id && form.representative_id.trim() !== "" ? form.representative_id : undefined,
+        brand_id: form.brand_id && form.brand_id.trim() !== "" ? form.brand_id : undefined,
+        tipo_variante: form.tipo_variante?.trim() || undefined,
+        section_id: form.section_id && form.section_id.trim() !== "" ? form.section_id : undefined,
         tipo: form.tipo || "producto",
         tipo_producto: form.tipo_producto || "producto",
         activo: form.activo !== false,
@@ -800,6 +937,10 @@ export default function ProductsPage() {
       codigo_barra: p.codigo_barra || "",
       categoria_id: p.categoria_id || "",
       supplier_id: p.proveedor_oficial_id || p.supplier_id || "",
+      representative_id: p.representative_id || "",
+      brand_id: p.brand_id || "",
+      tipo_variante: p.tipo_variante || "",
+      section_id: p.section_id || (p.categoria?.section_id) || "",
       tipo: p.tipo || "producto",
       tipo_producto: (p.tipo_producto || "producto") as any,
       activo: p.activo !== false,
@@ -826,6 +967,9 @@ export default function ProductsPage() {
     })
     setFormTab("general")
     setShowForm(true)
+    if (representatives.length === 0 || sections.length === 0 || brands.length === 0) {
+      reloadTaxonomy()
+    }
 
     // Cargar si ya tiene código de caja/pack registrado
     api.products.packBarcodes.list(p.id).then((packs: PackBarcode[]) => {
@@ -875,6 +1019,10 @@ export default function ProductsPage() {
       codigo_barra: "",
       categoria_id: "",
       supplier_id: "",
+      representative_id: "",
+      brand_id: "",
+      tipo_variante: "",
+      section_id: "",
       tipo: "producto",
       tipo_producto: "producto",
       activo: true,
@@ -901,6 +1049,9 @@ export default function ProductsPage() {
     })
     setFormTab("general")
     setShowForm(true)
+    if (representatives.length === 0 || sections.length === 0 || brands.length === 0) {
+      reloadTaxonomy()
+    }
   }
 
   const handleDeleteProduct = async (p: Product) => {
@@ -2892,47 +3043,381 @@ export default function ProductsPage() {
                   />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                      Categoría
-                    </label>
-                    <select
-                      value={form.categoria_id}
-                      onChange={(e) => setForm({ ...form, categoria_id: e.target.value })}
-                      className="input-field w-full text-xs"
-                    >
-                      <option value="">Seleccionar Categoría...</option>
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.nombre}
-                        </option>
-                      ))}
-                    </select>
+                {/* ── Taxonomía, Marcas y Clasificación Comercial ── */}
+                <div className="bg-slate-50/70 dark:bg-slate-800/40 rounded-2xl p-3.5 border border-slate-200/70 dark:border-slate-800 space-y-3">
+                  <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-200/60 dark:border-slate-800/80 pb-1.5">
+                    <Tag className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Taxonomía, Marcas & Clasificación Comercial</span>
                   </div>
 
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
-                      Proveedor Oficial (Canal Principal)
-                    </label>
-                    <select
-                      value={form.supplier_id}
-                      onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
-                      className="input-field w-full text-xs"
-                    >
-                      <option value="">Sin proveedor oficial asignado...</option>
-                      {suppliers.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.razon_social || s.nombre_fantasia || "Proveedor"} {s.ruc ? `(${s.ruc})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                    {editingProduct?.ultimo_proveedor_nombre && editingProduct.ultimo_proveedor_nombre !== editingProduct.proveedor_oficial_nombre && (
-                      <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-1 flex items-center gap-1 font-medium">
-                        <span>ℹ️ Última compra registrada a:</span>
-                        <span className="font-bold underline">{editingProduct.ultimo_proveedor_nombre}</span>
-                      </p>
-                    )}
+                  {/* Fila 1: Sección y Categoría / Línea */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Sección */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                          Sección
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickAddType(quickAddType === "section" ? null : "section")
+                            setQuickAddName("")
+                          }}
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 dark:border-indigo-800 transition-colors"
+                          title="Crear sección rápida"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Nueva</span>
+                        </button>
+                      </div>
+
+                      {quickAddType === "section" && (
+                        <div className="mb-2 p-2 rounded-xl bg-indigo-50/90 dark:bg-slate-800 border border-indigo-200 dark:border-indigo-700 space-y-1.5 animate-fade-in shadow-xs">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-indigo-900 dark:text-indigo-200">
+                            <span className="flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-indigo-500" /> Nueva Sección
+                            </span>
+                            <button type="button" onClick={() => setQuickAddType(null)} className="text-slate-400 hover:text-slate-600">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              autoFocus
+                              value={quickAddName}
+                              onChange={(e) => setQuickAddName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); handleInlineQuickCreate() }
+                                if (e.key === "Escape") setQuickAddType(null)
+                              }}
+                              placeholder="Ej. Bebidas, Lácteos, Fiambrería"
+                              className="input-field flex-1 text-xs py-1"
+                            />
+                            <button
+                              type="button"
+                              disabled={!quickAddName.trim() || quickAddSaving}
+                              onClick={handleInlineQuickCreate}
+                              className="btn-primary text-xs px-2.5 py-1 flex items-center gap-1 shrink-0"
+                            >
+                              {quickAddSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                              <span>Crear</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <select
+                        value={form.section_id}
+                        onChange={(e) => setForm({ ...form, section_id: e.target.value })}
+                        className="input-field w-full text-xs"
+                      >
+                        <option value="">Sin sección asignada (Todas)</option>
+                        {sections.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Categoría / Línea */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                          Categoría / Línea
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickAddType(quickAddType === "category" ? null : "category")
+                            setQuickAddName("")
+                          }}
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 dark:border-indigo-800 transition-colors"
+                          title="Crear categoría rápida"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Nueva</span>
+                        </button>
+                      </div>
+
+                      {quickAddType === "category" && (
+                        <div className="mb-2 p-2 rounded-xl bg-indigo-50/90 dark:bg-slate-800 border border-indigo-200 dark:border-indigo-700 space-y-1.5 animate-fade-in shadow-xs">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-indigo-900 dark:text-indigo-200">
+                            <span className="flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-indigo-500" /> Nueva Categoría {form.section_id && sections.find(s => s.id === form.section_id) ? `(en ${sections.find(s => s.id === form.section_id)?.nombre})` : ""}
+                            </span>
+                            <button type="button" onClick={() => setQuickAddType(null)} className="text-slate-400 hover:text-slate-600">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              autoFocus
+                              value={quickAddName}
+                              onChange={(e) => setQuickAddName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); handleInlineQuickCreate() }
+                                if (e.key === "Escape") setQuickAddType(null)
+                              }}
+                              placeholder="Ej. Cervezas, Gaseosas, Yogures"
+                              className="input-field flex-1 text-xs py-1"
+                            />
+                            <button
+                              type="button"
+                              disabled={!quickAddName.trim() || quickAddSaving}
+                              onClick={handleInlineQuickCreate}
+                              className="btn-primary text-xs px-2.5 py-1 flex items-center gap-1 shrink-0"
+                            >
+                              {quickAddSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                              <span>Crear</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <select
+                        value={form.categoria_id}
+                        onChange={(e) => {
+                          const catId = e.target.value
+                          const cat = categories.find((c) => c.id === catId)
+                          setForm((prev) => ({
+                            ...prev,
+                            categoria_id: catId,
+                            section_id: cat?.section_id ? cat.section_id : prev.section_id,
+                          }))
+                        }}
+                        className="input-field w-full text-xs"
+                      >
+                        <option value="">Seleccionar Categoría / Línea...</option>
+                        {filteredCategories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.nombre} {c.section_id && !form.section_id ? `(${sections.find(s => s.id === c.section_id)?.nombre || "Sección"})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Fila 2: Proveedor Oficial y Representante */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Proveedor Oficial */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                        Proveedor Oficial (Canal Principal)
+                      </label>
+                      <select
+                        value={form.supplier_id}
+                        onChange={(e) => setForm({ ...form, supplier_id: e.target.value })}
+                        className="input-field w-full text-xs"
+                      >
+                        <option value="">Sin proveedor oficial asignado...</option>
+                        {suppliers.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.razon_social || s.nombre_fantasia || "Proveedor"} {s.ruc ? `(${s.ruc})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {editingProduct?.ultimo_proveedor_nombre && editingProduct.ultimo_proveedor_nombre !== editingProduct.proveedor_oficial_nombre && (
+                        <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-1 flex items-center gap-1 font-medium">
+                          <span>ℹ️ Última compra registrada a:</span>
+                          <span className="font-bold underline">{editingProduct.ultimo_proveedor_nombre}</span>
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Representante */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                          Representante / Vendedor
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickAddType(quickAddType === "representative" ? null : "representative")
+                            setQuickAddName("")
+                            setQuickAddPhone("")
+                            setQuickAddContact("")
+                          }}
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 dark:border-indigo-800 transition-colors"
+                          title="Crear representante rápido"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Nuevo</span>
+                        </button>
+                      </div>
+
+                      {quickAddType === "representative" && (
+                        <div className="mb-2 p-2 rounded-xl bg-indigo-50/90 dark:bg-slate-800 border border-indigo-200 dark:border-indigo-700 space-y-1.5 animate-fade-in shadow-xs">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-indigo-900 dark:text-indigo-200">
+                            <span className="flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-indigo-500" /> Nuevo Representante
+                            </span>
+                            <button type="button" onClick={() => setQuickAddType(null)} className="text-slate-400 hover:text-slate-600">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            autoFocus
+                            value={quickAddName}
+                            onChange={(e) => setQuickAddName(e.target.value)}
+                            placeholder="Nombre (ej. Juan Pérez - Distribuidora)..."
+                            className="input-field w-full text-xs py-1 font-semibold"
+                          />
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="text"
+                              value={quickAddPhone}
+                              onChange={(e) => setQuickAddPhone(e.target.value)}
+                              placeholder="Teléfono / Celular (opcional)"
+                              className="input-field text-xs py-1"
+                            />
+                            <input
+                              type="text"
+                              value={quickAddContact}
+                              onChange={(e) => setQuickAddContact(e.target.value)}
+                              placeholder="Contacto / Email (opcional)"
+                              className="input-field text-xs py-1"
+                            />
+                          </div>
+                          <div className="flex justify-end gap-1.5 pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setQuickAddType(null)}
+                              className="px-2 py-0.5 text-xs text-slate-500 rounded"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!quickAddName.trim() || quickAddSaving}
+                              onClick={handleInlineQuickCreate}
+                              className="btn-primary text-xs px-2.5 py-1 flex items-center gap-1"
+                            >
+                              {quickAddSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                              <span>Crear y Asignar</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <select
+                        value={form.representative_id}
+                        onChange={(e) => setForm({ ...form, representative_id: e.target.value })}
+                        className="input-field w-full text-xs"
+                      >
+                        <option value="">Sin representante asignado...</option>
+                        {filteredRepresentatives.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.nombre} {r.telefono ? `(${r.telefono})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {form.supplier_id && filteredRepresentatives.length > 0 && filteredRepresentatives.length < representatives.length && (
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          Filtrado por proveedor seleccionado
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Fila 3: Marca y Tipo / Variante */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Marca */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                          Marca
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickAddType(quickAddType === "brand" ? null : "brand")
+                            setQuickAddName("")
+                          }}
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 px-2 py-0.5 rounded-lg border border-indigo-200 dark:border-indigo-800 transition-colors"
+                          title="Crear marca rápida"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Nueva</span>
+                        </button>
+                      </div>
+
+                      {quickAddType === "brand" && (
+                        <div className="mb-2 p-2 rounded-xl bg-indigo-50/90 dark:bg-slate-800 border border-indigo-200 dark:border-indigo-700 space-y-1.5 animate-fade-in shadow-xs">
+                          <div className="flex items-center justify-between text-[11px] font-bold text-indigo-900 dark:text-indigo-200">
+                            <span className="flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-indigo-500" /> Nueva Marca
+                            </span>
+                            <button type="button" onClick={() => setQuickAddType(null)} className="text-slate-400 hover:text-slate-600">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              autoFocus
+                              value={quickAddName}
+                              onChange={(e) => setQuickAddName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); handleInlineQuickCreate() }
+                                if (e.key === "Escape") setQuickAddType(null)
+                              }}
+                              placeholder="Ej. Brahma, Coca-Cola, Trebol"
+                              className="input-field flex-1 text-xs py-1 font-semibold"
+                            />
+                            <button
+                              type="button"
+                              disabled={!quickAddName.trim() || quickAddSaving}
+                              onClick={handleInlineQuickCreate}
+                              className="btn-primary text-xs px-2.5 py-1 flex items-center gap-1 shrink-0"
+                            >
+                              {quickAddSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                              <span>Crear</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      <select
+                        value={form.brand_id}
+                        onChange={(e) => {
+                          const brandId = e.target.value
+                          const brand = brands.find((b) => b.id === brandId)
+                          setForm((prev) => ({
+                            ...prev,
+                            brand_id: brandId,
+                            representative_id: brand?.representative_id && !prev.representative_id ? brand.representative_id : prev.representative_id,
+                          }))
+                        }}
+                        className="input-field w-full text-xs"
+                      >
+                        <option value="">Sin marca asignada...</option>
+                        {filteredBrands.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.nombre} {b.representative_id && !form.representative_id ? `(${representatives.find(r => r.id === b.representative_id)?.nombre || "Rep"})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Tipo / Variante */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400 block mb-1">
+                        Tipo / Variante
+                      </label>
+                      <input
+                        type="text"
+                        value={form.tipo_variante}
+                        onChange={(e) => setForm({ ...form, tipo_variante: e.target.value })}
+                        className="input-field w-full text-xs font-semibold"
+                        placeholder="Ej. Pack x6, 1.5L, Cero Azúcar, Light, Tradicional"
+                      />
+                    </div>
                   </div>
                 </div>
 

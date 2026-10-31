@@ -314,8 +314,35 @@ export async function downloadAuthenticatedPost(path: string, body: any, filenam
   setTimeout(() => URL.revokeObjectURL(blobUrl), 20000)
 }
 
-export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; proveedor_oficial_id?: string; proveedor_oficial_nombre?: string; ultimo_proveedor_id?: string; ultimo_proveedor_nombre?: string; fecha_ultima_compra?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_producto?: "producto" | "materia_prima" | "insumo" | "servicio"; modalidad_abastecimiento?: "propio" | "consignacion"; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; stock_actual?: number; stock_disponible?: number; peso_kg?: number; plu_balanza?: number | null; es_pesable?: boolean; tiene_vencimiento?: boolean; tiene_lotes?: boolean; imagen_url?: string | null; precio_venta?: number; precio_regular?: number; precio_promo?: number; en_promocion?: boolean; promocion_id?: string | null; promocion_nombre?: string | null; promo_dias_semana?: number[] | null; promo_valido_hasta?: string | null; promo_horario_desde?: string | null; promo_horario_hasta?: string | null; precio_mayorista?: number | null; precio_mayorista_min_qty?: number | null; precio_promedio_real?: number | null; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
-export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; company_id?: string; activo?: boolean; created_at?: string }
+export interface Representative {
+  id: string
+  company_id: string
+  nombre: string
+  contacto?: string
+  telefono?: string
+  activo: boolean
+  supplier_ids?: string[]
+}
+
+export interface ProductSection {
+  id: string
+  company_id: string
+  nombre: string
+  orden: number
+  activo: boolean
+}
+
+export interface ProductBrand {
+  id: string
+  company_id: string
+  nombre: string
+  representative_id?: string
+  activo: boolean
+  representative?: Representative
+}
+
+export interface Product { id: string; sku: string; nombre: string; descripcion?: string | null; categoria_id?: string | null; supplier_id?: string; supplier_nombre?: string; proveedor_oficial_id?: string; proveedor_oficial_nombre?: string; ultimo_proveedor_id?: string; ultimo_proveedor_nombre?: string; representative_id?: string; brand_id?: string; tipo_variante?: string; section_id?: string; representative_nombre?: string; brand_nombre?: string; fecha_ultima_compra?: string; codigo_barra?: string; unidad_medida?: string; tipo?: string; tipo_producto?: "producto" | "materia_prima" | "insumo" | "servicio"; modalidad_abastecimiento?: "propio" | "consignacion"; tipo_venta?: string; iva_tasa?: number; stock_minimo?: number; stock_maximo?: number; stock_actual?: number; stock_disponible?: number; peso_kg?: number; plu_balanza?: number | null; es_pesable?: boolean; tiene_vencimiento?: boolean; tiene_lotes?: boolean; imagen_url?: string | null; precio_venta?: number; precio_regular?: number; precio_promo?: number; en_promocion?: boolean; promocion_id?: string | null; promocion_nombre?: string | null; promo_dias_semana?: number[] | null; promo_valido_hasta?: string | null; promo_horario_desde?: string | null; promo_horario_hasta?: string | null; precio_mayorista?: number | null; precio_mayorista_min_qty?: number | null; precio_promedio_real?: number | null; costo_promedio?: number; ultimo_costo?: number; costo_landed?: number; costo_unitario?: number; precio_costo?: number; activo?: boolean; created_at?: string; updated_at?: string; precio?: number; categoria?: Category; stock?: number }
+export interface Category { id: string; nombre: string; codigo?: string; parent_id?: string; section_id?: string | null; company_id?: string; activo?: boolean; created_at?: string }
 export interface Customer { id: string; nombre: string; email?: string; telefono?: string; ruc?: string; extra_club_numero?: string | null; empresa_vinculada_nombre?: string | null; empresa_vinculada_ruc?: string | null; razon_social?: string; nombre_fantasia?: string | null; ci?: string; direccion?: string; ciudad?: string; departamento?: string | null; condicion_iva?: string | null; pago_default?: string | null; contacto?: string | null; tipo?: string; tipo_persona?: string; activo?: boolean; es_agente_retencion?: boolean; regimen_retencion?: string; porcentaje_retencion_iva?: number; saldo_pendiente?: number; limite_credito?: number; credito_limite?: number; credito_usado?: number; created_at?: string; updated_at?: string }
 export interface Sale { id: string; company_id?: string; customer_id?: string; customer?: Customer; customer_nombre?: string; customer_doc?: string; customer_extra_club?: string; user_id?: string; user?: any; cajero_nombre?: string; caja_nombre?: string; items?: SaleItem[]; total?: number; subtotal?: number; total_iva?: number; estado?: string; condicion?: string; forma_pago?: string; tipo_comprobante?: string; fecha?: string; session_id?: string; caja_session_id?: string; usuario_id?: string; observaciones?: string; numero?: string; numero_interno?: string; recibo_html?: string; recibo_escpos_b64?: string; total_pagado?: number; saldo?: number; iva_10?: number; iva_5?: number; descuento_total?: number; sifen_estado?: string; cdc?: string; created_at?: string }
 export interface SaleItem { id?: string; sale_id?: string; product_id?: string; producto?: Product; product?: Product; descripcion?: string; cantidad?: number; cantidad_devuelta?: number; cantidad_disponible?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; iva_monto?: number; total?: number; descuento?: number }
@@ -2207,7 +2234,79 @@ export interface RevisionHuerfano { id: string; fecha: string; tipo_operacion: s
 export interface RevisionMultiProveedor { id: string; numero: string; fecha: string; total: number; proveedores: string[] }
 export interface RevisionCobrosItems { no_cuadran: RevisionNoCuadran; huerfanos: RevisionHuerfano; multi_proveedor: RevisionMultiProveedor }
 
+export async function getRepresentatives(supplierId?: string): Promise<Representative[]> {
+  return client.get<Representative[]>("/v1/representatives", supplierId ? { supplier_id: supplierId } : undefined)
+}
+
+export async function createRepresentative(data: { nombre: string; contacto?: string; telefono?: string; supplier_ids?: string[] }): Promise<Representative> {
+  return client.post<Representative>("/v1/representatives", { ...data, company_id: COMPANY_ID })
+}
+
+export async function getSupplierRepresentatives(supplierId: string): Promise<Representative[]> {
+  return client.get<Representative[]>(`/v1/suppliers/${supplierId}/representatives`)
+}
+
+export async function assignSupplierRepresentatives(supplierId: string, representativeIds: string[]): Promise<Representative[]> {
+  return client.post<Representative[]>(`/v1/suppliers/${supplierId}/representatives`, { representative_ids: representativeIds })
+}
+
+export async function getProductSections(): Promise<ProductSection[]> {
+  return client.get<ProductSection[]>("/v1/product-sections")
+}
+
+export async function createProductSection(data: { nombre: string; orden?: number }): Promise<ProductSection> {
+  return client.post<ProductSection>("/v1/product-sections", { ...data, company_id: COMPANY_ID })
+}
+
+export async function getProductBrands(representativeId?: string): Promise<ProductBrand[]> {
+  return client.get<ProductBrand[]>("/v1/product-brands", representativeId ? { representative_id: representativeId } : undefined)
+}
+
+export async function createProductBrand(data: { nombre: string; representative_id?: string }): Promise<ProductBrand> {
+  return client.post<ProductBrand>("/v1/product-brands", { ...data, company_id: COMPANY_ID })
+}
+
+export async function getCategoryProductCount(categoryId: string): Promise<{ category_id: string; product_count: number }> {
+  return client.get<{ category_id: string; product_count: number }>(`/v1/categories/${categoryId}/product-count`)
+}
+
+export async function safeDeleteCategory(categoryId: string, reassignToId?: string): Promise<any> {
+  const url = reassignToId ? `/v1/categories/${categoryId}?reassign_to_id=${encodeURIComponent(reassignToId)}` : `/v1/categories/${categoryId}`
+  return client.delete<any>(url)
+}
+
 export const api = {
+  getRepresentatives,
+  createRepresentative,
+  getSupplierRepresentatives,
+  assignSupplierRepresentatives,
+  getProductSections,
+  createProductSection,
+  getProductBrands,
+  createProductBrand,
+  getCategoryProductCount,
+  safeDeleteCategory,
+
+  representatives: {
+    list: (supplierId?: string) => getRepresentatives(supplierId),
+    create: (data: { nombre: string; contacto?: string; telefono?: string; supplier_ids?: string[] }) => createRepresentative(data),
+    getSupplierRepresentatives: (supplierId: string) => getSupplierRepresentatives(supplierId),
+    assignSupplierRepresentatives: (supplierId: string, representativeIds: string[]) => assignSupplierRepresentatives(supplierId, representativeIds),
+    update: (id: string, data: Partial<Representative>) => client.patch<Representative>(`/v1/representatives/${id}`, data),
+    delete: (id: string) => client.delete<void>(`/v1/representatives/${id}`),
+  },
+  sections: {
+    list: () => getProductSections(),
+    create: (data: { nombre: string; orden?: number }) => createProductSection(data),
+    update: (id: string, data: Partial<ProductSection>) => client.patch<ProductSection>(`/v1/product-sections/${id}`, data),
+    delete: (id: string) => client.delete<void>(`/v1/product-sections/${id}`),
+  },
+  brands: {
+    list: (representativeId?: string) => getProductBrands(representativeId),
+    create: (data: { nombre: string; representative_id?: string }) => createProductBrand(data),
+    update: (id: string, data: Partial<ProductBrand>) => client.patch<ProductBrand>(`/v1/product-brands/${id}`, data),
+    delete: (id: string) => client.delete<void>(`/v1/product-brands/${id}`),
+  },
   auth: {
     login: (data: { email: string; password: string }) => client.post<{ access_token: string; refresh_token: string }>("/v1/auth/login", data),
     register: (data: { email: string; password: string; nombre: string; tenant_nombre: string }) => client.post<{ access_token: string; refresh_token: string }>("/v1/auth/register", data),
@@ -2277,9 +2376,11 @@ export const api = {
   categories: {
     list: () => client.get<Category[]>(`/v1/companies/${COMPANY_ID}/categories`),
     get: (id: string) => client.get<Category>(`/v1/companies/${COMPANY_ID}/categories/${id}`),
-    create: (data: { nombre: string; codigo?: string; parent_id?: string }) => client.post<Category>("/v1/categories", { ...data, company_id: COMPANY_ID }),
+    create: (data: { nombre: string; codigo?: string; parent_id?: string; section_id?: string }) => client.post<Category>("/v1/categories", { ...data, company_id: COMPANY_ID }),
     update: (id: string, data: Partial<Category>) => client.patch<Category>(`/v1/categories/${id}`, data),
     delete: (id: string) => client.delete<void>(`/v1/categories/${id}`),
+    productCount: (categoryId: string) => getCategoryProductCount(categoryId),
+    deleteSafe: (categoryId: string, reassignToId?: string) => safeDeleteCategory(categoryId, reassignToId),
   },
   products: {
     list: (params?: { search?: string; categoria_id?: string; supplier_id?: string; activo?: boolean; tipo_producto?: string; include_inactive?: boolean; updated_since?: string; limit?: number; offset?: number }) => client.get<Product[]>(`/v1/companies/${COMPANY_ID}/products`, { search: params?.search, categoria_id: params?.categoria_id, supplier_id: params?.supplier_id, activo: params?.activo !== undefined ? params?.activo.toString() : undefined, tipo_producto: params?.tipo_producto, include_inactive: params?.include_inactive ? "true" : undefined, updated_since: params?.updated_since, limit: params?.limit, offset: params?.offset }),
