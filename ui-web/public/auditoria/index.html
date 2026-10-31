@@ -194,8 +194,9 @@
           id="tab-WILL_CHANGE" 
           onclick="setQuickTab('WILL_CHANGE')" 
           class="px-3 py-1.5 rounded-lg border border-emerald-900/60 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-900/50 hover:text-emerald-100 transition-all flex items-center gap-1.5"
+          title="Productos sugeridos para aumento (excluye tráfico blindado 0%)"
         >
-          <span>⚡ A Modificar (Con Aumento)</span>
+          <span>⚡ Con Aumento Sugerido</span>
           <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-900/80 text-emerald-200 font-mono font-bold" id="badge-count-will-change">0</span>
         </button>
 
@@ -204,8 +205,9 @@
           id="tab-NO_CHANGE" 
           onclick="setQuickTab('NO_CHANGE')" 
           class="px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-900/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-all flex items-center gap-1.5"
+          title="Productos que mantienen precio actual (0% aumento)"
         >
-          <span>🛡️ Sin Modificar (Mantener 0%)</span>
+          <span>🛡️ Sin Modificar (0%)</span>
           <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-400 font-mono" id="badge-count-no-change">0</span>
         </button>
 
@@ -214,9 +216,10 @@
           id="tab-TRAFFIC" 
           onclick="setQuickTab('TRAFFIC')" 
           class="px-3 py-1.5 rounded-lg border border-indigo-900/50 bg-indigo-950/30 text-indigo-300 hover:bg-indigo-900/40 hover:text-indigo-100 transition-all flex items-center gap-1.5"
+          title="Artículos de combate y canasta básica protegidos con 0% de aumento"
         >
-          <span>🛒 Tráfico & Mascotas Blindados</span>
-          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-900/70 text-indigo-200 font-mono" id="badge-count-traffic">378</span>
+          <span>🛒 Tráfico Blindado (0%)</span>
+          <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-900/70 text-indigo-200 font-mono" id="badge-count-traffic">0</span>
         </button>
 
         <!-- Tab: Con Escalas Mayoristas -->
@@ -235,7 +238,7 @@
           onclick="setQuickTab('MODIFIED')" 
           class="px-3 py-1.5 rounded-lg border border-blue-900/50 bg-blue-950/30 text-blue-300 hover:bg-blue-900/40 hover:text-blue-100 transition-all flex items-center gap-1.5"
         >
-          <span>✏️ Editados Manualmente</span>
+          <span>✏️ Mis Cambios Aprobados</span>
           <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-blue-900/70 text-blue-200 font-mono" id="badge-count-modified">0</span>
         </button>
       </div>
@@ -255,6 +258,13 @@
           title="Marcar todos los visibles como Protegidos sin aumento"
         >
           <span>🔒 Proteger Visibles (0%)</span>
+        </button>
+        <button 
+          onclick="confirmResetAllDecisions()" 
+          class="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-red-950/60 text-slate-400 hover:text-red-300 text-xs font-medium border border-slate-800 hover:border-red-900/60 transition-colors flex items-center gap-1" 
+          title="Reiniciar todas las decisiones guardadas y volver al estado inicial del catálogo"
+        >
+          <span>↺ Reset</span>
         </button>
       </div>
     </div>
@@ -392,13 +402,13 @@
           <th class="py-2.5 px-3 min-w-[280px]">Artículo & Proveedor</th>
           <th class="py-2.5 px-3 w-24 text-right">Costo Prom.</th>
           <th class="py-2.5 px-3 w-28 text-right">PVP Actual</th>
-          <th class="py-2.5 px-3 w-28 text-right">Margen Actual</th>
+          <th class="py-2.5 px-3 w-28 text-right" title="Markup s/ Costo y Margen s/ Venta actual">Markup Actual</th>
           <th class="py-2.5 px-3 w-28 text-right bg-slate-900/90 text-blue-300">Sugerencia IA</th>
           <th class="py-2.5 px-3 w-40 text-center bg-blue-950/40 border-l border-r border-blue-900/50 text-blue-200">
             PVP Aprobado (Gs)
           </th>
-          <th class="py-2.5 px-3 w-32 text-center bg-blue-950/40 border-r border-blue-900/50 text-blue-200">
-            Margen %
+          <th class="py-2.5 px-3 w-32 text-center bg-blue-950/40 border-r border-blue-900/50 text-blue-200" title="Markup sobre costo: PVP = Costo x (1 + Markup/100)">
+            Markup % (s/ Costo)
           </th>
           <th class="py-2.5 px-3 min-w-[250px] bg-slate-900/70 border-r border-slate-800 text-amber-200">
             Escalas Mayoristas (Editables)
@@ -539,7 +549,7 @@
           <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">E</kbd>
         </div>
         <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
-          <span>Editar Margen % de fila seleccionada</span>
+          <span>Editar Markup % (s/ Costo) de fila seleccionada</span>
           <kbd class="px-2 py-1 rounded bg-slate-800 border border-slate-700 font-mono">M</kbd>
         </div>
         <div class="flex items-center justify-between py-1 border-b border-slate-800/50">
@@ -898,11 +908,11 @@
 
     function getTabDescription(tabKey) {
       switch (tabKey) {
-        case 'WILL_CHANGE': return 'Productos que cambian de precio (con suba sugerida o custom)';
-        case 'NO_CHANGE': return 'Productos que NO cambian de precio (mantienen precio actual)';
-        case 'TRAFFIC': return 'Productos de Tráfico & Mascotas blindados (0% aumento)';
+        case 'WILL_CHANGE': return 'Productos con aumento sugerido (excluye canasta básica y tráfico blindado 0%)';
+        case 'NO_CHANGE': return 'Productos que mantienen precio actual (0% aumento)';
+        case 'TRAFFIC': return 'Artículos de Tráfico & Mascotas blindados (0% aumento)';
         case 'WITH_TIERS': return 'Productos con escalas mayoristas por cantidad';
-        case 'MODIFIED': return 'Productos con modificaciones manuales personalizadas';
+        case 'MODIFIED': return 'Productos con cambios aprobados por el usuario';
         default: return 'Todos los productos';
       }
     }
@@ -944,14 +954,15 @@
         } else if (isTraffic) {
           activeRetail = item.p_act;
         } else {
-          // Pendiente: si no se decidió, su sugerencia es p_sug
           activeRetail = item.p_sug;
         }
 
-        // ¿Tiene cambio de precio aprobado/sugerido?
-        const hasRetailChange = (activeRetail !== item.p_act);
         const hasCustomTiers = dec && dec.custom_tiers && dec.custom_tiers.length > 0;
-        const willChange = hasRetailChange || hasCustomTiers;
+        
+        // Con Aumento: productos con sugerencia de suba o modificados al alza, NUNCA productos protegidos sin modificación
+        const isSuggestedIncrease = !isTraffic && (item.p_sug > item.p_act);
+        const isManualIncrease = dec && (dec.price > item.p_act);
+        const willChange = isManualIncrease || (!dec && isSuggestedIncrease) || hasCustomTiers;
 
         // 4. Filtro por Pestaña Rápida
         if (activeQuickTab === 'WILL_CHANGE') {
@@ -963,7 +974,7 @@
         } else if (activeQuickTab === 'WITH_TIERS') {
           if (!item.tiers || item.tiers.length === 0) return false;
         } else if (activeQuickTab === 'MODIFIED') {
-          if (!dec || (dec.status !== 'MODIFIED' && !hasCustomTiers)) return false;
+          if (!dec || (dec.price === item.p_act && !hasCustomTiers)) return false;
         }
 
         return true;
@@ -998,16 +1009,17 @@
           activeRetail = item.p_sug;
         }
 
-        const hasRetailChange = (activeRetail !== item.p_act);
         const hasCustomTiers = dec && dec.custom_tiers && dec.custom_tiers.length > 0;
-        const willChange = hasRetailChange || hasCustomTiers;
+        const isSuggestedIncrease = !isTraffic && (item.p_sug > item.p_act);
+        const isManualIncrease = dec && (dec.price > item.p_act);
+        const willChange = isManualIncrease || (!dec && isSuggestedIncrease) || hasCustomTiers;
 
         if (willChange) countWillChange++;
         else countNoChange++;
 
         if (isTraffic) countTraffic++;
         if (item.tiers && item.tiers.length > 0) countTiers++;
-        if (dec && (dec.status === 'MODIFIED' || hasCustomTiers)) countModified++;
+        if (dec && (dec.price !== item.p_act || hasCustomTiers)) countModified++;
       });
 
       const bWill = document.getElementById('badge-count-will-change');
@@ -1021,6 +1033,23 @@
       if (bTraf) bTraf.textContent = countTraffic.toLocaleString('es-PY');
       if (bTiers) bTiers.textContent = countTiers.toLocaleString('es-PY');
       if (bMod) bMod.textContent = countModified.toLocaleString('es-PY');
+    }
+
+    async function confirmResetAllDecisions() {
+      if (!confirm('¿Estás seguro de que deseás reiniciar y borrar todas las decisiones guardadas? El catálogo volverá al estado inicial.')) {
+        return;
+      }
+      userDecisions = {};
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+      } catch (e) {}
+      try {
+        await fetch(`${API_BASE}/audit-reset`, { method: 'POST' });
+      } catch (e) {}
+      applyFilters();
+      recalculateGlobalKPIs();
+      setSyncStatus('synced', 'Decisiones reiniciadas correctamente');
+      flashStatus('Catálogo reiniciado al estado inicial');
     }
 
     function sortFilteredList(orderType) {
@@ -1088,7 +1117,7 @@
       setQuickTab('ALL');
     }
 
-    // --- CÁLCULOS MATEMÁTICOS BIDIRECCIONALES (PURO RETAIL SUPERMERCADO) ---
+    // --- CÁLCULOS MATEMÁTICOS BIDIRECCIONALES (ESTÁNDAR COMERCIAL: MARKUP S/ COSTO) ---
     function computeMetricsFromPrice(item, newRetailPrice, customTiersList = null) {
       const cost = Number(item.cst) || 0;
       const pAct = Number(item.p_act) || 0;
@@ -1103,7 +1132,7 @@
         });
       }
 
-      // Calcular precio y margen de cada tier (respetando si el usuario lo personalizó)
+      // Calcular precio, markup y margen de cada tier (respetando si el usuario lo personalizó)
       const scaledTiers = (item.tiers || []).map(t => {
         const tid = String(t.id || t.min_qty);
         let tierPrice;
@@ -1119,27 +1148,44 @@
           tierPrice = Math.round(Number(t.precio));
         }
 
+        const tierMarkup = (cost > 0) ? ((tierPrice - cost) / cost) * 100 : 0;
         const tierMargin = (tierPrice > 0 && cost > 0) ? ((tierPrice - cost) / tierPrice) * 100 : 0;
 
         return {
           id: t.id,
           min_qty: t.min_qty,
           precio: tierPrice,
+          markup: Number(tierMarkup.toFixed(1)),
           margin: Number(tierMargin.toFixed(1)),
           isCustom: isCustom
         };
       });
 
-      // Margen Góndola Puro: (PVP - Costo) / PVP
+      // Markup sobre Costo (Estándar Comercial): (PVP - Costo) / Costo
+      const markup = (cost > 0) ? ((pRetail - cost) / cost) * 100 : 0;
+      // Margen sobre Venta: (PVP - Costo) / PVP
       const margin = (pRetail > 0 && cost > 0) ? ((pRetail - cost) / pRetail) * 100 : 0;
 
       return {
         pRetail,
+        markup: Number(markup.toFixed(1)),
         margin: Number(margin.toFixed(1)),
         marginMin: Number(margin.toFixed(1)),
         marginEff: Number(margin.toFixed(1)),
         scaledTiers
       };
+    }
+
+    // PVP = Costo * (1 + Markup/100) (Entero exacto en Guaraníes)
+    function computePriceFromMarkup(item, targetMarkupPct) {
+      const cost = Number(item.cst) || 0;
+      const pAct = Number(item.p_act) || 0;
+      const mkp = Number(targetMarkupPct) / 100.0;
+
+      if (cost <= 0) return pAct;
+
+      const pRetailRaw = cost * (1.0 + mkp);
+      return Math.round(pRetailRaw);
     }
 
     function computePriceFromMargin(item, targetMarginPct) {
@@ -1149,7 +1195,6 @@
 
       if (m >= 1.0 || cost <= 0) return pAct;
 
-      // PVP = Costo / (1 - Margen)
       const pRetailRaw = cost / (1.0 - m);
       return Math.round(pRetailRaw);
     }
@@ -1177,9 +1222,10 @@
         sku: item.sku,
         precio_aprobado: pRetail,
         price: pRetail,
-        margen_modo: 'retail',
-        margin_mode: 'retail',
-        margen_aprobado: metrics.margin,
+        margen_modo: 'markup',
+        margin_mode: 'markup',
+        margen_aprobado: metrics.markup,
+        markup: metrics.markup,
         margin: metrics.margin,
         margin_min: metrics.margin,
         margin_eff: metrics.margin,
@@ -1197,12 +1243,12 @@
       updateTabBadges();
     }
 
-    function updateProductMargin(itemId, newMarginPct) {
+    function updateProductMargin(itemId, newMarkupPct) {
       const item = RAW_DATA.find(x => x.id === itemId);
       if (!item) return;
 
-      const pRetail = computePriceFromMargin(item, newMarginPct);
-      updateProductPrice(itemId, pRetail, 'USER_MARGIN');
+      const pRetail = computePriceFromMarkup(item, newMarkupPct);
+      updateProductPrice(itemId, pRetail, 'USER_MARKUP');
     }
 
     // MODIFICACIÓN MANUAL DIRECTA DE PRECIO DE ESCALA
@@ -1242,9 +1288,10 @@
         sku: item.sku,
         precio_aprobado: pRetail,
         price: pRetail,
-        margen_modo: 'retail',
-        margin_mode: 'retail',
-        margen_aprobado: metrics.margin,
+        margen_modo: 'markup',
+        margin_mode: 'markup',
+        margen_aprobado: metrics.markup,
+        markup: metrics.markup,
         margin: metrics.margin,
         margin_min: metrics.margin,
         margin_eff: metrics.margin,
@@ -1261,7 +1308,7 @@
       recalculateGlobalKPIs();
       updateTabBadges();
       const currentTier = metrics.scaledTiers.find(t => t.min_qty === minQty);
-      flashStatus(`Escala ${minQty}u actualizada a ₲ ${formatPYG(newTierPrice)} (${currentTier ? currentTier.margin : 0}%) para ${item.nom}`);
+      flashStatus(`Escala ${minQty}u actualizada a ₲ ${formatPYG(newTierPrice)} (${currentTier ? currentTier.markup : 0}% mkp) para ${item.nom}`);
     }
 
     function acceptSuggestion(itemId) {
@@ -1276,9 +1323,10 @@
         sku: item.sku,
         precio_aprobado: pRetail,
         price: pRetail,
-        margen_modo: 'retail',
-        margin_mode: 'retail',
-        margen_aprobado: metrics.margin,
+        margen_modo: 'markup',
+        margin_mode: 'markup',
+        margen_aprobado: metrics.markup,
+        markup: metrics.markup,
         margin: metrics.margin,
         margin_min: metrics.margin,
         margin_eff: metrics.margin,
@@ -1309,9 +1357,10 @@
         sku: item.sku,
         precio_aprobado: pRetail,
         price: pRetail,
-        margen_modo: 'retail',
-        margin_mode: 'retail',
-        margen_aprobado: metrics.margin,
+        margen_modo: 'markup',
+        margin_mode: 'markup',
+        margen_aprobado: metrics.markup,
+        markup: metrics.markup,
         margin: metrics.margin,
         margin_min: metrics.margin,
         margin_eff: metrics.margin,
@@ -1366,9 +1415,10 @@
             sku: item.sku,
             precio_aprobado: item.p_sug,
             price: item.p_sug,
-            margen_modo: 'retail',
-            margin_mode: 'retail',
-            margen_aprobado: metrics.margin,
+            margen_modo: 'markup',
+            margin_mode: 'markup',
+            margen_aprobado: metrics.markup,
+            markup: metrics.markup,
             margin: metrics.margin,
             margin_eff: metrics.margin,
             margin_min: metrics.margin,
@@ -1406,9 +1456,10 @@
           sku: item.sku,
           precio_aprobado: item.p_act,
           price: item.p_act,
-          margen_modo: 'retail',
-          margin_mode: 'retail',
-          margen_aprobado: metrics.margin,
+          margen_modo: 'markup',
+          margin_mode: 'markup',
+          margen_aprobado: metrics.markup,
+          markup: metrics.markup,
           margin: metrics.margin,
           margin_eff: metrics.margin,
           margin_min: metrics.margin,
@@ -1490,7 +1541,9 @@
       const diffPct = currentRetail > 0 ? (diffAmount / currentRetail) * 100 : 0;
       const deltaEstimatedGain = Math.round(diffAmount * (item.cant_oct || 0));
 
-      const mColor = getMarginColorClass(metrics.margin);
+      const actMarkup = (cost > 0) ? ((currentRetail - cost) / cost) * 100 : 0;
+      const sugMarkup = (cost > 0) ? ((item.p_sug - cost) / cost) * 100 : 0;
+      const mColor = getMarginColorClass(metrics.markup);
 
       let statusBadge = '';
       if (status === 'MODIFIED') {
@@ -1503,7 +1556,7 @@
         statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800/60 text-slate-500 border border-slate-800">PENDIENTE</span>`;
       }
 
-      // Renderizado interactivo y editable de escalas mayoristas con margen directo
+      // Renderizado interactivo y editable de escalas mayoristas con markup directo
       let tiersHtml = '<span class="text-slate-600">-</span>';
       if (metrics.scaledTiers && metrics.scaledTiers.length > 0) {
         tiersHtml = metrics.scaledTiers.map((t, t_idx) => {
@@ -1524,7 +1577,7 @@
                 onblur="handleTierBlur('${item.id}', '${tierKey}', this.value, ${t.min_qty})"
                 title="Editar precio para escala de ${t.min_qty} unidades"
               />
-              <span class="text-[10px] font-mono ${getMarginColorClass(t.margin)} font-semibold">(${t.margin}%)</span>
+              <span class="text-[10px] font-mono ${getMarginColorClass(t.markup !== undefined ? t.markup : t.margin)} font-semibold">(${t.markup !== undefined ? t.markup : t.margin}% mkp)</span>
             </div>
           `;
         }).join(' ');
@@ -1535,7 +1588,7 @@
       const sugHtml = `
         <div class="font-bold text-slate-200">${formatPYG(item.p_sug)}</div>
         <div class="text-[10px] ${sugDiff > 0 ? 'text-blue-400' : 'text-slate-500'}">
-          ${sugDiff > 0 ? '+' : ''}${sugDiffPct.toFixed(1)}% | Margen: ${item.m_sug}%
+          ${sugDiff > 0 ? '+' : ''}${sugDiffPct.toFixed(1)}% | Mkp: ${sugMarkup.toFixed(1)}%
         </div>
       `;
 
@@ -1579,16 +1632,14 @@
             ${item.p_eff_act && item.p_eff_act !== item.p_act ? `<div class="text-[10px] text-slate-500" title="Precio promedio efectivo en ventas de octubre">P.Prom Oct: ${formatPYG(item.p_eff_act)}</div>` : ''}
           </td>
 
-          <!-- Margen Actual -->
+          <!-- Markup Actual -->
           <td class="py-2 px-3 text-right font-mono">
-            <div class="font-semibold ${getMarginColorClass(item.m_min_act)}">
-              ${item.m_min_act}% <span class="text-[10px] text-slate-400 font-normal">góndola</span>
+            <div class="font-semibold ${getMarginColorClass(actMarkup)}">
+              ${actMarkup.toFixed(1)}% <span class="text-[10px] text-slate-400 font-normal">mkp</span>
             </div>
-            ${item.m_eff_act !== undefined && item.m_eff_act !== item.m_min_act ? `
-              <div class="text-[10px] text-slate-500" title="Margen promedio ponderado en ventas de octubre">
-                ${item.m_eff_act}% prom. oct
-              </div>
-            ` : ''}
+            <div class="text-[10px] text-slate-500" title="Margen comercial sobre venta">
+              ${item.m_min_act}% mgn
+            </div>
           </td>
 
           <!-- Sugerencia IA -->
@@ -1617,22 +1668,23 @@
             ` : '<div class="text-[10px] text-slate-600 mt-0.5">Mantener precio</div>'}
           </td>
 
-          <!-- MARGEN APROBADO % (EDITABLE INPUT) -->
+          <!-- MARKUP APROBADO % (EDITABLE INPUT S/ COSTO) -->
           <td class="py-1 px-2 text-center bg-blue-950/20 border-r border-blue-900/30">
             <div class="relative flex items-center">
               <input 
                 type="text" 
                 id="input-margin-${item.id}" 
-                value="${metrics.margin.toFixed(1)}" 
+                value="${metrics.markup.toFixed(1)}" 
                 class="input-clean text-right font-bold ${mColor} text-xs py-1.5 pl-2 pr-5 rounded-lg w-full focus:bg-slate-900"
                 onfocus="onInputFocus(${index})"
                 onkeydown="handleInputKey(event, '${item.id}', 'MARGIN', ${index})"
                 onblur="handleMarginBlur('${item.id}', this.value)"
+                title="Markup sobre Costo: PVP = Costo x (1 + Markup/100)"
               />
               <span class="absolute right-2 text-slate-500 font-bold text-xs pointer-events-none">%</span>
             </div>
-            <div class="text-[10px] text-slate-400 mt-0.5">
-              Margen Góndola
+            <div class="text-[10px] text-slate-400 mt-0.5" title="Margen sobre venta equivalente: ${metrics.margin}%">
+              Markup s/ Costo (${metrics.margin}% mgn)
             </div>
           </td>
 
@@ -1946,7 +1998,7 @@
     function handleMarginBlur(itemId, rawValue) {
       const cleanVal = rawValue.replace(',', '.').replace(/[^\d.]/g, '');
       const parsedNum = parseFloat(cleanVal);
-      if (!isNaN(parsedNum) && parsedNum >= 0 && parsedNum < 100) {
+      if (!isNaN(parsedNum) && parsedNum >= 0 && parsedNum <= 1000) {
         updateProductMargin(itemId, parsedNum);
       } else {
         updateRowDOM(itemId);
@@ -2195,6 +2247,7 @@
           precio_nuevo: chosenRetail,
           diferencia_monto: chosenRetail - pAct,
           diferencia_pct: pAct > 0 ? Number(((chosenRetail - pAct) / pAct * 100).toFixed(1)) : 0,
+          markup_nuevo_pct: metrics.markup,
           margen_minorista_nuevo_pct: metrics.marginMin,
           margen_efectivo_nuevo_pct: metrics.marginEff,
           escalas_nuevas: metrics.scaledTiers,
@@ -2222,7 +2275,7 @@
       const csvHeader = [
         'sku', 'codigo_barra', 'nombre', 'proveedor', 'categoria', 
         'costo_promedio', 'precio_actual', 'precio_nuevo', 'diferencia_monto', 'diferencia_pct',
-        'margen_minorista_nuevo_pct', 'margen_efectivo_nuevo_pct', 'escalas_nuevas', 'estado', 'cambio_aplicable', 'product_id'
+        'markup_nuevo_pct', 'margen_minorista_nuevo_pct', 'margen_efectivo_nuevo_pct', 'escalas_nuevas', 'estado', 'cambio_aplicable', 'product_id'
       ].join(';');
 
       const csvRows = exportList.map(row => {
@@ -2238,6 +2291,7 @@
           row.precio_nuevo,
           row.diferencia_monto,
           row.diferencia_pct,
+          row.markup_nuevo_pct,
           row.margen_minorista_nuevo_pct,
           row.margen_efectivo_nuevo_pct,
           `"${tiersStr}"`,
