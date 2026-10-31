@@ -319,12 +319,14 @@ async def record_movement(db: AsyncSession, data: MovementCreate) -> InventoryMo
     if data.cantidad > 0 and data.costo_unitario:
         old_cost = stock.costo_unitario or 0
         old_qty = stock.cantidad - data.cantidad
-        if old_qty + data.cantidad > 0:
+        if old_qty <= 0:
+            stock.costo_unitario = data.costo_unitario
+        elif old_qty + data.cantidad > 0:
             stock.costo_unitario = (old_cost * old_qty + data.costo_unitario * data.cantidad) / (old_qty + data.cantidad)
-            # Sincronizar el costo promedio de la ficha de producto con el nuevo PMP del stock
-            prod = await db.get(Product, data.product_id)
-            if prod and stock.costo_unitario:
-                prod.costo_promedio = round(Decimal(str(stock.costo_unitario)))
+        # Sincronizar el costo promedio de la ficha de producto con el nuevo PMP del stock
+        prod = await db.get(Product, data.product_id)
+        if prod and stock.costo_unitario:
+            prod.costo_promedio = round(Decimal(str(stock.costo_unitario)))
 
     stock.updated_at = datetime.now(timezone.utc)
     await db.flush()

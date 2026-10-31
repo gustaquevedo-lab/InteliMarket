@@ -839,7 +839,12 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         d_cost = Decimal(str(cost or 0))
         d_qty = qty
         stock_obj.cantidad = (old_qty + d_qty).quantize(Decimal("0.001"))
-        if old_qty + d_qty > 0:
+        if old_qty <= Decimal("0"):
+            # Si el stock previo era <= 0 (quiebre o sobreventa), el stock negativo ya fue despachado/vendido.
+            # Las nuevas unidades físicas que ingresan asumen limpiamente su costo de adquisición entrante.
+            if d_cost > Decimal("0"):
+                stock_obj.costo_unitario = d_cost.quantize(Decimal("1"), rounding="ROUND_HALF_UP")
+        elif old_qty + d_qty > Decimal("0") and d_cost > Decimal("0"):
             stock_obj.costo_unitario = ((old_cost * old_qty + d_cost * d_qty) / (old_qty + d_qty)).quantize(Decimal("1"), rounding="ROUND_HALF_UP")
         stock_obj.updated_at = datetime.now(timezone.utc)
 
