@@ -73,7 +73,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [pacingMode, setPacingMode] = useState<"diario" | "acumulado">("diario")
-  const [mixViewMode, setMixViewMode] = useState<"venta" | "margen">("venta")
 
   const [salesSummary, setSalesSummary] = useState<any>(null)
   const [salesByCat, setSalesByCat] = useState<any[]>([])
@@ -84,6 +83,7 @@ export default function Dashboard() {
   const [recentOrders, setRecentOrders] = useState<PurchaseOrder[]>([])
   const [lowStockItems, setLowStockItems] = useState<any[]>([])
   const [agingData, setAgingData] = useState<any>(null)
+  const [stockVal, setStockVal] = useState<any>(null)
   const [periodLoading, setPeriodLoading] = useState(false)
 
   // Cache en memoria para transiciones instantáneas
@@ -153,6 +153,7 @@ export default function Dashboard() {
         api.stock.lowStock().catch(() => []),
         api.accountsReceivable.aging().catch(() => null),
       ])
+      api.reports.inventoryValuation().then(setStockVal).catch(() => setStockVal(null))
 
       if (replenishRes.status === "fulfilled" && replenishRes.value) setReplenishmentData(replenishRes.value)
       if (finRes.status === "fulfilled" && finRes.value) setFinancialDash(finRes.value)
@@ -185,12 +186,12 @@ export default function Dashboard() {
   const totalVentasMonto = useMemo(() => {
     if (salesSummary?.monto_total != null) return Number(salesSummary.monto_total)
     if (salesSummary?.total_monto != null) return Number(salesSummary.total_monto)
-    return 939170724
+    return 0
   }, [salesSummary])
 
   const totalTickets = useMemo(() => {
     if (salesSummary?.total_ventas != null) return Number(salesSummary.total_ventas)
-    return 9778
+    return 0
   }, [salesSummary])
 
   const ticketPromedio = useMemo(() => {
@@ -198,134 +199,71 @@ export default function Dashboard() {
       return Math.round(Number(salesSummary.ticket_promedio))
     }
     if (totalTickets > 0) return Math.round(totalVentasMonto / totalTickets)
-    return 96049
+    return 0
   }, [salesSummary, totalVentasMonto, totalTickets])
 
   const margenBrutoGs = useMemo(() => {
-    if (salesSummary?.margen_bruto_gs != null) return Number(salesSummary.margen_bruto_gs)
-    return Math.round(totalVentasMonto * 0.1758)
-  }, [salesSummary, totalVentasMonto])
+    // utilidad bruta = venta SIN IVA - costo (la calcula el backend; aca no se supone nada)
+    return Number(salesSummary?.margen_bruto_gs ?? 0)
+  }, [salesSummary])
 
   const margenBrutoPct = useMemo(() => {
-    if (salesSummary?.margen_bruto_pct != null) return Number(salesSummary.margen_bruto_pct)
-    if (totalVentasMonto > 0) return Number(((margenBrutoGs / totalVentasMonto) * 100).toFixed(2))
-    return 17.58
-  }, [salesSummary, margenBrutoGs, totalVentasMonto])
+    return Number(salesSummary?.margen_bruto_pct ?? 0)
+  }, [salesSummary])
 
   const costoTotalMercaderias = useMemo(() => {
-    if (salesSummary?.costo_total != null) return Number(salesSummary.costo_total)
-    return Math.max(0, totalVentasMonto - margenBrutoGs)
-  }, [salesSummary, totalVentasMonto, margenBrutoGs])
+    return Number(salesSummary?.costo_total ?? 0)
+  }, [salesSummary])
+  const ventasSinIva = Number(salesSummary?.monto_sin_iva ?? 0)
 
   // Seguimiento de Volumen PARESA / Bebidas
   const paresaVolumeData = useMemo(() => {
-    const paresaCats = (salesByCat || []).filter((c: any) => {
-      const n = (c.categoria || c.name || "").toLowerCase()
-      return n.includes("bebid") || n.includes("pares") || n.includes("gaseos") || n.includes("agua") || n.includes("coca")
-    })
-    const totalBebidasGs = paresaCats.reduce((acc: number, c: any) => acc + Number(c.monto || c.total || 0), 0) || Math.round(totalVentasMonto * 0.32)
-    const totalUC = Math.round(totalBebidasGs / 32000)
-    const targetUC = 15000
-    const pctAlcanzado = Math.min(100, Number(((totalUC / targetUC) * 100).toFixed(1)))
-    const rebateEstimadoGs = Math.round(totalBebidasGs * 0.045)
-
-    return { totalBebidasGs, totalUC, targetUC, pctAlcanzado, rebateEstimadoGs }
-  }, [salesByCat, totalVentasMonto])
+    const totalUC = Number(salesSummary?.paresa_uc ?? 0)
+    const targetUC: number | null = salesSummary?.paresa_meta_uc ?? null
+    const pctAlcanzado = targetUC ? Number(((totalUC / targetUC) * 100).toFixed(1)) : null
+    return { totalUC, targetUC, pctAlcanzado }
+  }, [salesSummary])
 
   // DOH & Stock en Depósito
   const stockMetrics = useMemo(() => {
-    const totalSKUs = 4850
-    const dohDias = 18.5
-    const valorizacionTotalGs = Math.round(totalVentasMonto * 1.85)
-    const quiebresCriticos = replenishmentData?.total_quiebres ?? (lowStockItems.length > 0 ? lowStockItems.length : 3)
-    return { totalSKUs, dohDias, valorizacionTotalGs, quiebresCriticos }
-  }, [replenishmentData, lowStockItems, totalVentasMonto])
+    const totalSKUs: number | null = stockVal?.total_products ?? null
+    const valorizacionTotalGs: number | null = stockVal?.total_value ?? null
+    const quiebresCriticos = replenishmentData?.total_quiebres ?? lowStockItems.length
+    return { totalSKUs, valorizacionTotalGs, quiebresCriticos }
+  }, [replenishmentData, lowStockItems, stockVal])
 
   // ---------------------------------------------------------------------------
   // DATOS PARA GRÁFICOS RECHARTS
   // ---------------------------------------------------------------------------
   const salesTrendData = useMemo(() => {
-    if (salesPeriodData && salesPeriodData.length > 0) {
-      let acumuladoVenta = 0
-      let acumuladoMeta = 0
-
-      return salesPeriodData.map((d: any, idx: number) => {
-        const monto = Number(d.monto || d.venta_real || d.total || 0)
-        const metaDia = Math.round(monto * 1.12 || 35000000)
-        acumuladoVenta += monto
-        acumuladoMeta += metaDia
-
-        return {
-          label: d.periodo ? String(d.periodo).slice(-5) : `Día ${idx + 1}`,
-          fecha: d.periodo || d.fecha || "",
-          actual: pacingMode === "diario" ? monto : acumuladoVenta,
-          meta: pacingMode === "diario" ? metaDia : acumuladoMeta,
-          mes_anterior: pacingMode === "diario" ? Math.round(monto * 0.94) : Math.round(acumuladoVenta * 0.94),
-          rentabilidad_real: Math.round(monto * 0.176),
-          tickets: Number(d.cantidad || d.tickets || 1),
-        }
-      })
-    }
-    const days = timeRange === "7d" ? 7 : timeRange === "mes" ? 25 : 30
-    let acum = 0
-    let acumM = 0
-    return Array.from({ length: days }).map((_, i) => {
-      const diaNum = i + 1
-      const dailyBase = Math.round(totalVentasMonto / days)
-      const variance = 1 + ((i % 5) - 2) * 0.12
-      const val = Math.round(dailyBase * variance)
-      const meta = Math.round(val * 1.1)
-      acum += val
-      acumM += meta
-
+    let acumuladoVenta = 0
+    return (salesPeriodData || []).map((d: any, idx: number) => {
+      const monto = Number(d.monto || d.venta_real || d.total || 0)
+      acumuladoVenta += monto
       return {
-        label: `${diaNum < 10 ? '0' : ''}${diaNum}/08`,
-        fecha: `2026-08-${diaNum < 10 ? '0' : ''}${diaNum}`,
-        actual: pacingMode === "diario" ? val : acum,
-        meta: pacingMode === "diario" ? meta : acumM,
-        mes_anterior: pacingMode === "diario" ? Math.round(val * 0.92) : Math.round(acum * 0.92),
-        rentabilidad_real: Math.round(val * 0.176),
-        tickets: Math.round(val / ticketPromedio) || 350,
+        label: d.periodo ? String(d.periodo).slice(-5) : `Día ${idx + 1}`,
+        fecha: d.periodo || d.fecha || "",
+        actual: pacingMode === "diario" ? monto : acumuladoVenta,
+        tickets: Number(d.cantidad || d.tickets || 0),
       }
     })
-  }, [salesPeriodData, pacingMode, totalVentasMonto, timeRange, ticketPromedio])
+  }, [salesPeriodData, pacingMode])
 
   const categoryMixData = useMemo(() => {
-    const defaultCats = [
-      { name: "Bebidas Core (PARESA)", value: Math.round(totalVentasMonto * 0.35), percentage: "35.0", margen: 18.2, color: "#3b82f6" },
-      { name: "Lácteos & Quesos (Trébol)", value: Math.round(totalVentasMonto * 0.24), percentage: "24.0", margen: 15.4, color: "#10b981" },
-      { name: "Carnicería & Embutidos", value: Math.round(totalVentasMonto * 0.20), percentage: "20.0", margen: 21.5, color: "#f59e0b" },
-      { name: "Almacén & Secos", value: Math.round(totalVentasMonto * 0.14), percentage: "14.0", margen: 16.8, color: "#8b5cf6" },
-      { name: "Limpieza & Bazar", value: Math.round(totalVentasMonto * 0.07), percentage: "7.0", margen: 24.0, color: "#ec4899" },
-    ]
-
-    if (!salesByCat || salesByCat.length === 0) return defaultCats
-
     const colors = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4", "#f97316"]
-    const totalMonto = salesByCat.reduce((acc: number, c: any) => acc + Number(c.monto || c.total || 0), 0) || totalVentasMonto
-
-    return salesByCat.slice(0, 5).map((c: any, i: number) => {
+    const totalMonto = (salesByCat || []).reduce((acc: number, c: any) => acc + Number(c.monto || c.total || 0), 0)
+    return (salesByCat || []).slice(0, 5).map((c: any, i: number) => {
       const val = Number(c.monto || c.total || 0)
       return {
         name: c.categoria || c.name || `Familia ${i + 1}`,
-        value: val > 0 ? val : defaultCats[i]?.value || 1000000,
-        percentage: ((val / totalMonto) * 100).toFixed(1),
-        margen: 16.5 + (i * 1.5),
+        value: val,
+        percentage: totalMonto ? ((val / totalMonto) * 100).toFixed(1) : "0.0",
         color: colors[i % colors.length],
       }
     })
-  }, [salesByCat, totalVentasMonto])
+  }, [salesByCat])
 
-  const topMovers = useMemo(() => {
-    if (salesByProd && salesByProd.length > 0) return salesByProd.slice(0, 5)
-    return [
-      { producto: "Coca-Cola Original 2L Retornable", sku: "PAR-COC-2000", cantidad: 4120, monto: 49440000, margen: 19.5 },
-      { producto: "Leche Entera UHT Trébol 1L (Caja x12)", sku: "TRE-LEC-1000", cantidad: 3850, monto: 34650000, margen: 14.8 },
-      { producto: "Costilla Vacuna Premium Frigorífico", sku: "CAR-COS-001", cantidad: 1420, monto: 56800000, margen: 22.4 },
-      { producto: "Cerveza Pilsen 3/4 (Cajón x12)", sku: "CER-PIL-750", cantidad: 2150, monto: 38700000, margen: 16.2 },
-      { producto: "Aceite Girasol 900ml (Caja x12)", sku: "ALM-ACE-900", cantidad: 1890, monto: 22680000, margen: 15.1 },
-    ]
-  }, [salesByProd])
+  const topMovers = useMemo(() => (salesByProd || []).slice(0, 5), [salesByProd])
 
   return (
     <div className="space-y-6 pb-20 max-w-full overflow-hidden animate-fade-in">
@@ -428,7 +366,7 @@ export default function Dashboard() {
                 </span>
               </div>
               <p className="text-xs text-indigo-200/80 mt-0.5">
-                Ventas en <strong>{formatPYG(totalVentasMonto)}</strong> con Margen Bruto Real de <strong>{margenBrutoPct.toFixed(1)}% ({formatPYG(margenBrutoGs)})</strong>. Volumen PARESA: <strong>{paresaVolumeData.totalUC.toLocaleString()} UC</strong> acumuladas.
+                Ventas en <strong>{formatPYG(totalVentasMonto)}</strong> con Margen Bruto Real de <strong>{margenBrutoPct.toFixed(1)}% ({formatPYG(margenBrutoGs)})</strong>. Volumen PARESA: <strong>{paresaVolumeData.totalUC.toLocaleString()} UC</strong> netas de devoluciones.
               </p>
             </div>
           </div>
@@ -443,61 +381,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div onClick={() => navigate("/contratos-proveedores")} className="p-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-all cursor-pointer group">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] uppercase font-black text-indigo-300 tracking-wider">
-                Destrabar Escalón Rebate Aguas PARESA
-              </span>
-              <span className="px-2 py-0.5 rounded-md text-[10px] font-black font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                +₲ 18.250.000
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Faltan <strong>{(paresaVolumeData.targetUC - paresaVolumeData.totalUC).toLocaleString()} UC</strong> para saltar al tramo del 100%. Clientes mayoristas tienen pedidos pendientes de despacho.
-            </p>
-            <div className="mt-3 flex items-center justify-between text-xs text-indigo-400 font-bold group-hover:text-indigo-300">
-              <span>Ejecutar Acción IA</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-          <div onClick={() => navigate("/purchases")} className="p-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-all cursor-pointer group">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] uppercase font-black text-indigo-300 tracking-wider">
-                Reabastecimiento Trébol (Chortitzer)
-              </span>
-              <span className="px-2 py-0.5 rounded-md text-[10px] font-black font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                Protege ₲ 45M
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              32 SKUs de alta rotación (Leche Entera y Besito Parrillero) están por debajo del punto de reorden en depósito central.
-            </p>
-            <div className="mt-3 flex items-center justify-between text-xs text-indigo-400 font-bold group-hover:text-indigo-300">
-              <span>Revisar Sugerencia de Compras</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-
-          <div onClick={() => navigate("/accounts-receivable")} className="p-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-all cursor-pointer group">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] uppercase font-black text-indigo-300 tracking-wider">
-                Cobranzas de Cartera Preventa
-              </span>
-              <span className="px-2 py-0.5 rounded-md text-[10px] font-black font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                ₲ 68.400.000
-              </span>
-            </div>
-            <p className="text-xs text-slate-300 leading-relaxed">
-              12 clientes mayoristas acumulan facturas a crédito con vencimiento en los próximos 7 días hábiles.
-            </p>
-            <div className="mt-3 flex items-center justify-between text-xs text-indigo-400 font-bold group-hover:text-indigo-300">
-              <span>Ver Cuentas a Cobrar</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* ──────────────────────────────────────────────────────────────────────────
@@ -520,9 +403,7 @@ export default function Dashboard() {
           </p>
           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-700/60 font-mono">
             <span>Ticket Prom: <strong className="text-gray-900 dark:text-gray-100">{formatPYG(ticketPromedio)}</strong></span>
-            <span className="text-emerald-600 font-bold flex items-center gap-0.5">
-              <ArrowUpRight className="w-3.5 h-3.5" /> +12.4% vs Mes Ant
-            </span>
+            <span>Sin IVA: <strong className="text-gray-900 dark:text-gray-100">{formatPYG(ventasSinIva)}</strong></span>
           </div>
         </div>
 
@@ -541,8 +422,8 @@ export default function Dashboard() {
             {formatPYG(margenBrutoGs)}
           </p>
           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-700/60 font-mono">
-            <span>Facturado: <strong className="text-gray-900 dark:text-gray-100">{formatPYG(totalVentasMonto)}</strong></span>
-            <span>COGS: <strong className="text-gray-700 dark:text-gray-300">{formatPYG(costoTotalMercaderias)}</strong></span>
+            <span>Venta sin IVA: <strong className="text-gray-900 dark:text-gray-100">{formatPYG(ventasSinIva)}</strong></span>
+            <span>Costo: <strong className="text-gray-700 dark:text-gray-300">{formatPYG(costoTotalMercaderias)}</strong></span>
           </div>
         </div>
 
@@ -554,14 +435,14 @@ export default function Dashboard() {
               PARESA ({timeRange === "mes" ? "Este Mes (MTD)" : computeDateRange(timeRange).label})
             </span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-black font-mono bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-              {paresaVolumeData.pctAlcanzado}% Meta
+              {paresaVolumeData.pctAlcanzado != null ? `${paresaVolumeData.pctAlcanzado}% Meta` : "Sin meta"}
             </span>
           </div>
           <p className="text-2xl sm:text-3xl font-black font-mono text-amber-600 dark:text-amber-400 tracking-tight">
             {paresaVolumeData.totalUC.toLocaleString()} <span className="text-sm font-bold text-gray-500 dark:text-gray-400">UC</span>
           </p>
           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-700/60 font-mono">
-            <span>Rebate Estimado: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{formatPYG(paresaVolumeData.rebateEstimadoGs)}</strong></span>
+            <span>Meta: <strong className="text-gray-900 dark:text-gray-100">{paresaVolumeData.targetUC != null ? `${paresaVolumeData.targetUC.toLocaleString()} UC` : "sin cargar"}</strong></span>
             <button onClick={() => navigate("/supplier-kpis")} className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline">Ver KPIs & Rebate →</button>
           </div>
         </div>
@@ -574,14 +455,14 @@ export default function Dashboard() {
               Stock en Depósito
             </span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-black font-mono bg-purple-50 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-              {stockMetrics.dohDias} días DOH
+              a costo
             </span>
           </div>
           <p className="text-2xl sm:text-3xl font-black font-mono text-purple-600 dark:text-purple-400 tracking-tight">
-            {formatPYG(stockMetrics.valorizacionTotalGs)}
+            {stockMetrics.valorizacionTotalGs != null ? formatPYG(stockMetrics.valorizacionTotalGs) : "—"}
           </p>
           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-700/60 font-mono">
-            <span>SKUs Activos: <strong className="text-gray-900 dark:text-gray-100">{stockMetrics.totalSKUs.toLocaleString()}</strong></span>
+            <span>SKUs Activos: <strong className="text-gray-900 dark:text-gray-100">{stockMetrics.totalSKUs != null ? stockMetrics.totalSKUs.toLocaleString() : "—"}</strong></span>
             <span className="text-amber-600 font-bold">Quiebres: {stockMetrics.quiebresCriticos} SKUs</span>
           </div>
         </div>
@@ -640,8 +521,6 @@ export default function Dashboard() {
                 />
                 <Legend wrapperStyle={{ fontSize: 12, paddingTop: 10 }} />
                 <Area type="monotone" dataKey="actual" name="Ventas Actuales" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorActual)" />
-                <Area type="monotone" dataKey="mes_anterior" name="Mes Anterior" stroke="#f59e0b" strokeWidth={2} strokeDasharray="4 4" fill="none" />
-                <Area type="monotone" dataKey="meta" name="Meta Pacing" stroke="#10b981" strokeWidth={2} strokeDasharray="2 2" fill="none" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -655,10 +534,6 @@ export default function Dashboard() {
                 <PieChartIcon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                 Mix por Categoría
               </h2>
-              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-700/60 p-0.5 rounded-lg text-[11px] font-bold">
-                <button onClick={() => setMixViewMode("venta")} className={`px-2 py-0.5 rounded-md ${mixViewMode === "venta" ? "bg-white dark:bg-slate-800 text-indigo-600 font-bold" : "text-gray-500"}`}>% Venta</button>
-                <button onClick={() => setMixViewMode("margen")} className={`px-2 py-0.5 rounded-md ${mixViewMode === "margen" ? "bg-white dark:bg-slate-800 text-indigo-600 font-bold" : "text-gray-500"}`}>% Margen</button>
-              </div>
             </div>
 
             <div className="h-48 w-full relative">
@@ -686,7 +561,7 @@ export default function Dashboard() {
                     <span className="text-gray-700 dark:text-gray-300 font-medium truncate max-w-[140px]">{cat.name}</span>
                   </div>
                   <span className="font-mono font-bold text-gray-900 dark:text-white">
-                    {mixViewMode === "venta" ? `${cat.percentage || (cat.value / totalVentasMonto * 100).toFixed(1)}%` : `${cat.margen}%`}
+                    {cat.percentage}%
                   </span>
                 </div>
               ))}
@@ -744,7 +619,7 @@ export default function Dashboard() {
                     {formatPYG(p.monto || 0)}
                   </td>
                   <td className="p-3 text-right font-bold text-teal-600 dark:text-teal-400">
-                    {Number(p.margen || 17.5).toFixed(1)}%
+                    {p.margen != null ? `${Number(p.margen).toFixed(1)}%` : "—"}
                   </td>
                   <td className="p-3 text-center">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">

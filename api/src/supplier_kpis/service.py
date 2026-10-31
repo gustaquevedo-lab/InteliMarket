@@ -252,7 +252,9 @@ async def recalculate_period_sales(db: AsyncSession, period_id: uuid.UUID) -> sc
             si.product_id,
             p.segmento_paresa,
             p.nombre,
-            SUM(si.cantidad * COALESCE(p.caja_unitaria_factor, 1.0)) as total_uc
+            -- las notas de credito guardan cantidad positiva: restan UC, no suman
+            SUM(CASE WHEN s.tipo_comprobante = 'notacredito' THEN -1 ELSE 1 END
+                * si.cantidad * COALESCE(p.caja_unitaria_factor, 1.0)) as total_uc
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
         JOIN products p ON p.id = si.product_id

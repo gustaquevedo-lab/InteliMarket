@@ -16,11 +16,23 @@ from typing import Optional
 from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from api.src.financial.models import SupplierInvoice
+from api.src.common.money import gs
 
 
 async def _exec(db: AsyncSession, query: str, params: Optional[dict] = None):
     result = await db.execute(text(query), params or {})
     return result.mappings()
+
+
+def margen_bruto(monto_total: float, iva: float, costo: float) -> dict:
+    """Utilidad bruta = venta SIN IVA - costo. El costo de compra se guarda sin IVA,
+    así que restarlo de la venta con IVA contaría el IVA como ganancia. Sin valores supuestos:
+    si el costo supera la venta, el margen sale negativo."""
+    monto_sin_iva = int(monto_total - iva)
+    costo_total = int(gs(costo))
+    margen = monto_sin_iva - costo_total
+    pct = round(margen / monto_sin_iva * 100.0, 2) if monto_sin_iva else 0.0
+    return {"monto_sin_iva": monto_sin_iva, "costo_total": costo_total, "margen_bruto_gs": margen, "margen_bruto_pct": pct}
 
 
 async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> dict:
@@ -60,8 +72,9 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
                 COALESCE(SUM(vi.cantidad), 0) as total_items,
                 COALESCE(SUM(
                     (CASE WHEN fs.tipo_comprobante = 'notacredito' OR vi.total < 0 THEN -1 ELSE 1 END) *
-                    COALESCE(NULLIF(vi.costo_unitario, 0), p.costo_promedio, p.ultimo_costo, p.costo_landed, vi.precio_unitario * 0.84) * vi.cantidad
-                ), 0) as costo_total
+                    COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), NULLIF(p.ultimo_costo, 0), NULLIF(p.costo_landed, 0), 0) * vi.cantidad
+                ), 0) as costo_total,
+                COUNT(*) FILTER (WHERE COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), NULLIF(p.ultimo_costo, 0), NULLIF(p.costo_landed, 0)) IS NULL) as items_sin_costo
             FROM sale_items vi
             JOIN filtered_sales fs ON fs.id = vi.sale_id
             LEFT JOIN products p ON p.id = vi.product_id
@@ -74,7 +87,8 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
             st.total_pagado,
             st.saldo_pendiente,
             it.total_items,
-            it.costo_total
+            it.costo_total,
+            it.items_sin_costo
         FROM sales_totals st
         CROSS JOIN items_totals it
     """
@@ -84,19 +98,27 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
     monto_total = float(result["monto_total"] or 0)
     monto_iva_10 = float(result["monto_iva_10"] or 0)
     monto_iva_5 = float(result["monto_iva_5"] or 0)
-    costo_total = float(result["costo_total"] or 0)
+    m = margen_bruto(monto_total, monto_iva_10 + monto_iva_5, float(result["costo_total"] or 0))
+    costo_total, margen_bruto_gs, margen_bruto_pct = m["costo_total"], m["margen_bruto_gs"], m["margen_bruto_pct"]
 
-    if monto_total > 0 and costo_total > 0 and costo_total < monto_total:
-        margen_bruto_gs = monto_total - costo_total
-        margen_bruto_pct = round((margen_bruto_gs / monto_total) * 100.0, 2)
-    elif monto_total > 0:
-        margen_bruto_pct = 15.5
-        margen_bruto_gs = round(monto_total * (margen_bruto_pct / 100.0), 0)
-        costo_total = monto_total - margen_bruto_gs
-    else:
-        margen_bruto_gs = 0.0
-        margen_bruto_pct = 0.0
-        costo_total = 0.0
+    # Cajas unitarias PARESA del periodo (las notas de credito restan) y la meta del mes cargada en Metas PARESA
+    paresa = (await _exec(db, f"""
+        SELECT COALESCE(SUM(CASE WHEN v.tipo_comprobante = 'notacredito' THEN -1 ELSE 1 END
+                            * vi.cantidad * COALESCE(p.caja_unitaria_factor, 0)), 0) as uc
+        FROM sale_items vi
+        JOIN sales v ON v.id = vi.sale_id
+        JOIN products p ON p.id = vi.product_id
+        JOIN suppliers sp ON sp.id = p.supplier_id
+        WHERE {where} AND sp.razon_social ILIKE '%PARAGUAY REFRESCOS%'
+    """, params)).first()
+    meta = (await _exec(db, """
+        SELECT i.meta FROM supplier_kpi_periods sk
+        JOIN supplier_kpi_indicators i ON i.period_id = sk.id AND i.codigo = 'total_compra'
+        JOIN suppliers sp ON sp.id = sk.supplier_id
+        WHERE sk.company_id = :company_id AND sp.razon_social ILIKE '%PARAGUAY REFRESCOS%'
+          AND sk.periodo = date_trunc('month', CAST(:mes AS date))::date
+        LIMIT 1
+    """, {"company_id": company_id, "mes": fecha_hasta or date.today()})).first() if company_id else None
 
     return {
         "total_ventas": total_ventas,
@@ -106,7 +128,11 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
         "monto_exento": float(monto_total - monto_iva_10 - monto_iva_5),
         "ticket_promedio": float(monto_total / max(total_ventas, 1)),
         "total_items": int(result["total_items"] or 0),
+        "monto_sin_iva": m["monto_sin_iva"],
         "costo_total": costo_total,
+        "items_sin_costo": int(result["items_sin_costo"] or 0),
+        "paresa_uc": round(float(paresa["uc"] or 0)),
+        "paresa_meta_uc": float(meta["meta"]) if meta and meta["meta"] else None,
         "margen_bruto_gs": margen_bruto_gs,
         "margen_bruto_pct": margen_bruto_pct,
         # OJO: total_pagado/saldo a nivel de venta no son confiables para
@@ -229,6 +255,7 @@ async def get_margin_summary(db: AsyncSession, fecha_desde: Optional[date] = Non
     query = f"""
         SELECT
             COALESCE(SUM(vi.total), 0) as monto,
+            COALESCE(SUM(COALESCE(vi.iva_monto, 0)), 0) as iva,
             COALESCE(SUM(SIGN(vi.total) * vi.costo_unitario * vi.cantidad), 0) as costo
         FROM sales v
         JOIN sale_items vi ON vi.sale_id = v.id
@@ -236,11 +263,11 @@ async def get_margin_summary(db: AsyncSession, fecha_desde: Optional[date] = Non
     """
     r = (await _exec(db, query, params)).first()
     monto = float(r["monto"] or 0)
-    costo = float(r["costo"] or 0)
+    m = margen_bruto(monto, float(r["iva"] or 0), float(r["costo"] or 0))
     return {
         "monto": monto,
-        "costo": costo,
-        "margen_pct": round(((monto - costo) / max(monto, 1)) * 100, 1) if monto > 0 else 0.0,
+        "costo": m["costo_total"],
+        "margen_pct": round(m["margen_bruto_pct"], 1),
     }
 
 
@@ -263,6 +290,7 @@ async def get_sales_by_product(db: AsyncSession, company_id: Optional[str] = Non
             p.sku,
             SUM(vi.cantidad) as cantidad,
             SUM(vi.total) as monto,
+            SUM(COALESCE(vi.iva_monto, 0)) as iva,
             SUM(SIGN(vi.total) * vi.costo_unitario * vi.cantidad) as costo
         FROM sales v
         JOIN sale_items vi ON vi.sale_id = v.id
@@ -280,7 +308,7 @@ async def get_sales_by_product(db: AsyncSession, company_id: Optional[str] = Non
             "cantidad": int(r["cantidad"]),
             "monto": float(r["monto"]),
             "costo": float(r["costo"] or 0),
-            "margen": round(((float(r["monto"]) - float(r["costo"] or 0)) / max(float(r["monto"]), 1)) * 100, 1),
+            "margen": round(margen_bruto(float(r["monto"]), float(r["iva"] or 0), float(r["costo"] or 0))["margen_bruto_pct"], 1),
         }
         for r in results
     ]
