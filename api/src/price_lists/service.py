@@ -679,7 +679,7 @@ async def get_audit_catalog(db: AsyncSession, fresh: bool = False) -> str:
             p.nombre,
             COALESCE(s.nombre_fantasia, s.razon_social, 'SIN PROVEEDOR') as proveedor,
             COALESCE(c.nombre, 'SIN CATEGORIA') as categoria,
-            p.precio_venta as precio_minorista_actual,
+            COALESCE(NULLIF(p.precio_regular, 0), p.precio_venta) as precio_minorista_actual,
             COALESCE(NULLIF(p.costo_promedio, 0), NULLIF(p.ultimo_costo, 0), 0) as costo_promedio,
             p.ultimo_costo,
             COALESCE(so.cant_oct, 0) as cant_oct,
@@ -914,13 +914,14 @@ async def apply_audit_decisions(db: AsyncSession, company_id: str, usuario_nombr
         SELECT 
             d.product_id, d.sku, d.precio_aprobado, d.status, d.escalas_aprobadas,
             p.nombre as product_nombre, p.codigo_barra as product_barcode,
-            p.precio_venta as precio_actual,
+            COALESCE(NULLIF(p.precio_regular, 0), p.precio_venta) as precio_actual,
+            p.precio_regular,
             c.nombre as categoria_nombre
         FROM price_audit_decisions d
         JOIN products p ON p.id = d.product_id
         LEFT JOIN product_categories c ON c.id = p.categoria_id
         WHERE (
-            (d.status IN ('MODIFIED', 'ACCEPTED') AND d.precio_aprobado > 0 AND d.precio_aprobado != p.precio_venta)
+            (d.status IN ('MODIFIED', 'ACCEPTED') AND d.precio_aprobado > 0 AND d.precio_aprobado != COALESCE(NULLIF(p.precio_regular, 0), p.precio_venta))
             OR (d.escalas_aprobadas IS NOT NULL AND jsonb_array_length(d.escalas_aprobadas) > 0)
         );
     """))
@@ -982,7 +983,8 @@ async def apply_audit_decisions(db: AsyncSession, company_id: str, usuario_nombr
         if p_new > 0 and p_new != p_act:
             await db.execute(text("""
                 UPDATE products
-                SET precio_venta = :p_new,
+                SET precio_regular = CASE WHEN precio_regular IS NOT NULL AND precio_regular > 0 THEN :p_new ELSE NULL END,
+                    precio_venta = CASE WHEN precio_regular IS NOT NULL AND precio_regular > 0 THEN precio_venta ELSE :p_new END,
                     updated_at = :now
                 WHERE id = :pid;
             """), {"p_new": p_new, "now": now_utc, "pid": pid})
