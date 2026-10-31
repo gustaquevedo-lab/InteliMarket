@@ -2261,6 +2261,34 @@ async def assign_product_supplier(
     }
 
 
+async def toggle_product_active(
+    db: AsyncSession,
+    product_id: UUID | str,
+    activo: Optional[bool] = None,
+) -> dict:
+    """Activa o inactiva un producto en la base de datos."""
+    pid = UUID(str(product_id))
+    product = (await db.execute(select(Product).where(Product.id == pid))).scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    if activo is None:
+        product.activo = not bool(product.activo)
+    else:
+        product.activo = bool(activo)
+
+    product.updated_at = func.now()
+    await db.commit()
+
+    return {
+        "success": True,
+        "product_id": str(product.id),
+        "sku": product.sku,
+        "nombre": product.nombre,
+        "activo": product.activo,
+    }
+
+
 async def assign_product_supplier_batch(
     db: AsyncSession,
     assignments: list[dict],
@@ -2314,7 +2342,7 @@ async def get_unassigned_supplier_catalog(
                 "count": r[4]
             }
 
-    # Productos sin proveedor
+    # Productos sin proveedor con stock real consolidado de todos los depósitos
     q_prods = '''
         SELECT 
             p.id::text,
@@ -2326,13 +2354,12 @@ async def get_unassigned_supplier_catalog(
             COALESCE(p.unidad_medida, 'UN') as unidad_medida,
             COALESCE(p.costo_promedio, p.ultimo_costo, 0)::float as costo,
             COALESCE(p.precio_venta, 0)::float as precio_venta,
-            COALESCE(s.cantidad, 0)::float as stock
+            COALESCE((SELECT SUM(st.cantidad) FROM stock st WHERE st.product_id = p.id), 0)::float as stock
         FROM products p
         LEFT JOIN product_categories c ON c.id = p.categoria_id
-        LEFT JOIN stock s ON s.product_id = p.id
         WHERE p.company_id = :cid
           AND p.supplier_id IS NULL
-        ORDER BY p.activo DESC, s.cantidad DESC NULLS LAST, p.nombre ASC
+        ORDER BY p.activo DESC, p.nombre ASC
     '''
     res_prods = await db.execute(text(q_prods), {"cid": cid})
     products = []
@@ -2364,9 +2391,13 @@ async def get_unassigned_supplier_catalog(
             "total": len(products),
             "activos": sum(1 for p in products if p["activo"]),
             "inactivos": sum(1 for p in products if not p["activo"]),
-            "con_stock": sum(1 for p in products if p["stock"] > 0),
+            "con_stock_positivo": sum(1 for p in products if p["stock"] > 0),
+            "con_stock_negativo": sum(1 for p in products if p["stock"] < 0),
+            "con_stock_cero": sum(1 for p in products if p["stock"] == 0),
+            "con_stock": sum(1 for p in products if p["stock"] != 0),
             "con_sugerencia": sum(1 for p in products if p["sugerencia"]),
             "total_suppliers": len(suppliers),
         }
     }
+
 

@@ -18,7 +18,7 @@ from api.src.products.schemas import (
     SupplierRepresentativesPayload,
     ProductSectionCreate, ProductSectionUpdate, ProductSectionResponse,
     ProductBrandCreate, ProductBrandUpdate, ProductBrandResponse,
-    AssignSupplierRequest, AssignSupplierBatchRequest,
+    AssignSupplierRequest, AssignSupplierBatchRequest, ToggleProductActiveRequest,
 )
 from api.src.products import service
 from api.src.products.service import annotate_products_with_promos
@@ -702,5 +702,24 @@ async def tool_assign_supplier_batch(
 ):
     """Asigna proveedores en lote desde la herramienta HTML."""
     return await service.assign_product_supplier_batch(db, [a.model_dump() for a in body.assignments])
+
+
+@router.post("/products/toggle-active")
+async def toggle_active_endpoint(
+    body: ToggleProductActiveRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Activa o inactiva un producto en la base de datos."""
+    return await service.toggle_product_active(db, body.product_id, body.activo)
+
+
+@tool_router.post("/toggle-active")
+async def tool_toggle_active(
+    body: ToggleProductActiveRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Activa o inactiva un producto desde la herramienta HTML."""
+    return await service.toggle_product_active(db, body.product_id, body.activo)
 
 

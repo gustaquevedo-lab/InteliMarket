@@ -1,5 +1,12 @@
 """Generador de la Herramienta HTML Interactiva de Asignación de Proveedores.
-Extra Supermercado — InteliMarket
+Extra Supermercado — InteliMarket (vertical/supermercado)
+Incluye:
+- Activar / Inactivar productos en vivo con persistencia en BD y acciones en lote.
+- Stock Real consolidado de la BD (con alertas para stock negativo y desglose por unidad).
+- Buscador predictivo typeahead entre 489 proveedores.
+- Sugerencias inteligentes de marca.
+- Asignación individual y en lote con persistencia inmediata en PostgreSQL.
+- Exportación SQL y CSV.
 """
 
 import json
@@ -21,7 +28,7 @@ def build_html():
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Asignación de Proveedores — Productos Sin Proveedor · Extra Supermercado</title>
+  <title>Asignación de Proveedores & Stock Real — Extra Supermercado</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {{
@@ -78,12 +85,12 @@ def build_html():
         </div>
         <div>
           <div class="flex items-center gap-2">
-            <h1 class="text-base sm:text-lg font-bold text-white tracking-tight">Gestor de Proveedores</h1>
+            <h1 class="text-base sm:text-lg font-bold text-white tracking-tight">Gestor de Proveedores & Stock</h1>
             <span class="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 font-semibold">
               Productos Sin Proveedor
             </span>
           </div>
-          <p class="text-xs text-slate-400">Extra Supermercado Mayorista · Catálogo Comercial</p>
+          <p class="text-xs text-slate-400">Extra Supermercado Mayorista · Catálogo Comercial en Vivo</p>
         </div>
       </div>
 
@@ -97,7 +104,7 @@ def build_html():
         </button>
 
         <!-- Recargar desde servidor -->
-        <button onclick="reloadFromServer()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="Refrescar catálogo desde la BD en vivo">
+        <button onclick="reloadFromServer()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="Refrescar catálogo y stock desde la BD en vivo">
           <svg id="reload-svg" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
           </svg>
@@ -120,7 +127,31 @@ def build_html():
   </header>
 
   <!-- CONTENEDOR PRINCIPAL -->
-  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-5">
+
+    <!-- BANNER EXPLICATIVO DE PERSISTENCIA Y FUNCIONAMIENTO -->
+    <div class="bg-gradient-to-r from-emerald-950/40 via-slate-900 to-indigo-950/40 border border-emerald-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+      <div class="flex items-start gap-3">
+        <div class="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-lg shrink-0 mt-0.5">
+          ⚡
+        </div>
+        <div class="space-y-0.5 text-xs text-slate-300">
+          <p class="font-bold text-white text-sm">
+            Persistencia Inmediata en Base de Datos PostgreSQL
+          </p>
+          <p>
+            Al pulsar <b>Guardar</b> o cambiar el switch <b>Activo / Inactivo</b>, la base de datos se actualiza directamente en tiempo real.
+            No requiere reiniciar servicios ni compilar; queda asociado de inmediato para <b>Órdenes de Compra, Recepciones, Sugeridos de Reposición y Reportes del ERP</b>.
+          </p>
+        </div>
+      </div>
+      <div class="shrink-0 flex items-center gap-2 text-xs">
+        <label class="flex items-center gap-2 cursor-pointer bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700 hover:border-slate-600 transition">
+          <input type="checkbox" id="chk-hide-assigned" onchange="toggleHideAssigned(this.checked)" class="rounded bg-slate-950 border-slate-700 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer">
+          <span class="text-slate-300 font-medium">Ocultar ya asignados</span>
+        </label>
+      </div>
+    </div>
 
     <!-- KPI CARDS -->
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -129,43 +160,43 @@ def build_html():
         <span class="text-xs font-medium text-slate-400">Total Sin Proveedor</span>
         <div class="flex items-baseline justify-between mt-1">
           <span id="kpi-total" class="text-2xl font-black text-white font-mono">0</span>
-          <span class="text-[11px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">100%</span>
+          <span class="text-[11px] text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">Catálogo</span>
         </div>
       </div>
 
       <!-- Activos -->
-      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
+      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm cursor-pointer hover:border-emerald-500/40 transition" onclick="setQuickFilter('activos')">
         <span class="text-xs font-medium text-slate-400">Activos en Venta</span>
         <div class="flex items-baseline justify-between mt-1">
           <span id="kpi-activos" class="text-2xl font-black text-emerald-400 font-mono">0</span>
-          <span class="text-[11px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.5 rounded">Prioritarios</span>
+          <span class="text-[11px] text-emerald-400/80 bg-emerald-500/10 px-1.5 py-0.5 rounded">Habilitados</span>
         </div>
       </div>
 
       <!-- Inactivos -->
-      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
+      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm cursor-pointer hover:border-slate-700 transition" onclick="setQuickFilter('inactivos')">
         <span class="text-xs font-medium text-slate-400">Inactivos</span>
         <div class="flex items-baseline justify-between mt-1">
           <span id="kpi-inactivos" class="text-2xl font-black text-slate-400 font-mono">0</span>
-          <span class="text-[11px] text-slate-500">Históricos</span>
+          <span class="text-[11px] text-slate-500 bg-slate-800 px-1.5 py-0.5 rounded">Deshabilitados</span>
         </div>
       </div>
 
-      <!-- Con Stock -->
-      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
-        <span class="text-xs font-medium text-slate-400">Con Stock Físico</span>
+      <!-- Con Stock Positivo -->
+      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm cursor-pointer hover:border-cyan-500/40 transition" onclick="setQuickFilter('stock_positivo')">
+        <span class="text-xs font-medium text-slate-400">Stock &gt; 0</span>
         <div class="flex items-baseline justify-between mt-1">
-          <span id="kpi-stock" class="text-2xl font-black text-cyan-400 font-mono">0</span>
-          <span class="text-[11px] text-cyan-400/80 bg-cyan-500/10 px-1.5 py-0.5 rounded">&gt; 0</span>
+          <span id="kpi-stock-pos" class="text-2xl font-black text-cyan-400 font-mono">0</span>
+          <span class="text-[11px] text-cyan-400/80 bg-cyan-500/10 px-1.5 py-0.5 rounded">Físico</span>
         </div>
       </div>
 
-      <!-- Con Sugerencias -->
-      <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between shadow-sm">
-        <span class="text-xs font-medium text-slate-400">Con Sugerencia</span>
+      <!-- Stock Negativo (Ventas sin Factura de Compra) -->
+      <div class="bg-slate-900/70 border border-rose-900/40 rounded-xl p-3.5 flex flex-col justify-between shadow-sm cursor-pointer hover:border-rose-500/40 transition" onclick="setQuickFilter('stock_negativo')" title="Productos que registran ventas pero no tienen factura de compra ingresada">
+        <span class="text-xs font-medium text-rose-400">Stock Negativo (&lt; 0)</span>
         <div class="flex items-baseline justify-between mt-1">
-          <span id="kpi-sugerencias" class="text-2xl font-black text-purple-400 font-mono">0</span>
-          <span class="text-[11px] text-purple-300 bg-purple-500/10 px-1.5 py-0.5 rounded">✨ Marca</span>
+          <span id="kpi-stock-neg" class="text-2xl font-black text-rose-400 font-mono">0</span>
+          <span class="text-[11px] text-rose-300 bg-rose-500/20 px-1.5 py-0.5 rounded font-bold">⚠️ Regularizar</span>
         </div>
       </div>
 
@@ -174,7 +205,7 @@ def build_html():
         <span class="text-xs font-medium text-emerald-400">Asignados Hoy</span>
         <div class="flex items-baseline justify-between mt-1">
           <span id="kpi-asignados" class="text-2xl font-black text-emerald-400 font-mono">0</span>
-          <span class="text-[11px] text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded font-bold">Listos</span>
+          <span class="text-[11px] text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded font-bold">Guardados</span>
         </div>
       </div>
     </div>
@@ -202,26 +233,27 @@ def build_html():
         <div class="md:col-span-2">
           <select id="filter-estado" onchange="applyFilters()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-emerald-500">
             <option value="todos">Estado: Todos</option>
-            <option value="activo" selected>Solo Activos (234)</option>
-            <option value="inactivo">Solo Inactivos (102)</option>
+            <option value="activo" selected>Solo Activos</option>
+            <option value="inactivo">Solo Inactivos</option>
             <option value="asignados">Asignados en sesión</option>
             <option value="pendientes">Pendientes de asignar</option>
           </select>
         </div>
 
-        <!-- Filtro Categoría -->
+        <!-- Filtro Stock Real -->
         <div class="md:col-span-2">
-          <select id="filter-categoria" onchange="applyFilters()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-emerald-500">
-            <option value="todas">Categoría: Todas</option>
+          <select id="filter-stock" onchange="applyFilters()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-emerald-500">
+            <option value="todos">Stock: Todos</option>
+            <option value="positivo">Stock &gt; 0 (Positivo)</option>
+            <option value="negativo">⚠️ Stock &lt; 0 (Negativo)</option>
+            <option value="cero">Stock = 0</option>
           </select>
         </div>
 
-        <!-- Filtro Sugerencia -->
+        <!-- Filtro Categoría -->
         <div class="md:col-span-3">
-          <select id="filter-sugerencia" onchange="applyFilters()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-emerald-500">
-            <option value="todas">Sugerencias: Todas</option>
-            <option value="con_sugerencia">✨ Solo Con Sugerencia de Marca</option>
-            <option value="sin_sugerencia">Sin sugerencia detectada</option>
+          <select id="filter-categoria" onchange="applyFilters()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-medium text-slate-200 focus:outline-none focus:border-emerald-500">
+            <option value="todas">Categoría: Todas</option>
           </select>
         </div>
 
@@ -233,17 +265,23 @@ def build_html():
         <!-- Quick Chips -->
         <div class="flex items-center gap-1.5 flex-wrap">
           <span class="text-slate-500 text-[11px] mr-1">Rápido:</span>
-          <button onclick="setQuickFilter('activos_stock')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
-            Activos con Stock &gt; 0
+          <button onclick="setQuickFilter('activos')" class="px-2.5 py-1 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/40 text-emerald-300 border border-emerald-800/40 transition">
+            Activos
+          </button>
+          <button onclick="setQuickFilter('inactivos')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+            Inactivos
+          </button>
+          <button onclick="setQuickFilter('stock_negativo')" class="px-2.5 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/40 text-rose-300 border border-rose-800/40 transition">
+            ⚠️ Stock Negativo (54)
           </button>
           <button onclick="setQuickFilter('con_sugerencia')" class="px-2.5 py-1 rounded-lg bg-purple-950/40 hover:bg-purple-900/40 text-purple-300 border border-purple-800/40 transition">
-            ✨ 149 Con Sugerencia
+            ✨ Con Sugerencia de Marca
           </button>
           <button onclick="setQuickFilter('panificados')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
-            🍞 Panificados (Extra Propio)
+            🍞 Panificados Extra
           </button>
           <button onclick="setQuickFilter('todos')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
-            Ver Todos (336)
+            Ver Todos
           </button>
         </div>
 
@@ -251,7 +289,8 @@ def build_html():
         <div class="flex items-center gap-2">
           <span class="text-slate-500 text-[11px]">Ordenar por:</span>
           <select id="sort-select" onchange="applyFilters()" class="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-emerald-500">
-            <option value="stock_desc">Mayor Stock Físico</option>
+            <option value="stock_asc">Stock Menor → Mayor (Ver Negativos Primero)</option>
+            <option value="stock_desc">Stock Mayor → Menor</option>
             <option value="nombre_asc">Nombre A → Z</option>
             <option value="sku_asc">SKU (Código Interno)</option>
             <option value="precio_desc">Mayor Precio Venta</option>
@@ -269,23 +308,35 @@ def build_html():
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
           <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
         </span>
-        <span class="text-sm font-bold text-white"><span id="selected-count">0</span> productos seleccionados</span>
-        <button onclick="selectAllVisible()" class="text-xs text-emerald-400 hover:underline">Seleccionar todos los visibles</button>
+        <span class="text-sm font-bold text-white"><span id="selected-count">0</span> seleccionados</span>
+        <button onclick="selectAllVisible()" class="text-xs text-emerald-400 hover:underline">Seleccionar visibles</button>
         <button onclick="deselectAll()" class="text-xs text-slate-400 hover:underline">Desmarcar</button>
       </div>
 
-      <!-- Asignador Masivo -->
+      <!-- Acciones de Estado y Proveedor -->
       <div class="flex items-center gap-2 flex-wrap">
-        <button onclick="applySuggestionsToSelected()" class="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow transition flex items-center gap-1.5">
-          <span>✨</span>
-          <span>Aplicar Sugerencias a Seleccionados</span>
+        <!-- Activar / Inactivar Masivo -->
+        <button onclick="setBulkActiveState(true)" class="px-3 py-1.5 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 border border-emerald-500/40 text-xs font-semibold transition flex items-center gap-1.5" title="Activar todos los seleccionados en la base de datos">
+          <span>✅</span>
+          <span>Activar</span>
+        </button>
+        <button onclick="setBulkActiveState(false)" class="px-3 py-1.5 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 border border-rose-500/40 text-xs font-semibold transition flex items-center gap-1.5" title="Inactivar todos los seleccionados en la base de datos">
+          <span>⏸️</span>
+          <span>Inactivar</span>
         </button>
 
-        <div class="relative w-64">
+        <span class="text-slate-600">|</span>
+
+        <button onclick="applySuggestionsToSelected()" class="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow transition flex items-center gap-1.5">
+          <span>✨</span>
+          <span>Aplicar Sugerencias</span>
+        </button>
+
+        <div class="relative w-56">
           <input 
             type="text" 
             id="bulk-supplier-search"
-            placeholder="Buscar proveedor en lote..."
+            placeholder="Proveedor en lote..."
             oninput="handleBulkSupplierSearch(this.value)"
             class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
           >
@@ -295,7 +346,7 @@ def build_html():
         </div>
 
         <button id="btn-bulk-apply" onclick="applyBulkSupplier()" disabled class="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-bold transition shadow">
-          Asignar Proveedor
+          Asignar
         </button>
       </div>
     </div>
@@ -314,7 +365,7 @@ def build_html():
           <select id="page-size-select" onchange="changePageSize(this.value)" class="bg-slate-950 border border-slate-700 rounded-md px-2 py-0.5 text-xs text-slate-300">
             <option value="50">50 por pág.</option>
             <option value="100">100 por pág.</option>
-            <option value="all">Ver Todos (336)</option>
+            <option value="all">Ver Todos</option>
           </select>
         </div>
       </div>
@@ -326,10 +377,15 @@ def build_html():
             <tr class="bg-slate-950/70 border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               <th class="py-3 px-3 w-10 text-center">#</th>
               <th class="py-3 px-3 w-28">SKU / Barra</th>
-              <th class="py-3 px-4 min-w-[280px]">Descripción / Categoría</th>
-              <th class="py-3 px-3 text-right">Stock</th>
+              <th class="py-3 px-4 min-w-[260px]">Descripción / Categoría</th>
+              <th class="py-3 px-3 text-right w-28 cursor-pointer hover:text-white" onclick="toggleStockSort()" title="Clic para ordenar por stock real de la BD">
+                <span class="inline-flex items-center gap-1 justify-end">
+                  Stock Real BD
+                  <span id="stock-sort-icon">↕️</span>
+                </span>
+              </th>
               <th class="py-3 px-3 text-right">Costo / Venta</th>
-              <th class="py-3 px-2 text-center w-20">Estado</th>
+              <th class="py-3 px-3 text-center w-36">Estado (Activar/Inactivar)</th>
               <th class="py-3 px-4 min-w-[340px]">Proveedor Asignado / Buscador</th>
             </tr>
           </thead>
@@ -409,9 +465,9 @@ def build_html():
       <div class="flex items-center justify-between border-b border-slate-800 pb-3 shrink-0">
         <div>
           <h3 class="text-base font-bold text-white flex items-center gap-2">
-            <span>📜</span> Sentencias SQL de Asignación
+            <span>📜</span> Sentencias SQL de Asignación & Estados
           </h3>
-          <p class="text-xs text-slate-400">Actualización masiva de `products.supplier_id` en PostgreSQL</p>
+          <p class="text-xs text-slate-400">Actualización masiva de `products.supplier_id` y `products.activo` en PostgreSQL</p>
         </div>
         <button onclick="closeSqlModal()" class="text-slate-400 hover:text-white">✕</button>
       </div>
@@ -447,6 +503,8 @@ def build_html():
     let selectedProductIds = new Set();
     let assignedSession = {{}}; // product_id -> {{ supplier_id, supplier_nombre, timestamp }}
 
+    let hideAssigned = false;
+    let stockSortAsc = true;
     let currentPage = 1;
     let pageSize = 50;
     let currentSearchTerm = '';
@@ -479,7 +537,6 @@ def build_html():
         const cached = localStorage.getItem('intelimarket_assigned_session');
         if (cached) {{
           assignedSession = JSON.parse(cached);
-          // Reflejar en productos
           for (const pid in assignedSession) {{
             const p = RAW_PRODUCTS.find(x => x.id === pid);
             if (p) {{
@@ -512,15 +569,15 @@ def build_html():
       const total = RAW_PRODUCTS.length;
       const activos = RAW_PRODUCTS.filter(p => p.activo).length;
       const inactivos = total - activos;
-      const conStock = RAW_PRODUCTS.filter(p => p.stock > 0).length;
-      const conSugerencia = RAW_PRODUCTS.filter(p => p.sugerencia).length;
+      const conStockPos = RAW_PRODUCTS.filter(p => p.stock > 0).length;
+      const conStockNeg = RAW_PRODUCTS.filter(p => p.stock < 0).length;
       const asignados = Object.keys(assignedSession).length;
 
       document.getElementById('kpi-total').textContent = total.toLocaleString('es-PY');
       document.getElementById('kpi-activos').textContent = activos.toLocaleString('es-PY');
       document.getElementById('kpi-inactivos').textContent = inactivos.toLocaleString('es-PY');
-      document.getElementById('kpi-stock').textContent = conStock.toLocaleString('es-PY');
-      document.getElementById('kpi-sugerencias').textContent = conSugerencia.toLocaleString('es-PY');
+      document.getElementById('kpi-stock-pos').textContent = conStockPos.toLocaleString('es-PY');
+      document.getElementById('kpi-stock-neg').textContent = conStockNeg.toLocaleString('es-PY');
       document.getElementById('kpi-asignados').textContent = asignados.toLocaleString('es-PY');
     }}
 
@@ -537,26 +594,50 @@ def build_html():
       handleSearch('');
     }}
 
+    function toggleHideAssigned(checked) {{
+      hideAssigned = checked;
+      currentPage = 1;
+      applyFilters();
+    }}
+
     function setQuickFilter(type) {{
       const est = document.getElementById('filter-estado');
-      const sug = document.getElementById('filter-sugerencia');
+      const stk = document.getElementById('filter-stock');
       const cat = document.getElementById('filter-categoria');
 
-      if (type === 'activos_stock') {{
+      if (type === 'activos') {{
         est.value = 'activo';
-        sug.value = 'todas';
+        stk.value = 'todos';
+        cat.value = 'todas';
+      }} else if (type === 'inactivos') {{
+        est.value = 'inactivo';
+        stk.value = 'todos';
+        cat.value = 'todas';
+      }} else if (type === 'stock_positivo') {{
+        est.value = 'todos';
+        stk.value = 'positivo';
+        cat.value = 'todas';
+      }} else if (type === 'stock_negativo') {{
+        est.value = 'todos';
+        stk.value = 'negativo';
         cat.value = 'todas';
       }} else if (type === 'con_sugerencia') {{
         est.value = 'todos';
-        sug.value = 'con_sugerencia';
+        stk.value = 'todos';
         cat.value = 'todas';
+        currentSearchTerm = '';
+        document.getElementById('search-input').value = '';
+        filteredProducts = RAW_PRODUCTS.filter(p => p.sugerencia);
+        currentPage = 1;
+        renderTable();
+        return;
       }} else if (type === 'panificados') {{
         est.value = 'todos';
-        sug.value = 'todas';
+        stk.value = 'todos';
         cat.value = 'PANIFICADOS';
       }} else if (type === 'todos') {{
         est.value = 'todos';
-        sug.value = 'todas';
+        stk.value = 'todos';
         cat.value = 'todas';
         clearSearch();
         return;
@@ -565,13 +646,26 @@ def build_html():
       applyFilters();
     }}
 
+    function toggleStockSort() {{
+      stockSortAsc = !stockSortAsc;
+      const sortSelect = document.getElementById('sort-select');
+      sortSelect.value = stockSortAsc ? 'stock_asc' : 'stock_desc';
+      document.getElementById('stock-sort-icon').textContent = stockSortAsc ? '▲' : '▼';
+      applyFilters();
+    }}
+
     function applyFilters() {{
       const estFilter = document.getElementById('filter-estado').value;
+      const stkFilter = document.getElementById('filter-stock').value;
       const catFilter = document.getElementById('filter-categoria').value;
-      const sugFilter = document.getElementById('filter-sugerencia').value;
       const sortBy = document.getElementById('sort-select').value;
 
       filteredProducts = RAW_PRODUCTS.filter(p => {{
+        // Ocultar asignados si está marcado
+        if (hideAssigned && (assignedSession[p.id] || p.assigned_supplier_id)) {{
+          return false;
+        }}
+
         // Búsqueda textual
         if (currentSearchTerm) {{
           const matchSku = p.sku && p.sku.toLowerCase().includes(currentSearchTerm);
@@ -586,18 +680,20 @@ def build_html():
         if (estFilter === 'asignados' && !assignedSession[p.id]) return false;
         if (estFilter === 'pendientes' && assignedSession[p.id]) return false;
 
+        // Stock Real BD
+        if (stkFilter === 'positivo' && !(p.stock > 0)) return false;
+        if (stkFilter === 'negativo' && !(p.stock < 0)) return false;
+        if (stkFilter === 'cero' && !(p.stock === 0)) return false;
+
         // Categoría
         if (catFilter !== 'todas' && (p.categoria || 'Sin Categoría') !== catFilter) return false;
-
-        // Sugerencias
-        if (sugFilter === 'con_sugerencia' && !p.sugerencia) return false;
-        if (sugFilter === 'sin_sugerencia' && p.sugerencia) return false;
 
         return true;
       }});
 
       // Ordenar
       filteredProducts.sort((a, b) => {{
+        if (sortBy === 'stock_asc') return (a.stock || 0) - (b.stock || 0);
         if (sortBy === 'stock_desc') return (b.stock || 0) - (a.stock || 0);
         if (sortBy === 'nombre_asc') return (a.nombre || '').localeCompare(b.nombre || '');
         if (sortBy === 'sku_asc') return (a.sku || '').localeCompare(b.sku || '');
@@ -607,6 +703,15 @@ def build_html():
       }});
 
       renderTable();
+    }}
+
+    // Formateador de stock
+    function formatStock(val) {{
+      const num = Number(val || 0);
+      if (Math.abs(num % 1) < 0.0001) {{
+        return num.toLocaleString('es-PY');
+      }}
+      return num.toLocaleString('es-PY', {{ minimumFractionDigits: 2, maximumFractionDigits: 3 }});
     }}
 
     // --- RENDERIZADO DE TABLA ---
@@ -622,7 +727,7 @@ def build_html():
           <tr>
             <td colspan="7" class="py-12 text-center text-slate-500">
               <span class="text-3xl block mb-2">🔍</span>
-              No se encontraron productos que coincidan con los filtros aplicados.
+              No se encontraron productos con los filtros aplicados.
             </td>
           </tr>
         `;
@@ -630,7 +735,7 @@ def build_html():
         return;
       }}
 
-      // Calcular rango de paginación
+      // Rango de paginación
       let start = 0;
       let end = totalFiltered;
       if (pageSize !== 'all') {{
@@ -647,26 +752,48 @@ def build_html():
         const isSelected = selectedProductIds.has(p.id);
         const assigned = assignedSession[p.id];
 
-        // Stock badge
+        // Stock Real BD badge
         let stockBadge = '';
         if (p.stock > 0) {{
-          stockBadge = `<span class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 font-mono font-bold">${{p.stock}} ${{p.unidad_medida}}</span>`;
+          stockBadge = `
+            <span class="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 font-mono font-bold border border-emerald-500/30 whitespace-nowrap" title="Stock Físico en Depósito Central">
+              +${{formatStock(p.stock)}} ${{p.unidad_medida}}
+            </span>
+          `;
         }} else if (p.stock < 0) {{
-          stockBadge = `<span class="px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 font-mono font-bold">${{p.stock}} ${{p.unidad_medida}}</span>`;
+          stockBadge = `
+            <span class="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 font-mono font-bold border border-rose-500/30 whitespace-nowrap cursor-help" title="Stock Negativo: Ventas registradas en caja POS sin ingreso previo de factura de compra">
+              ⚠️ ${{formatStock(p.stock)}} ${{p.unidad_medida}}
+            </span>
+          `;
         }} else {{
-          stockBadge = `<span class="text-slate-500 font-mono">0 ${{p.unidad_medida}}</span>`;
+          stockBadge = `<span class="text-slate-500 font-mono text-[11px] whitespace-nowrap">0 ${{p.unidad_medida}}</span>`;
         }}
 
-        // Estado badge
-        const estadoBadge = p.activo
-          ? `<span class="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold border border-emerald-500/20">ACTIVO</span>`
-          : `<span class="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 text-[10px] font-bold border border-slate-700">INACTIVO</span>`;
+        // Switch Interactivo Activo / Inactivo
+        const estadoSwitch = `
+          <div class="flex items-center justify-center gap-2">
+            <button 
+              type="button"
+              onclick="toggleProductActive('${{p.id}}', event)" 
+              id="toggle-btn-${{p.id}}"
+              class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${{p.activo ? 'bg-emerald-500' : 'bg-slate-700'}}"
+              title="${{p.activo ? 'Clic para Inactivar' : 'Clic para Activar'}}"
+            >
+              <span class="sr-only">Estado</span>
+              <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${{p.activo ? 'translate-x-4' : 'translate-x-0'}}"></span>
+            </button>
+            <span id="badge-estado-${{p.id}}" class="text-[10px] font-bold w-12 text-left ${{p.activo ? 'text-emerald-400' : 'text-slate-400'}}">
+              ${{p.activo ? 'ACTIVO' : 'INACTIVO'}}
+            </span>
+          </div>
+        `;
 
-        // Precios formateados en Guaraníes (sin decimales según regla)
+        // Precios formateados en Guaraníes (sin decimales según regla canónica de Extra)
         const costoFmt = Math.round(p.costo || 0).toLocaleString('es-PY');
         const precioFmt = Math.round(p.precio_venta || 0).toLocaleString('es-PY');
 
-        // Sección del asignador / proveedor
+        // Asignador / Proveedor UI
         let supplierUi = '';
         if (assigned) {{
           supplierUi = `
@@ -676,19 +803,18 @@ def build_html():
                 <span class="text-emerald-200 font-bold text-xs truncate" title="${{assigned.supplier_nombre}}">${{assigned.supplier_nombre}}</span>
               </div>
               <div class="flex items-center gap-1 shrink-0">
-                <button onclick="clearAssignment('${{p.id}}')" class="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 text-[10px]" title="Desvincular">✕</button>
+                <button onclick="clearAssignment('${{p.id}}')" class="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 text-[10px]" title="Desvincular proveedor">✕</button>
               </div>
             </div>
           `;
         }} else {{
-          // Buscador interactivo + sugerencia
           const sug = p.sugerencia;
           const sugHtml = sug ? `
             <div class="mt-1 flex items-center justify-between gap-1 p-1 rounded-lg bg-purple-950/30 border border-purple-800/40 text-[11px]">
               <span class="text-purple-300 truncate" title="Sugerido por marca: ${{sug.supplier_nombre}}">
                 ✨ <b>Sugerido:</b> ${{sug.supplier_nombre}}
               </span>
-              <button onclick="assignDirect('${{p.id}}', '${{sug.supplier_id}}', '${{sug.supplier_nombre}}')" class="px-2 py-0.5 rounded bg-purple-600 hover:bg-purple-500 text-white font-bold text-[10px] shrink-0 transition">
+              <button onclick="assignDirect('${{p.id}}', '${{sug.supplier_id}}', '${{escapeQuotes(sug.supplier_nombre)}}')" class="px-2 py-0.5 rounded bg-purple-600 hover:bg-purple-500 text-white font-bold text-[10px] shrink-0 transition">
                 Aceptar
               </button>
             </div>
@@ -707,15 +833,17 @@ def build_html():
                 >
               </div>
               <div id="sup-drop-${{p.id}}" class="dropdown-menu hidden absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 p-1">
-                <!-- Dropdown items dynamically injected on focus/input -->
+                <!-- Dropdown items dinámicos -->
               </div>
               ${{sugHtml}}
             </div>
           `;
         }}
 
+        const rowOpacity = p.activo ? '' : 'opacity-70 bg-slate-950/40';
+
         html += `
-          <tr class="hover:bg-slate-800/40 transition ${{isSelected ? 'bg-emerald-950/20' : ''}}">
+          <tr id="row-${{p.id}}" class="hover:bg-slate-800/40 transition ${{rowOpacity}} ${{isSelected ? 'bg-emerald-950/20' : ''}}">
             <td class="py-2.5 px-3 text-center">
               <input type="checkbox" onchange="toggleSelectProduct('${{p.id}}', this.checked)" ${{isSelected ? 'checked' : ''}} class="rounded bg-slate-950 border-slate-700 text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5 cursor-pointer">
             </td>
@@ -734,8 +862,8 @@ def build_html():
               <span class="text-slate-400 block" title="Costo Promedio">₲ ${{costoFmt}}</span>
               <span class="text-emerald-400 font-bold block" title="Precio Venta">₲ ${{precioFmt}}</span>
             </td>
-            <td class="py-2.5 px-2 text-center">
-              ${{estadoBadge}}
+            <td class="py-2.5 px-3 text-center">
+              ${{estadoSwitch}}
             </td>
             <td class="py-2.5 px-4">
               ${{supplierUi}}
@@ -752,6 +880,95 @@ def build_html():
       if (!text || !search) return text || '';
       const regex = new RegExp(`(${{search}})`, 'gi');
       return text.replace(regex, '<span class="bg-amber-400/20 text-amber-200 font-bold rounded px-0.5">$1</span>');
+    }}
+
+    // --- ACCIÓN ACTIVAR / INACTIVAR EN VIVO ---
+    async function toggleProductActive(productId, event) {{
+      if (event) event.stopPropagation();
+      const p = RAW_PRODUCTS.find(x => x.id === productId);
+      if (!p) return;
+
+      const newStatus = !p.activo;
+      p.activo = newStatus;
+
+      // Actualizar UI optimistamente
+      const btn = document.getElementById(`toggle-btn-${{productId}}`);
+      const badge = document.getElementById(`badge-estado-${{productId}}`);
+      const row = document.getElementById(`row-${{productId}}`);
+
+      if (btn) {{
+        btn.className = `relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${{newStatus ? 'bg-emerald-500' : 'bg-slate-700'}}`;
+        const dot = btn.querySelector('span:not(.sr-only)');
+        if (dot) dot.className = `pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${{newStatus ? 'translate-x-4' : 'translate-x-0'}}`;
+      }}
+      if (badge) {{
+        badge.textContent = newStatus ? 'ACTIVO' : 'INACTIVO';
+        badge.className = `text-[10px] font-bold w-12 text-left ${{newStatus ? 'text-emerald-400' : 'text-slate-400'}}`;
+      }}
+      if (row) {{
+        if (newStatus) row.classList.remove('opacity-70', 'bg-slate-950/40');
+        else row.classList.add('opacity-70', 'bg-slate-950/40');
+      }}
+
+      updateKpis();
+      showToast(`${{p.sku}} - ${{p.nombre.slice(0, 20)}} → ${{newStatus ? 'ACTIVO' : 'INACTIVO'}}`, newStatus ? 'success' : 'warn');
+
+      // Persistir en backend API
+      try {{
+        const headers = {{ 'Content-Type': 'application/json' }};
+        if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${{AUTH_TOKEN}}`;
+
+        let url = `${{API_BASE}}/api/v1/products-tool/toggle-active`;
+        if (API_BASE.endsWith('/api')) url = `${{API_BASE}}/v1/products-tool/toggle-active`;
+
+        const res = await fetch(url, {{
+          method: 'POST',
+          headers,
+          body: JSON.stringify({{ product_id: productId, activo: newStatus }})
+        }});
+
+        if (!res.ok) {{
+          const fallbackUrl = API_BASE.endsWith('/api') ? `${{API_BASE}}/v1/products/toggle-active` : `${{API_BASE}}/api/v1/products/toggle-active`;
+          await fetch(fallbackUrl, {{
+            method: 'POST',
+            headers,
+            body: JSON.stringify({{ product_id: productId, activo: newStatus }})
+          }});
+        }}
+      }} catch (err) {{
+        console.warn('Error sincronizando estado activo con API:', err);
+      }}
+    }}
+
+    // Activar / Inactivar masivo
+    async function setBulkActiveState(newStatus) {{
+      if (selectedProductIds.size === 0) return;
+      const pids = Array.from(selectedProductIds);
+
+      pids.forEach(pid => {{
+        const p = RAW_PRODUCTS.find(x => x.id === pid);
+        if (p) p.activo = newStatus;
+      }});
+
+      updateKpis();
+      renderTable();
+      showToast(`${{pids.length}} productos cambiados a ${{newStatus ? 'ACTIVO' : 'INACTIVO'}}`, newStatus ? 'success' : 'warn');
+
+      // Persistir cada uno en background
+      for (const pid of pids) {{
+        try {{
+          const headers = {{ 'Content-Type': 'application/json' }};
+          if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${{AUTH_TOKEN}}`;
+          let url = `${{API_BASE}}/api/v1/products-tool/toggle-active`;
+          if (API_BASE.endsWith('/api')) url = `${{API_BASE}}/v1/products-tool/toggle-active`;
+
+          fetch(url, {{
+            method: 'POST',
+            headers,
+            body: JSON.stringify({{ product_id: pid, activo: newStatus }})
+          }}).catch(() => {{}});
+        }} catch (e) {{}}
+      }}
     }}
 
     // --- PAGINACIÓN ---
@@ -815,11 +1032,8 @@ def build_html():
 
     // --- SELECCIÓN MÚLTIPLE / LOTE ---
     function toggleSelectProduct(productId, isChecked) {{
-      if (isChecked) {{
-        selectedProductIds.add(productId);
-      }} else {{
-        selectedProductIds.delete(productId);
-      }}
+      if (isChecked) selectedProductIds.add(productId);
+      else selectedProductIds.delete(productId);
       updateBulkToolbar();
     }}
 
@@ -853,14 +1067,13 @@ def build_html():
       toolbar.classList.toggle('hidden', count === 0);
     }}
 
-    // --- ASIGNACIÓN DE PROVEEDORES (BUSCADOR INTELIGENTE EN FILA) ---
+    // --- ASIGNACIÓN DE PROVEEDORES ---
     function openSupplierDropdown(productId) {{
       const drop = document.getElementById(`sup-drop-${{productId}}`);
       if (!drop) return;
       filterSupplierDropdown(productId, '');
       drop.classList.remove('hidden');
 
-      // Click outside listener
       const clickHandler = (e) => {{
         if (!e.target.closest(`#picker-${{productId}}`)) {{
           drop.classList.add('hidden');
@@ -883,7 +1096,7 @@ def build_html():
           (s.nombre_fantasia && s.nombre_fantasia.toLowerCase().includes(q))
         );
       }}
-      matches = matches.slice(0, 15); // Top 15 resultados
+      matches = matches.slice(0, 15);
 
       if (matches.length === 0) {{
         drop.innerHTML = `<div class="p-3 text-center text-slate-500 text-xs">No se encontraron proveedores para "${{q}}"</div>`;
@@ -916,9 +1129,7 @@ def build_html():
       return (str || '').replace(/'/g, "\\'");
     }}
 
-    // --- ACCIÓN DE ASIGNAR (DIRECTA O API) ---
     async function assignDirect(productId, supplierId, supplierNombre) {{
-      // 1. Guardar en estado de sesión inmediatamente
       assignedSession[productId] = {{
         supplier_id: supplierId,
         supplier_nombre: supplierNombre,
@@ -928,7 +1139,6 @@ def build_html():
         localStorage.setItem('intelimarket_assigned_session', JSON.stringify(assignedSession));
       }} catch (e) {{}}
 
-      // Actualizar objeto producto en memoria
       const p = RAW_PRODUCTS.find(x => x.id === productId);
       if (p) {{
         p.assigned_supplier_id = supplierId;
@@ -937,9 +1147,8 @@ def build_html():
 
       showToast(`Asignado: ${{p ? p.nombre.slice(0, 25) : 'Producto'}} → ${{supplierNombre}}`, 'success');
       updateKpis();
-      renderTable();
+      applyFilters();
 
-      // 2. Sincronizar en background con la API si hay conexión
       syncAssignmentToBackend(productId, supplierId, supplierNombre);
     }}
 
@@ -957,7 +1166,7 @@ def build_html():
 
       showToast('Asignación removida', 'info');
       updateKpis();
-      renderTable();
+      applyFilters();
 
       syncAssignmentToBackend(productId, null, null);
     }}
@@ -967,7 +1176,6 @@ def build_html():
         const headers = {{ 'Content-Type': 'application/json' }};
         if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${{AUTH_TOKEN}}`;
 
-        // Intentar primero con la ruta de herramienta (/api/v1/products-tool/assign), fallback a (/api/v1/products/assign-supplier)
         let url = `${{API_BASE}}/api/v1/products-tool/assign`;
         if (API_BASE.endsWith('/api')) url = `${{API_BASE}}/v1/products-tool/assign`;
 
@@ -978,7 +1186,6 @@ def build_html():
         }});
 
         if (!res.ok) {{
-          // Intentar fallback
           const fallbackUrl = API_BASE.endsWith('/api') ? `${{API_BASE}}/v1/products/assign-supplier` : `${{API_BASE}}/api/v1/products/assign-supplier`;
           await fetch(fallbackUrl, {{
             method: 'POST',
@@ -987,7 +1194,7 @@ def build_html():
           }});
         }}
       }} catch (err) {{
-        console.warn('No se pudo sincronizar en vivo con la API (los cambios quedan guardados en memoria y exportables en SQL):', err);
+        console.warn('Error sincronizando con API:', err);
       }}
     }}
 
@@ -1064,28 +1271,33 @@ def build_html():
         localStorage.setItem('intelimarket_assigned_session', JSON.stringify(assignedSession));
       }} catch (e) {{}}
 
-      showToast(`¡${{pids.length}} productos asignados a ${{selectedBulkSupplier.nombre}}!`, 'success');
-      selectedProductIds.clear();
-      updateBulkToolbar();
+      showToast(`Asignados ${{pids.length}} productos a ${{selectedBulkSupplier.nombre}}`, 'success');
+      deselectAll();
       updateKpis();
-      renderTable();
+      applyFilters();
 
-      // Sincronizar lote en API
+      // Sincronizar en lote
       try {{
         const headers = {{ 'Content-Type': 'application/json' }};
         if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${{AUTH_TOKEN}}`;
+
         let url = `${{API_BASE}}/api/v1/products-tool/assign-batch`;
         if (API_BASE.endsWith('/api')) url = `${{API_BASE}}/v1/products-tool/assign-batch`;
-        await fetch(url, {{ method: 'POST', headers, body: JSON.stringify({{ assignments }}) }});
+
+        fetch(url, {{
+          method: 'POST',
+          headers,
+          body: JSON.stringify({{ assignments }})
+        }}).catch(() => {{}});
       }} catch (e) {{}}
     }}
 
     async function applySuggestionsToSelected() {{
-      const pids = Array.from(selectedProductIds);
-      let count = 0;
+      if (selectedProductIds.size === 0) return;
+      let applied = 0;
       const assignments = [];
 
-      pids.forEach(pid => {{
+      selectedProductIds.forEach(pid => {{
         const p = RAW_PRODUCTS.find(x => x.id === pid);
         if (p && p.sugerencia) {{
           assignedSession[pid] = {{
@@ -1096,12 +1308,12 @@ def build_html():
           p.assigned_supplier_id = p.sugerencia.supplier_id;
           p.assigned_supplier_nombre = p.sugerencia.supplier_nombre;
           assignments.push({{ product_id: pid, supplier_id: p.sugerencia.supplier_id }});
-          count++;
+          applied++;
         }}
       }});
 
-      if (count === 0) {{
-        alert('Ninguno de los productos seleccionados tiene sugerencia de marca automática detectada.');
+      if (applied === 0) {{
+        showToast('Ninguno de los seleccionados tiene sugerencia de marca', 'warn');
         return;
       }}
 
@@ -1109,71 +1321,83 @@ def build_html():
         localStorage.setItem('intelimarket_assigned_session', JSON.stringify(assignedSession));
       }} catch (e) {{}}
 
-      showToast(`¡Sugerencias aplicadas a ${{count}} productos!`, 'success');
-      selectedProductIds.clear();
-      updateBulkToolbar();
+      showToast(`Se aplicaron ${{applied}} sugerencias inteligentes`, 'success');
+      deselectAll();
       updateKpis();
-      renderTable();
+      applyFilters();
 
-      // Sync batch
       try {{
         const headers = {{ 'Content-Type': 'application/json' }};
         if (AUTH_TOKEN) headers['Authorization'] = `Bearer ${{AUTH_TOKEN}}`;
         let url = `${{API_BASE}}/api/v1/products-tool/assign-batch`;
         if (API_BASE.endsWith('/api')) url = `${{API_BASE}}/v1/products-tool/assign-batch`;
-        await fetch(url, {{ method: 'POST', headers, body: JSON.stringify({{ assignments }}) }});
+        fetch(url, {{
+          method: 'POST',
+          headers,
+          body: JSON.stringify({{ assignments }})
+        }}).catch(() => {{}});
       }} catch (e) {{}}
     }}
 
-    // --- RECARGA DESDE EL SERVIDOR ---
-    async function reloadFromServer() {{
-      const svg = document.getElementById('reload-svg');
-      if (svg) svg.classList.add('animate-spin');
+    // --- CONEXIÓN API & RECARGA ---
+    async function checkApiConnection() {{
+      const dot = document.getElementById('conn-dot');
+      const label = document.getElementById('conn-label');
 
       try {{
         let url = `${{API_BASE}}/api/v1/products-tool/unassigned`;
         if (API_BASE.endsWith('/api')) url = `${{API_BASE}}/v1/products-tool/unassigned`;
 
         const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${{res.status}}`);
-        const json = await res.json();
-
-        if (json.products && json.suppliers) {{
-          RAW_PRODUCTS = json.products;
-          RAW_SUPPLIERS = json.suppliers;
-          STATS = json.stats;
-          populateCategoryDropdown();
-          updateKpis();
-          applyFilters();
-          showToast(`Catálogo en vivo actualizado: ${{RAW_PRODUCTS.length}} productos sin proveedor`, 'success');
-        }}
-      }} catch (err) {{
-        showToast('No se pudo conectar al servidor en vivo. Usando datos locales.', 'info');
-      }} finally {{
-        if (svg) svg.classList.remove('animate-spin');
-      }}
-    }}
-
-    async function checkApiConnection() {{
-      const dot = document.getElementById('conn-dot');
-      const label = document.getElementById('conn-label');
-
-      try {{
-        let url = `${{API_BASE}}/api/health`;
-        if (API_BASE.endsWith('/api')) url = `${{API_BASE}}/health`;
-        const res = await fetch(url, {{ method: 'GET' }});
         if (res.ok) {{
           dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
           label.textContent = 'API Conectada';
-          return;
+          return true;
         }}
       }} catch (e) {{}}
 
       dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400';
-      label.textContent = 'Modo Standalone';
+      label.textContent = 'Modo Local (Offline)';
+      return false;
     }}
 
-    // --- MODAL DE CONFIGURACIÓN & LOGIN ---
+    async function reloadFromServer() {{
+      const svg = document.getElementById('reload-svg');
+      svg.classList.add('animate-spin');
+
+      try {{
+        let url = `${{API_BASE}}/api/v1/products-tool/unassigned`;
+        if (API_BASE.endsWith('/api')) url = `${{API_BASE}}/v1/products-tool/unassigned`;
+
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Respuesta no satisfactoria del servidor');
+
+        const fresh = await res.json();
+        RAW_PRODUCTS = fresh.products || [];
+        RAW_SUPPLIERS = fresh.suppliers || [];
+        STATS = fresh.stats || {{}};
+
+        // Re-mapear asignaciones de sesión
+        for (const pid in assignedSession) {{
+          const p = RAW_PRODUCTS.find(x => x.id === pid);
+          if (p) {{
+            p.assigned_supplier_id = assignedSession[pid].supplier_id;
+            p.assigned_supplier_nombre = assignedSession[pid].supplier_nombre;
+          }}
+        }}
+
+        populateCategoryDropdown();
+        updateKpis();
+        applyFilters();
+        showToast('¡Catálogo y stock refrescados desde PostgreSQL!', 'success');
+      }} catch (err) {{
+        showToast('No se pudo conectar al API en vivo: ' + err.message, 'warn');
+      }} finally {{
+        setTimeout(() => svg.classList.remove('animate-spin'), 400);
+      }}
+    }}
+
+    // --- MODALES & SETTINGS ---
     function openSettingsModal() {{
       document.getElementById('cfg-api-base').value = API_BASE;
       document.getElementById('cfg-token').value = AUTH_TOKEN;
@@ -1185,10 +1409,16 @@ def build_html():
     }}
 
     function saveSettings() {{
-      API_BASE = document.getElementById('cfg-api-base').value.trim() || '/api';
-      AUTH_TOKEN = document.getElementById('cfg-token').value.trim();
-      localStorage.setItem('cfg_api_base', API_BASE);
-      if (AUTH_TOKEN) localStorage.setItem('access_token', AUTH_TOKEN);
+      const newBase = document.getElementById('cfg-api-base').value.trim();
+      const newToken = document.getElementById('cfg-token').value.trim();
+
+      if (newBase) {{
+        API_BASE = newBase;
+        localStorage.setItem('cfg_api_base', API_BASE);
+      }}
+      AUTH_TOKEN = newToken;
+      localStorage.setItem('access_token', AUTH_TOKEN);
+
       closeSettingsModal();
       checkApiConnection();
       showToast('Configuración guardada', 'success');
@@ -1196,7 +1426,8 @@ def build_html():
 
     async function performLogin() {{
       const email = document.getElementById('login-email').value.trim();
-      const password = document.getElementById('login-pass').value;
+      const password = document.getElementById('login-pass').value.trim();
+
       if (!email || !password) {{
         alert('Ingresá usuario y contraseña');
         return;
@@ -1286,7 +1517,7 @@ def build_html():
 
     function exportToCsv() {{
       const rows = [
-        ['SKU', 'Codigo Barra', 'Nombre Producto', 'Categoria', 'Unidad', 'Stock', 'Costo', 'Precio Venta', 'Estado', 'Proveedor Asignado', 'ID Proveedor', 'ID Producto']
+        ['SKU', 'Codigo Barra', 'Nombre Producto', 'Categoria', 'Unidad', 'Stock Real BD', 'Costo', 'Precio Venta', 'Estado', 'Proveedor Asignado', 'ID Proveedor', 'ID Producto']
       ];
 
       RAW_PRODUCTS.forEach(p => {{

@@ -259,3 +259,8 @@ class AssignSupplierRequest(BaseModel):
 
 class AssignSupplierBatchRequest(BaseModel):
     assignments: list[AssignSupplierRequest]
+
+
+class ToggleProductActiveRequest(BaseModel):
+    product_id: UUID
+    activo: Optional[bool] = None

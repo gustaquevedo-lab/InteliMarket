@@ -1,55 +1,6 @@
 {
   "products": [
     {
-      "id": "5c5d5b58-ab17-45fd-95ac-2cf9a65ab01e",
-      "sku": "124390",
-      "nombre": "BOLETE CHUPETIN MASCTI / TUTTI FRUTTI (50)",
-      "codigo_barra": "7896058500288",
-      "activo": true,
-      "categoria": "DULCES ",
-      "unidad_medida": "UN",
-      "costo": 406.0,
-      "precio_venta": 700.0,
-      "stock": 62.0,
-      "sugerencia": null
-    },
-    {
-      "id": "563d2bd8-949d-4ede-a333-6e84c890de71",
-      "sku": "115538",
-      "nombre": "TRENTO CHOCOLATE RELLENO DARK 29GR",
-      "codigo_barra": "7896306625275",
-      "activo": true,
-      "categoria": "Golosinas y Snacks",
-      "unidad_medida": "UN",
-      "costo": 2800.0,
-      "precio_venta": 3600.0,
-      "stock": 24.0,
-      "sugerencia": {
-        "supplier_id": "a074ccfc-e527-4b43-b2cd-320c51317908",
-        "supplier_nombre": "SAN JOSE IMPORT EXPORT S.A",
-        "nombre_fantasia": "",
-        "count": 9
-      }
-    },
-    {
-      "id": "99c2ce0f-7407-4dc6-914a-79793cdebdfa",
-      "sku": "126294",
-      "nombre": "BOREDA MARMITA ALUM RECTANG 20 UNDS 500ML",
-      "codigo_barra": "2000944",
-      "activo": true,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 19563.0,
-      "precio_venta": 26900.0,
-      "stock": 8.0,
-      "sugerencia": {
-        "supplier_id": "c1873bba-5540-41f6-965a-4b79eb3f661c",
-        "supplier_nombre": "FLAMMA IMPORT SRL",
-        "nombre_fantasia": "",
-        "count": 5
-      }
-    },
-    {
       "id": "7928b5ad-f94a-445c-ac9a-663894372e63",
       "sku": "124050",
       "nombre": "DS GRAN TERMO 2.5L CUERINA PARAGUAY",
@@ -61,37 +12,6 @@
       "precio_venta": 122200.0,
       "stock": 2.0,
       "sugerencia": null
-    },
-    {
-      "id": "0a662700-afad-4504-b0aa-a97d28345811",
-      "sku": "120503",
-      "nombre": "SUAV P ROPA 2L G. LIMPIA FLORATA PET",
-      "codigo_barra": "7896540905515",
-      "activo": true,
-      "categoria": "HOGAR",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 17300.0,
-      "stock": 2.0,
-      "sugerencia": null
-    },
-    {
-      "id": "d08c6d4f-aeb4-4299-971b-663d5e67ac29",
-      "sku": "124619",
-      "nombre": "GOTA LIMPA COMBO 2 CRISTAL + 1 AGUA SANIT",
-      "codigo_barra": "2000725",
-      "activo": true,
-      "categoria": "HOGAR",
-      "unidad_medida": "UN",
-      "costo": 11708.0,
-      "precio_venta": 14777.0,
-      "stock": 1.0,
-      "sugerencia": {
-        "supplier_id": "a2f37cf3-caa5-42b5-84cd-270a549d5a73",
-        "supplier_nombre": "CASA GONZALITO S.R.L.",
-        "nombre_fantasia": "",
-        "count": 68
-      }
     },
     {
       "id": "795ce509-5797-44d0-815c-16a34f82c631",
@@ -133,19 +53,6 @@
       "sugerencia": null
     },
     {
-      "id": "7ed6eeef-f024-456d-9437-704ef193a16d",
-      "sku": "123219",
-      "nombre": "....",
-      "codigo_barra": "1780998200574",
-      "activo": true,
-      "categoria": "ACCESORIOS",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
       "id": "b93dee66-0dd5-42bd-bb19-bc908443cb58",
       "sku": "120634",
       "nombre": "....",
@@ -155,6 +62,19 @@
       "unidad_medida": "KG",
       "costo": 0.0,
       "precio_venta": 100.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
+      "id": "7ed6eeef-f024-456d-9437-704ef193a16d",
+      "sku": "123219",
+      "nombre": "....",
+      "codigo_barra": "1780998200574",
+      "activo": true,
+      "categoria": "ACCESORIOS",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
       "stock": 0.0,
       "sugerencia": null
     },
@@ -224,73 +144,6 @@
       "sugerencia": null
     },
     {
-      "id": "7c6cdf5f-32f6-478c-8067-f6487db92280",
-      "sku": "124844",
-      "nombre": "AC OREGANO KG",
-      "codigo_barra": "2000768",
-      "activo": true,
-      "categoria": "REMEDIOS YUYOS",
-      "unidad_medida": "KG",
-      "costo": 0.0,
-      "precio_venta": 5000.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
-      "id": "8ee00c0f-932d-438f-8674-640af4a3faa7",
-      "sku": "123295",
-      "nombre": "ACTRON IBUPROFENO 600",
-      "codigo_barra": "7793640215523",
-      "activo": true,
-      "categoria": "FARMACIA",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "569a7511-1d92-41ab-8a96-ccfa846d9e8c",
-        "supplier_nombre": "SANAFARMA SHOP E.A.S.",
-        "nombre_fantasia": "SANAFARMA SHOP E.A.S.",
-        "count": 2
-      }
-    },
-    {
-      "id": "6270d2ae-9717-403f-b29d-d4b30ca0087f",
-      "sku": "125299",
-      "nombre": "ANTARCTICA ZERO SODA LIMONADA LT 350ML",
-      "codigo_barra": "7891991000819",
-      "activo": true,
-      "categoria": "SIN ALCOHOL ",
-      "unidad_medida": "UN",
-      "costo": 4391.0,
-      "precio_venta": 5500.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "4f024965-d817-4c9f-b991-f33beb8b56a8",
-        "supplier_nombre": "SUPERMERCADO SOL ATACADO",
-        "nombre_fantasia": "SUPERMERCADO SOL ATACADO",
-        "count": 11
-      }
-    },
-    {
-      "id": "bbcba7cc-db23-4fa2-bfc8-e28bcfcb20eb",
-      "sku": "1266",
-      "nombre": "BANDEJA ACERO 40CM 580GRS",
-      "codigo_barra": "4001253619229",
-      "activo": true,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 14000.0,
-      "precio_venta": 16200.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "294e589b-2ea9-4c73-a4cd-0d74b7b5bf23",
-        "supplier_nombre": "PARIS IMPORT Y EXPORT S.A.",
-        "nombre_fantasia": "",
-        "count": 3
-      }
-    },
-    {
       "id": "99758317-f9a6-4a17-80c9-162514481b27",
       "sku": "125501",
       "nombre": "BELO TERMO CLASIC  1L",
@@ -315,168 +168,6 @@
       "precio_venta": 0.0,
       "stock": 0.0,
       "sugerencia": null
-    },
-    {
-      "id": "61fee585-6a20-4439-a149-b20c4b38b7eb",
-      "sku": "126560",
-      "nombre": "BIMBO PAN DULCE CHOCO 400G",
-      "codigo_barra": "7840131001008",
-      "activo": true,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "37f68145-c465-4252-96ad-90cad246fd34",
-        "supplier_nombre": "BIMBO PARAGUAY S.A.",
-        "nombre_fantasia": "",
-        "count": 32
-      }
-    },
-    {
-      "id": "28e27b5f-3fc2-469d-a1c8-bc18ca9a2d0d",
-      "sku": "121210",
-      "nombre": "BOMPACK VELA 0 AZUL",
-      "codigo_barra": "7898221466561",
-      "activo": true,
-      "categoria": "OTROS",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "bef5c824-bc26-4fac-8ca6-e61a9815ed76",
-        "supplier_nombre": "NEXO PARAGUAY S.A.",
-        "nombre_fantasia": "",
-        "count": 65
-      }
-    },
-    {
-      "id": "a5621451-cf10-42f2-b888-5a6232ab6715",
-      "sku": "121971",
-      "nombre": "BONARE EXTRACTO DE TOMATE LATA 4KG",
-      "codigo_barra": "788905153586",
-      "activo": true,
-      "categoria": "ADEREZOS",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "66385293-7c32-4c31-8b75-ba2ffb12c0ae",
-        "supplier_nombre": "SERGIO JAVIER GUCCIONE VERA",
-        "nombre_fantasia": "40 COMERCIAL",
-        "count": 27
-      }
-    },
-    {
-      "id": "e7271aa9-cc3d-4e49-be40-830c83622ef9",
-      "sku": "121966",
-      "nombre": "BONARE JARDINERA SACHET 170GR",
-      "codigo_barra": "7899659901183",
-      "activo": true,
-      "categoria": "CONSERVADOS ",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "66385293-7c32-4c31-8b75-ba2ffb12c0ae",
-        "supplier_nombre": "SERGIO JAVIER GUCCIONE VERA",
-        "nombre_fantasia": "40 COMERCIAL",
-        "count": 27
-      }
-    },
-    {
-      "id": "303a4dbd-e649-4429-a7a7-52dc015806bb",
-      "sku": "121897",
-      "nombre": "BONARE SALSA ALBAHACA 300GR",
-      "codigo_barra": "789965990172",
-      "activo": true,
-      "categoria": "ADEREZOS",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "66385293-7c32-4c31-8b75-ba2ffb12c0ae",
-        "supplier_nombre": "SERGIO JAVIER GUCCIONE VERA",
-        "nombre_fantasia": "40 COMERCIAL",
-        "count": 27
-      }
-    },
-    {
-      "id": "161c7c2c-4c53-4cab-8261-b4b4d77f76b3",
-      "sku": "122373",
-      "nombre": "BOTA GUAPO AGRICULTURE AMARILLA C/ CORDON Nº 37",
-      "codigo_barra": "7908479365572",
-      "activo": true,
-      "categoria": "ACCESORIOS",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "a074ccfc-e527-4b43-b2cd-320c51317908",
-        "supplier_nombre": "SAN JOSE IMPORT EXPORT S.A",
-        "nombre_fantasia": "",
-        "count": 40
-      }
-    },
-    {
-      "id": "1627e847-2914-48b0-9609-f950547d17ae",
-      "sku": "122374",
-      "nombre": "BOTA GUAPO AGRICULTURE AMARILLA C/ CORDON Nº 38",
-      "codigo_barra": "7908479365589",
-      "activo": true,
-      "categoria": "ACCESORIOS",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "a074ccfc-e527-4b43-b2cd-320c51317908",
-        "supplier_nombre": "SAN JOSE IMPORT EXPORT S.A",
-        "nombre_fantasia": "",
-        "count": 40
-      }
-    },
-    {
-      "id": "cda7b3ba-ce42-419d-896f-1ddfb1ca314c",
-      "sku": "122208",
-      "nombre": "BOTA  GUAPO AGRICULTURE MARRON Nº 40",
-      "codigo_barra": "7909036432567",
-      "activo": true,
-      "categoria": "ACCESORIOS",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "a074ccfc-e527-4b43-b2cd-320c51317908",
-        "supplier_nombre": "SAN JOSE IMPORT EXPORT S.A",
-        "nombre_fantasia": "",
-        "count": 40
-      }
-    },
-    {
-      "id": "1f70a7c9-da2f-402a-a6fb-c99ab2f07427",
-      "sku": "122191",
-      "nombre": "BOTA GUAPO AGRICULTURE MARRON  Nº 42",
-      "codigo_barra": "7909036432581",
-      "activo": true,
-      "categoria": "ACCESORIOS",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "a074ccfc-e527-4b43-b2cd-320c51317908",
-        "supplier_nombre": "SAN JOSE IMPORT EXPORT S.A",
-        "nombre_fantasia": "",
-        "count": 40
-      }
     },
     {
       "id": "664ba516-44ac-47ae-8b11-8c1a30332f6f",
@@ -2833,7 +2524,7 @@
         "supplier_id": "c1873bba-5540-41f6-965a-4b79eb3f661c",
         "supplier_nombre": "FLAMMA IMPORT SRL",
         "nombre_fantasia": "",
-        "count": 5
+        "count": 6
       }
     },
     {
@@ -3356,7 +3047,7 @@
       "unidad_medida": "KG",
       "costo": 0.0,
       "precio_venta": 8977.0,
-      "stock": -329.138,
+      "stock": -329.838,
       "sugerencia": null
     },
     {
@@ -3387,7 +3078,7 @@
       "unidad_medida": "KG",
       "costo": 0.0,
       "precio_venta": 9977.0,
-      "stock": -463.963,
+      "stock": -464.345,
       "sugerencia": null
     },
     {
@@ -3787,123 +3478,6 @@
       "sugerencia": null
     },
     {
-      "id": "eacce9a0-0ba1-4de4-9a32-559766b0efc0",
-      "sku": "120684",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
-      "id": "4233f5e9-e70c-4caa-b8da-f79d7c7fe258",
-      "sku": "119910",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
-      "id": "82c9c5d3-524f-411d-9e5e-9b630f1d902f",
-      "sku": "120031",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
-      "id": "8ea1d0ea-8019-4323-9168-72965fb28ac1",
-      "sku": "121723",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
-      "id": "30929001-15b3-4302-8d6b-4d91f9f50f63",
-      "sku": "120035",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
-      "id": "f1f57385-550e-4543-870c-33c115a71cb3",
-      "sku": "120029",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
-      "id": "0ff5e3dc-1586-4a33-a3df-0dfbf83375e9",
-      "sku": "120118",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
-      "id": "3a589e74-8879-4d90-99bf-b700bac02a3a",
-      "sku": "121623",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
-      "id": "445edb1f-aed8-4837-95bf-baa1d79dcfe0",
-      "sku": "125263",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 2144.0,
-      "precio_venta": 2650.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
       "id": "e29c7f63-3b15-4236-9c54-bd6cfbe1d218",
       "sku": "120026",
       "nombre": ".",
@@ -3943,8 +3517,34 @@
       "sugerencia": null
     },
     {
+      "id": "f1f57385-550e-4543-870c-33c115a71cb3",
+      "sku": "120029",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
       "id": "b3fb9121-b6c7-4b91-a9df-a8bdab8c087a",
       "sku": "120387",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
+      "id": "30929001-15b3-4302-8d6b-4d91f9f50f63",
+      "sku": "120035",
       "nombre": ".",
       "codigo_barra": "",
       "activo": false,
@@ -3965,6 +3565,58 @@
       "unidad_medida": "UN",
       "costo": 20000.0,
       "precio_venta": 25000.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
+      "id": "4ebdbfd1-5134-4de0-88db-98195f15f438",
+      "sku": "121725",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
+      "id": "3a589e74-8879-4d90-99bf-b700bac02a3a",
+      "sku": "121623",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
+      "id": "0ff5e3dc-1586-4a33-a3df-0dfbf83375e9",
+      "sku": "120118",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
+      "id": "445edb1f-aed8-4837-95bf-baa1d79dcfe0",
+      "sku": "125263",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 2144.0,
+      "precio_venta": 2650.0,
       "stock": 0.0,
       "sugerencia": null
     },
@@ -3995,19 +3647,6 @@
       "sugerencia": null
     },
     {
-      "id": "7d156703-2526-4f7f-aff4-f184dde03370",
-      "sku": "119911",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
       "id": "e31d21a5-381d-4cd9-afa0-c71afffe19e8",
       "sku": "123280",
       "nombre": ".",
@@ -4017,19 +3656,6 @@
       "unidad_medida": "UN",
       "costo": 0.0,
       "precio_venta": 3250.0,
-      "stock": 0.0,
-      "sugerencia": null
-    },
-    {
-      "id": "b55279ec-2207-4508-9522-92c32efb1aab",
-      "sku": "119912",
-      "nombre": ".",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
       "stock": 0.0,
       "sugerencia": null
     },
@@ -4047,8 +3673,34 @@
       "sugerencia": null
     },
     {
-      "id": "4ebdbfd1-5134-4de0-88db-98195f15f438",
-      "sku": "121725",
+      "id": "7d156703-2526-4f7f-aff4-f184dde03370",
+      "sku": "119911",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
+      "id": "b55279ec-2207-4508-9522-92c32efb1aab",
+      "sku": "119912",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
+      "id": "54fc48d5-6438-4d9d-866e-fd49d0537d4e",
+      "sku": "121724",
       "nombre": ".",
       "codigo_barra": "",
       "activo": false,
@@ -4086,8 +3738,8 @@
       "sugerencia": null
     },
     {
-      "id": "54fc48d5-6438-4d9d-866e-fd49d0537d4e",
-      "sku": "121724",
+      "id": "eb5c9faf-4597-410d-a8da-045ab2f394a8",
+      "sku": "119909",
       "nombre": ".",
       "codigo_barra": "",
       "activo": false,
@@ -4099,8 +3751,21 @@
       "sugerencia": null
     },
     {
-      "id": "eb5c9faf-4597-410d-a8da-045ab2f394a8",
-      "sku": "119909",
+      "id": "8ea1d0ea-8019-4323-9168-72965fb28ac1",
+      "sku": "121723",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
+      "id": "82c9c5d3-524f-411d-9e5e-9b630f1d902f",
+      "sku": "120031",
       "nombre": ".",
       "codigo_barra": "",
       "activo": false,
@@ -4125,8 +3790,34 @@
       "sugerencia": null
     },
     {
+      "id": "4233f5e9-e70c-4caa-b8da-f79d7c7fe258",
+      "sku": "119910",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
       "id": "c646654d-3706-4b13-8539-feb62f764a60",
       "sku": "124391",
+      "nombre": ".",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": null
+    },
+    {
+      "id": "eacce9a0-0ba1-4de4-9a32-559766b0efc0",
+      "sku": "120684",
       "nombre": ".",
       "codigo_barra": "",
       "activo": false,
@@ -4676,26 +4367,8 @@
       "sugerencia": null
     },
     {
-      "id": "79f51935-cfe0-4268-8f7d-bad23e863ecb",
-      "sku": "122852",
-      "nombre": "MONSTER PIPELINE PUCH 473ML",
-      "codigo_barra": "",
-      "activo": false,
-      "categoria": "Sin Categoría",
-      "unidad_medida": "UN",
-      "costo": 0.0,
-      "precio_venta": 0.0,
-      "stock": 0.0,
-      "sugerencia": {
-        "supplier_id": "4f024965-d817-4c9f-b991-f33beb8b56a8",
-        "supplier_nombre": "SUPERMERCADO SOL ATACADO",
-        "nombre_fantasia": "SUPERMERCADO SOL ATACADO",
-        "count": 13
-      }
-    },
-    {
-      "id": "502c2213-917b-446e-bab3-1648a73fde21",
-      "sku": "122844",
+      "id": "c589c618-b9e6-4f2e-a343-c86daf0f9956",
+      "sku": "122851",
       "nombre": "MONSTER PIPELINE PUCH 473ML",
       "codigo_barra": "",
       "activo": false,
@@ -4730,6 +4403,24 @@
       }
     },
     {
+      "id": "79f51935-cfe0-4268-8f7d-bad23e863ecb",
+      "sku": "122852",
+      "nombre": "MONSTER PIPELINE PUCH 473ML",
+      "codigo_barra": "",
+      "activo": false,
+      "categoria": "Sin Categoría",
+      "unidad_medida": "UN",
+      "costo": 0.0,
+      "precio_venta": 0.0,
+      "stock": 0.0,
+      "sugerencia": {
+        "supplier_id": "4f024965-d817-4c9f-b991-f33beb8b56a8",
+        "supplier_nombre": "SUPERMERCADO SOL ATACADO",
+        "nombre_fantasia": "SUPERMERCADO SOL ATACADO",
+        "count": 13
+      }
+    },
+    {
       "id": "ec86c9a2-9640-49ae-9bf1-957038251a4c",
       "sku": "122843",
       "nombre": "MONSTER PIPELINE PUCH 473ML",
@@ -4748,8 +4439,8 @@
       }
     },
     {
-      "id": "c589c618-b9e6-4f2e-a343-c86daf0f9956",
-      "sku": "122851",
+      "id": "502c2213-917b-446e-bab3-1648a73fde21",
+      "sku": "122844",
       "nombre": "MONSTER PIPELINE PUCH 473ML",
       "codigo_barra": "",
       "activo": false,
@@ -4802,8 +4493,8 @@
       }
     },
     {
-      "id": "483f0841-9b34-4b2c-92cf-de511e7c9680",
-      "sku": "121721",
+      "id": "4cd8a241-e96e-4bea-b661-f0b256900057",
+      "sku": "121726",
       "nombre": ".N",
       "codigo_barra": "",
       "activo": false,
@@ -4828,8 +4519,8 @@
       "sugerencia": null
     },
     {
-      "id": "4cd8a241-e96e-4bea-b661-f0b256900057",
-      "sku": "121726",
+      "id": "483f0841-9b34-4b2c-92cf-de511e7c9680",
+      "sku": "121721",
       "nombre": ".N",
       "codigo_barra": "",
       "activo": false,
@@ -8051,11 +7742,11 @@
     }
   ],
   "stats": {
-    "total": 336,
-    "activos": 234,
+    "total": 318,
+    "activos": 216,
     "inactivos": 102,
-    "con_stock": 6,
-    "con_sugerencia": 149,
+    "con_stock": 1,
+    "con_sugerencia": 134,
     "total_suppliers": 489
   }
 }
