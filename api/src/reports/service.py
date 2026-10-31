@@ -74,10 +74,15 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
                     (CASE WHEN fs.tipo_comprobante = 'notacredito' OR vi.total < 0 THEN -1 ELSE 1 END) *
                     COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), NULLIF(p.ultimo_costo, 0), NULLIF(p.costo_landed, 0), 0) * vi.cantidad
                 ), 0) as costo_total,
-                COUNT(*) FILTER (WHERE COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), NULLIF(p.ultimo_costo, 0), NULLIF(p.costo_landed, 0)) IS NULL) as items_sin_costo
+                COUNT(*) FILTER (WHERE COALESCE(NULLIF(vi.costo_unitario, 0), NULLIF(p.costo_promedio, 0), NULLIF(p.ultimo_costo, 0), NULLIF(p.costo_landed, 0)) IS NULL) as items_sin_costo,
+                -- cajas unitarias PARESA (las notas de credito restan); en esta misma pasada, que ya filtra por fecha
+                COALESCE(SUM(
+                    (CASE WHEN fs.tipo_comprobante = 'notacredito' THEN -1 ELSE 1 END) * vi.cantidad * COALESCE(p.caja_unitaria_factor, 0)
+                ) FILTER (WHERE sp.razon_social ILIKE '%PARAGUAY REFRESCOS%'), 0) as paresa_uc
             FROM sale_items vi
             JOIN filtered_sales fs ON fs.id = vi.sale_id
             LEFT JOIN products p ON p.id = vi.product_id
+            LEFT JOIN suppliers sp ON sp.id = p.supplier_id
         )
         SELECT
             st.total_ventas,
@@ -88,7 +93,8 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
             st.saldo_pendiente,
             it.total_items,
             it.costo_total,
-            it.items_sin_costo
+            it.items_sin_costo,
+            it.paresa_uc
         FROM sales_totals st
         CROSS JOIN items_totals it
     """
@@ -101,16 +107,7 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
     m = margen_bruto(monto_total, monto_iva_10 + monto_iva_5, float(result["costo_total"] or 0))
     costo_total, margen_bruto_gs, margen_bruto_pct = m["costo_total"], m["margen_bruto_gs"], m["margen_bruto_pct"]
 
-    # Cajas unitarias PARESA del periodo (las notas de credito restan) y la meta del mes cargada en Metas PARESA
-    paresa = (await _exec(db, f"""
-        SELECT COALESCE(SUM(CASE WHEN v.tipo_comprobante = 'notacredito' THEN -1 ELSE 1 END
-                            * vi.cantidad * COALESCE(p.caja_unitaria_factor, 0)), 0) as uc
-        FROM sale_items vi
-        JOIN sales v ON v.id = vi.sale_id
-        JOIN products p ON p.id = vi.product_id
-        JOIN suppliers sp ON sp.id = p.supplier_id
-        WHERE {where} AND sp.razon_social ILIKE '%PARAGUAY REFRESCOS%'
-    """, params)).first()
+    # meta del mes cargada en Metas PARESA
     meta = (await _exec(db, """
         SELECT i.meta FROM supplier_kpi_periods sk
         JOIN supplier_kpi_indicators i ON i.period_id = sk.id AND i.codigo = 'total_compra'
@@ -131,7 +128,7 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
         "monto_sin_iva": m["monto_sin_iva"],
         "costo_total": costo_total,
         "items_sin_costo": int(result["items_sin_costo"] or 0),
-        "paresa_uc": round(float(paresa["uc"] or 0)),
+        "paresa_uc": round(float(result["paresa_uc"] or 0)),
         "paresa_meta_uc": float(meta["meta"]) if meta and meta["meta"] else None,
         "margen_bruto_gs": margen_bruto_gs,
         "margen_bruto_pct": margen_bruto_pct,
