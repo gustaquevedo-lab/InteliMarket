@@ -757,16 +757,27 @@ Español paraguayo comercial, máx 200 palabras con viñetas •.`,
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [onClose])
 
+  const modalOverlayRef = useRef<HTMLDivElement>(null)
+  const isMouseDownOnOverlayRef = useRef<boolean>(false)
+
   return createPortal(
     <div
+      ref={modalOverlayRef}
       className="fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 md:py-10 md:px-8 overflow-y-auto"
+      onMouseDown={(e) => {
+        isMouseDownOnOverlayRef.current = e.target === e.currentTarget
+      }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
+        if (e.target === e.currentTarget && isMouseDownOnOverlayRef.current) {
+          onClose()
+        }
+        isMouseDownOnOverlayRef.current = false
       }}
     >
       <div
         className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl md:rounded-3xl shadow-2xl w-full max-w-6xl my-auto flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
         style={{ maxHeight: "min(85vh, 840px)" }}
+        onClick={(e) => e.stopPropagation()}
       >
 
         {/* ── HEADER ── */}
