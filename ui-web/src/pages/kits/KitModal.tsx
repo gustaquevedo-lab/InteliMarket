@@ -27,6 +27,24 @@ interface ComponentRow {
   cantidad: number
   costo_unitario: number
   precio_unitario: number
+  unidad_medida?: string
+  tipo_venta?: string
+  es_pesable?: boolean
+}
+
+function isProductPesable(p?: Product | null, row?: Partial<ComponentRow>): boolean {
+  if (!p && !row) return false
+  const tipoVenta = p?.tipo_venta || row?.tipo_venta
+  const um = p?.unidad_medida || row?.unidad_medida
+  const plu = p?.plu_balanza
+  const bc = p?.codigo_barra || row?.codigo_barra
+  return (
+    tipoVenta === "peso" ||
+    um === "KG" ||
+    (plu !== null && plu !== undefined) ||
+    !!(p as any)?.es_pesable ||
+    !!(bc && bc.startsWith("2000"))
+  )
 }
 
 function generateRetailEan13(): string {
@@ -75,7 +93,7 @@ export default function KitModal({
   const [searchError, setSearchError] = useState<string | null>(null)
   const searchTimeoutRef = useRef<any>(null)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [addQty, setAddQty] = useState<number>(1)
+  const [addQtyStr, setAddQtyStr] = useState<string>("1")
   const [copiedCode, setCopiedCode] = useState(false)
   const [saving, setSaving] = useState(false)
   const [allowBelowCost, setAllowBelowCost] = useState(false)
@@ -95,6 +113,7 @@ export default function KitModal({
       // Mapear items existentes
       const loadedItems: ComponentRow[] = (kitToEdit.items || []).map((it: any) => {
         const prod = (allProducts || []).find(p => p.id === it.product_id)
+        const pesable = it.es_pesable ?? isProductPesable(prod, it)
         return {
           product_id: it.product_id,
           nombre: it.nombre || prod?.nombre || "Producto",
@@ -105,6 +124,9 @@ export default function KitModal({
           cantidad: Number(it.cantidad || 1),
           costo_unitario: Number(it.costo_unitario !== undefined ? it.costo_unitario : prod?.costo_promedio ?? 0),
           precio_unitario: Number(it.precio_unitario !== undefined ? it.precio_unitario : prod?.precio_venta ?? 0),
+          unidad_medida: it.unidad_medida || prod?.unidad_medida || (pesable ? "KG" : "UN"),
+          tipo_venta: it.tipo_venta || prod?.tipo_venta || (pesable ? "peso" : "unidad"),
+          es_pesable: pesable,
         }
       })
       setItems(loadedItems)
@@ -123,7 +145,7 @@ export default function KitModal({
     setIsSearching(false)
     setSearchError(null)
     setSelectedProduct(null)
-    setAddQty(1)
+    setAddQtyStr("1")
     setAllowBelowCost(false)
   }, [open, kitToEdit, allProducts])
 
@@ -168,16 +190,22 @@ export default function KitModal({
     }
   }, [searchQuery])
 
-  // Agregar componente al combo
-  const handleAddComponent = (prodToAdd?: Product) => {
+  // Agregar componente al combo (con soporte para cantidades fraccionarias y pesables)
+  const handleAddComponent = (prodToAdd?: Product, overrideQty?: number) => {
     const p = prodToAdd || selectedProduct
     if (!p) return
+
+    const pesable = isProductPesable(p)
+    const rawVal = overrideQty !== undefined
+      ? overrideQty
+      : parseFloat(addQtyStr.replace(",", ".")) || 1
+    const finalQty = Math.max(0.001, Number(rawVal.toFixed(3)))
 
     setItems(prev => {
       const existingIdx = prev.findIndex(i => i.product_id === p.id)
       if (existingIdx >= 0) {
         const updated = [...prev]
-        updated[existingIdx].cantidad += addQty
+        updated[existingIdx].cantidad = Number((updated[existingIdx].cantidad + finalQty).toFixed(3))
         return updated
       }
       return [
@@ -189,9 +217,12 @@ export default function KitModal({
           codigo_barra: p.codigo_barra,
           iva_tasa: Number(p.iva_tasa ?? 10),
           stock_actual: Number((p as any)?.stock_actual ?? 0),
-          cantidad: addQty,
+          cantidad: finalQty,
           costo_unitario: Number(p.costo_promedio || p.ultimo_costo || 0),
           precio_unitario: Number(p.precio_venta || 0),
+          unidad_medida: p.unidad_medida || (pesable ? "KG" : "UN"),
+          tipo_venta: p.tipo_venta || (pesable ? "peso" : "unidad"),
+          es_pesable: pesable,
         }
       ]
     })
@@ -200,13 +231,14 @@ export default function KitModal({
     setSearchQuery("")
     setSearchResults([])
     setSearchError(null)
-    setAddQty(1)
+    setAddQtyStr("1")
     setTimeout(() => {
       if (searchInputRef.current) searchInputRef.current.focus()
     }, 50)
   }
 
   // Soporte directo para pistola lectora en el buscador (escaneo con pistola o presionar Enter)
+  // Incluye detección automática de etiquetas de balanza con peso embebido (ej: 2000996012503)
   const handleSearchKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault()
@@ -219,16 +251,40 @@ export default function KitModal({
 
       setIsSearching(true)
       try {
-        const res = (await api.products.list({ search: clean, limit: 10 })) || []
-        const qLower = clean.toLowerCase()
+        let lookupTerm = clean
+        let parsedScaleWeight: number | null = null
+
+        // Detección de código de barras de balanza (12 o 13 dígitos numéricos que inician con 2)
+        if ((clean.length === 12 || clean.length === 13) && /^\d+$/.test(clean) && clean.startsWith("2")) {
+          if (clean.startsWith("2000")) {
+            // Estándar 2000 + PLU 3 dígitos + 5 dígitos gramos (ej: 2000996012503 -> PLU 996, peso 1.250kg)
+            const baseBc = clean.slice(0, 7)
+            const weightGrams = parseInt(clean.slice(7, 12), 10)
+            if (!isNaN(weightGrams) && weightGrams > 0) {
+              parsedScaleWeight = weightGrams / 1000
+              lookupTerm = baseBc
+            }
+          } else if (clean.startsWith("20")) {
+            const baseBc = clean.slice(0, 6)
+            const weightGrams = parseInt(clean.slice(6, 11), 10)
+            if (!isNaN(weightGrams) && weightGrams > 0) {
+              parsedScaleWeight = weightGrams / 1000
+              lookupTerm = baseBc
+            }
+          }
+        }
+
+        const res = (await api.products.list({ search: lookupTerm, limit: 10 })) || []
+        const qLower = lookupTerm.toLowerCase()
 
         // 1. Coincidencia exacta por código de barra
         const exactBarcode = res.find(
-          p => p.codigo_barra && p.codigo_barra.trim().toLowerCase() === qLower
+          p => p.codigo_barra && (p.codigo_barra.trim().toLowerCase() === qLower || p.codigo_barra.trim().toLowerCase() === clean.toLowerCase())
         )
         if (exactBarcode) {
-          handleAddComponent(exactBarcode)
-          toast.success("Producto escaneado", exactBarcode.nombre)
+          const qty = parsedScaleWeight !== null ? parsedScaleWeight : (parseFloat(addQtyStr.replace(",", ".")) || 1)
+          handleAddComponent(exactBarcode, qty)
+          toast.success("Producto escaneado", `${exactBarcode.nombre} (${qty} ${exactBarcode.unidad_medida || "un."})`)
           return
         }
 
@@ -237,7 +293,8 @@ export default function KitModal({
           p => p.sku && p.sku.trim().toLowerCase() === qLower
         )
         if (exactSku) {
-          handleAddComponent(exactSku)
+          const qty = parsedScaleWeight !== null ? parsedScaleWeight : (parseFloat(addQtyStr.replace(",", ".")) || 1)
+          handleAddComponent(exactSku, qty)
           toast.success("Producto agregado", exactSku.nombre)
           return
         }
@@ -247,14 +304,16 @@ export default function KitModal({
           p => p.nombre && p.nombre.trim().toLowerCase() === qLower
         )
         if (exactName) {
-          handleAddComponent(exactName)
+          const qty = parsedScaleWeight !== null ? parsedScaleWeight : (parseFloat(addQtyStr.replace(",", ".")) || 1)
+          handleAddComponent(exactName, qty)
           toast.success("Producto agregado", exactName.nombre)
           return
         }
 
         // 4. Si hay 1 solo resultado retornado
         if (res.length === 1) {
-          handleAddComponent(res[0])
+          const qty = parsedScaleWeight !== null ? parsedScaleWeight : (parseFloat(addQtyStr.replace(",", ".")) || 1)
+          handleAddComponent(res[0], qty)
           toast.success("Producto agregado", res[0].nombre)
           return
         }
@@ -322,14 +381,33 @@ export default function KitModal({
     }
   }
 
+  // Modificación manual directa de cantidad o peso en la fila
+  const handleSetItemQty = (idx: number, rawVal: string) => {
+    const clean = rawVal.replace(/[^0-9.,]/g, "").replace(",", ".")
+    const parsed = parseFloat(clean)
+    setItems(prev => {
+      const copy = [...prev]
+      copy[idx] = {
+        ...copy[idx],
+        cantidad: isNaN(parsed) ? 0 : Number(parsed.toFixed(3)),
+      }
+      return copy
+    })
+  }
+
+  // Incremento / decremento con step inteligente (+-0.100 kg en pesables, +-1 en unidades)
   const handleUpdateQty = (idx: number, delta: number) => {
     setItems(prev => {
       const copy = [...prev]
-      const newQty = copy[idx].cantidad + delta
+      const current = Number(copy[idx].cantidad) || 0
+      const newQty = Math.max(0, Number((current + delta).toFixed(3)))
       if (newQty <= 0) {
         return copy.filter((_, i) => i !== idx)
       }
-      copy[idx].cantidad = newQty
+      copy[idx] = {
+        ...copy[idx],
+        cantidad: newQty,
+      }
       return copy
     })
   }
@@ -701,15 +779,21 @@ export default function KitModal({
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">Cant:</span>
+                <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">
+                    {selectedProduct && isProductPesable(selectedProduct) ? "Peso KG:" : "Cant:"}
+                  </span>
                   <input
-                    type="number"
-                    min="1"
-                    value={addQty}
-                    onChange={e => setAddQty(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-12 text-center bg-transparent font-mono font-bold text-xs text-slate-900 dark:text-white outline-none"
+                    type="text"
+                    inputMode="decimal"
+                    value={addQtyStr}
+                    onChange={e => setAddQtyStr(e.target.value.replace(/[^0-9.,]/g, ""))}
+                    placeholder="1"
+                    className="w-14 text-center bg-transparent font-mono font-bold text-xs text-slate-900 dark:text-white outline-none"
                   />
+                  {selectedProduct && isProductPesable(selectedProduct) && (
+                    <span className="text-[10px] font-extrabold text-amber-600 dark:text-amber-400 font-mono">KG</span>
+                  )}
                 </div>
 
                 <button
@@ -742,6 +826,11 @@ export default function KitModal({
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-900 dark:text-white">{prod.nombre}</span>
+                          {isProductPesable(prod) && (
+                            <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded font-mono bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                              PESABLE (KG)
+                            </span>
+                          )}
                           <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded font-mono ${
                             Number(prod.iva_tasa) === 5 ? "bg-emerald-100 text-emerald-700" :
                             Number(prod.iva_tasa) === 0 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
@@ -753,7 +842,7 @@ export default function KitModal({
                           <span>SKU: {prod.sku || "—"}</span>
                           <span>EAN: {prod.codigo_barra || "—"}</span>
                           <span className="text-slate-600 dark:text-slate-300 font-bold">
-                            Stock: {Number((prod as any)?.stock_actual ?? 0).toLocaleString("es-PY")} un.
+                            Stock: {Number((prod as any)?.stock_actual ?? 0).toLocaleString("es-PY", { maximumFractionDigits: 3 })} {isProductPesable(prod) ? "kg" : "un."}
                           </span>
                         </div>
                       </div>
@@ -790,7 +879,7 @@ export default function KitModal({
                       <th className="p-3 text-right">Stock</th>
                       <th className="p-3 text-right">Costo Unit.</th>
                       <th className="p-3 text-right">PVP Normal</th>
-                      <th className="p-3 text-center">Cant.</th>
+                      <th className="p-3 text-center">Cant. / Peso</th>
                       {modalidad === "desglosado" && (
                         <th className="p-3 text-right bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400">
                           PVP Factura
@@ -810,7 +899,14 @@ export default function KitModal({
                       return (
                         <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-850 transition">
                           <td className="p-3">
-                            <div className="font-bold text-slate-900 dark:text-white">{it.nombre}</div>
+                            <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <span>{it.nombre}</span>
+                              {it.es_pesable && (
+                                <span className="text-[9px] font-extrabold px-1 rounded bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                                  KG
+                                </span>
+                              )}
+                            </div>
                             <div className="text-[10px] text-slate-400 font-mono flex items-center gap-2">
                               <span>SKU: {it.sku}</span>
                               {it.codigo_barra && <span>EAN: {it.codigo_barra}</span>}
@@ -829,7 +925,8 @@ export default function KitModal({
 
                           <td className="p-3 text-right font-mono">
                             <span className={it.stock_actual < it.cantidad ? "text-rose-500 font-bold" : "text-slate-600 dark:text-slate-300"}>
-                              {it.stock_actual}
+                              {it.stock_actual.toLocaleString("es-PY", { maximumFractionDigits: 3 })}
+                              <span className="text-[10px] ml-0.5 text-slate-400 font-sans">{it.unidad_medida || (it.es_pesable ? "kg" : "un.")}</span>
                             </span>
                           </td>
 
@@ -842,21 +939,33 @@ export default function KitModal({
                           </td>
 
                           <td className="p-3 text-center">
-                            <div className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-0.5 border border-slate-200 dark:border-slate-700">
+                            <div className="inline-flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1 border border-slate-200 dark:border-slate-700">
                               <button
                                 type="button"
-                                onClick={() => handleUpdateQty(idx, -1)}
-                                className="w-5 h-5 flex items-center justify-center rounded hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300"
+                                onClick={() => handleUpdateQty(idx, it.es_pesable ? -0.1 : -1)}
+                                className="w-5 h-5 flex items-center justify-center rounded hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                                title={it.es_pesable ? "-0.100 kg" : "-1"}
                               >
                                 <Minus className="w-3 h-3" />
                               </button>
-                              <span className="w-6 text-center font-mono font-black text-xs text-purple-600 dark:text-purple-400">
-                                {it.cantidad}
-                              </span>
+                              <div className="relative flex items-center">
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={it.cantidad || ""}
+                                  onChange={e => handleSetItemQty(idx, e.target.value)}
+                                  className="w-16 px-1.5 py-0.5 text-center font-mono font-black text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded text-purple-600 dark:text-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-500 shadow-inner"
+                                  placeholder="0"
+                                />
+                                <span className="ml-1 text-[9px] font-extrabold text-slate-400 font-mono select-none">
+                                  {it.unidad_medida || (it.es_pesable ? "KG" : "UN")}
+                                </span>
+                              </div>
                               <button
                                 type="button"
-                                onClick={() => handleUpdateQty(idx, 1)}
-                                className="w-5 h-5 flex items-center justify-center rounded hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300"
+                                onClick={() => handleUpdateQty(idx, it.es_pesable ? 0.1 : 1)}
+                                className="w-5 h-5 flex items-center justify-center rounded hover:bg-white dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition"
+                                title={it.es_pesable ? "+0.100 kg" : "+1"}
                               >
                                 <Plus className="w-3 h-3" />
                               </button>

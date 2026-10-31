@@ -404,7 +404,10 @@ export default function KitsPage() {
                           <span className="truncate">{item.nombre}</span>
                         </div>
                         <span className="font-mono font-black text-purple-600 dark:text-purple-400 shrink-0">
-                          ×{item.cantidad}
+                          ×{Number(item.cantidad).toLocaleString("es-PY", { maximumFractionDigits: 3 })}
+                          <span className="text-[9px] font-bold text-slate-400 ml-0.5 font-sans">
+                            {item.unidad_medida || (item.es_pesable ? "kg" : "")}
+                          </span>
                         </span>
                       </div>
                     ))}

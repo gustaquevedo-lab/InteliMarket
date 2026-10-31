@@ -43,6 +43,9 @@ class KitItemResponse(BaseModel):
     nombre: Optional[str] = None
     sku: Optional[str] = None
     codigo_barra: Optional[str] = None
+    unidad_medida: Optional[str] = "UN"
+    tipo_venta: Optional[str] = "unidad"
+    es_pesable: Optional[bool] = False
     cantidad: float = 1
     iva_tasa: Optional[float] = 10.0
     stock_actual: Optional[float] = 0.0
@@ -69,6 +72,7 @@ class KitResponse(BaseModel):
     sku: Optional[str] = None
     costo_total: Optional[float] = 0
     precio_individual_total: Optional[float] = 0
+    precio_calculado: Optional[float] = None
     margen_monto: Optional[float] = 0
     margen_pct: Optional[float] = 0
     ahorro_cliente_monto: Optional[float] = 0

@@ -26,10 +26,48 @@ def _generate_kit_barcode() -> str:
 
 def _generate_kit_sku() -> str:
     """Genera un SKU interno único para el combo."""
-    return f"KIT-{random.randint(1000, 9999)}"
+    return f"KIT-{random.randint(10000, 99999)}"
 
 
-async def create_kit(db: AsyncSession, data: KitCreate) -> ProductKit:
+async def _ensure_unique_kit_sku(db: AsyncSession, company_id: uuid.UUID, desired_sku: str | None = None) -> str:
+    """Valida o genera un SKU único que no colisione con el catálogo de productos."""
+    if desired_sku and desired_sku.strip():
+        cand = desired_sku.strip()
+        existing = (await db.execute(
+            select(Product.id).where(Product.company_id == company_id, Product.sku == cand)
+        )).scalar_one_or_none()
+        if not existing:
+            return cand
+    for _ in range(30):
+        cand = _generate_kit_sku()
+        existing = (await db.execute(
+            select(Product.id).where(Product.company_id == company_id, Product.sku == cand)
+        )).scalar_one_or_none()
+        if not existing:
+            return cand
+    return f"KIT-{int(time.time())}"
+
+
+async def _ensure_unique_kit_barcode(db: AsyncSession, company_id: uuid.UUID, desired_barcode: str | None = None) -> str:
+    """Valida o genera un código EAN-13 único que no colisione con el catálogo de productos."""
+    if desired_barcode and desired_barcode.strip():
+        cand = desired_barcode.strip()
+        existing = (await db.execute(
+            select(Product.id).where(Product.company_id == company_id, Product.codigo_barra == cand)
+        )).scalar_one_or_none()
+        if not existing:
+            return cand
+    for _ in range(30):
+        cand = _generate_kit_barcode()
+        existing = (await db.execute(
+            select(Product.id).where(Product.company_id == company_id, Product.codigo_barra == cand)
+        )).scalar_one_or_none()
+        if not existing:
+            return cand
+    return _generate_kit_barcode()
+
+
+async def create_kit(db: AsyncSession, data: KitCreate) -> dict:
     """Crea un Kit / Combo y lo sincroniza automáticamente como producto oficial en el catálogo."""
     company_id = data.company_id or uuid.UUID("00000000-0000-0000-0000-000000000010")
     modalidad = data.modalidad_facturacion or "item_unico"
@@ -39,12 +77,10 @@ async def create_kit(db: AsyncSession, data: KitCreate) -> ProductKit:
     codigo_barra = data.codigo_barra
     sku = data.sku
 
-    # Si no se pasó product_id, crear un producto tipo 'kit' en el catálogo
+    # Si no se pasó product_id, crear o reutilizar producto tipo 'kit' en el catálogo
     if not target_product_id:
-        if not codigo_barra:
-            codigo_barra = _generate_kit_barcode()
-        if not sku:
-            sku = _generate_kit_sku()
+        sku = await _ensure_unique_kit_sku(db, company_id, sku)
+        codigo_barra = await _ensure_unique_kit_barcode(db, company_id, codigo_barra)
 
         # IVA: Si es ítem único tributa 10% fija según la DNIT; si es desglosado 10% nominal en cabecera
         iva_tasa = 10.0
@@ -116,7 +152,7 @@ async def create_kit(db: AsyncSession, data: KitCreate) -> ProductKit:
 
     await db.commit()
     await db.refresh(kit)
-    return kit
+    return await _kit_to_dict(db, kit)
 
 
 async def _kit_to_dict(db: AsyncSession, kit: ProductKit) -> dict:
@@ -153,6 +189,14 @@ async def _kit_to_dict(db: AsyncSession, kit: ProductKit) -> dict:
             cuello_botella_nombre = p.nombre if p else "Producto"
 
         iva_tasa = float(p.iva_tasa if p and p.iva_tasa is not None else 10.0)
+        es_pesable = bool(
+            p and (
+                p.tipo_venta == "peso" or
+                p.unidad_medida == "KG" or
+                p.plu_balanza is not None or
+                (p.codigo_barra and p.codigo_barra.startswith("2000"))
+            )
+        )
 
         components.append({
             "id": str(item.id),
@@ -162,6 +206,9 @@ async def _kit_to_dict(db: AsyncSession, kit: ProductKit) -> dict:
             "nombre": p.nombre if p else "Producto",
             "sku": p.sku if p else "—",
             "codigo_barra": p.codigo_barra if p else None,
+            "unidad_medida": p.unidad_medida if p else ("KG" if es_pesable else "UN"),
+            "tipo_venta": p.tipo_venta if p else ("peso" if es_pesable else "unidad"),
+            "es_pesable": es_pesable,
             "iva_tasa": iva_tasa,
             "stock_actual": stock_actual,
             "cantidad": float(item.cantidad),
@@ -209,6 +256,7 @@ async def _kit_to_dict(db: AsyncSession, kit: ProductKit) -> dict:
         "sku": sku,
         "costo_total": float(total_costo),
         "precio_individual_total": float(total_precio_individual),
+        "precio_calculado": float(total_precio_individual),
         "margen_monto": float(margen_monto),
         "margen_pct": margen_pct,
         "ahorro_cliente_monto": ahorro_cliente,
