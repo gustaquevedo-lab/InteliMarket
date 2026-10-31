@@ -238,18 +238,24 @@ function DashboardRouter() {
   return <Suspense fallback={<PageLoader />}><Dashboard /></Suspense>
 }
 
-function AuditoriaRedirect() {
-  useEffect(() => {
-    window.location.replace("/auditoria/index.html")
-  }, [])
-  return null
+function AuditoriaPage() {
+  return (
+    <div style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", zIndex: 99999, background: "#020617" }}>
+      <iframe
+        src="/auditoria/index.html"
+        title="Auditor de Precios & Rentabilidad"
+        style={{ width: "100%", height: "100%", border: "none" }}
+      />
+    </div>
+  )
 }
 
 function AppRoutes() {
   const isElectron = typeof window !== "undefined" && !!(window as any).electronAPI
   return (
     <Routes>
-      <Route path="/auditoria" element={<AuditoriaRedirect />} />
+      <Route path="/auditoria" element={<AuditoriaPage />} />
+      <Route path="/auditoria/index.html" element={<AuditoriaPage />} />
       <Route path="/login" element={<Suspense fallback={<PageLoader />}><Login /></Suspense>} />
       <Route path="/portal/proveedores/login" element={<Suspense fallback={<PageLoader />}><SupplierLogin /></Suspense>} />
       <Route path="/portal/proveedores/dashboard" element={<Suspense fallback={<PageLoader />}><SupplierDashboard /></Suspense>} />
