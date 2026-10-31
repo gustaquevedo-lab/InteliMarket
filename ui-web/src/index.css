@@ -23,6 +23,12 @@
   .dark select, .dark input, .dark textarea { color-scheme: dark; }
   .dark select option { background-color: #0f172a; color: #f8fafc; }
 
+  /* Política Canónica: Textos en Mayúsculas (Excluye contraseñas y correos) */
+  input:not([type="password"]):not([type="email"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(.keep-case),
+  textarea:not(.keep-case) {
+    text-transform: uppercase;
+  }
+
   *, *::before, *::after {
     transition-property: background-color, border-color, color, box-shadow;
     transition-timing-function: ease-in-out;
