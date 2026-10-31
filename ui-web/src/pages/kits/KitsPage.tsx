@@ -16,7 +16,6 @@ export default function KitsPage() {
   const confirm = useConfirm()
 
   const [kits, setKits] = useState<any[]>([])
-  const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
   const [modalidadFilter, setModalidadFilter] = useState<string>("todos")
@@ -30,12 +29,8 @@ export default function KitsPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [kitsList, prods] = await Promise.all([
-        api.kits.list(),
-        api.products.list({ limit: 1000 }),
-      ])
+      const kitsList = await api.kits.list()
       setKits(kitsList || [])
-      setProducts(prods || [])
     } catch (e: any) {
       toast.error("Error al cargar kits", e.message || "No se pudieron obtener los combos.")
     } finally {
@@ -460,7 +455,6 @@ export default function KitsPage() {
         onClose={() => setShowModal(false)}
         onSuccess={fetchData}
         kitToEdit={kitToEdit}
-        allProducts={products}
       />
     </div>
   )

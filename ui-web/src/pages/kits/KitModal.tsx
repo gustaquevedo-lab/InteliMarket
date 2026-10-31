@@ -3,7 +3,7 @@ import {
   Gift, X, Plus, Minus, Trash2, Check, Copy, AlertTriangle, ShieldAlert,
   Sparkles, Layers, Package, Barcode, DollarSign, Percent, TrendingUp,
   Box, Info, Search, RefreshCw, Lock, CheckCircle2, ArrowRight, Zap,
-  Calculator, Receipt
+  Calculator, Receipt, Loader2
 } from "lucide-react"
 import { api, type Product } from "../../api"
 import { useToast } from "../../context/ToastContext"
@@ -14,7 +14,7 @@ export interface KitModalProps {
   onClose: () => void
   onSuccess: () => void
   kitToEdit?: any | null
-  allProducts: Product[]
+  allProducts?: Product[]
 }
 
 interface ComponentRow {
@@ -70,6 +70,10 @@ export default function KitModal({
 
   // 2. Buscador y agregado de componentes
   const [searchQuery, setSearchQuery] = useState("")
+  const [searchResults, setSearchResults] = useState<Product[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const searchTimeoutRef = useRef<any>(null)
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [addQty, setAddQty] = useState<number>(1)
   const [copiedCode, setCopiedCode] = useState(false)
@@ -90,7 +94,7 @@ export default function KitModal({
 
       // Mapear items existentes
       const loadedItems: ComponentRow[] = (kitToEdit.items || []).map((it: any) => {
-        const prod = allProducts.find(p => p.id === it.product_id)
+        const prod = (allProducts || []).find(p => p.id === it.product_id)
         return {
           product_id: it.product_id,
           nombre: it.nombre || prod?.nombre || "Producto",
@@ -115,24 +119,54 @@ export default function KitModal({
       setItems([])
     }
     setSearchQuery("")
+    setSearchResults([])
+    setIsSearching(false)
+    setSearchError(null)
     setSelectedProduct(null)
     setAddQty(1)
     setAllowBelowCost(false)
   }, [open, kitToEdit, allProducts])
 
-  // Filtrado de productos para agregar
-  const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return []
-    const q = searchQuery.toLowerCase().trim()
-    return allProducts
-      .filter(p => {
-        const n = (p.nombre || "").toLowerCase()
-        const s = (p.sku || "").toLowerCase()
-        const b = (p.codigo_barra || "").toLowerCase()
-        return n.includes(q) || s.includes(q) || b.includes(q)
-      })
-      .slice(0, 15)
-  }, [searchQuery, allProducts])
+  // Búsqueda dinámica asíncrona conectada al catálogo completo (11.000+ productos)
+  useEffect(() => {
+    const q = searchQuery.trim()
+    if (!q) {
+      setSearchResults([])
+      setIsSearching(false)
+      setSearchError(null)
+      return
+    }
+
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current)
+    }
+
+    setIsSearching(true)
+    setSearchError(null)
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const res = await api.products.list({ search: q, limit: 20 })
+        const list = res || []
+        setSearchResults(list)
+        if (list.length === 0 && q.length >= 2) {
+          setSearchError(`No se encontró ningún producto con "${q}"`)
+        } else {
+          setSearchError(null)
+        }
+      } catch (err: any) {
+        console.error("Error al buscar productos en KitModal:", err)
+      } finally {
+        setIsSearching(false)
+      }
+    }, 250)
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current)
+      }
+    }
+  }, [searchQuery])
 
   // Agregar componente al combo
   const handleAddComponent = (prodToAdd?: Product) => {
@@ -164,32 +198,127 @@ export default function KitModal({
 
     setSelectedProduct(null)
     setSearchQuery("")
+    setSearchResults([])
+    setSearchError(null)
     setAddQty(1)
-    if (searchInputRef.current) searchInputRef.current.focus()
+    setTimeout(() => {
+      if (searchInputRef.current) searchInputRef.current.focus()
+    }, 50)
   }
 
-  // Soporte directo para pistola lectora en el buscador
-  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  // Soporte directo para pistola lectora en el buscador (escaneo con pistola o presionar Enter)
+  const handleSearchKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       e.preventDefault()
       const clean = searchQuery.trim()
       if (!clean) return
 
-      // Buscar coincidencia exacta por código de barra o SKU
-      const exactMatch = allProducts.find(
-        p => (p.codigo_barra && p.codigo_barra.trim() === clean) || (p.sku && p.sku.trim() === clean)
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current)
+      }
+
+      setIsSearching(true)
+      try {
+        const res = (await api.products.list({ search: clean, limit: 10 })) || []
+        const qLower = clean.toLowerCase()
+
+        // 1. Coincidencia exacta por código de barra
+        const exactBarcode = res.find(
+          p => p.codigo_barra && p.codigo_barra.trim().toLowerCase() === qLower
+        )
+        if (exactBarcode) {
+          handleAddComponent(exactBarcode)
+          toast.success("Producto escaneado", exactBarcode.nombre)
+          return
+        }
+
+        // 2. Coincidencia exacta por SKU
+        const exactSku = res.find(
+          p => p.sku && p.sku.trim().toLowerCase() === qLower
+        )
+        if (exactSku) {
+          handleAddComponent(exactSku)
+          toast.success("Producto agregado", exactSku.nombre)
+          return
+        }
+
+        // 3. Coincidencia exacta por nombre
+        const exactName = res.find(
+          p => p.nombre && p.nombre.trim().toLowerCase() === qLower
+        )
+        if (exactName) {
+          handleAddComponent(exactName)
+          toast.success("Producto agregado", exactName.nombre)
+          return
+        }
+
+        // 4. Si hay 1 solo resultado retornado
+        if (res.length === 1) {
+          handleAddComponent(res[0])
+          toast.success("Producto agregado", res[0].nombre)
+          return
+        }
+
+        // 5. Si hay varios resultados, mantener lista visible
+        if (res.length > 1) {
+          setSearchResults(res)
+          return
+        }
+
+        // 6. No se encontró
+        toast.error("Producto no encontrado", `No se encontró ningún artículo para "${clean}"`)
+        setSearchError(`No se encontró ningún artículo para "${clean}"`)
+      } catch (err: any) {
+        toast.error("Error al buscar", err.message || "Error al buscar producto")
+      } finally {
+        setIsSearching(false)
+      }
+    }
+  }
+
+  // Click en botón "+ Agregar"
+  const handleAddButtonClick = async () => {
+    if (searchResults.length === 1) {
+      handleAddComponent(searchResults[0])
+      return
+    }
+
+    const clean = searchQuery.trim()
+    if (!clean) return
+
+    setIsSearching(true)
+    try {
+      const res = (await api.products.list({ search: clean, limit: 10 })) || []
+      const qLower = clean.toLowerCase()
+
+      const exact = res.find(
+        p => (p.codigo_barra && p.codigo_barra.trim().toLowerCase() === qLower) ||
+             (p.sku && p.sku.trim().toLowerCase() === qLower) ||
+             (p.nombre && p.nombre.trim().toLowerCase() === qLower)
       )
-      if (exactMatch) {
-        handleAddComponent(exactMatch)
-        toast.success("Producto escaneado", exactMatch.nombre)
+      if (exact) {
+        handleAddComponent(exact)
+        toast.success("Producto agregado", exact.nombre)
         return
       }
 
-      // Si no es exacto pero hay 1 solo resultado
-      if (searchResults.length === 1) {
-        handleAddComponent(searchResults[0])
+      if (res.length === 1) {
+        handleAddComponent(res[0])
+        toast.success("Producto agregado", res[0].nombre)
         return
       }
+
+      if (res.length > 1) {
+        setSearchResults(res)
+        return
+      }
+
+      toast.error("Producto no encontrado", `No se encontró ningún producto con "${clean}"`)
+      setSearchError(`No se encontró ningún producto con "${clean}"`)
+    } catch (err: any) {
+      toast.error("Error al buscar", err.message || "Error al buscar producto")
+    } finally {
+      setIsSearching(false)
     }
   }
 
@@ -542,7 +671,11 @@ export default function KitModal({
             <div className="relative">
               <div className="flex gap-2">
                 <div className="relative flex-1">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  {isSearching ? (
+                    <Loader2 className="w-4 h-4 text-purple-500 animate-spin absolute left-3.5 top-3" />
+                  ) : (
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  )}
                   <input
                     ref={searchInputRef}
                     type="text"
@@ -555,7 +688,12 @@ export default function KitModal({
                   {searchQuery && (
                     <button
                       type="button"
-                      onClick={() => setSearchQuery("")}
+                      onClick={() => {
+                        setSearchQuery("")
+                        setSearchResults([])
+                        setSearchError(null)
+                        if (searchInputRef.current) searchInputRef.current.focus()
+                      }}
                       className="absolute right-3 top-3 text-slate-400 hover:text-slate-600"
                     >
                       <X className="w-3.5 h-3.5" />
@@ -576,13 +714,21 @@ export default function KitModal({
 
                 <button
                   type="button"
-                  onClick={() => handleAddComponent()}
-                  disabled={!selectedProduct && searchResults.length === 0}
+                  onClick={handleAddButtonClick}
+                  disabled={isSearching || (!searchQuery.trim() && searchResults.length === 0)}
                   className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 disabled:opacity-40 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5"
                 >
                   <Plus className="w-4 h-4" /> Agregar
                 </button>
               </div>
+
+              {/* Mensaje si no se encuentra */}
+              {searchError && (
+                <div className="absolute left-0 right-0 top-12 z-30 bg-rose-50 dark:bg-rose-950/90 border border-rose-200 dark:border-rose-800 rounded-xl p-2.5 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2 shadow-lg">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+                  <span>{searchError}</span>
+                </div>
+              )}
 
               {/* Dropdown de Resultados de Búsqueda */}
               {searchQuery && searchResults.length > 0 && (
@@ -597,17 +743,17 @@ export default function KitModal({
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-slate-900 dark:text-white">{prod.nombre}</span>
                           <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded font-mono ${
-                            prod.iva_tasa === 5 ? "bg-emerald-100 text-emerald-700" :
-                            prod.iva_tasa === 0 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                            Number(prod.iva_tasa) === 5 ? "bg-emerald-100 text-emerald-700" :
+                            Number(prod.iva_tasa) === 0 ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
                           }`}>
-                            IVA {prod.iva_tasa ?? 10}%
+                            IVA {Number(prod.iva_tasa ?? 10)}%
                           </span>
                         </div>
                         <div className="flex items-center gap-3 text-[10px] text-slate-400 font-mono">
                           <span>SKU: {prod.sku || "—"}</span>
                           <span>EAN: {prod.codigo_barra || "—"}</span>
                           <span className="text-slate-600 dark:text-slate-300 font-bold">
-                            Stock: {(prod as any)?.stock_actual ?? 0} un.
+                            Stock: {Number((prod as any)?.stock_actual ?? 0).toLocaleString("es-PY")} un.
                           </span>
                         </div>
                       </div>
