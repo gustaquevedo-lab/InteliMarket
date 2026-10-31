@@ -109,6 +109,10 @@ class CategoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CategorySafeDeletePayload(BaseModel):
+    reassign_to_id: Optional[UUID] = None
+
+
 class ProductCreate(BaseModel):
     company_id: UUID
     categoria_id: Optional[UUID] = None

@@ -13,7 +13,7 @@ from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.products.schemas import (
     ProductCreate, ProductUpdate, ProductResponse, PaginatedProductResponse,
-    CategoryCreate, CategoryResponse,
+    CategoryCreate, CategoryResponse, CategorySafeDeletePayload,
     RepresentativeCreate, RepresentativeUpdate, RepresentativeResponse,
     SupplierRepresentativesPayload,
     ProductSectionCreate, ProductSectionUpdate, ProductSectionResponse,
@@ -25,17 +25,6 @@ from api.src.products.service import annotate_products_with_promos
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["products"], dependencies=[Depends(require_auth)])
-
-
-# Categories
-@router.post("/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
-async def create_category(body: CategoryCreate, db: AsyncSession = Depends(get_db)):
-    return await service.create_category(db, body)
-
-
-@router.get("/companies/{company_id}/categories", response_model=list[CategoryResponse])
-async def list_categories(company_id: str, db: AsyncSession = Depends(get_db)):
-    return await service.list_categories(db, company_id)
 
 
 DEFAULT_COMPANY_ID = uuid.UUID("00000000-0000-0000-0000-000000000010")
@@ -52,6 +41,56 @@ def _get_company_uuid(user: dict, explicit: Optional[uuid.UUID] = None) -> uuid.
             except (ValueError, TypeError):
                 pass
     return DEFAULT_COMPANY_ID
+
+
+# Categories
+@router.post("/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)
+async def create_category(body: CategoryCreate, db: AsyncSession = Depends(get_db)):
+    return await service.create_category(db, body)
+
+
+@router.get("/companies/{company_id}/categories", response_model=list[CategoryResponse])
+async def list_categories(company_id: str, db: AsyncSession = Depends(get_db)):
+    return await service.list_categories(db, company_id)
+
+
+@router.get("/categories/{category_id}/product-count")
+async def get_category_product_count(
+    category_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    count = await service.count_category_products(db, category_id)
+    return {"category_id": category_id, "product_count": count}
+
+
+@router.delete("/categories/{category_id}")
+async def delete_category(
+    category_id: uuid.UUID,
+    reassign_to_id: Optional[uuid.UUID] = Query(None),
+    company_id: Optional[uuid.UUID] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user, company_id)
+    return await service.safe_delete_category(
+        db, category_id=category_id, company_id=cid, reassign_to_id=reassign_to_id
+    )
+
+
+@router.post("/categories/{category_id}/safe-delete")
+async def safe_delete_category(
+    category_id: uuid.UUID,
+    payload: Optional[CategorySafeDeletePayload] = None,
+    company_id: Optional[uuid.UUID] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user, company_id)
+    reassign_to_id = payload.reassign_to_id if payload else None
+    return await service.safe_delete_category(
+        db, category_id=category_id, company_id=cid, reassign_to_id=reassign_to_id
+    )
 
 
 # ═══════════════════════════════════════════════════════════════

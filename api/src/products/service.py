@@ -9,7 +9,7 @@ from uuid import UUID
 from sqlalchemy import select, func, text, and_, or_, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 
 from api.src.products.models import (
     Product,
@@ -87,6 +87,139 @@ def _ensure_opt_uuid(val: Optional[UUID | str]) -> Optional[UUID]:
     if val is None:
         return None
     return val if isinstance(val, UUID) else UUID(str(val))
+
+
+async def count_category_products(db: AsyncSession, category_id: UUID | str) -> int:
+    cid = _ensure_uuid(category_id)
+    res = await db.execute(
+        select(func.count(Product.id)).where(Product.categoria_id == cid)
+    )
+    return res.scalar() or 0
+
+
+async def safe_delete_category(
+    db: AsyncSession,
+    category_id: UUID | str,
+    company_id: UUID | str,
+    reassign_to_id: Optional[UUID | str] = None,
+) -> dict:
+    cat_id = _ensure_uuid(category_id)
+    comp_id = _ensure_uuid(company_id)
+    target_id = _ensure_opt_uuid(reassign_to_id)
+
+    # 1. Fetch category, ensure exists and matches company_id
+    res = await db.execute(
+        select(ProductCategory).where(
+            ProductCategory.id == cat_id,
+            ProductCategory.company_id == comp_id,
+        )
+    )
+    cat = res.scalar_one_or_none()
+    if not cat:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Category not found",
+        )
+
+    # 2. Count products currently assigned
+    prod_count = await count_category_products(db, cat_id)
+
+    # 3. If count == 0
+    if prod_count == 0:
+        if target_id is not None:
+            if target_id == cat_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot reassign to the same category",
+                )
+            target_res = await db.execute(
+                select(ProductCategory).where(
+                    ProductCategory.id == target_id,
+                    ProductCategory.company_id == comp_id,
+                )
+            )
+            target = target_res.scalar_one_or_none()
+            if not target:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Target category for reassignment not found",
+                )
+            await db.execute(
+                update(ProductCategory)
+                .where(ProductCategory.parent_id == cat_id, ProductCategory.id != target_id)
+                .values(parent_id=target_id)
+            )
+            if target.parent_id == cat_id:
+                target.parent_id = cat.parent_id
+        else:
+            await db.execute(
+                update(ProductCategory)
+                .where(ProductCategory.parent_id == cat_id)
+                .values(parent_id=None)
+            )
+
+        await db.delete(cat)
+        await db.flush()
+        return {"deleted_id": str(cat_id), "reassigned_products": 0}
+
+    # 4. If count > 0 and not reassign_to_id
+    if not target_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": f"Category has {prod_count} products assigned. Reassignment required.",
+                "product_count": prod_count,
+            },
+        )
+
+    # 5. If count > 0 and reassign_to_id
+    if target_id == cat_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot reassign to the same category",
+        )
+
+    target_res = await db.execute(
+        select(ProductCategory).where(
+            ProductCategory.id == target_id,
+            ProductCategory.company_id == comp_id,
+        )
+    )
+    target = target_res.scalar_one_or_none()
+    if not target:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Target category for reassignment not found",
+        )
+
+    # Execute atomically:
+    # - UPDATE products SET categoria_id = reassign_to_id WHERE categoria_id = category_id
+    await db.execute(
+        update(Product)
+        .where(Product.categoria_id == cat_id)
+        .values(categoria_id=target_id, updated_at=func.now())
+    )
+    # - If any child categories (parent_id == category_id), update their parent_id = target.id (or None)
+    await db.execute(
+        update(ProductCategory)
+        .where(ProductCategory.parent_id == cat_id, ProductCategory.id != target_id)
+        .values(parent_id=target_id)
+    )
+    if target.parent_id == cat_id:
+        target.parent_id = cat.parent_id
+
+    # - Delete category
+    await db.delete(cat)
+    await db.flush()
+
+    return {
+        "deleted_id": str(cat_id),
+        "reassigned_to_id": str(target_id),
+        "reassigned_products": prod_count,
+    }
+
+
+delete_category_safe = safe_delete_category
 
 
 # ═══════════════════════════════════════════════════════════════
