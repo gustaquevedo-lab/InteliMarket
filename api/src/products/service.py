@@ -6,13 +6,30 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, func, text, and_, or_
+from sqlalchemy import select, func, text, and_, or_, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
-from api.src.products.models import Product, ProductCategory
-from api.src.products.schemas import ProductCreate, ProductUpdate, CategoryCreate
+from api.src.products.models import (
+    Product,
+    ProductCategory,
+    Representative,
+    SupplierRepresentative,
+    ProductSection,
+    ProductBrand,
+)
+from api.src.products.schemas import (
+    ProductCreate,
+    ProductUpdate,
+    CategoryCreate,
+    RepresentativeCreate,
+    RepresentativeUpdate,
+    ProductSectionCreate,
+    ProductSectionUpdate,
+    ProductBrandCreate,
+    ProductBrandUpdate,
+)
 from api.src.inventory.models import Stock, Warehouse, InventoryMovement
 from api.src.purchases.models import PurchaseOrder, PurchaseOrderItem, Supplier, SupplierPriceHistory
 from api.src.promotions.models import Promotion
@@ -62,6 +79,385 @@ async def get_category(db: AsyncSession, category_id: str) -> ProductCategory | 
     return result.scalar_one_or_none()
 
 
+def _ensure_uuid(val: UUID | str) -> UUID:
+    return val if isinstance(val, UUID) else UUID(str(val))
+
+
+def _ensure_opt_uuid(val: Optional[UUID | str]) -> Optional[UUID]:
+    if val is None:
+        return None
+    return val if isinstance(val, UUID) else UUID(str(val))
+
+
+# ═══════════════════════════════════════════════════════════════
+#  REPRESENTANTES (MATRICES / FABRICANTES OFICIALES)
+# ═══════════════════════════════════════════════════════════════
+
+async def get_representatives(
+    db: AsyncSession,
+    company_id: UUID | str,
+    supplier_id: Optional[UUID | str] = None,
+) -> list[Representative]:
+    cid = _ensure_uuid(company_id)
+    sid = _ensure_opt_uuid(supplier_id)
+    query = (
+        select(Representative)
+        .options(selectinload(Representative.suppliers))
+        .where(Representative.company_id == cid)
+    )
+    if sid:
+        query = query.join(
+            SupplierRepresentative,
+            SupplierRepresentative.representative_id == Representative.id,
+        ).where(SupplierRepresentative.supplier_id == sid)
+    query = query.order_by(Representative.nombre.asc())
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def create_representative(
+    db: AsyncSession,
+    company_id: UUID | str,
+    data: RepresentativeCreate,
+) -> Representative:
+    cid = data.company_id or _ensure_uuid(company_id)
+    rep = Representative(
+        company_id=cid,
+        nombre=data.nombre.strip(),
+        contacto=data.contacto,
+        telefono=data.telefono,
+        activo=data.activo if data.activo is not None else True,
+    )
+    db.add(rep)
+    await db.flush()
+
+    if data.supplier_ids:
+        for s_id in data.supplier_ids:
+            db.add(SupplierRepresentative(supplier_id=_ensure_uuid(s_id), representative_id=rep.id))
+        await db.flush()
+
+    res = await db.execute(
+        select(Representative)
+        .options(selectinload(Representative.suppliers))
+        .where(Representative.id == rep.id)
+    )
+    return res.scalar_one()
+
+
+async def update_representative(
+    db: AsyncSession,
+    rep_id: UUID | str,
+    company_id: UUID | str,
+    data: RepresentativeUpdate,
+) -> Representative:
+    rid = _ensure_uuid(rep_id)
+    cid = _ensure_uuid(company_id)
+    result = await db.execute(
+        select(Representative)
+        .options(selectinload(Representative.suppliers))
+        .where(Representative.id == rid, Representative.company_id == cid)
+    )
+    rep = result.scalar_one_or_none()
+    if not rep:
+        raise HTTPException(status_code=404, detail="Representante no encontrado")
+
+    if data.nombre is not None:
+        rep.nombre = data.nombre.strip()
+    if data.contacto is not None:
+        rep.contacto = data.contacto
+    if data.telefono is not None:
+        rep.telefono = data.telefono
+    if data.activo is not None:
+        rep.activo = data.activo
+
+    if data.supplier_ids is not None:
+        await db.execute(
+            delete(SupplierRepresentative).where(SupplierRepresentative.representative_id == rid)
+        )
+        for s_id in data.supplier_ids:
+            db.add(SupplierRepresentative(supplier_id=_ensure_uuid(s_id), representative_id=rid))
+
+    await db.flush()
+    res = await db.execute(
+        select(Representative)
+        .options(selectinload(Representative.suppliers))
+        .where(Representative.id == rid)
+    )
+    return res.scalar_one()
+
+
+async def delete_representative(
+    db: AsyncSession,
+    rep_id: UUID | str,
+    company_id: UUID | str,
+) -> bool:
+    rid = _ensure_uuid(rep_id)
+    cid = _ensure_uuid(company_id)
+    result = await db.execute(
+        select(Representative).where(Representative.id == rid, Representative.company_id == cid)
+    )
+    rep = result.scalar_one_or_none()
+    if not rep:
+        raise HTTPException(status_code=404, detail="Representante no encontrado")
+    await db.delete(rep)
+    await db.flush()
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════
+#  ASOCIACIONES PROVEEDOR - REPRESENTANTE
+# ═══════════════════════════════════════════════════════════════
+
+async def assign_supplier_representatives(
+    db: AsyncSession,
+    supplier_id: UUID | str,
+    representative_ids: list[UUID | str],
+) -> list[Representative]:
+    sid = _ensure_uuid(supplier_id)
+    await db.execute(
+        delete(SupplierRepresentative).where(SupplierRepresentative.supplier_id == sid)
+    )
+    for rep_id in representative_ids:
+        db.add(SupplierRepresentative(supplier_id=sid, representative_id=_ensure_uuid(rep_id)))
+    await db.flush()
+    return await get_supplier_representatives(db, sid)
+
+
+async def get_supplier_representatives(
+    db: AsyncSession,
+    supplier_id: UUID | str,
+) -> list[Representative]:
+    sid = _ensure_uuid(supplier_id)
+    query = (
+        select(Representative)
+        .join(SupplierRepresentative, SupplierRepresentative.representative_id == Representative.id)
+        .options(selectinload(Representative.suppliers))
+        .where(SupplierRepresentative.supplier_id == sid)
+        .order_by(Representative.nombre.asc())
+    )
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def remove_supplier_representative(
+    db: AsyncSession,
+    supplier_id: UUID | str,
+    representative_id: UUID | str,
+) -> bool:
+    sid = _ensure_uuid(supplier_id)
+    rid = _ensure_uuid(representative_id)
+    await db.execute(
+        delete(SupplierRepresentative).where(
+            SupplierRepresentative.supplier_id == sid,
+            SupplierRepresentative.representative_id == rid,
+        )
+    )
+    await db.flush()
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════
+#  SECCIONES DE PRODUCTO (TAXONOMÍA COMERCIAL)
+# ═══════════════════════════════════════════════════════════════
+
+async def get_sections(
+    db: AsyncSession,
+    company_id: UUID | str,
+) -> list[ProductSection]:
+    cid = _ensure_uuid(company_id)
+    result = await db.execute(
+        select(ProductSection)
+        .where(ProductSection.company_id == cid)
+        .order_by(ProductSection.orden.asc(), ProductSection.nombre.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def create_section(
+    db: AsyncSession,
+    company_id: UUID | str,
+    data: ProductSectionCreate,
+) -> ProductSection:
+    cid = data.company_id or _ensure_uuid(company_id)
+    sec = ProductSection(
+        company_id=cid,
+        nombre=data.nombre.strip(),
+        orden=data.orden,
+        activo=data.activo if data.activo is not None else True,
+    )
+    db.add(sec)
+    await db.flush()
+    await db.refresh(sec)
+    return sec
+
+
+async def update_section(
+    db: AsyncSession,
+    section_id: UUID | str,
+    company_id: UUID | str,
+    data: ProductSectionUpdate,
+) -> ProductSection:
+    sid = _ensure_uuid(section_id)
+    cid = _ensure_uuid(company_id)
+    result = await db.execute(
+        select(ProductSection).where(
+            ProductSection.id == sid,
+            ProductSection.company_id == cid,
+        )
+    )
+    sec = result.scalar_one_or_none()
+    if not sec:
+        raise HTTPException(status_code=404, detail="Sección de producto no encontrada")
+    if data.nombre is not None:
+        sec.nombre = data.nombre.strip()
+    if data.orden is not None:
+        sec.orden = data.orden
+    if data.activo is not None:
+        sec.activo = data.activo
+    await db.flush()
+    await db.refresh(sec)
+    return sec
+
+
+async def delete_section(
+    db: AsyncSession,
+    section_id: UUID | str,
+    company_id: UUID | str,
+) -> bool:
+    sid = _ensure_uuid(section_id)
+    cid = _ensure_uuid(company_id)
+    result = await db.execute(
+        select(ProductSection).where(
+            ProductSection.id == sid,
+            ProductSection.company_id == cid,
+        )
+    )
+    sec = result.scalar_one_or_none()
+    if not sec:
+        raise HTTPException(status_code=404, detail="Sección de producto no encontrada")
+    await db.delete(sec)
+    await db.flush()
+    return True
+
+
+# ═══════════════════════════════════════════════════════════════
+#  MARCAS DE PRODUCTO
+# ═══════════════════════════════════════════════════════════════
+
+async def get_brands(
+    db: AsyncSession,
+    company_id: UUID | str,
+    representative_id: Optional[UUID | str] = None,
+) -> list[ProductBrand]:
+    cid = _ensure_uuid(company_id)
+    rid = _ensure_opt_uuid(representative_id)
+    query = (
+        select(ProductBrand)
+        .options(
+            selectinload(ProductBrand.representative).selectinload(Representative.suppliers)
+        )
+        .where(ProductBrand.company_id == cid)
+    )
+    if rid:
+        query = query.where(ProductBrand.representative_id == rid)
+    query = query.order_by(ProductBrand.nombre.asc())
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def create_brand(
+    db: AsyncSession,
+    company_id: UUID | str,
+    data: ProductBrandCreate,
+) -> ProductBrand:
+    cid = data.company_id or _ensure_uuid(company_id)
+    brand = ProductBrand(
+        company_id=cid,
+        nombre=data.nombre.strip(),
+        representative_id=data.representative_id,
+        activo=data.activo if data.activo is not None else True,
+    )
+    db.add(brand)
+    await db.flush()
+    res = await db.execute(
+        select(ProductBrand)
+        .options(
+            selectinload(ProductBrand.representative).selectinload(Representative.suppliers)
+        )
+        .where(ProductBrand.id == brand.id)
+    )
+    return res.scalar_one()
+
+
+async def update_brand(
+    db: AsyncSession,
+    brand_id: UUID | str,
+    company_id: UUID | str,
+    data: ProductBrandUpdate,
+) -> ProductBrand:
+    bid = _ensure_uuid(brand_id)
+    cid = _ensure_uuid(company_id)
+    result = await db.execute(
+        select(ProductBrand)
+        .options(
+            selectinload(ProductBrand.representative).selectinload(Representative.suppliers)
+        )
+        .where(
+            ProductBrand.id == bid,
+            ProductBrand.company_id == cid,
+        )
+    )
+    brand = result.scalar_one_or_none()
+    if not brand:
+        raise HTTPException(status_code=404, detail="Marca no encontrada")
+    if data.nombre is not None:
+        brand.nombre = data.nombre.strip()
+    if data.representative_id is not None:
+        brand.representative_id = data.representative_id
+    if data.activo is not None:
+        brand.activo = data.activo
+    await db.flush()
+    res = await db.execute(
+        select(ProductBrand)
+        .options(
+            selectinload(ProductBrand.representative).selectinload(Representative.suppliers)
+        )
+        .where(ProductBrand.id == brand.id)
+    )
+    return res.scalar_one()
+
+
+async def delete_brand(
+    db: AsyncSession,
+    brand_id: UUID | str,
+    company_id: UUID | str,
+) -> bool:
+    bid = _ensure_uuid(brand_id)
+    cid = _ensure_uuid(company_id)
+    result = await db.execute(
+        select(ProductBrand).where(
+            ProductBrand.id == bid,
+            ProductBrand.company_id == cid,
+        )
+    )
+    brand = result.scalar_one_or_none()
+    if not brand:
+        raise HTTPException(status_code=404, detail="Marca no encontrada")
+    await db.delete(brand)
+    await db.flush()
+    return True
+
+
+# Backward-compatibility aliases
+list_representatives = get_representatives
+list_supplier_representatives = get_supplier_representatives
+set_supplier_representatives = assign_supplier_representatives
+list_product_sections = get_sections
+create_product_section = create_section
+list_product_brands = get_brands
+create_product_brand = create_brand
+
+
 # ═══════════════════════════════════════════════════════════════
 #  PRODUCTOS
 # ═══════════════════════════════════════════════════════════════
@@ -84,6 +480,7 @@ async def get_next_sku(db: AsyncSession, company_id: str) -> str:
 
 async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
     dump = data.model_dump()
+    dump.pop("section_id", None)
     if not dump.get("sku") or str(dump.get("sku")).strip().upper() in ("", "AUTO"):
         dump["sku"] = await get_next_sku(db, str(data.company_id))
 
@@ -94,12 +491,17 @@ async def create_product(db: AsyncSession, data: ProductCreate) -> Product:
     product = Product(**dump)
     db.add(product)
     await db.flush()
-    await db.refresh(product)
-    # Mismo motivo que en list_products: ProductResponse expone supplier_nombre
-    # y categoria a traves de relaciones. Si no se cargan aca, pydantic las
-    # dereferencia al serializar y SQLAlchemy corta con MissingGreenlet.
-    await db.refresh(product, ["categoria", "supplier"])
-    return product
+    res = await db.execute(
+        select(Product)
+        .options(
+            selectinload(Product.categoria),
+            selectinload(Product.supplier),
+            selectinload(Product.representative),
+            selectinload(Product.brand),
+        )
+        .where(Product.id == product.id)
+    )
+    return res.scalar_one()
 
 
 async def get_product(db: AsyncSession, product_id: str) -> Product | None:
@@ -108,7 +510,14 @@ async def get_product(db: AsyncSession, product_id: str) -> Product | None:
     except ValueError:
         return None
     result = await db.execute(
-        select(Product).options(selectinload(Product.categoria), selectinload(Product.supplier)).where(Product.id == p_uuid)
+        select(Product)
+        .options(
+            selectinload(Product.categoria),
+            selectinload(Product.supplier),
+            selectinload(Product.representative),
+            selectinload(Product.brand),
+        )
+        .where(Product.id == p_uuid)
     )
     return result.scalar_one_or_none()
 
@@ -121,7 +530,12 @@ async def update_product(db: AsyncSession, product_id: str, data: ProductUpdate)
 
     result = await db.execute(
         select(Product)
-        .options(selectinload(Product.categoria), selectinload(Product.supplier))
+        .options(
+            selectinload(Product.categoria),
+            selectinload(Product.supplier),
+            selectinload(Product.representative),
+            selectinload(Product.brand),
+        )
         .where(Product.id == p_uuid)
     )
     product = result.scalar_one_or_none()
@@ -129,6 +543,7 @@ async def update_product(db: AsyncSession, product_id: str, data: ProductUpdate)
         return None
 
     update_dict = data.model_dump(exclude_unset=True)
+    update_dict.pop("section_id", None)
 
     # Validar que si el SKU cambia, no choque con otro de la misma empresa
     new_sku = update_dict.get("sku")
@@ -163,8 +578,17 @@ async def update_product(db: AsyncSession, product_id: str, data: ProductUpdate)
 
     product.updated_at = func.now()
     await db.flush()
-    await db.refresh(product)
-    return product
+    res = await db.execute(
+        select(Product)
+        .options(
+            selectinload(Product.categoria),
+            selectinload(Product.supplier),
+            selectinload(Product.representative),
+            selectinload(Product.brand),
+        )
+        .where(Product.id == product.id)
+    )
+    return res.scalar_one()
 
 
 async def delete_product(db: AsyncSession, product_id: str) -> bool:
@@ -590,7 +1014,12 @@ async def list_products(
 
     query = (
         select(Product)
-        .options(selectinload(Product.categoria), selectinload(Product.supplier))
+        .options(
+            selectinload(Product.categoria),
+            selectinload(Product.supplier),
+            selectinload(Product.representative),
+            selectinload(Product.brand),
+        )
         .where(Product.company_id == c_uuid, *conds)
     )
 
@@ -647,7 +1076,12 @@ async def list_products_paginated(
     # 2. Paginated items
     query = (
         select(Product)
-        .options(selectinload(Product.categoria), selectinload(Product.supplier))
+        .options(
+            selectinload(Product.categoria),
+            selectinload(Product.supplier),
+            selectinload(Product.representative),
+            selectinload(Product.brand),
+        )
         .where(Product.company_id == c_uuid, *conds)
     )
 

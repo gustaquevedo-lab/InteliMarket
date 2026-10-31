@@ -4,7 +4,8 @@ import logging
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
+from typing import Optional, Union
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form, Body
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,9 @@ from api.src.auth.middleware import require_auth
 from api.src.products.schemas import (
     ProductCreate, ProductUpdate, ProductResponse, PaginatedProductResponse,
     CategoryCreate, CategoryResponse,
+    RepresentativeCreate, RepresentativeUpdate, RepresentativeResponse,
+    ProductSectionCreate, ProductSectionUpdate, ProductSectionResponse,
+    ProductBrandCreate, ProductBrandUpdate, ProductBrandResponse,
 )
 from api.src.products import service
 from api.src.products.service import annotate_products_with_promos
@@ -31,6 +35,202 @@ async def create_category(body: CategoryCreate, db: AsyncSession = Depends(get_d
 @router.get("/companies/{company_id}/categories", response_model=list[CategoryResponse])
 async def list_categories(company_id: str, db: AsyncSession = Depends(get_db)):
     return await service.list_categories(db, company_id)
+
+
+DEFAULT_COMPANY_ID = uuid.UUID("00000000-0000-0000-0000-000000000010")
+
+
+def _get_company_uuid(user: dict, explicit: Optional[uuid.UUID] = None) -> uuid.UUID:
+    if explicit:
+        return explicit
+    if user:
+        raw = user.get("company_id")
+        if raw:
+            try:
+                return uuid.UUID(str(raw))
+            except (ValueError, TypeError):
+                pass
+    return DEFAULT_COMPANY_ID
+
+
+# ═══════════════════════════════════════════════════════════════
+#  REPRESENTANTES
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/representatives", response_model=list[RepresentativeResponse])
+async def list_representatives(
+    company_id: Optional[uuid.UUID] = Query(None),
+    supplier_id: Optional[uuid.UUID] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user, company_id)
+    return await service.get_representatives(db, company_id=cid, supplier_id=supplier_id)
+
+
+@router.post("/representatives", response_model=RepresentativeResponse, status_code=status.HTTP_201_CREATED)
+async def create_representative(
+    body: RepresentativeCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = body.company_id or _get_company_uuid(user)
+    return await service.create_representative(db, company_id=cid, data=body)
+
+
+@router.put("/representatives/{id}", response_model=RepresentativeResponse)
+@router.patch("/representatives/{id}", response_model=RepresentativeResponse)
+async def update_representative(
+    id: uuid.UUID,
+    body: RepresentativeUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user)
+    return await service.update_representative(db, rep_id=id, company_id=cid, data=body)
+
+
+@router.delete("/representatives/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_representative(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user)
+    await service.delete_representative(db, rep_id=id, company_id=cid)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  VINCULACIÓN PROVEEDORES - REPRESENTANTES
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/suppliers/{supplier_id}/representatives", response_model=list[RepresentativeResponse])
+async def get_supplier_representatives(
+    supplier_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    return await service.get_supplier_representatives(db, supplier_id=supplier_id)
+
+
+@router.post("/suppliers/{supplier_id}/representatives", response_model=list[RepresentativeResponse])
+@router.put("/suppliers/{supplier_id}/representatives", response_model=list[RepresentativeResponse])
+async def assign_supplier_representatives(
+    supplier_id: uuid.UUID,
+    body: Union[list[uuid.UUID], dict],
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    if isinstance(body, list):
+        rep_ids = [uuid.UUID(str(x)) for x in body]
+    elif isinstance(body, dict):
+        rep_ids = [uuid.UUID(str(x)) for x in body.get("representative_ids", [])]
+    else:
+        rep_ids = []
+    return await service.assign_supplier_representatives(db, supplier_id=supplier_id, representative_ids=rep_ids)
+
+
+@router.delete("/suppliers/{supplier_id}/representatives/{rep_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_supplier_representative(
+    supplier_id: uuid.UUID,
+    rep_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    await service.remove_supplier_representative(db, supplier_id=supplier_id, representative_id=rep_id)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  SECCIONES DE PRODUCTOS
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/product-sections", response_model=list[ProductSectionResponse])
+async def list_product_sections(
+    company_id: Optional[uuid.UUID] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user, company_id)
+    return await service.get_sections(db, company_id=cid)
+
+
+@router.post("/product-sections", response_model=ProductSectionResponse, status_code=status.HTTP_201_CREATED)
+async def create_product_section(
+    body: ProductSectionCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = body.company_id or _get_company_uuid(user)
+    return await service.create_section(db, company_id=cid, data=body)
+
+
+@router.put("/product-sections/{id}", response_model=ProductSectionResponse)
+@router.patch("/product-sections/{id}", response_model=ProductSectionResponse)
+async def update_product_section(
+    id: uuid.UUID,
+    body: ProductSectionUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user)
+    return await service.update_section(db, section_id=id, company_id=cid, data=body)
+
+
+@router.delete("/product-sections/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_product_section(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user)
+    await service.delete_section(db, section_id=id, company_id=cid)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  MARCAS DE PRODUCTOS
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/product-brands", response_model=list[ProductBrandResponse])
+async def list_product_brands(
+    company_id: Optional[uuid.UUID] = Query(None),
+    representative_id: Optional[uuid.UUID] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user, company_id)
+    return await service.get_brands(db, company_id=cid, representative_id=representative_id)
+
+
+@router.post("/product-brands", response_model=ProductBrandResponse, status_code=status.HTTP_201_CREATED)
+async def create_product_brand(
+    body: ProductBrandCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = body.company_id or _get_company_uuid(user)
+    return await service.create_brand(db, company_id=cid, data=body)
+
+
+@router.put("/product-brands/{id}", response_model=ProductBrandResponse)
+@router.patch("/product-brands/{id}", response_model=ProductBrandResponse)
+async def update_product_brand(
+    id: uuid.UUID,
+    body: ProductBrandUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user)
+    return await service.update_brand(db, brand_id=id, company_id=cid, data=body)
+
+
+@router.delete("/product-brands/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_product_brand(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    cid = _get_company_uuid(user)
+    await service.delete_brand(db, brand_id=id, company_id=cid)
 
 
 # Products

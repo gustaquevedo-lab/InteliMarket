@@ -35,7 +35,7 @@ class Representative(Base):
 
     brands = relationship("ProductBrand", back_populates="representative")
     products = relationship("Product", back_populates="representative")
-    suppliers = relationship("Supplier", secondary="supplier_representatives", back_populates="representatives")
+    suppliers = relationship("Supplier", secondary="supplier_representatives", back_populates="representatives", lazy="selectin")
 
     @property
     def supplier_ids(self) -> list:
@@ -60,7 +60,7 @@ class ProductBrand(Base):
     representative_id = Column(UUID(as_uuid=True), ForeignKey("representatives.id", ondelete="SET NULL"), nullable=True, index=True)
     activo = Column(Boolean, default=True, server_default=text("true"))
 
-    representative = relationship("Representative", back_populates="brands")
+    representative = relationship("Representative", back_populates="brands", lazy="selectin")
     products = relationship("Product", back_populates="brand")
 
 

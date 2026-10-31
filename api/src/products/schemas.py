@@ -8,7 +8,7 @@ from decimal import Decimal
 
 
 class ProductSectionCreate(BaseModel):
-    company_id: UUID
+    company_id: Optional[UUID] = None
     nombre: str = Field(min_length=1, max_length=100)
     orden: int = 0
     activo: bool = True
@@ -31,7 +31,7 @@ class ProductSectionResponse(BaseModel):
 
 
 class RepresentativeCreate(BaseModel):
-    company_id: UUID
+    company_id: Optional[UUID] = None
     nombre: str = Field(min_length=1, max_length=150)
     contacto: Optional[str] = Field(default=None, max_length=200)
     telefono: Optional[str] = Field(default=None, max_length=50)
@@ -61,7 +61,7 @@ class RepresentativeResponse(BaseModel):
 
 
 class ProductBrandCreate(BaseModel):
-    company_id: UUID
+    company_id: Optional[UUID] = None
     nombre: str = Field(min_length=1, max_length=120)
     representative_id: Optional[UUID] = None
     activo: bool = True
