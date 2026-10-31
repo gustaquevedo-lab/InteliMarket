@@ -30,7 +30,7 @@ logging.basicConfig(
 from api.src.auth.router import router as auth_router
 from api.src.tenants.router import router as tenants_router
 from api.src.companies.router import router as companies_router
-from api.src.products.router import router as products_router
+from api.src.products.router import router as products_router, tool_router as products_tool_router
 from api.src.inventory.router import router as inventory_router
 from api.src.sales.router import router as sales_router
 from api.src.customers.router import router as customers_router
@@ -378,6 +378,7 @@ app.include_router(kiosk_router)
 app.include_router(tenants_router)
 app.include_router(companies_router)
 app.include_router(products_router)
+app.include_router(products_tool_router)
 app.include_router(inventory_router)
 app.include_router(sales_router)
 app.include_router(customers_router)

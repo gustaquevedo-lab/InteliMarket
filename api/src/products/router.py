@@ -18,6 +18,7 @@ from api.src.products.schemas import (
     SupplierRepresentativesPayload,
     ProductSectionCreate, ProductSectionUpdate, ProductSectionResponse,
     ProductBrandCreate, ProductBrandUpdate, ProductBrandResponse,
+    AssignSupplierRequest, AssignSupplierBatchRequest,
 )
 from api.src.products import service
 from api.src.products.service import annotate_products_with_promos
@@ -637,4 +638,69 @@ async def delete_variant(
     deleted = await service.delete_variant(db, variant_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Variante no encontrada")
+
+
+# ── Asignación de Proveedores (Herramienta & API) ───────────────────────────
+
+@router.post("/products/assign-supplier")
+async def assign_supplier_endpoint(
+    body: AssignSupplierRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Asigna o desvincula un proveedor a un producto."""
+    return await service.assign_product_supplier(db, body.product_id, body.supplier_id)
+
+
+@router.post("/products/assign-supplier-batch")
+async def assign_supplier_batch_endpoint(
+    body: AssignSupplierBatchRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Asigna proveedores a múltiples productos en lote."""
+    return await service.assign_product_supplier_batch(db, [a.model_dump() for a in body.assignments])
+
+
+@router.get("/products/unassigned-suppliers")
+async def get_unassigned_suppliers_endpoint(
+    company_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Retorna productos sin proveedor asignado, lista de proveedores y sugerencias."""
+    cid = company_id or str(_get_company_uuid(user))
+    return await service.get_unassigned_supplier_catalog(db, cid)
+
+
+# Subrouter sin dependencia forzosa para uso interno / reportes interactivos HTML
+tool_router = APIRouter(prefix="/api/v1/products-tool", tags=["products-tool"])
+
+
+@tool_router.get("/unassigned")
+async def tool_get_unassigned(
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Obtiene catálogo de productos sin proveedor para el gestor interactivo."""
+    return await service.get_unassigned_supplier_catalog(db, company_id)
+
+
+@tool_router.post("/assign")
+async def tool_assign_supplier(
+    body: AssignSupplierRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Asigna proveedor desde la herramienta HTML."""
+    return await service.assign_product_supplier(db, body.product_id, body.supplier_id)
+
+
+@tool_router.post("/assign-batch")
+async def tool_assign_supplier_batch(
+    body: AssignSupplierBatchRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Asigna proveedores en lote desde la herramienta HTML."""
+    return await service.assign_product_supplier_batch(db, [a.model_dump() for a in body.assignments])
+
 

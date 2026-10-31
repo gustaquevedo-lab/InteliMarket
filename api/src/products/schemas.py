@@ -250,3 +250,12 @@ class PaginatedProductResponse(BaseModel):
     offset: int
     page: int
     total_pages: int
+
+
+class AssignSupplierRequest(BaseModel):
+    product_id: UUID
+    supplier_id: Optional[UUID] = None
+
+
+class AssignSupplierBatchRequest(BaseModel):
+    assignments: list[AssignSupplierRequest]

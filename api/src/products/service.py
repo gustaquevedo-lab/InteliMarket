@@ -2225,3 +2225,148 @@ async def delete_variant(db: AsyncSession, variant_id: str) -> bool:
     await db.delete(variant)
     await db.flush()
     return True
+
+
+async def assign_product_supplier(
+    db: AsyncSession,
+    product_id: UUID | str,
+    supplier_id: Optional[UUID | str] = None,
+) -> dict:
+    """Asigna o actualiza el proveedor asignado a un producto."""
+    p_uuid = UUID(str(product_id)) if not isinstance(product_id, UUID) else product_id
+    s_uuid = UUID(str(supplier_id)) if supplier_id and not isinstance(supplier_id, UUID) else supplier_id
+
+    product = (await db.execute(select(Product).where(Product.id == p_uuid))).scalar_one_or_none()
+    if not product:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    supplier_nombre = None
+    if s_uuid:
+        supplier = (await db.execute(select(Supplier).where(Supplier.id == s_uuid))).scalar_one_or_none()
+        if not supplier:
+            raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+        supplier_nombre = supplier.razon_social
+
+    product.supplier_id = s_uuid
+    product.updated_at = func.now()
+    await db.commit()
+
+    return {
+        "success": True,
+        "product_id": str(product.id),
+        "sku": product.sku,
+        "nombre": product.nombre,
+        "supplier_id": str(s_uuid) if s_uuid else None,
+        "supplier_nombre": supplier_nombre,
+    }
+
+
+async def assign_product_supplier_batch(
+    db: AsyncSession,
+    assignments: list[dict],
+) -> dict:
+    """Asigna proveedores a múltiples productos en lote."""
+    updated = 0
+    for a in assignments:
+        pid_raw = a.get("product_id")
+        if not pid_raw:
+            continue
+        pid = UUID(str(pid_raw))
+        sid_raw = a.get("supplier_id")
+        sid = UUID(str(sid_raw)) if sid_raw else None
+        res = await db.execute(
+            update(Product)
+            .where(Product.id == pid)
+            .values(supplier_id=sid, updated_at=func.now())
+        )
+        updated += res.rowcount
+    await db.commit()
+    return {"success": True, "updated_count": updated}
+
+
+async def get_unassigned_supplier_catalog(
+    db: AsyncSession,
+    company_id: str = "00000000-0000-0000-0000-000000000010",
+) -> dict:
+    """Retorna productos sin proveedor asignado, lista de proveedores activos y estadísticas."""
+    cid = UUID(str(company_id))
+
+    # Mapeo de sugerencias de proveedor por marca/prefijo de nombre
+    res_ref = await db.execute(text('''
+        SELECT split_part(trim(p.nombre), ' ', 1) as word1,
+               s.id::text as sup_id, s.razon_social, s.nombre_fantasia, COUNT(*) as cnt
+        FROM products p
+        JOIN suppliers s ON s.id = p.supplier_id
+        WHERE p.company_id = :cid
+          AND length(split_part(trim(p.nombre), ' ', 1)) >= 3
+        GROUP BY word1, s.id, s.razon_social, s.nombre_fantasia
+        HAVING COUNT(*) >= 2
+        ORDER BY word1, cnt DESC
+    '''), {"cid": cid})
+    brand_map = {}
+    for r in res_ref.fetchall():
+        w = r[0].upper()
+        if w not in brand_map:
+            brand_map[w] = {
+                "supplier_id": r[1],
+                "supplier_nombre": r[2],
+                "nombre_fantasia": r[3] or "",
+                "count": r[4]
+            }
+
+    # Productos sin proveedor
+    q_prods = '''
+        SELECT 
+            p.id::text,
+            p.sku,
+            p.nombre,
+            COALESCE(p.codigo_barra, '') as codigo_barra,
+            p.activo,
+            COALESCE(c.nombre, 'Sin Categoría') as categoria,
+            COALESCE(p.unidad_medida, 'UN') as unidad_medida,
+            COALESCE(p.costo_promedio, p.ultimo_costo, 0)::float as costo,
+            COALESCE(p.precio_venta, 0)::float as precio_venta,
+            COALESCE(s.cantidad, 0)::float as stock
+        FROM products p
+        LEFT JOIN product_categories c ON c.id = p.categoria_id
+        LEFT JOIN stock s ON s.product_id = p.id
+        WHERE p.company_id = :cid
+          AND p.supplier_id IS NULL
+        ORDER BY p.activo DESC, s.cantidad DESC NULLS LAST, p.nombre ASC
+    '''
+    res_prods = await db.execute(text(q_prods), {"cid": cid})
+    products = []
+    for r in res_prods.fetchall():
+        p = dict(r._mapping)
+        w1 = p["nombre"].strip().split(" ")[0].upper() if p["nombre"] else ""
+        p["sugerencia"] = brand_map.get(w1)
+        products.append(p)
+
+    # Proveedores activos
+    q_sups = '''
+        SELECT 
+            s.id::text,
+            s.razon_social,
+            COALESCE(s.nombre_fantasia, '') as nombre_fantasia,
+            COALESCE(s.ruc, '') as ruc
+        FROM suppliers s
+        WHERE s.company_id = :cid
+          AND s.activo = true
+        ORDER BY s.razon_social ASC
+    '''
+    res_sups = await db.execute(text(q_sups), {"cid": cid})
+    suppliers = [dict(r._mapping) for r in res_sups.fetchall()]
+
+    return {
+        "products": products,
+        "suppliers": suppliers,
+        "stats": {
+            "total": len(products),
+            "activos": sum(1 for p in products if p["activo"]),
+            "inactivos": sum(1 for p in products if not p["activo"]),
+            "con_stock": sum(1 for p in products if p["stock"] > 0),
+            "con_sugerencia": sum(1 for p in products if p["sugerencia"]),
+            "total_suppliers": len(suppliers),
+        }
+    }
+
