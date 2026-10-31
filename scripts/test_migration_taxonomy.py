@@ -6,13 +6,16 @@ from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 
-def test_migration_compilation(migration_path: Path):
+DEFAULT_MIGRATION_PATH = Path(__file__).resolve().parent.parent / "api/alembic/versions/20261031170000_add_representatives_and_taxonomy.py"
+
+
+def test_migration_compilation(migration_path: Path = DEFAULT_MIGRATION_PATH):
     print(f"[1/3] Verificando compilacion de sintaxis: {migration_path}...")
     py_compile.compile(str(migration_path), doraise=True)
     print("  -> Compilacion exitosa (sin errores de sintaxis).")
 
 
-def test_migration_structure(migration_path: Path):
+def test_migration_structure(migration_path: Path = DEFAULT_MIGRATION_PATH):
     print("[2/3] Importando módulo y validando metadata de revision...")
     spec = importlib.util.spec_from_file_location("migration_mod", str(migration_path))
     mod = importlib.util.module_from_spec(spec)
