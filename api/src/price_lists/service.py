@@ -797,6 +797,9 @@ async def get_audit_catalog(db: AsyncSession, fresh: bool = False) -> str:
                 p_minorista_sug = p_minorista_act
                 m_sug = m_minorista_act
 
+        u_costo = r['ultimo_costo']
+        costo_ult = round_pyg(u_costo) if u_costo is not None and float(u_costo) > 0 else round_pyg(costo)
+
         data.append({
             'id': pid,
             'sku': sku,
@@ -805,6 +808,7 @@ async def get_audit_catalog(db: AsyncSession, fresh: bool = False) -> str:
             'prv': r['proveedor'],
             'cat': r['categoria'],
             'est': estrategia,
+            'cst_ult': costo_ult,
             'cst': round_pyg(costo),
             'p_act': round_pyg(p_minorista_act),
             'm_min_act': round(m_minorista_act, 1),

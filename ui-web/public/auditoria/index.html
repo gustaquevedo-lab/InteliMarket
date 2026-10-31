@@ -422,6 +422,7 @@
           <th class="py-2.5 px-3 w-10 text-center">#</th>
           <th class="py-2.5 px-3 w-28">SKU / Barra</th>
           <th class="py-2.5 px-3 min-w-[280px]">Artículo & Proveedor</th>
+          <th class="py-2.5 px-3 w-24 text-right text-slate-400" title="Último costo de compra registrado">Últ. Costo</th>
           <th class="py-2.5 px-3 w-24 text-right">Costo Prom.</th>
           <th class="py-2.5 px-3 w-28 text-right">PVP Actual</th>
           <th class="py-2.5 px-3 w-28 text-right" title="Markup s/ Costo y Margen s/ Venta actual">Markup Actual</th>
@@ -1693,6 +1694,11 @@
             </div>
           </td>
 
+          <!-- Último Costo -->
+          <td class="py-2 px-3 text-right font-mono text-slate-400" title="Último costo de compra">
+            ${formatPYG(item.cst_ult != null && item.cst_ult > 0 ? item.cst_ult : cost)}
+          </td>
+
           <!-- Costo Promedio -->
           <td class="py-2 px-3 text-right font-mono text-slate-300">
             ${formatPYG(cost)}
@@ -2314,6 +2320,7 @@
           nombre: item.nom,
           proveedor: item.prv,
           categoria: item.cat,
+          ultimo_costo: item.cst_ult != null && item.cst_ult > 0 ? item.cst_ult : item.cst,
           costo_promedio: item.cst,
           precio_actual: pAct,
           precio_nuevo: chosenRetail,
@@ -2346,7 +2353,7 @@
       // 2. Descargar CSV
       const csvHeader = [
         'sku', 'codigo_barra', 'nombre', 'proveedor', 'categoria', 
-        'costo_promedio', 'precio_actual', 'precio_nuevo', 'diferencia_monto', 'diferencia_pct',
+        'ultimo_costo', 'costo_promedio', 'precio_actual', 'precio_nuevo', 'diferencia_monto', 'diferencia_pct',
         'markup_nuevo_pct', 'margen_minorista_nuevo_pct', 'margen_efectivo_nuevo_pct', 'escalas_nuevas', 'estado', 'cambio_aplicable', 'product_id'
       ].join(';');
 
@@ -2358,6 +2365,7 @@
           `"${(row.nombre || '').replace(/"/g, '""')}"`,
           `"${(row.proveedor || '').replace(/"/g, '""')}"`,
           `"${(row.categoria || '').replace(/"/g, '""')}"`,
+          row.ultimo_costo,
           row.costo_promedio,
           row.precio_actual,
           row.precio_nuevo,
