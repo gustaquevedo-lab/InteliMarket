@@ -89,11 +89,12 @@ def _ensure_opt_uuid(val: Optional[UUID | str]) -> Optional[UUID]:
     return val if isinstance(val, UUID) else UUID(str(val))
 
 
-async def count_category_products(db: AsyncSession, category_id: UUID | str) -> int:
+async def count_category_products(db: AsyncSession, category_id: UUID | str, company_id: Optional[UUID | str] = None) -> int:
     cid = _ensure_uuid(category_id)
-    res = await db.execute(
-        select(func.count(Product.id)).where(Product.categoria_id == cid)
-    )
+    stmt = select(func.count(Product.id)).where(Product.categoria_id == cid)
+    if company_id is not None:
+        stmt = stmt.where(Product.company_id == _ensure_uuid(company_id))
+    res = await db.execute(stmt)
     return res.scalar() or 0
 
 
@@ -122,7 +123,7 @@ async def safe_delete_category(
         )
 
     # 2. Count products currently assigned
-    prod_count = await count_category_products(db, cat_id)
+    prod_count = await count_category_products(db, cat_id, company_id=comp_id)
 
     # 3. If count == 0
     if prod_count == 0:
@@ -193,17 +194,17 @@ async def safe_delete_category(
         )
 
     # Execute atomically:
-    # - UPDATE products SET categoria_id = reassign_to_id WHERE categoria_id = category_id
+    # - UPDATE products SET categoria_id = reassign_to_id WHERE categoria_id = category_id AND company_id = comp_id
     await db.execute(
         update(Product)
-        .where(Product.categoria_id == cat_id)
+        .where(Product.categoria_id == cat_id, Product.company_id == comp_id)
         .values(categoria_id=target_id, updated_at=func.now())
     )
-    # - If any child categories (parent_id == category_id), update their parent_id = target.id (or None)
+    # - If any child categories (parent_id == category_id), promote them to cat.parent_id
     await db.execute(
         update(ProductCategory)
-        .where(ProductCategory.parent_id == cat_id, ProductCategory.id != target_id)
-        .values(parent_id=target_id)
+        .where(ProductCategory.parent_id == cat_id)
+        .values(parent_id=cat.parent_id)
     )
     if target.parent_id == cat_id:
         target.parent_id = cat.parent_id
