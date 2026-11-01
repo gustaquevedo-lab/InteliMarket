@@ -1101,15 +1101,15 @@ async def apply_audit_decisions(db: AsyncSession, company_id: str, usuario_nombr
             min_q = t["min_qty"]
             t_ant = float(t["precio_unitario"] or 0)
             
-            # Si el usuario modificó manualmente la escala, usar ese valor
+            # Si el usuario aprobó o modificó la escala en la auditoría, respetar el valor exacto aprobado
             if str(tid) in custom_tier_map:
-                t_nue = redondear_pyg(custom_tier_map[str(tid)])
-                motivo_escala = f"Ajuste manual de escala {min_q}u en auditoría interactiva"
+                t_nue = float(custom_tier_map[str(tid)])
+                motivo_escala = f"Ajuste de escala {min_q}u aprobado en auditoría interactiva"
             elif min_q in custom_tier_map:
-                t_nue = redondear_pyg(custom_tier_map[min_q])
-                motivo_escala = f"Ajuste manual de escala {min_q}u en auditoría interactiva"
+                t_nue = float(custom_tier_map[min_q])
+                motivo_escala = f"Ajuste de escala {min_q}u aprobado en auditoría interactiva"
             else:
-                t_nue = redondear_pyg(t_ant * factor)
+                t_nue = float(int(round(t_ant * factor)))
                 motivo_escala = f"Escalado proporcional de escala {min_q}u"
 
             if t_nue != t_ant:
