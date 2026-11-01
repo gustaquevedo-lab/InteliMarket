@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Barcode, Trash2, Printer, Loader2, CheckCircle2, AlertCircle, Plus, Minus, Wrench, RefreshCw, X, Sliders, ArrowUp, ArrowDown, HelpCircle, FileText, Check } from "lucide-react"
+import { Barcode, Trash2, Printer, Loader2, CheckCircle2, AlertCircle, Plus, Minus, Wrench, RefreshCw, X, Sliders, ArrowUp, ArrowDown, HelpCircle, FileText, Check, Tags } from "lucide-react"
 import { api } from "../../api"
 import { renderGondola, canvasAZplGrafico, DISENO_GONDOLA_DEFAULT, type DisenoGondola } from "../../utils/labelCanvas"
 // Import estático a propósito: con import dinámico, una estación que quedó
@@ -262,6 +262,41 @@ export default function GondolaPage() {
       prev.map((i) => (i.product_id === id ? { ...i, cantidad: Math.max(1, i.cantidad + delta) } : i))
     )
 
+  const [cargandoAuditoria, setCargandoAuditoria] = useState(false)
+
+  const cargarModificadosAuditoria = async () => {
+    setCargandoAuditoria(true)
+    try {
+      const items = await api.priceLists.getAuditModifiedProducts()
+      if (!items || !items.length) {
+        mostrar("error", "No se encontraron productos modificados en auditoría")
+        return
+      }
+      setCola(items)
+      mostrar("ok", `Se cargaron ${items.length} productos modificados en la cola de impresión`)
+    } catch (e: any) {
+      mostrar("error", `Error al cargar auditoría: ${e?.message || e}`)
+    } finally {
+      setCargandoAuditoria(false)
+    }
+  }
+
+  const vaciarCola = () => {
+    if (!cola.length) return
+    if (window.confirm("¿Seguro que querés vaciar la cola de impresión?")) {
+      setCola([])
+      mostrar("ok", "Cola de impresión vaciada")
+    }
+  }
+
+  // Si viene por query param ?origen=auditoria, precargar automáticamente
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("origen") === "auditoria") {
+      cargarModificadosAuditoria()
+    }
+  }, [])
+
   const quitar = (id: string) => setCola((prev) => prev.filter((i) => i.product_id !== id))
 
   const total = cola.reduce((s, i) => s + i.cantidad, 0)
@@ -323,6 +358,28 @@ export default function GondolaPage() {
           <p className="text-[10px] text-slate-500 mt-0.5">Diseño aprobado: <span className="text-slate-300 font-bold">{nombreDiseno}</span></p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={cargarModificadosAuditoria}
+            disabled={cargandoAuditoria}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-bold text-white transition cursor-pointer shadow-sm shadow-emerald-950"
+            title="Cargar los productos aprobados de la auditoría de precios"
+          >
+            {cargandoAuditoria ? <Loader2 className="w-4 h-4 animate-spin" /> : <Tags className="w-4 h-4" />}
+            <span className="hidden sm:inline">Cargar Auditoría (456)</span>
+            <span className="sm:hidden">Auditoría</span>
+          </button>
+          {cola.length > 0 && (
+            <button
+              type="button"
+              onClick={vaciarCola}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-xs font-bold text-slate-400 hover:text-rose-400 transition cursor-pointer"
+              title="Vaciar toda la cola"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Vaciar</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setModalMantenimiento(true)}

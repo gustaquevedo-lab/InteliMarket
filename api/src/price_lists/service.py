@@ -912,6 +912,47 @@ async def generate_audit_modifications_pdf(db: AsyncSession) -> bytes:
     return build_pdf(modificados)
 
 
+async def get_audit_modified_products(db: AsyncSession) -> list[dict]:
+    """Obtiene los productos con precio modificado en la auditoría con sus datos listos para imprimir en góndola."""
+    res = await db.execute(text("""
+        SELECT 
+            p.id as product_id,
+            p.nombre,
+            p.sku,
+            p.codigo_barra,
+            COALESCE(NULLIF(p.precio_regular, 0), p.precio_venta) as precio_venta,
+            p.stock_minimo,
+            p.activo,
+            (
+                SELECT json_agg(json_build_object('min_qty', t.min_qty, 'precio_unitario', t.precio_unitario) ORDER BY t.min_qty ASC)
+                FROM sp_tiered_prices t
+                WHERE t.product_id = p.id AND t.activo = true
+            ) as escalas
+        FROM price_audit_decisions d
+        JOIN products p ON p.id = d.product_id
+        WHERE d.status = 'MODIFIED'
+        ORDER BY p.nombre ASC;
+    """))
+    rows = res.mappings().all()
+    resultado = []
+    for r in rows:
+        escalas = r["escalas"] or []
+        resultado.append({
+            "product_id": str(r["product_id"]),
+            "nombre": r["nombre"],
+            "sku": r["sku"],
+            "codigo_barra": r["codigo_barra"],
+            "precio_venta": int(round(float(r["precio_venta"] or 0))),
+            "cantidad": 1,
+            "escalas": [{"min_qty": int(e["min_qty"]), "precio_unitario": int(round(float(e["precio_unitario"])))} for e in escalas],
+            "stock": None,
+            "stock_reservado": 0,
+            "stock_minimo": int(r["stock_minimo"] or 0),
+            "en_promocion": False,
+        })
+    return resultado
+
+
 async def save_audit_decisions(db: AsyncSession, items: list[dict]) -> dict:
     if not items:
         return {"status": "ok", "saved_count": 0}

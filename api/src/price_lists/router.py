@@ -45,6 +45,12 @@ async def get_audit_pdf(db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.get("/audit-modified-products")
+async def get_audit_modified_products(db: AsyncSession = Depends(get_db)):
+    """Devuelve los productos modificados en la auditoría con sus precios y escalas vigentes para la cola de impresión de etiquetas."""
+    return await service.get_audit_modified_products(db)
+
+
 @router.post("/audit-save")
 async def save_audit_state(body: AuditSaveRequest, db: AsyncSession = Depends(get_db)):
     """Guarda de forma persistente un lote de decisiones de auditoría de precios en el servidor."""
