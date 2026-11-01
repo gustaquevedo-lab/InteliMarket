@@ -1048,11 +1048,17 @@ async def apply_audit_decisions(db: AsyncSession, company_id: str, usuario_nombr
         if p_new > 0 and p_new != p_act:
             await db.execute(text("""
                 UPDATE products
-                SET precio_regular = CASE WHEN precio_regular IS NOT NULL AND precio_regular > 0 THEN :p_new ELSE NULL END,
-                    precio_venta = CASE WHEN precio_regular IS NOT NULL AND precio_regular > 0 THEN precio_venta ELSE :p_new END,
+                SET precio_regular = CASE 
+                        WHEN precio_regular IS NOT NULL AND precio_regular > 0 THEN CAST(:p_new AS numeric)
+                        ELSE NULL 
+                    END,
+                    precio_venta = CASE 
+                        WHEN precio_regular IS NOT NULL AND precio_regular > 0 THEN precio_venta 
+                        ELSE CAST(:p_new AS numeric)
+                    END,
                     updated_at = :now
                 WHERE id = :pid;
-            """), {"p_new": p_new, "now": now_utc, "pid": pid})
+            """), {"p_new": Decimal(str(int(round(p_new)))), "now": now_utc, "pid": pid})
             updated_products += 1
 
             # 2. Log minorista
@@ -1107,10 +1113,10 @@ async def apply_audit_decisions(db: AsyncSession, company_id: str, usuario_nombr
             if t_nue != t_ant:
                 await db.execute(text("""
                     UPDATE sp_tiered_prices
-                    SET precio_unitario = :p_tier,
+                    SET precio_unitario = CAST(:p_tier AS numeric),
                         updated_at = :now
                     WHERE id = :tid;
-                """), {"p_tier": t_nue, "now": now_utc, "tid": tid})
+                """), {"p_tier": Decimal(str(int(round(t_nue)))), "now": now_utc, "tid": tid})
                 updated_tiers += 1
 
                 t_diff_m = t_nue - t_ant
