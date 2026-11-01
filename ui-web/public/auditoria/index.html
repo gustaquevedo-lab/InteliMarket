@@ -172,12 +172,12 @@
         </button>
 
         <!-- PDF Export Button -->
-        <a href="/api/v1/price-lists/audit-pdf" target="_blank" class="px-3 py-2 rounded-lg bg-red-950/60 hover:bg-red-900 text-red-200 hover:text-white text-xs font-semibold border border-red-800/80 flex items-center gap-1.5 transition-all shadow-sm" title="Descargar reporte PDF oficial en orden alfabético de los productos con precios modificados">
+        <button onclick="downloadAuditPDF()" id="btn-download-pdf" class="px-3 py-2 rounded-lg bg-red-950/60 hover:bg-red-900 text-red-200 hover:text-white text-xs font-semibold border border-red-800/80 flex items-center gap-1.5 transition-all shadow-sm" title="Descargar reporte PDF oficial en orden alfabético de los productos con precios modificados">
           <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
           </svg>
           <span>Descargar PDF</span>
-        </a>
+        </button>
 
         <!-- Primary Action: Apply in Production -->
         <button onclick="openApplyModal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-900/30 flex items-center gap-2 transition-all" title="Aplicar los precios aprobados en la base de datos de producción">
@@ -2395,8 +2395,38 @@
       flashStatus(`Se exportaron exitosamente ${exportList.length} productos (${totalChanges} con cambios de precio).`);
     }
 
+    async function downloadAuditPDF() {
+      const btn = document.getElementById('btn-download-pdf');
+      const originalHTML = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<svg class="w-4 h-4 animate-spin text-red-400" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg> <span>Descargando...</span>`;
+      }
+      flashStatus('Descargando reporte PDF oficial...');
+
+      try {
+        let res = await fetch('/auditoria/productos_modificados_auditoria.pdf?t=' + Date.now());
+        if (!res.ok) {
+          res = await fetch('/api/v1/price-lists/audit-pdf');
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const blob = await res.blob();
+        downloadBlob(blob, 'productos_modificados_auditoria.pdf', 'application/pdf');
+        flashStatus('✅ PDF descargado correctamente en su dispositivo.');
+      } catch (err) {
+        console.error('Error al descargar PDF:', err);
+        alert('❌ Error al descargar el PDF: ' + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalHTML;
+        }
+      }
+    }
+
     function downloadBlob(content, filename, mimeType) {
-      const blob = new Blob([content], { type: mimeType });
+      const blob = (content instanceof Blob) ? content : new Blob([content], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -2404,7 +2434,7 @@
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
   </script>
 </body>

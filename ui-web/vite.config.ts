@@ -66,7 +66,7 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         globIgnores: ['**/auditoria/**', '**/*.json'],
-        navigateFallbackDenylist: [/^\/auditoria/],
+        navigateFallbackDenylist: [/^\/auditoria/, /^\/api/],
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,
