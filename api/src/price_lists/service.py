@@ -873,6 +873,17 @@ async def generate_audit_modifications_pdf(db: AsyncSession) -> bytes:
         tiers = dec.get("custom_tiers", [])
 
         if st == "MODIFIED" or (p_nuevo > 0 and p_nuevo != p_act):
+            # Escalas anteriores del catálogo
+            old_tiers = prod.get("tiers") or []
+            old_tiers_strs = []
+            for t in sorted(old_tiers, key=lambda x: x.get("min_qty", 0)):
+                mq = t.get("min_qty")
+                pr = t.get("precio")
+                if mq and pr:
+                    pr_fmt = f"{int(round(float(pr))):,}".replace(",", ".")
+                    old_tiers_strs.append(f"{mq}u: {pr_fmt}")
+
+            # Escalas nuevas aprobadas
             tiers_strs = []
             for t in sorted(tiers, key=lambda x: x.get("min_qty", 0)):
                 mq = t.get("min_qty")
@@ -889,13 +900,13 @@ async def generate_audit_modifications_pdf(db: AsyncSession) -> bytes:
                 "nombre": (prod.get("nom") or "").strip(),
                 "sku": (prod.get("sku") or "").strip(),
                 "codigo_barra": (prod.get("bar") or "").strip(),
-                "proveedor": (prod.get("prv") or "").strip(),
                 "categoria": (prod.get("cat") or "").strip(),
                 "precio_anterior": p_act,
                 "precio_nuevo": p_nuevo,
                 "diferencia_monto": diff,
                 "diferencia_pct": round(diff_pct, 1),
-                "escalas": " | ".join(tiers_strs) if tiers_strs else "-"
+                "escalas_anteriores": " | ".join(old_tiers_strs) if old_tiers_strs else "-",
+                "escalas_nuevas": " | ".join(tiers_strs) if tiers_strs else "-"
             })
 
     return build_pdf(modificados)

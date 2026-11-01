@@ -289,7 +289,7 @@ def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] 
     total_mod = len(sorted_items)
     total_subidas = sum(1 for x in sorted_items if x.get("diferencia_monto", 0) > 0)
     total_bajadas = sum(1 for x in sorted_items if x.get("diferencia_monto", 0) < 0)
-    con_escalas = sum(1 for x in sorted_items if x.get("escalas") and x.get("escalas") != "-")
+    con_escalas = sum(1 for x in sorted_items if (x.get("escalas_nuevas") and x.get("escalas_nuevas") != "-") or (x.get("escalas") and x.get("escalas") != "-"))
 
     ahora_py = datetime.now(PY_TZ).strftime("%d/%m/%Y %H:%M")
     periodo_str = f"Emisión: {ahora_py} · Modificados: {total_mod} · Aumentos: {total_subidas} · Rebajas: {total_bajadas}"
@@ -333,8 +333,8 @@ def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] 
     elements.append(Spacer(1, 2.5 * mm))
 
     # Ancho total: 186mm
-    # # (7mm) + Cód / SKU (23mm) + Producto (62mm) + Ant. (19mm) + Nvo. (19mm) + Dif (18mm) + Escalas (38mm) = 186mm
-    col_widths = [7 * mm, 23 * mm, 62 * mm, 19 * mm, 19 * mm, 18 * mm, 38 * mm]
+    # # (7mm) + Cód / SKU (23mm) + Producto / Categoría (54mm) + P.Min Ant (18mm) + P.Min Nvo (18mm) + Dif (16mm) + P.Esc Ant (25mm) + P.Esc Nvo (25mm) = 186mm
+    col_widths = [7 * mm, 23 * mm, 54 * mm, 18 * mm, 18 * mm, 16 * mm, 25 * mm, 25 * mm]
     th_style = ParagraphStyle("TH", fontName=FONT_BOLD, fontSize=6.5, leading=8, textColor=WHITE, alignment=TA_CENTER)
     th_style_l = ParagraphStyle("THL", fontName=FONT_BOLD, fontSize=6.5, leading=8, textColor=WHITE, alignment=TA_LEFT)
     th_style_r = ParagraphStyle("THR", fontName=FONT_BOLD, fontSize=6.5, leading=8, textColor=WHITE, alignment=TA_RIGHT)
@@ -349,16 +349,18 @@ def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] 
     td_up = ParagraphStyle("TdUp", fontName=FONT_BOLD, fontSize=6.5, leading=8, alignment=TA_RIGHT, textColor=GREEN)
     td_down = ParagraphStyle("TdDown", fontName=FONT_BOLD, fontSize=6.5, leading=8, alignment=TA_RIGHT, textColor=RED)
     td_num = ParagraphStyle("TdNum", fontName=FONT_REGULAR, fontSize=6.5, leading=8, alignment=TA_RIGHT, textColor=GRAY_MEDIUM)
-    td_tiers = ParagraphStyle("TdTiers", fontName=FONT_REGULAR, fontSize=6, leading=7.5, textColor=HexColor("#1E293B"))
+    td_tiers_old = ParagraphStyle("TdTiersOld", fontName=FONT_REGULAR, fontSize=5.5, leading=7, alignment=TA_CENTER, textColor=GRAY_MEDIUM)
+    td_tiers_new = ParagraphStyle("TdTiersNew", fontName=FONT_BOLD, fontSize=5.5, leading=7, alignment=TA_CENTER, textColor=PRIMARY_COLOR)
 
     table_data = [[
         Paragraph("#", th_style),
         Paragraph("Código / SKU", th_style),
-        Paragraph("Producto & Clasificación", th_style_l),
-        Paragraph("P. Ant.", th_style_r),
-        Paragraph("P. Nvo.", th_style_r),
+        Paragraph("Producto / Categoría", th_style_l),
+        Paragraph("P. Min. Ant.", th_style_r),
+        Paragraph("P. Min. Nvo.", th_style_r),
         Paragraph("Dif.", th_style_r),
-        Paragraph("Escalas Mayoristas", th_style_l),
+        Paragraph("P. Escala Ant.", th_style),
+        Paragraph("P. Escala Nvo.", th_style),
     ]]
 
     for i, it in enumerate(sorted_items, 1):
@@ -374,14 +376,14 @@ def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] 
             Paragraph(f"SKU: {sku}" if sku else "", td_bar)
         ]
 
-        proveedor = str(it.get('proveedor') or "").strip()
         categoria = str(it.get('categoria') or "").strip()
-        sub_info = f"{categoria} · Prov: {proveedor}" if proveedor else categoria
-
         prod_cell = [
             Paragraph(str(it.get("nombre") or ""), td_prod_name),
-            Paragraph(sub_info, td_prod_sub)
+            Paragraph(categoria if categoria else "-", td_prod_sub)
         ]
+
+        esc_ant = it.get("escalas_anteriores") or it.get("escalas") or "-"
+        esc_nvo = it.get("escalas_nuevas") or it.get("escalas") or "-"
 
         table_data.append([
             Paragraph(str(i), td_idx),
@@ -390,7 +392,8 @@ def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] 
             Paragraph(_fmt_gs(it.get("precio_anterior", 0)), td_num_ant),
             Paragraph(_fmt_gs(it.get("precio_nuevo", 0)), td_num_new),
             Paragraph(diff_str, diff_style),
-            Paragraph(str(it.get("escalas") or "-"), td_tiers),
+            Paragraph(str(esc_ant), td_tiers_old),
+            Paragraph(str(esc_nvo), td_tiers_new),
         ])
 
     main_table = Table(table_data, colWidths=col_widths, repeatRows=1)
