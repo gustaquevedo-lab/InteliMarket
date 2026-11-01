@@ -18,7 +18,7 @@ from reportlab.lib.colors import HexColor
 
 
 from api.src.integrated_finance.pdf_reports import (
-    _base_landscape_doc, _company_header, _fmt_gs, _build,
+    _base_doc, _base_landscape_doc, _company_header, _fmt_gs, _build,
     RED, GREEN, GRAY_LIGHT, GRAY_MEDIUM, PRIMARY_COLOR, WHITE, FONT_BOLD, FONT_REGULAR,
 )
 
@@ -273,7 +273,7 @@ def generate_price_variations_csv(items: list[dict]) -> str:
 
 
 def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] = None) -> bytes:
-    """Genera el PDF formal de productos modificados en la auditoría en orden alfabético."""
+    """Genera el PDF formal de productos modificados en la auditoría en formato vertical (Portrait A4) en orden alfabético."""
     company = company or {
         "razon_social": "GRUPO SANTA TERESA E.A.S.",
         "nombre_fantasia": "Extra Supermercado Mayorista",
@@ -281,7 +281,7 @@ def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] 
         "direccion": "Pedro Juan Caballero, Paraguay",
     }
     buffer = io.BytesIO()
-    doc, styles = _base_landscape_doc(buffer, "Auditoría de Precios Modificados", company, "Administración")
+    doc, styles = _base_doc(buffer, "Auditoría de Precios Modificados", company, "Administración")
 
     # Sort alphabetically by product name
     sorted_items = sorted(items, key=lambda x: (x.get("nombre") or "").upper())
@@ -292,7 +292,7 @@ def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] 
     con_escalas = sum(1 for x in sorted_items if x.get("escalas") and x.get("escalas") != "-")
 
     ahora_py = datetime.now(PY_TZ).strftime("%d/%m/%Y %H:%M")
-    periodo_str = f"Emisión: {ahora_py} · Total modificados: {total_mod} · Aumentos: {total_subidas} · Rebajas: {total_bajadas}"
+    periodo_str = f"Emisión: {ahora_py} · Modificados: {total_mod} · Aumentos: {total_subidas} · Rebajas: {total_bajadas}"
 
     elements = _company_header(
         company,
@@ -302,17 +302,18 @@ def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] 
         "Auditoría de Rentabilidad",
     )
 
-    kpi_style_label = ParagraphStyle("KpiL", fontName=FONT_BOLD, fontSize=7, alignment=TA_CENTER, textColor=GRAY_MEDIUM)
-    kpi_style_val = ParagraphStyle("KpiV", fontName=FONT_BOLD, fontSize=10, alignment=TA_CENTER, textColor=PRIMARY_COLOR)
-    kpi_up = ParagraphStyle("KpiUp", fontName=FONT_BOLD, fontSize=10, alignment=TA_CENTER, textColor=GREEN)
-    kpi_down = ParagraphStyle("KpiDown", fontName=FONT_BOLD, fontSize=10, alignment=TA_CENTER, textColor=RED)
+    kpi_style_label = ParagraphStyle("KpiL", fontName=FONT_BOLD, fontSize=6.5, leading=8, alignment=TA_CENTER, textColor=GRAY_MEDIUM)
+    kpi_style_val = ParagraphStyle("KpiV", fontName=FONT_BOLD, fontSize=9, leading=10, alignment=TA_CENTER, textColor=PRIMARY_COLOR)
+    kpi_up = ParagraphStyle("KpiUp", fontName=FONT_BOLD, fontSize=9, leading=10, alignment=TA_CENTER, textColor=GREEN)
+    kpi_down = ParagraphStyle("KpiDown", fontName=FONT_BOLD, fontSize=9, leading=10, alignment=TA_CENTER, textColor=RED)
 
+    # Ancho disponible A4 Portrait: 210 - 24 = 186mm -> 4 columnas de 46.5mm
     kpi_table = Table([
         [
-            Paragraph("TOTAL PRODUCTOS MODIFICADOS", kpi_style_label),
-            Paragraph("AUMENTOS APROBADOS (▲)", kpi_style_label),
-            Paragraph("REBAJAS / AJUSTES (▼)", kpi_style_label),
-            Paragraph("PRODUCTOS CON ESCALAS", kpi_style_label),
+            Paragraph("MODIFICADOS", kpi_style_label),
+            Paragraph("AUMENTOS (▲)", kpi_style_label),
+            Paragraph("REBAJAS (▼)", kpi_style_label),
+            Paragraph("CON ESCALAS", kpi_style_label),
         ],
         [
             Paragraph(f"{total_mod}", kpi_style_val),
@@ -320,60 +321,71 @@ def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] 
             Paragraph(f"{total_bajadas}", kpi_down),
             Paragraph(f"{con_escalas}", kpi_style_val),
         ]
-    ], colWidths=[68.2 * mm, 68.2 * mm, 68.2 * mm, 68.2 * mm])
+    ], colWidths=[46.5 * mm, 46.5 * mm, 46.5 * mm, 46.5 * mm])
     kpi_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), GRAY_LIGHT),
         ("BOX", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
         ("INNERGRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
     ]))
     elements.append(kpi_table)
-    elements.append(Spacer(1, 3 * mm))
+    elements.append(Spacer(1, 2.5 * mm))
 
-    col_widths = [8 * mm, 15 * mm, 24 * mm, 75 * mm, 24 * mm, 25 * mm, 24 * mm, 82 * mm]
-    th_style = ParagraphStyle("TH", fontName=FONT_BOLD, fontSize=7.5, leading=9.5, textColor=WHITE, alignment=TA_CENTER)
-    th_style_l = ParagraphStyle("THL", fontName=FONT_BOLD, fontSize=7.5, leading=9.5, textColor=WHITE, alignment=TA_LEFT)
-    th_style_r = ParagraphStyle("THR", fontName=FONT_BOLD, fontSize=7.5, leading=9.5, textColor=WHITE, alignment=TA_RIGHT)
+    # Ancho total: 186mm
+    # # (7mm) + Cód / SKU (23mm) + Producto (62mm) + Ant. (19mm) + Nvo. (19mm) + Dif (18mm) + Escalas (38mm) = 186mm
+    col_widths = [7 * mm, 23 * mm, 62 * mm, 19 * mm, 19 * mm, 18 * mm, 38 * mm]
+    th_style = ParagraphStyle("TH", fontName=FONT_BOLD, fontSize=6.5, leading=8, textColor=WHITE, alignment=TA_CENTER)
+    th_style_l = ParagraphStyle("THL", fontName=FONT_BOLD, fontSize=6.5, leading=8, textColor=WHITE, alignment=TA_LEFT)
+    th_style_r = ParagraphStyle("THR", fontName=FONT_BOLD, fontSize=6.5, leading=8, textColor=WHITE, alignment=TA_RIGHT)
 
-    td_idx = ParagraphStyle("TdIdx", fontName=FONT_REGULAR, fontSize=7, leading=8.5, alignment=TA_CENTER, textColor=GRAY_MEDIUM)
-    td_sku = ParagraphStyle("TdSku", fontName=FONT_BOLD, fontSize=7.5, leading=9, alignment=TA_CENTER, textColor=PRIMARY_COLOR)
-    td_bar = ParagraphStyle("TdBar", fontName=FONT_REGULAR, fontSize=7, leading=8.5, alignment=TA_CENTER, textColor=GRAY_MEDIUM)
-    td_prod_name = ParagraphStyle("TdProdName", fontName=FONT_BOLD, fontSize=7.5, leading=9.5, textColor=PRIMARY_COLOR)
-    td_prod_sub = ParagraphStyle("TdProdSub", fontName=FONT_REGULAR, fontSize=6.5, leading=8, textColor=GRAY_MEDIUM)
-    td_num_ant = ParagraphStyle("TdNumAnt", fontName=FONT_REGULAR, fontSize=7.5, leading=9, alignment=TA_RIGHT, textColor=GRAY_MEDIUM)
-    td_num_new = ParagraphStyle("TdNumNew", fontName=FONT_BOLD, fontSize=8, leading=9.5, alignment=TA_RIGHT, textColor=PRIMARY_COLOR)
-    td_up = ParagraphStyle("TdUp", fontName=FONT_BOLD, fontSize=7.5, leading=9, alignment=TA_RIGHT, textColor=GREEN)
-    td_down = ParagraphStyle("TdDown", fontName=FONT_BOLD, fontSize=7.5, leading=9, alignment=TA_RIGHT, textColor=RED)
-    td_num = ParagraphStyle("TdNum", fontName=FONT_REGULAR, fontSize=7.5, leading=9, alignment=TA_RIGHT, textColor=GRAY_MEDIUM)
-    td_tiers = ParagraphStyle("TdTiers", fontName=FONT_REGULAR, fontSize=7, leading=8.5, textColor=HexColor("#1E293B"))
+    td_idx = ParagraphStyle("TdIdx", fontName=FONT_REGULAR, fontSize=6, leading=7.5, alignment=TA_CENTER, textColor=GRAY_MEDIUM)
+    td_sku = ParagraphStyle("TdSku", fontName=FONT_BOLD, fontSize=6.5, leading=8, alignment=TA_CENTER, textColor=PRIMARY_COLOR)
+    td_bar = ParagraphStyle("TdBar", fontName=FONT_REGULAR, fontSize=6, leading=7.5, alignment=TA_CENTER, textColor=GRAY_MEDIUM)
+    td_prod_name = ParagraphStyle("TdProdName", fontName=FONT_BOLD, fontSize=6.5, leading=8, textColor=PRIMARY_COLOR)
+    td_prod_sub = ParagraphStyle("TdProdSub", fontName=FONT_REGULAR, fontSize=5.5, leading=7, textColor=GRAY_MEDIUM)
+    td_num_ant = ParagraphStyle("TdNumAnt", fontName=FONT_REGULAR, fontSize=6.5, leading=8, alignment=TA_RIGHT, textColor=GRAY_MEDIUM)
+    td_num_new = ParagraphStyle("TdNumNew", fontName=FONT_BOLD, fontSize=7, leading=8.5, alignment=TA_RIGHT, textColor=PRIMARY_COLOR)
+    td_up = ParagraphStyle("TdUp", fontName=FONT_BOLD, fontSize=6.5, leading=8, alignment=TA_RIGHT, textColor=GREEN)
+    td_down = ParagraphStyle("TdDown", fontName=FONT_BOLD, fontSize=6.5, leading=8, alignment=TA_RIGHT, textColor=RED)
+    td_num = ParagraphStyle("TdNum", fontName=FONT_REGULAR, fontSize=6.5, leading=8, alignment=TA_RIGHT, textColor=GRAY_MEDIUM)
+    td_tiers = ParagraphStyle("TdTiers", fontName=FONT_REGULAR, fontSize=6, leading=7.5, textColor=HexColor("#1E293B"))
 
     table_data = [[
         Paragraph("#", th_style),
-        Paragraph("SKU", th_style),
-        Paragraph("Cód. Barras", th_style),
+        Paragraph("Código / SKU", th_style),
         Paragraph("Producto & Clasificación", th_style_l),
-        Paragraph("Precio Anterior", th_style_r),
-        Paragraph("Precio Nuevo", th_style_r),
-        Paragraph("Diferencia", th_style_r),
-        Paragraph("Escalas Mayoristas Nuevas (Cantidad : Precio)", th_style_l),
+        Paragraph("P. Ant.", th_style_r),
+        Paragraph("P. Nvo.", th_style_r),
+        Paragraph("Dif.", th_style_r),
+        Paragraph("Escalas Mayoristas", th_style_l),
     ]]
 
     for i, it in enumerate(sorted_items, 1):
         diff = float(it.get("diferencia_monto", 0))
         diff_pct = float(it.get("diferencia_pct", 0))
-        diff_str = f"{'+' if diff > 0 else ''}{_fmt_gs(diff)} ({'+' if diff_pct > 0 else ''}{diff_pct:.1f}%)"
+        diff_str = f"{'+' if diff > 0 else ''}{_fmt_gs(diff)}<br/>({'+' if diff_pct > 0 else ''}{diff_pct:.1f}%)"
         diff_style = td_up if diff > 0 else (td_down if diff < 0 else td_num)
+
+        barcode = str(it.get("codigo_barra") or "").strip()
+        sku = str(it.get("sku") or "").strip()
+        code_cell = [
+            Paragraph(barcode if barcode else "-", td_sku),
+            Paragraph(f"SKU: {sku}" if sku else "", td_bar)
+        ]
+
+        proveedor = str(it.get('proveedor') or "").strip()
+        categoria = str(it.get('categoria') or "").strip()
+        sub_info = f"{categoria} · Prov: {proveedor}" if proveedor else categoria
 
         prod_cell = [
             Paragraph(str(it.get("nombre") or ""), td_prod_name),
-            Paragraph(f"{it.get('categoria', '')} · Proveedor: {it.get('proveedor', '')}", td_prod_sub)
+            Paragraph(sub_info, td_prod_sub)
         ]
 
         table_data.append([
             Paragraph(str(i), td_idx),
-            Paragraph(str(it.get("sku", "")), td_sku),
-            Paragraph(str(it.get("codigo_barra") or "-"), td_bar),
+            code_cell,
             prod_cell,
             Paragraph(_fmt_gs(it.get("precio_anterior", 0)), td_num_ant),
             Paragraph(_fmt_gs(it.get("precio_nuevo", 0)), td_num_new),
@@ -388,10 +400,10 @@ def generate_audit_modifications_pdf(items: list[dict], company: Optional[dict] 
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("GRID", (0, 0), (-1, -1), 0.3, HexColor("#CBD5E1")),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, GRAY_LIGHT]),
-        ("TOPPADDING", (0, 0), (-1, -1), 2),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-        ("LEFTPADDING", (0, 0), (-1, -1), 2),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
     ]))
 
     elements.append(main_table)
