@@ -977,7 +977,9 @@ async def apply_audit_decisions(db: AsyncSession, company_id: str, usuario_nombr
 
     q = await db.execute(text("""
         SELECT 
-            d.product_id, d.sku, d.precio_aprobado, d.status, d.escalas_aprobadas,
+            d.product_id, 
+            COALESCE(p.sku, d.sku) as product_sku, 
+            d.precio_aprobado, d.status, d.escalas_aprobadas,
             p.nombre as product_nombre, p.codigo_barra as product_barcode,
             COALESCE(NULLIF(p.precio_regular, 0), p.precio_venta) as precio_actual,
             p.precio_regular,
