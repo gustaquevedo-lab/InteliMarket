@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from "react"
+import { type ReactNode, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 import { X } from "lucide-react"
 
@@ -54,12 +54,22 @@ export function Modal({
     return () => window.removeEventListener("keydown", handleEsc)
   }, [open, onClose])
 
+  const isMouseDownOnOverlayRef = useRef<boolean>(false)
+
   if (!open) return null
 
   return createPortal(
     <div
       className="fixed inset-0 z-[9999] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-hidden animate-fade-in"
-      onClick={closeOnOverlay ? onClose : undefined}
+      onMouseDown={(e) => {
+        isMouseDownOnOverlayRef.current = e.target === e.currentTarget
+      }}
+      onClick={(e) => {
+        if (closeOnOverlay && e.target === e.currentTarget && isMouseDownOnOverlayRef.current) {
+          onClose()
+        }
+        isMouseDownOnOverlayRef.current = false
+      }}
     >
       <div
         className={`relative w-full max-h-[90vh] flex flex-col rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden ${sizeClasses[size]} ${className}`}

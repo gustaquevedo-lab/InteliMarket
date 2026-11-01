@@ -2784,6 +2784,7 @@ export default function ProductsPage() {
       <Modal
         open={showForm}
         onClose={() => setShowForm(false)}
+        closeOnOverlay={false}
         title={editingProduct ? `Editar Producto: ${editingProduct.nombre}` : "Nuevo Producto en Catálogo"}
         subtitle={
           editingProduct
