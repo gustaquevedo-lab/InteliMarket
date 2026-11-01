@@ -46,4 +46,29 @@ test.describe('Política Canónica Universal: Textos en MAYÚSCULAS', () => {
     console.log('✓ Valor ingresado en input:', val);
     expect(val).toBe('LACTEOS TREBOL DESCREMADA');
   });
+
+  test('Inputs en el POS (/pos) se convierten automáticamente a MAYÚSCULAS de forma permanente', async ({ page }) => {
+    await page.addInitScript((token) => {
+      localStorage.setItem('access_token', token);
+      localStorage.setItem('cached_user_profile', JSON.stringify({
+        id: '49af8122-0875-4d4b-a90e-9b25bc52f310',
+        email: 'dev@superextra.com.py',
+        nombre: 'Caja 3',
+        rol: 'cajero',
+        is_superadmin: true
+      }));
+    }, TOKEN);
+
+    await page.goto('/pos', { waitUntil: 'networkidle', timeout: 35000 });
+    await page.waitForTimeout(3000);
+
+    const searchInput = page.locator('input[placeholder*="Buscar"], input[type="text"]').first();
+    if (await searchInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await searchInput.fill('coca cola 2l');
+      await page.waitForTimeout(500);
+      const val = await searchInput.inputValue();
+      console.log('✓ Valor ingresado en buscador POS:', val);
+      expect(val).toBe('COCA COLA 2L');
+    }
+  });
 });

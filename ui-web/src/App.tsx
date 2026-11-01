@@ -426,17 +426,11 @@ function AppRoutes() {
 }
 
 export default function App() {
-  // Política Canónica Universal: Textos en MAYÚSCULAS en inputs y textareas
+  // Política Canónica Universal: Textos en MAYÚSCULAS en inputs y textareas (ERP y POS)
   useEffect(() => {
     const handleGlobalInput = (e: Event) => {
       const target = e.target as HTMLInputElement | HTMLTextAreaElement;
       if (!target || !(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
-
-      // Blindaje de POS antes de las 22:00 hs (hora local Paraguay)
-      const isPosRoute = window.location.pathname.startsWith("/pos");
-      const now = new Date();
-      const pyHour = parseInt(now.toLocaleTimeString("en-US", { timeZone: "America/Asuncion", hour12: false, hour: "2-digit" }), 10);
-      if (isPosRoute && pyHour < 22) return;
 
       if (
         target.type === "password" ||
