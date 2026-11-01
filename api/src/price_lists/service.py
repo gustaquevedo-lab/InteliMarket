@@ -851,6 +851,56 @@ async def get_audit_state(db: AsyncSession) -> dict:
     }
 
 
+async def generate_audit_modifications_pdf(db: AsyncSession) -> bytes:
+    from api.src.price_lists.pdf_reports import generate_audit_modifications_pdf as build_pdf
+    import json
+
+    state = await get_audit_state(db)
+    decisiones = state.get("decisiones", {})
+
+    catalog_json = await get_audit_catalog(db)
+    catalog = json.loads(catalog_json)
+    prod_map = {p["id"]: p for p in catalog}
+
+    modificados = []
+    for pid, dec in decisiones.items():
+        st = dec.get("status")
+        prod = prod_map.get(pid)
+        if not prod:
+            continue
+        p_act = prod.get("p_act", 0)
+        p_nuevo = dec.get("price", 0)
+        tiers = dec.get("custom_tiers", [])
+
+        if st == "MODIFIED" or (p_nuevo > 0 and p_nuevo != p_act):
+            tiers_strs = []
+            for t in sorted(tiers, key=lambda x: x.get("min_qty", 0)):
+                mq = t.get("min_qty")
+                pr = t.get("precio")
+                if mq and pr:
+                    pr_fmt = f"{int(round(float(pr))):,}".replace(",", ".")
+                    tiers_strs.append(f"{mq}u: {pr_fmt}")
+
+            diff = p_nuevo - p_act
+            diff_pct = (diff / p_act * 100) if p_act > 0 else 0.0
+
+            modificados.append({
+                "id": pid,
+                "nombre": (prod.get("nom") or "").strip(),
+                "sku": (prod.get("sku") or "").strip(),
+                "codigo_barra": (prod.get("bar") or "").strip(),
+                "proveedor": (prod.get("prv") or "").strip(),
+                "categoria": (prod.get("cat") or "").strip(),
+                "precio_anterior": p_act,
+                "precio_nuevo": p_nuevo,
+                "diferencia_monto": diff,
+                "diferencia_pct": round(diff_pct, 1),
+                "escalas": " | ".join(tiers_strs) if tiers_strs else "-"
+            })
+
+    return build_pdf(modificados)
+
+
 async def save_audit_decisions(db: AsyncSession, items: list[dict]) -> dict:
     if not items:
         return {"status": "ok", "saved_count": 0}

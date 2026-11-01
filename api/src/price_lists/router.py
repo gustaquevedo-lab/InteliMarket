@@ -33,6 +33,18 @@ async def get_audit_state(db: AsyncSession = Depends(get_db)):
     return await service.get_audit_state(db)
 
 
+@router.get("/audit-pdf")
+async def get_audit_pdf(db: AsyncSession = Depends(get_db)):
+    """Genera y descarga en tiempo real el PDF formal de los productos modificados en la auditoría en orden alfabético."""
+    pdf_bytes = await service.generate_audit_modifications_pdf(db)
+    now_str = datetime.now().strftime("%Y%m%d_%H%M")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="productos_modificados_auditoria_{now_str}.pdf"'}
+    )
+
+
 @router.post("/audit-save")
 async def save_audit_state(body: AuditSaveRequest, db: AsyncSession = Depends(get_db)):
     """Guarda de forma persistente un lote de decisiones de auditoría de precios en el servidor."""
