@@ -112,4 +112,9 @@
    - **Prohibición de Sumar Ventas Legacy a Calibraciones de Stock:** Queda TERMINANTEMENTE PROHIBIDO computar ventas históricas importadas de sistemas anteriores (tipo `factura`, `salida_venta_legacy` o saldos de migración 2025/2026) como 'déficit no descontado'. Esas ventas ya están consolidadas en el stock de apertura.
    - **Validación Multivariante y Anti-Sesgo de Muestra:** Toda auditoría o ajuste masivo de Kardex debe validarse tanto en productos nuevos (sin historial legacy) como en productos tradicionales de alta rotación (verdulería, carnicería, panadería) antes de aplicar cambios transaccionales.
 
+18. **CANDADO INMUTABLE DE REVERSIÓN DE PROMOCIONES (ANTI-OFERTAS PEGADAS Y ANTI-HUÉRFANOS):**
+   - **Reversión Inmediata por Remoción o Eliminación:** Cuando un producto es removido de una promoción activa (`producto_ids` o `precios_por_producto`), o cuando una promoción es eliminada (`DELETE`) o pausada/vencida, el producto DEBE revertirse inmediatamente a su precio regular (`precio_venta = precio_regular` y `precio_regular = NULL`), salvo que exista otra promoción activa que lo cubra.
+   - **Prohibición de Orfandad:** Queda terminantemente PROHIBIDO que un producto conserve `precio_regular > precio_venta` sin una promoción activa y vigente en el catálogo.
+   - **Candado Doble (Trigger SQL + Reconciliador del Scheduler):** Todo cambio de membresía en promociones está blindado a nivel de motor de base de datos por el trigger `trg_sync_promo_precio_fijo` (cubriendo `INSERT`, `UPDATE` y `DELETE`). Como salvaguarda proactiva redundante, el sincronizador periódico de `scheduler.py` reconcilia y revierte automáticamente cualquier producto que haya quedado desfasado sin promoción vigente.
+
 
