@@ -349,6 +349,139 @@ async def sync_salary_advance_deduction(
     return {"status": "success", "message": "Novedad de anticipo registrada localmente para nómina SueldOK", "payload": payload}
 
 
+async def sync_corporate_remission_to_sueldok(
+    db: AsyncSession,
+    company_id: str,
+    remission_id: str | uuid.UUID,
+) -> dict:
+    """Sincroniza automáticamente los comprobantes de una remisión corporativa de Extra Club a SueldOK.
+    
+    Toma los comprobantes vinculados a la remisión en accounts_receivable, extrae las cédulas de identidad
+    limpias de cada funcionario y los envía al endpoint /api/financial/sync-commercial-debts de SueldOK.
+    """
+    import logging
+    import re
+    import httpx
+    logger = logging.getLogger(__name__)
+
+    # 1. Obtener configuración de conexión a SueldOK
+    res_cfg = await db.execute(
+        text("SELECT * FROM sueldok_sync_config WHERE company_id = :cid OR enabled = true LIMIT 1"),
+        {"cid": company_id},
+    )
+    row = res_cfg.mappings().first()
+    config = dict(row) if row else {"url_base": SUELDOK_BASE_URL, "api_key": SUELDOK_SYSTEM_KEY, "enabled": True}
+
+    base_url = (config.get("url_base") or SUELDOK_BASE_URL).rstrip("/")
+    api_key = config.get("api_key") or SUELDOK_SYSTEM_KEY
+
+    # 2. Consultar los comprobantes asociados a la remisión
+    q_docs = text("""
+        SELECT 
+            ar.id,
+            ar.numero_documento,
+            ar.fecha_emision,
+            ar.saldo_pendiente,
+            ar.monto_original,
+            c.ci as customer_ci,
+            c.ruc as customer_ruc,
+            c.razon_social as customer_nombre,
+            r.numero_remision,
+            r.periodo_mes
+        FROM accounts_receivable ar
+        JOIN customers c ON c.id = ar.customer_id
+        JOIN ar_corporate_remissions r ON r.id = ar.corporate_remission_id
+        WHERE ar.corporate_remission_id = :rem_id
+        ORDER BY c.razon_social, ar.fecha_emision
+    """)
+    res_docs = await db.execute(q_docs, {"rem_id": remission_id})
+    rows = res_docs.mappings().all()
+
+    if not rows:
+        return {"status": "warning", "message": "No se encontraron comprobantes para la remisión indicada", "synced": 0}
+
+    # Sobrescrituras y limpieza de CI para inconsistencias conocidas
+    overrides = {
+        "571814": "5718147",
+        "453364": "4533640",
+        "392523": "3925234",
+    }
+
+    def clean_ci(ci_val, ruc_val):
+        raw = (ci_val or "").strip()
+        if not raw and ruc_val:
+            raw = re.sub(r'[^0-9a-zA-Z]', '', ruc_val)
+        else:
+            raw = re.sub(r'[^0-9a-zA-Z]', '', raw)
+        return overrides.get(raw, raw)
+
+    debts = []
+    for r in rows:
+        ci = clean_ci(r["customer_ci"], r["customer_ruc"])
+        monto = float(r["saldo_pendiente"] or r["monto_original"] or 0)
+        fecha = r["fecha_emision"].strftime("%Y-%m-%d") if r["fecha_emision"] else "2026-10-15"
+        ticket_ref = r["numero_documento"] or str(r["id"])
+        rem_num = r["numero_remision"]
+        periodo = r["periodo_mes"] or "2026-10"
+
+        debts.append({
+            "ci": ci,
+            "originStore": "Intelimarket - Extra Supermercado",
+            "ticketReference": ticket_ref,
+            "description": f"Consumo crédito Extra Club (Remito {rem_num})",
+            "amount": monto,
+            "purchaseDate": fecha,
+            "payrollPeriod": periodo,
+            "remissionNumber": rem_num,
+        })
+
+    # 3. Enviar en lotes (chunks) de 50 items a SueldOK
+    sync_url = f"{base_url}/http/api/financial/sync-commercial-debts?apiKey={api_key}"
+    chunk_size = 50
+    total_inserted = 0
+    total_updated = 0
+    total_unmatched = 0
+    errors = []
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for i in range(0, len(debts), chunk_size):
+            chunk = debts[i:i + chunk_size]
+            payload = {"debts": chunk}
+            try:
+                resp = await client.post(
+                    sync_url,
+                    json=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "User-Agent": "Intelimarket-ERP/2.0",
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    total_inserted += data.get("inserted", 0)
+                    total_updated += data.get("updated", 0)
+                    total_unmatched += data.get("unmatchedCount", 0)
+                else:
+                    errors.append(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            except Exception as e:
+                logger.error(f"Error sincronizando lote de remisión a SueldOK: {e}")
+                errors.append(str(e))
+
+    logger.info(
+        f"Remisión {remission_id} sincronizada a SueldOK: {len(debts)} docs. "
+        f"Insertados={total_inserted}, Actualizados={total_updated}, Sin Match={total_unmatched}"
+    )
+
+    return {
+        "status": "success" if not errors else "partial_error",
+        "total_documents": len(debts),
+        "inserted": total_inserted,
+        "updated": total_updated,
+        "unmatched": total_unmatched,
+        "errors": errors if errors else None,
+    }
+
+
 def get_available_events() -> list[str]:
     return SYNC_EVENTS
 

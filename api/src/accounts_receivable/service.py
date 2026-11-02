@@ -2166,6 +2166,17 @@ async def create_corporate_remission(db: AsyncSession, company_id: str, data, us
         )
 
     await db.flush()
+
+    # Sincronizar automáticamente con SueldOK si la empresa vinculada es Grupo Santa Teresa
+    sueldok_sync_res = None
+    if "SANTA TERESA" in empresa_nombre.upper() or (empresa_ruc and "80150377" in empresa_ruc):
+        try:
+            from api.src.sueldok.service import sync_corporate_remission_to_sueldok
+            sueldok_sync_res = await sync_corporate_remission_to_sueldok(db, company_id, remission_id)
+        except Exception as e:
+            logger.error(f"Error al invocar sincronización de remisión corporativa con SueldOK: {e}")
+            sueldok_sync_res = {"status": "error", "message": str(e)}
+
     return {
         "remission_id": str(remission_id),
         "id": str(remission_id),
@@ -2176,6 +2187,7 @@ async def create_corporate_remission(db: AsyncSession, company_id: str, data, us
         "cantidad_funcionarios": len(funcionarios_montos),
         "cantidad_documentos": len(docs),
         "estado": "REMITIDO",
+        "sueldok_sync": sueldok_sync_res,
     }
 
 
@@ -3032,6 +3044,17 @@ async def update_corporate_remission(
         )
 
     await db.flush()
+
+    # Si se modificaron comprobantes o periodo de la remisión y corresponde a Grupo Santa Teresa, re-sincronizar con SueldOK
+    emp_nombre = rem.empresa_vinculada_nombre or ""
+    emp_ruc = getattr(rem, "empresa_vinculada_ruc", None) or ""
+    if "SANTA TERESA" in emp_nombre.upper() or "80150377" in emp_ruc:
+        try:
+            from api.src.sueldok.service import sync_corporate_remission_to_sueldok
+            await sync_corporate_remission_to_sueldok(db, company_id, remission_id)
+        except Exception as e:
+            logger.error(f"Error al re-sincronizar remisión modificada con SueldOK: {e}")
+
     return await get_corporate_remission_detail(db, remission_id)
 
 
