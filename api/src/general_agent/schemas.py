@@ -9,7 +9,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    company_id: UUID
+    company_id: UUID | None = None  # se ignora: la empresa sale del usuario autenticado
     message: str
     history: list[ChatMessage] = []
 

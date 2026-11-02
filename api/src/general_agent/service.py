@@ -15,6 +15,7 @@ conversación y lo reenvía en cada mensaje.
 import json
 from datetime import datetime, date, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from api.src.config import settings
 from api.src.reports import service as reports_service
@@ -45,15 +46,20 @@ def _json_default(obj):
     return str(obj)
 
 
-async def _gather_context(db, company_id: str) -> dict:
-    hoy = datetime.utcnow().date()
-    hace_30 = hoy - timedelta(days=30)
+def _hoy() -> date:
+    return datetime.now(ZoneInfo("America/Asuncion")).date()
 
-    ventas_hoy = await reports_service.get_sales_summary(db, hoy, hoy)
-    ventas_30_dias = await reports_service.get_sales_summary(db, hace_30, hoy)
-    financiero = await reports_service.get_financial_summary(db, hace_30, hoy)
-    inventario = await reports_service.get_inventory_summary(db)
-    top_productos = await reports_service.get_sales_by_product(db, hace_30, hoy, 10)
+
+async def _gather_context(db, company_id: str) -> dict:
+    hoy = _hoy()
+    hace_30 = hoy - timedelta(days=30)
+    rango = {"company_id": company_id, "fecha_desde": hace_30, "fecha_hasta": hoy}
+
+    ventas_hoy = await reports_service.get_sales_summary(db, company_id=company_id, fecha_desde=hoy, fecha_hasta=hoy)
+    ventas_30_dias = await reports_service.get_sales_summary(db, **rango)
+    financiero = await reports_service.get_financial_summary(db, **rango)
+    inventario = await reports_service.get_inventory_summary(db, company_id=company_id)
+    top_productos = await reports_service.get_sales_by_product(db, **rango, limit=10)
     gastos = await petty_cash_service.get_expense_dashboard(db, company_id, hace_30, hoy)
 
     return {

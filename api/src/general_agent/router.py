@@ -12,10 +12,10 @@ router = APIRouter(prefix="/api/v1/general-agent", tags=["general-agent"], depen
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
     try:
         history = [{"role": m.role, "content": m.content} for m in body.history]
-        reply = await service.chat(db, str(body.company_id), body.message, history)
+        reply = await service.chat(db, str(user["company_id"]), body.message, history)  # nunca la empresa que manda el cliente
         return ChatResponse(reply=reply)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"El Gerente General IA no pudo responder: {e}")
