@@ -480,8 +480,8 @@ async def get_chart_comparison(db: AsyncSession, company_id: Optional[str] = Non
 
 
 async def get_sales_by_client(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
-    params = {}
-    where = "v.estado <> 'cancelado'"
+    params = {"company_id": company_id}
+    where = "v.estado <> 'cancelado' AND v.company_id = :company_id"
     if fecha_desde:
         where += " AND v.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -516,8 +516,8 @@ async def get_sales_by_client(db: AsyncSession, company_id: Optional[str] = None
 
 
 async def get_inventory_summary(db: AsyncSession, company_id: Optional[str] = None, warehouse_id: Optional[int] = None) -> dict:
-    params = {}
-    where = "s.cantidad > 0"
+    params = {"company_id": company_id}
+    where = "s.cantidad > 0 AND w.company_id = :company_id"
     if warehouse_id:
         where += " AND s.warehouse_id = :warehouse_id"
         params["warehouse_id"] = warehouse_id
@@ -528,6 +528,7 @@ async def get_inventory_summary(db: AsyncSession, company_id: Optional[str] = No
             COALESCE(SUM(s.cantidad), 0) as total_unidades,
             COALESCE(SUM(s.cantidad * COALESCE(s.costo_unitario, 0)), 0) as valor_total
         FROM stock s
+        JOIN warehouses w ON w.id = s.warehouse_id
         WHERE {where}
     """
     result = (await _exec(db, query, params)).first()
@@ -536,12 +537,14 @@ async def get_inventory_summary(db: AsyncSession, company_id: Optional[str] = No
         SELECT COUNT(DISTINCT s.product_id) as bajo_stock
         FROM stock s
         JOIN products p ON p.id = s.product_id
-        WHERE s.cantidad - s.cantidad_reservada <= p.stock_minimo AND s.cantidad > 0
+        JOIN warehouses w ON w.id = s.warehouse_id
+        WHERE s.cantidad - s.cantidad_reservada <= p.stock_minimo AND s.cantidad > 0 AND w.company_id = :company_id
     """
-    bajo = (await _exec(db, query_bajo)).first()
+    bajo = (await _exec(db, query_bajo, {"company_id": company_id})).first()
 
-    query_sin = "SELECT COUNT(DISTINCT s.product_id) as sin_stock FROM stock s WHERE s.cantidad = 0"
-    sin = (await _exec(db, query_sin)).first()
+    query_sin = ("SELECT COUNT(DISTINCT s.product_id) as sin_stock FROM stock s JOIN warehouses w ON w.id = s.warehouse_id "
+                 "WHERE s.cantidad = 0 AND w.company_id = :company_id")
+    sin = (await _exec(db, query_sin, {"company_id": company_id})).first()
 
     return {
         "total_productos": result["total_productos"] or 0,
@@ -554,8 +557,8 @@ async def get_inventory_summary(db: AsyncSession, company_id: Optional[str] = No
 
 
 async def get_inventory_detail(db: AsyncSession, company_id: Optional[str] = None, warehouse_id: Optional[int] = None) -> list:
-    params = {}
-    where = "1=1"
+    params = {"company_id": company_id}
+    where = "w.company_id = :company_id"
     if warehouse_id:
         where += " AND s.warehouse_id = :warehouse_id"
         params["warehouse_id"] = warehouse_id
@@ -607,9 +610,10 @@ async def get_inventory_rotation(db: AsyncSession, company_id: Optional[str] = N
         FROM products p
         LEFT JOIN sale_items vi ON vi.product_id = p.id
         LEFT JOIN sales v ON v.id = vi.sale_id AND v.estado <> 'cancelado'
+        WHERE p.company_id = :company_id
         GROUP BY p.id, p.nombre, p.sku
     """
-    results = (await _exec(db, query)).all()
+    results = (await _exec(db, query, {"company_id": company_id})).all()
     items = []
     for r in results:
         ventas_30d = int(r["ventas_30d"] or 0)
@@ -772,8 +776,8 @@ async def get_fiscal_summary(db: AsyncSession, company_id: Optional[str] = None,
 
 
 async def get_financial_summary(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
-    params = {}
-    where = "estado <> 'cancelado'"
+    params = {"company_id": company_id}
+    where = "estado <> 'cancelado' AND company_id = :company_id"
     if fecha_desde:
         where += " AND fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -786,7 +790,7 @@ async def get_financial_summary(db: AsyncSession, company_id: Optional[str] = No
     # TODO purchase_orders sin filtro, lo que quedaba oculto con poco volumen pero
     # rompe por completo el resumen apenas hay historico real cargado (ej. el
     # conector incremental de Casa Gonzalito trae ~106K ordenes historicas).
-    where_po = "estado <> 'cancelado'"
+    where_po = "estado <> 'cancelado' AND company_id = :company_id"
     if fecha_desde:
         where_po += " AND fecha >= :fecha_desde"
     if fecha_hasta:
@@ -800,14 +804,15 @@ async def get_financial_summary(db: AsyncSession, company_id: Optional[str] = No
     # agregado como respaldo), sumarlas duplicaba el mismo saldo dos veces.
     por_cobrar = (await _exec(db, """
         SELECT
-            CASE WHEN EXISTS (SELECT 1 FROM accounts_receivable WHERE estado = 'pendiente')
-                THEN COALESCE((SELECT SUM(saldo_pendiente) FROM accounts_receivable WHERE estado = 'pendiente'), 0)
-                ELSE COALESCE((SELECT SUM(saldo_actual) FROM customer_accounts WHERE saldo_actual > 0), 0)
+            CASE WHEN EXISTS (SELECT 1 FROM accounts_receivable WHERE estado = 'pendiente' AND company_id = :company_id)
+                THEN COALESCE((SELECT SUM(saldo_pendiente) FROM accounts_receivable WHERE estado = 'pendiente' AND company_id = :company_id), 0)
+                ELSE COALESCE((SELECT SUM(ca.saldo_actual) FROM customer_accounts ca JOIN customers c ON c.id = ca.customer_id
+                               WHERE ca.saldo_actual > 0 AND c.company_id = :company_id), 0)
             END AS total
-    """)).first()
+    """, {"company_id": company_id})).first()
     r_ap = await db.execute(
         select(func.coalesce(func.sum(SupplierInvoice.saldo_pendiente), 0))
-        .where(SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]))
+        .where(SupplierInvoice.company_id == company_id, SupplierInvoice.estado.in_(["pendiente", "aprobada", "parcial"]))
     )
     por_pagar = {"total": r_ap.scalar()}
 
@@ -825,8 +830,8 @@ async def get_financial_summary(db: AsyncSession, company_id: Optional[str] = No
 
 
 async def get_financial_by_day(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
-    params = {}
-    where = "estado <> 'cancelado'"
+    params = {"company_id": company_id}
+    where = "estado <> 'cancelado' AND company_id = :company_id"
     if fecha_desde:
         where += " AND fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
@@ -858,8 +863,8 @@ async def get_financial_by_day(db: AsyncSession, company_id: Optional[str] = Non
 
 
 async def get_fifo_costing(db: AsyncSession, company_id: Optional[str] = None, product_id=None, warehouse_id=None) -> list:
-    params = {}
-    where = "sl.cantidad_disponible > 0"
+    params = {"company_id": company_id}
+    where = "sl.cantidad_disponible > 0 AND sl.company_id = :company_id"
     if product_id:
         where += " AND sl.product_id = :product_id"
         params["product_id"] = product_id
@@ -929,8 +934,8 @@ async def get_fifo_costing(db: AsyncSession, company_id: Optional[str] = None, p
 
 
 async def get_lifo_costing(db: AsyncSession, company_id: Optional[str] = None, product_id=None, warehouse_id=None) -> list:
-    params = {}
-    where = "sl.cantidad_disponible > 0"
+    params = {"company_id": company_id}
+    where = "sl.cantidad_disponible > 0 AND sl.company_id = :company_id"
     if product_id:
         where += " AND sl.product_id = :product_id"
         params["product_id"] = product_id
@@ -1034,8 +1039,8 @@ async def get_cost_comparison(db: AsyncSession, company_id: Optional[str] = None
 
 
 async def get_inventory_valuation(db: AsyncSession, company_id: Optional[str] = None, warehouse_id: Optional[str] = None, supplier_id: Optional[str] = None, fecha_corte: Optional[date] = None) -> dict:
-    params = {}
-    where = "s.cantidad > 0"
+    params = {"company_id": company_id}
+    where = "s.cantidad > 0 AND w.company_id = :company_id"
     if warehouse_id:
         where += " AND s.warehouse_id = :warehouse_id"
         params["warehouse_id"] = warehouse_id
