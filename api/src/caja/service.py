@@ -1700,6 +1700,7 @@ async def close_session(
         "requiere_revision": count.requiere_revision,
         "handoff_id": handoff.id,
         "reconciliation": recon,
+        "desglose_formas_pago": recon.get("desglose_detallado", []) if recon else [],
         "ticket_text": recon.get("ticket_text") if recon else None,
         "ticket_escpos_b64": recon.get("ticket_escpos_b64") if recon else None,
     }

@@ -13,20 +13,19 @@
 
 ---
 
-### 2. Fondo Inicial de Apertura Bimonetario (Separado por Moneda)
-- Toda cajera regular (no supervisora) inicia su turno recibiendo un **Fondo de Gaveta Bimonetario** para cambio/vuelto:
-  - **Fondo Inicial en Guaraníes:** Típicamente `Gs. 500.000` (en billetes y monedas).
-  - **Fondo Inicial en Reales:** Típicamente `R$ 300,00` (en billetes y monedas para vuelto en reales).
-- **Regla de presentación:** En el informe de caja y en la pantalla, el fondo **NUNCA se unifica ni se convierte a una sola bola de dinero**. La cajera debe ver:
-  - `Fondo Inicial Gs.: Gs. 500.000`
-  - `Fondo Inicial R$:  R$ 300,00`
-  *(Tal cual ingresó al abrir su caja).*
-- Las supervisoras o administradoras abren turno sin fondo inicial (`Gs. 0` y `R$ 0,00`).
+### 2. Fondo Inicial de Apertura Bimonetario (Fondo Fijo Permanente de Gaveta)
+- Toda cajera regular (no supervisora) cuenta con un **Fondo de Gaveta Bimonetario** permanente para cambio/vuelto:
+  - **Fondo Inicial en Guaraníes:** `Gs. 500.000` (en billetes y monedas).
+  - **Fondo Inicial en Reales:** `R$ 300,00` (en billetes y monedas para vuelto en reales).
+- **Regla Operativa Canónica:** El fondo inicial **NO es dinero que viaja al sobre ni llega a Tesorería**.
+  - Permanece en la gaveta bajo custodia de la cajera para su siguiente turno.
+  - La supervisora certifica su existencia en gaveta al inicio/cierre.
+  - Las supervisoras o administradoras abren turno sin fondo inicial (`Gs. 0` y `R$ 0,00`).
 
 ---
 
-### 3. Total Efectivo Esperado en Gaveta
-Para la conciliación, el concepto contable indica que se espera **Efectivo Físico** (desglosado en las monedas recibidas), el cual resulta de la diferencia entre el total vendido y los pagos cobrados mediante medios electrónicos o no efectivo.
+### 3. Total Efectivo Esperado a Rendir a Tesorería (En Sobre)
+Para la conciliación y rendición de cuentas hacia Tesorería, el sobre debe contener estrictamente la **Recaudación Neta en Efectivo**:
 
 #### A. En Guaraníes (PYG):
 ```text
@@ -34,25 +33,25 @@ Ventas Netas en Efectivo Gs. = Total Facturado - Total Cobros No Efectivo
                               (Bancard, Dinelco, QR, PIX, Extra Club, SIPAP, Cheques)
                               (Incluyendo pagos mixtos: la porción cobrada en efectivo es la que cuenta).
 
-Total Efectivo Esperado Gs.   = Devolución Fondo Inicial Gs. (ej. 500.000) 
-                              + Ventas Netas en Efectivo Gs. 
+Total Efectivo Esperado Gs.   = Ventas Netas en Efectivo Gs. 
                               - Retiros Parciales Confirmados (Cash Drops)
+                              - Adelantos de Efectivo entregados (Red de Pagos / Dinelco)
 ```
 
 #### B. En Reales (BRL):
 ```text
-Total Esperado R$ = Devolución Fondo Inicial R$ (ej. 300,00) 
-                  + Recaudación en Efectivo Reales por Cobros en R$
+Total Esperado R$ = Recaudación Neta en Efectivo Reales por Cobros en R$
+                  - Retiros Parciales en R$ (si los hubiere)
 ```
-- **El fondo de R$ 300,00 para vuelto es un esperado:** la cajera debe devolver como mínimo el fondo en R$ que se le entregó al abrir, más lo que haya cobrado en reales.
+- **El fondo de R$ 300,00 para vuelto queda en gaveta:** La cajera rinde en el sobre únicamente lo recaudado por cobros de ventas en reales.
 
 ---
 
-### 4. Arqueo Real Físico en Gaveta (Dinero Contado)
-Al finalizar el turno, la cajera realiza el conteo físico de todo el dinero presente en su gaveta:
-1. **Guaraníes (PYG):** Billetes y monedas = **(DEVOLUCIÓN DE FONDO + Recaudación en Gs)**.
-2. **Reales (BRL):** Billetes y monedas = **(DEVOLUCIÓN DE FONDO + Recaudación en R$)**.
-3. **Dólares (USD):** Billetes = **Recaudación en US$** (si hubo clientes que pagaron en dólares).
+### 4. Arqueo Real Físico Rendido en Sobre a Tesorería
+Al finalizar el turno, la cajera separa su fondo fijo de gaveta (₲ 500.000 y R$ 300,00) que queda en custodia, y guarda en el sobre de rendición:
+1. **Guaraníes (PYG):** Billetes y monedas de la **Recaudación Neta en Gs.**
+2. **Reales (BRL):** Billetes y monedas de la **Recaudación Neta en R$.**
+3. **Dólares (USD):** Billetes de la **Recaudación en US$** (si hubo clientes que pagaron en dólares).
 
 ---
 

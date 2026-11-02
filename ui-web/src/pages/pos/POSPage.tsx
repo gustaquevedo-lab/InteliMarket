@@ -18,7 +18,7 @@ import { useAuth } from "../../context/AuthContext"
 import { useTheme } from "../../context/ThemeContext"
 import { useToast } from "../../context/ToastContext"
 import { useOffline } from "../../context/OfflineContext"
-import { formatPYG, formatInputDecimal, parseInputDecimal } from "../../utils/format"
+import { formatPYG, formatBRL, formatUSD, formatInputDecimal, parseInputDecimal } from "../../utils/format"
 import { DEFAULT_RECEIPT_CONFIG } from "../../constants/receiptDefaults"
 import { loadCachedPOSData, persistPOSCatalog } from "../../utils/posOfflineSync"
 import { offlineDB } from "../../utils/offlineDB"
@@ -533,7 +533,18 @@ export default function POSPage() {
   const [montoCierreUsd, setMontoCierreUsd] = useState<string>("")
   const [montoCierreBrl, setMontoCierreBrl] = useState<string>("")
   const [submittingCierre, setSubmittingCierre] = useState(false)
-  const [cierreResult, setCierreResult] = useState<{ monto_cierre_esperado: number; diferencia: number; requiere_revision: boolean; diferencia_usd: number; diferencia_brl: number; desglose_formas_pago: { forma_pago: string; moneda: string; monto: number }[]; contado: number; contado_usd: number; contado_brl: number } | null>(null)
+  const [cierreResult, setCierreResult] = useState<{
+    monto_cierre_esperado: number;
+    diferencia: number;
+    requiere_revision: boolean;
+    diferencia_usd: number;
+    diferencia_brl: number;
+    desglose_formas_pago: any[];
+    contado: number;
+    contado_usd: number;
+    contado_brl: number;
+    reconciliation?: any;
+  } | null>(null)
   const [preCloseData, setPreCloseData] = useState<any>(null)
   const [loadingPreClose, setLoadingPreClose] = useState(false)
   const [syncingCierrePendientes, setSyncingCierrePendientes] = useState(false)
@@ -4141,10 +4152,11 @@ export default function POSPage() {
         diferencia_usd: result.diferencia_usd,
         diferencia_brl: result.diferencia_brl,
         requiere_revision: result.requiere_revision,
-        desglose_formas_pago: result.desglose_formas_pago || [],
+        desglose_formas_pago: (result as any).desglose_formas_pago || (result as any).reconciliation?.desglose_detallado || [],
         contado,
         contado_usd: contadoUsd,
         contado_brl: contadoBrl,
+        reconciliation: (result as any).reconciliation,
       })
 
       const resAny = result as any
@@ -17799,33 +17811,183 @@ export default function POSPage() {
               </>
             ) : (
               <div className="space-y-3 overflow-y-auto flex-1 pr-1">
-                <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 space-y-1 text-sm font-posMono tabular-nums">
-                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Efectivo Esperado:</span><span>{formatPYG(cierreResult.monto_cierre_esperado)}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-500 dark:text-slate-400">Efectivo Contado:</span><span className="font-bold">{formatPYG(cierreResult.contado)}</span></div>
-                  <div className={`flex justify-between font-black pt-1 border-t border-slate-200 dark:border-slate-800 ${cierreResult.diferencia < 0 ? "text-red-600 dark:text-red-400" : cierreResult.diferencia > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                    <span>Diferencia Gs.:</span><span>{cierreResult.diferencia >= 0 ? "+" : ""}{formatPYG(cierreResult.diferencia)}</span>
-                  </div>
-                  {(cierreResult.contado_usd || cierreResult.diferencia_usd) && (
-                    <div className={`flex justify-between font-bold pt-1 ${cierreResult.diferencia_usd < 0 ? "text-red-600 dark:text-red-400" : cierreResult.diferencia_usd > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                      <span>Diferencia US$:</span><span>{cierreResult.diferencia_usd >= 0 ? "+" : ""}{cierreResult.diferencia_usd.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {(cierreResult.contado_brl || cierreResult.diferencia_brl) && (
-                    <div className={`flex justify-between font-bold ${cierreResult.diferencia_brl < 0 ? "text-red-600 dark:text-red-400" : cierreResult.diferencia_brl > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                      <span>Diferencia R$:</span><span>{cierreResult.diferencia_brl >= 0 ? "+" : ""}{cierreResult.diferencia_brl.toFixed(2)}</span>
-                    </div>
-                  )}
-                </div>
+                {(() => {
+                  const recon = cierreResult.reconciliation || {}
+                  const tasaBrl = Number(recon.tasa_brl || rates.BRL || 1075)
+                  const tasaUsd = Number(recon.tasa_usd || rates.USD || 7850)
 
-                {cierreResult.desglose_formas_pago.length > 0 && (
+                  // Consolidado unificado en Guaraníes
+                  const espTotalGs = Number(recon.esperado_total_gs ?? cierreResult.monto_cierre_esperado ?? 0)
+                  const contadoPyg = Number(recon.contado_pyg ?? cierreResult.contado ?? 0)
+                  const contadoBrl = Number(recon.contado_brl ?? cierreResult.contado_brl ?? 0)
+                  const contadoUsd = Number(recon.contado_usd ?? cierreResult.contado_usd ?? 0)
+
+                  const contadoBrlGs = Number(recon.contado_brl_gs ?? (contadoBrl * tasaBrl))
+                  const contadoUsdGs = Number(recon.contado_usd_gs ?? (contadoUsd * tasaUsd))
+                  const contadoTotalGs = Number(recon.contado_total_gs ?? (contadoPyg + contadoBrlGs + contadoUsdGs))
+
+                  const difConsolidadaGs = Number(recon.diferencia_consolidada_gs ?? cierreResult.diferencia ?? 0)
+
+                  // Detalle por moneda
+                  const espPyg = Number(recon.esp_pyg ?? (espTotalGs - (contadoBrl > 0 ? (recon.esp_brl || 0) * tasaBrl : 0)))
+                  const difPyg = Number(recon.diferencia_pyg ?? (contadoPyg - espPyg))
+
+                  const espBrl = Number(recon.esp_brl ?? 0)
+                  const difBrl = Number(recon.diferencia_brl ?? cierreResult.diferencia_brl ?? 0)
+
+                  const espUsd = Number(recon.esp_usd ?? 0)
+                  const difUsd = Number(recon.diferencia_usd ?? cierreResult.diferencia_usd ?? 0)
+
+                  const hasBrl = (contadoBrl > 0 || espBrl > 0 || Math.abs(difBrl) > 0.01)
+                  const hasUsd = (contadoUsd > 0 || espUsd > 0 || Math.abs(difUsd) > 0.01)
+                  const hasDivisas = hasBrl || hasUsd
+
+                  // Detección de compensación de vueltos entre divisas y guaraníes
+                  const hayCompensacion = hasBrl && ((difPyg < 0 && difBrl > 0) || (difPyg > 0 && difBrl < 0))
+
+                  return (
+                    <>
+                      {/* 1. Tarjeta Principal: Consolidación y Rendición a Tesorería */}
+                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 space-y-2 text-sm font-posMono tabular-nums">
+                        <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-0.5">
+                          Consolidación de Rendición a Tesorería
+                        </div>
+
+                        <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
+                          <span>Total Esperado a Rendir:</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-200">{formatPYG(espTotalGs)}</span>
+                        </div>
+
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <span className="text-slate-700 dark:text-slate-200 font-bold">Total Rendido en Sobre:</span>
+                            {hasDivisas && (
+                              <div className="text-[10px] text-slate-400 font-normal">
+                                (Gs. {formatPYG(contadoPyg)}{hasBrl ? ` + R$ ${formatBRL(contadoBrl)}` : ""}{hasUsd ? ` + US$ ${formatUSD(contadoUsd)}` : ""})
+                              </div>
+                            )}
+                          </div>
+                          <span className="font-extrabold text-base text-slate-900 dark:text-white">{formatPYG(contadoTotalGs)}</span>
+                        </div>
+
+                        <div className={`flex justify-between items-center font-black pt-2 border-t border-slate-200 dark:border-slate-800 text-base ${
+                          difConsolidadaGs < -500 ? "text-red-600 dark:text-red-400" : difConsolidadaGs > 500 ? "text-amber-500 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
+                        }`}>
+                          <span>Diferencia Consolidada:</span>
+                          <span>{difConsolidadaGs > 0 ? "+" : ""}{formatPYG(difConsolidadaGs)}</span>
+                        </div>
+
+                        {/* Badge de dictamen */}
+                        <div className={`mt-2 py-1.5 px-2.5 rounded-lg text-center text-xs font-bold flex items-center justify-center gap-1.5 ${
+                          cierreResult.requiere_revision
+                            ? "bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400"
+                            : Math.abs(difConsolidadaGs) <= 3000
+                            ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                            : "bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400"
+                        }`}>
+                          {cierreResult.requiere_revision ? (
+                            <>
+                              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span>Turno fuera de tolerancia — Requiere revisión de supervisora</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                              <span>Cuadre Conforme {Math.abs(difConsolidadaGs) === 0 ? "(Exacto)" : "(Diferencia mínima tolerable)"}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 2. Desglose Moneda por Moneda */}
+                      <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 space-y-1.5 text-xs font-posMono tabular-nums">
+                        <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
+                          Recaudación Efectiva por Moneda
+                        </div>
+
+                        {/* Fila Guaraníes */}
+                        <div className="flex justify-between items-center py-1 border-b border-slate-200/60 dark:border-slate-800/60">
+                          <div>
+                            <span className="font-bold text-slate-700 dark:text-slate-200">Guaraníes (PYG)</span>
+                            <div className="text-[10px] text-slate-400">Esp: {formatPYG(espPyg)} | Contado: {formatPYG(contadoPyg)}</div>
+                          </div>
+                          <span className={`font-bold ${difPyg < 0 ? "text-red-500" : difPyg > 0 ? "text-amber-500" : "text-emerald-500"}`}>
+                            {difPyg > 0 ? "+" : ""}{formatPYG(difPyg)}
+                          </span>
+                        </div>
+
+                        {/* Fila Reales */}
+                        {hasBrl && (
+                          <div className="flex justify-between items-center py-1 border-b border-slate-200/60 dark:border-slate-800/60">
+                            <div>
+                              <span className="font-bold text-slate-700 dark:text-slate-200">Reales (BRL)</span>
+                              <div className="text-[10px] text-slate-400">
+                                Esp: R$ {formatBRL(espBrl)} | Contado: R$ {formatBRL(contadoBrl)} (TC {formatPYG(tasaBrl)})
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className={`font-bold ${difBrl < 0 ? "text-red-500" : difBrl > 0 ? "text-amber-500" : "text-emerald-500"}`}>
+                                {difBrl > 0 ? "+" : ""}R$ {formatBRL(difBrl)}
+                              </span>
+                              <div className="text-[10px] text-slate-400">
+                                ({difBrl > 0 ? "+" : ""}{formatPYG(Math.round(difBrl * tasaBrl))})
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Fila Dólares */}
+                        {hasUsd && (
+                          <div className="flex justify-between items-center py-1 border-b border-slate-200/60 dark:border-slate-800/60">
+                            <div>
+                              <span className="font-bold text-slate-700 dark:text-slate-200">Dólares (USD)</span>
+                              <div className="text-[10px] text-slate-400">
+                                Esp: US$ {formatUSD(espUsd)} | Contado: US$ {formatUSD(contadoUsd)} (TC {formatPYG(tasaUsd)})
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className={`font-bold ${difUsd < 0 ? "text-red-500" : difUsd > 0 ? "text-amber-500" : "text-emerald-500"}`}>
+                                {difUsd > 0 ? "+" : ""}US$ {formatUSD(difUsd)}
+                              </span>
+                              <div className="text-[10px] text-slate-400">
+                                ({difUsd > 0 ? "+" : ""}{formatPYG(Math.round(difUsd * tasaUsd))})
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Mensaje de compensación de vueltos */}
+                        {hayCompensacion && (
+                          <div className="mt-2 p-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-700 dark:text-blue-300 leading-tight">
+                            💡 <strong>Compensación Bimonetaria:</strong> Se cobraron Reales en efectivo y se entregó cambio en Guaraníes (o viceversa). La diferencia en Reales ({difBrl > 0 ? "+" : ""}R$ {formatBRL(difBrl)}) compensa la diferencia en Guaraníes ({difPyg > 0 ? "+" : ""}{formatPYG(difPyg)}).
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 3. Recordatorio Canónico de Fondo Fijo de Gaveta */}
+                      <div className="bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-[11px] text-slate-600 dark:text-slate-400 flex items-center justify-between">
+                        <span className="font-semibold">🔒 Fondo Fijo en Gaveta (Custodia):</span>
+                        <span className="font-posMono font-bold text-slate-700 dark:text-slate-300">
+                          ₲ {formatPYG(Number(recon.fondo_pyg || preCloseData?.monto_apertura_pyg || 500000))} + R$ {formatBRL(Number(recon.fondo_brl || preCloseData?.monto_apertura_brl || 300))}
+                        </span>
+                      </div>
+                    </>
+                  )
+                })()}
+
+                {cierreResult.desglose_formas_pago && cierreResult.desglose_formas_pago.length > 0 && (
                   <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl p-3 space-y-1 text-xs font-posMono tabular-nums">
                     <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Ventas del turno por forma de pago</div>
-                    {cierreResult.desglose_formas_pago.map((p, i) => (
-                      <div key={i} className="flex justify-between text-slate-700 dark:text-slate-300">
-                        <span>{FORMA_PAGO_LABEL[p.forma_pago] || p.forma_pago}{p.moneda && p.moneda !== "PYG" ? ` (${p.moneda})` : ""}</span>
-                        <span>{p.moneda === "PYG" ? formatPYG(p.monto) : Number(p.monto).toFixed(2)}</span>
-                      </div>
-                    ))}
+                    {cierreResult.desglose_formas_pago.map((p: any, i: number) => {
+                      const label = p.label || FORMA_PAGO_LABEL[p.forma_pago || p.clave] || p.forma_pago || p.clave
+                      const formatted = p.monto_formateado || (p.moneda === "PYG" ? formatPYG(p.monto || p.monto_gs) : `${p.moneda || ""} ${Number(p.monto || p.monto_orig || 0).toFixed(2)}`)
+                      return (
+                        <div key={i} className="flex justify-between text-slate-700 dark:text-slate-300">
+                          <span>{label}</span>
+                          <span>{formatted}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
 

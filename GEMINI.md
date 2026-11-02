@@ -21,10 +21,10 @@
    - Todo filtro de fechas, arqueos de caja, reportes fiscales y tickets de venta DEBEN procesarse sobre la hora local paraguaya.
 6. **LÓGICA INMUTABLE DE ARQUEO, FONDOS Y CIERRE DE CAJA:**
    - **Venta 100% en Guaraníes (PYG):** El supermercado nunca vende en moneda extranjera; las divisas (R$, US$) se aceptan exclusivamente como medios de pago.
-   - **Fondos de Apertura Bimonetarios Desglosados:** La cajera recibe su fondo para cambio en Gs. (ej. 500.000) y en R$ (ej. 300.00) por separado. En reportes y pantallas se muestran siempre por separado, nunca unificados ni convertidos a una sola masa.
-   - **Devolución de Fondo:** El fondo en R$ (300,00) es un esperado en R$ (devolución del fondo recibido).
-   - **Efectivo Esperado en Gaveta:** `Fondo Inicial Gs. + Ventas Netas en Efectivo Gs. (Ventas Totales - Medios No Efectivo) - Retiros/Drops`.
-   - **Arqueo Físico Real:** En gaveta se cuentan billetes y monedas en Guaraníes (`DEVOLUCIÓN DE FONDO + Recaudación Gs.`), Reales (`DEVOLUCIÓN DE FONDO + Recaudación R$`) y Dólares (si ingresó US$).
+   - **Fondos de Apertura Bimonetarios en Custodia Permanente (Fondo Fijo de Gaveta):** La cajera recibe y mantiene en su gaveta su fondo para cambio en Gs. (500.000) y en R$ (300,00) de forma permanente. Este monto **NO va a Tesorería ni se rinde en el sobre** al cierre de turno; permanece en gaveta bajo custodia de la cajera para el siguiente turno.
+   - **Efectivo Esperado a Rendir a Tesorería en Sobre:** `Ventas Netas en Efectivo Gs. (Total Facturado - Medios No Efectivo) - Retiros Parciales/Drops - Adelantos`.
+   - **Devolución/Arqueo en Reales (BRL):** En el sobre se entrega la recaudación neta en R$ por cobros en reales (`Ventas en Efectivo R$ - Retiros en R$`).
+   - **Arqueo Físico Rendido al Sobre:** En el sobre de rendición a Tesorería se entrega exclusivamente la **recaudación neta** (Efectivo Gs., Efectivo R$ y US$ recaudados). El fondo fijo de ₲ 500.000 y R$ 300,00 queda en gaveta.
    - **Cotejo No Efectivo:** Se corrobora físicamente la existencia y pertinencia de cada comprobante (Vouchers Bancard, Dinelco, QR, PIX, Extra Club, Transferencias, Cheques).
    - Ver especificación completa y fórmulas en [docs/REGLAS_ARQUEO_Y_CIERRE_CAJA.md](file:///Users/gustaquevedo/Library/CloudStorage/OneDrive-Personal/Dev/Intelimarket/docs/REGLAS_ARQUEO_Y_CIERRE_CAJA.md).
 
