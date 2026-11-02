@@ -6735,7 +6735,7 @@ async def delete_supplier_payment_order(
                     )
                 )
                 for ve in vault_entries_res.scalars().all():
-                    ve.estado = "disponible"
+                    ve.estado = "en_boveda"
                     ve.observaciones = f"Restaurado por eliminación de OP {num_orden}"
 
     # Eliminar Allocations, Disbursements y la Orden

@@ -6852,7 +6852,7 @@ async def get_vault_kardex(
             else:  # PYG
                 monto_val = float(e.monto_pyg or 0)
 
-            if monto_val <= 0:
+            if monto_val <= 0 or e.estado == "anulado":
                 continue
 
             user_name = users_map.get(e.registrado_por, "Tesorería")
@@ -6863,6 +6863,8 @@ async def get_vault_kardex(
                 "cheque_caja": "Cheques de Caja",
                 "devolucion_cajero": "Devolución Fondo Cajera",
                 "reintegro_sencillo": "Reintegro desde Fondo Sencillo",
+                "egreso_fondo": "Reposición Fondo Fijo",
+                "egreso_gasto": "Pago Gasto Directo",
             }.get(e.origen, e.origen.replace("_", " ").title())
 
             # 1. Ingreso a Bóveda
@@ -6880,7 +6882,7 @@ async def get_vault_kardex(
                 "observaciones": e.observaciones or "",
             })
 
-            # 2. Egreso si fue depositado al banco o transferido/asignado
+            # 2. Egreso si fue depositado al banco o transferido/asignado/gastado/ajustado
             if e.estado == "depositado" and e.fecha_deposito:
                 ref_txt = str(e.bank_transaction_id)[:8].upper() if e.bank_transaction_id else "BANCO"
                 raw_events.append({
@@ -6896,11 +6898,13 @@ async def get_vault_kardex(
                     "usuario": user_name,
                     "observaciones": e.observaciones or "Fondos remesados al banco",
                 })
-            elif e.estado in ("asignado_cajero", "fondo_sencillo", "pagado_proveedor"):
+            elif e.estado in ("asignado_cajero", "fondo_sencillo", "pagado_proveedor", "egreso_gasto", "ajuste"):
                 egreso_label = {
                     "asignado_cajero": "Salida por Dotación Fondo de Cajera",
                     "fondo_sencillo": "Traspaso a Fondo Permanente de Sencillo",
                     "pagado_proveedor": "Egreso por Pago a Proveedor",
+                    "egreso_gasto": "Egreso por Gasto / Reposición de Fondo",
+                    "ajuste": "Ajuste / Salida Extraordinaria de Bóveda",
                 }.get(e.estado, e.estado.replace("_", " ").title())
                 raw_events.append({
                     "id": f"EGR-{str(e.id)}",
