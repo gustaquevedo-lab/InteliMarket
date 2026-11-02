@@ -115,6 +115,16 @@ def num3(v):
         return Decimal("0")
 
 
+def fecha_con_hora(fecha, hora):
+    """Dia de la factura (FECHA) con la hora de carga (HORA), en hora local. HORA vacia o de 1899 -> 00:00."""
+    d, h = safe_dt(fecha), safe_dt(hora)
+    if d is None:
+        return None
+    if h is None or h.year < 1990:
+        return d
+    return datetime.combine(d.date(), h.time())
+
+
 def safe_dt(v):
     if v is None:
         return None
@@ -730,7 +740,7 @@ def sync_ventas(pg, my):
     last_id, _ = get_watermark(pg, "ventas")
     with my.cursor() as cur:
         cur.execute(
-            "SELECT IDFACVENTAS, IDCLIENTE, NUMFAC, MONTO, FECHA, IDTIPO_VENTA, TIMBRADO, RENDIDO, IDVENDEDOR "
+            "SELECT IDFACVENTAS, IDCLIENTE, NUMFAC, MONTO, FECHA, IDTIPO_VENTA, TIMBRADO, RENDIDO, IDVENDEDOR, HORA "
             "FROM fac_ventas WHERE IDFACVENTAS > %s ORDER BY IDFACVENTAS", (last_id,))
         legacy_rows = cur.fetchall()
     if not legacy_rows:
@@ -738,13 +748,13 @@ def sync_ventas(pg, my):
         return set(), last_id
     clientes_validos = {txt_keep(c, 15) for c in legacy_id_set(my, "clientes", "IDCLIENTES")}
     max_id, rows = last_id, []
-    for (idfac, idcli, numfac, monto, fecha, tipo_venta, timbrado, rendido, idvend) in legacy_rows:
+    for (idfac, idcli, numfac, monto, fecha, tipo_venta, timbrado, rendido, idvend, hora) in legacy_rows:
         idc = txt_keep(idcli, 15)
         cust = uuid.uuid5(NS, f"cli:{idc}") if (idc and idc in clientes_validos) else None
         total = money(monto)
         obs = f"NUMFAC={money(numfac)} TIMB={txt_keep(timbrado) or ''}".strip()
         rows.append((uuid.uuid5(NS, f"fac:{idfac}"), COMPANY_ID, cust, str(idfac)[:20],
-                     safe_dt(fecha) or datetime.now(), "factura",
+                     fecha_con_hora(fecha, hora) or datetime.now(), "factura",
                      condicion_venta(tipo_venta), "PYG", "completado",
                      total, total, total if rendido else 0, 0 if rendido else total, obs[:500],
                      txt_keep(idvend, 10)))
@@ -845,19 +855,19 @@ def reconciliar_ventas(pg, my, desde, hasta):
         marcas = ",".join(["%s"] * len(lote))
         with my.cursor() as cur:
             cur.execute("SELECT IDFACVENTAS, IDCLIENTE, NUMFAC, MONTO, FECHA, IDTIPO_VENTA, TIMBRADO, RENDIDO, "
-                        f"IDVENDEDOR FROM fac_ventas WHERE IDFACVENTAS IN ({marcas})", lote)
+                        f"IDVENDEDOR, HORA FROM fac_ventas WHERE IDFACVENTAS IN ({marcas})", lote)
             cabeceras = cur.fetchall()
             cur.execute("SELECT ID, IDVENTAS, IDPRODUCTOS, CANTIDAD, PRECVENTA, SUBTOTAL, COSTOPROMEDIO, "
                         f"GRAV10, GRAV5, EXENTAS FROM item_ventas WHERE IDVENTAS IN ({marcas})", lote)
             lineas = cur.fetchall()
         ventas, items = [], []
-        for (idfac, idcli, numfac, monto, fecha, tipo_venta, timbrado, rendido, idvend) in cabeceras:
+        for (idfac, idcli, numfac, monto, fecha, tipo_venta, timbrado, rendido, idvend, hora) in cabeceras:
             idc = txt_keep(idcli, 15)
             cust = uuid.uuid5(NS, f"cli:{idc}") if (idc and idc in clientes_validos) else None
             total = money(monto)
             obs = f"NUMFAC={money(numfac)} TIMB={txt_keep(timbrado) or ''}".strip()
             ventas.append((uuid.uuid5(NS, f"fac:{idfac}"), COMPANY_ID, cust, str(idfac)[:20],
-                           safe_dt(fecha) or datetime.now(), "factura", condicion_venta(tipo_venta),
+                           fecha_con_hora(fecha, hora) or datetime.now(), "factura", condicion_venta(tipo_venta),
                            "PYG", "completado", total, total, total if rendido else 0,
                            0 if rendido else total, obs[:500], txt_keep(idvend, 10)))
         for (iid, idv, idprod, cant, precv, subt, costo, g10, g5, ex) in lineas:
@@ -893,7 +903,7 @@ def sync_notas(pg, my):
     last_id, _ = get_watermark(pg, "notas")
     with my.cursor() as cur:
         cur.execute(
-            "SELECT IDNOTACREDITO, IDCLIENTE, NUMNOTACRED, MONTO, FECHA, CONCEPTO "
+            "SELECT IDNOTACREDITO, IDCLIENTE, NUMNOTACRED, MONTO, FECHA, CONCEPTO, HORA "
             "FROM notacredito WHERE IDNOTACREDITO > %s ORDER BY IDNOTACREDITO", (last_id,))
         legacy_rows = cur.fetchall()
     if not legacy_rows:
@@ -901,14 +911,14 @@ def sync_notas(pg, my):
         return last_id
     clientes_validos = {txt_keep(c, 15) for c in legacy_id_set(my, "clientes", "IDCLIENTES")}
     max_id, rows = last_id, []
-    for (idnc, idcli, numnc, monto, fecha, concepto) in legacy_rows:
+    for (idnc, idcli, numnc, monto, fecha, concepto, hora) in legacy_rows:
         max_id = max(max_id, idnc)
         idc = txt_keep(idcli, 15)
         cust = uuid.uuid5(NS, f"cli:{idc}") if (idc and idc in clientes_validos) else None
         total = -abs(money(monto))
         obs = f"NC {money(numnc)} {txt_keep(concepto) or ''}".strip()
         rows.append((uuid.uuid5(NS, f"nc:{idnc}"), COMPANY_ID, cust, f"NC{idnc}"[:20],
-                     safe_dt(fecha) or datetime.now(), "notacredito", "contado", "PYG",
+                     fecha_con_hora(fecha, hora) or datetime.now(), "notacredito", "contado", "PYG",
                      "completado", total, total, 0, 0, obs[:500]))
     n = upsert(pg, "sales", ["id", "company_id", "customer_id", "numero", "fecha",
                               "tipo_comprobante", "condicion", "moneda", "estado", "subtotal",
