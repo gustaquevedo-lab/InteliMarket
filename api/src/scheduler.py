@@ -207,6 +207,42 @@ async def run_promotions_daily_sync():
                 except Exception as p_err:
                     logger.warning("Error procesando productos/balanza para promo %s: %s", pr.id, p_err)
 
+            # 5. Candado anti-huérfanos: Revertir automáticamente cualquier producto con precio_regular > precio_venta
+            # que no pertenezca a ninguna promoción activa y vigente hoy (garantiza que nunca queden ofertas pegadas)
+            res_orphans = await db.execute(text("""
+                WITH active_promo_products AS (
+                    SELECT DISTINCT unnest(producto_ids) AS pid
+                    FROM promotions
+                    WHERE activo = true AND estado = 'activa'
+                      AND (valido_desde IS NULL OR CURRENT_DATE >= valido_desde)
+                      AND (valido_hasta IS NULL OR CURRENT_DATE <= valido_hasta)
+                      AND (dias_semana IS NULL OR array_length(dias_semana, 1) IS NULL OR EXTRACT(DOW FROM (CURRENT_TIMESTAMP AT TIME ZONE 'America/Asuncion'))::int = ANY(dias_semana))
+                    UNION
+                    SELECT DISTINCT jsonb_object_keys(precios_por_producto::jsonb)::uuid AS pid
+                    FROM promotions
+                    WHERE activo = true AND estado = 'activa'
+                      AND precios_por_producto IS NOT NULL
+                      AND (valido_desde IS NULL OR CURRENT_DATE >= valido_desde)
+                      AND (valido_hasta IS NULL OR CURRENT_DATE <= valido_hasta)
+                      AND (dias_semana IS NULL OR array_length(dias_semana, 1) IS NULL OR EXTRACT(DOW FROM (CURRENT_TIMESTAMP AT TIME ZONE 'America/Asuncion'))::int = ANY(dias_semana))
+                )
+                UPDATE products
+                SET precio_venta = COALESCE(precio_regular, precio_venta),
+                    precio_regular = NULL,
+                    updated_at = NOW()
+                WHERE precio_regular IS NOT NULL
+                  AND precio_regular > precio_venta
+                  AND id NOT IN (SELECT pid FROM active_promo_products WHERE pid IS NOT NULL)
+                RETURNING id, nombre, precio_venta;
+            """))
+            reverted = res_orphans.fetchall()
+            if reverted:
+                logger.warning(
+                    "Reconciliador anti-huérfanos revirtió %d productos con precio promocional desactualizado: %s",
+                    len(reverted),
+                    [f"{r.nombre} (ID: {r.id}, Precio Venta: {r.precio_venta})" for r in reverted]
+                )
+
             await db.commit()
             logger.info("Sincronización de promociones completada: %d promociones evaluadas.", len(promos))
         except Exception as e:

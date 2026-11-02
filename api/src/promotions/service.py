@@ -494,6 +494,22 @@ async def approve_promotion_loss(db: AsyncSession, company_id: str, promo_id: st
     return promo
 
 
+async def delete_promotion(db: AsyncSession, promo_id: str) -> bool:
+    try:
+        pid = uuid.UUID(promo_id)
+    except ValueError:
+        return False
+    promo = await db.get(Promotion, pid)
+    if not promo:
+        return False
+    prev_pids = list(promo.producto_ids or [])
+    prev_cids = list(promo.categoria_ids or [])
+    await db.delete(promo)
+    await db.flush()
+    await _touch_products_for_promo(db, promo, prev_pids, prev_cids)
+    return True
+
+
 async def resolve_product_promotions(
     db: AsyncSession,
     company_id: str,
