@@ -20,6 +20,11 @@ async def run_lifecycle_test():
     pid1 = uuid.uuid4()
     pid2 = uuid.uuid4()
     promo_id = uuid.uuid4()
+    run_id = uuid.uuid4().hex[:6]
+    sku1 = f"T-SKU1-{run_id}"
+    sku2 = f"T-SKU2-{run_id}"
+    bar1 = f"991{run_id}"
+    bar2 = f"992{run_id}"
 
     async with async_session_factory() as db:
         print("1. Creating 2 test products...")
@@ -27,9 +32,12 @@ async def run_lifecycle_test():
             INSERT INTO products (
                 id, company_id, sku, codigo_barra, nombre, precio_venta, costo_promedio, activo, created_at, updated_at
             ) VALUES 
-            (:p1, :cid, 'TEST-SKU-1', '9999901', 'PRODUCTO TEST PROMO 1', 20000.00, 10000.00, true, NOW(), NOW()),
-            (:p2, :cid, 'TEST-SKU-2', '9999902', 'PRODUCTO TEST PROMO 2', 30000.00, 15000.00, true, NOW(), NOW());
-        """), {"p1": pid1, "p2": pid2, "cid": cid})
+            (:p1, :cid, :sku1, :bar1, 'PRODUCTO TEST PROMO 1', 20000.00, 10000.00, true, NOW(), NOW()),
+            (:p2, :cid, :sku2, :bar2, 'PRODUCTO TEST PROMO 2', 30000.00, 15000.00, true, NOW(), NOW());
+        """), {
+            "p1": pid1, "p2": pid2, "cid": cid,
+            "sku1": sku1, "sku2": sku2, "bar1": bar1, "bar2": bar2
+        })
         await db.commit()
 
         # Check initial state
@@ -103,7 +111,9 @@ async def run_lifecycle_test():
         print("5. Cleaning up test products...")
         await db.execute(text("DELETE FROM products WHERE id IN (:p1, :p2);"), {"p1": pid1, "p2": pid2})
         await db.commit()
-        print("ALL TESTS PASSED WITH 100% SUCCESS!")
+        print("\n==========================================")
+        print(">>> ALL TESTS PASSED WITH 100% SUCCESS! <<<")
+        print("==========================================")
 
 
 if __name__ == "__main__":
