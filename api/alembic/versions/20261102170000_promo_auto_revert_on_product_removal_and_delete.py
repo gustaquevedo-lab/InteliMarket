@@ -215,8 +215,8 @@ END;
 $$ LANGUAGE plpgsql;
 """
 
-TRIGGER_SQL = """
-DROP TRIGGER IF EXISTS trg_sync_promo_precio_fijo ON promotions;
+TRIGGER_DROP_SQL = "DROP TRIGGER IF EXISTS trg_sync_promo_precio_fijo ON promotions;"
+TRIGGER_CREATE_SQL = """
 CREATE TRIGGER trg_sync_promo_precio_fijo
 AFTER INSERT OR UPDATE OR DELETE ON promotions
 FOR EACH ROW EXECUTE FUNCTION sync_promo_precio_fijo();
@@ -250,8 +250,9 @@ WHERE precio_regular IS NOT NULL
 def upgrade() -> None:
     # 1. Actualizar la función del trigger para cubrir remoción de productos en UPDATE y DELETE
     op.execute(FUNCTION_SQL)
-    # 2. Re-crear el trigger asegurando que escuche INSERT OR UPDATE OR DELETE
-    op.execute(TRIGGER_SQL)
+    # 2. Re-crear el trigger asegurando que escuche INSERT OR UPDATE OR DELETE (separado para asyncpg)
+    op.execute(TRIGGER_DROP_SQL)
+    op.execute(TRIGGER_CREATE_SQL)
     # 3. Limpieza inmediata de productos huérfanos con precio regular desfasado
     op.execute(CLEANUP_ORPHANS_SQL)
 
