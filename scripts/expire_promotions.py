@@ -30,7 +30,7 @@ async def run():
             SET estado = 'vencida', updated_at = NOW()
             WHERE estado = 'activa'
               AND activo = true
-              AND valido_hasta < CURRENT_DATE
+              AND valido_hasta < (NOW() AT TIME ZONE 'America/Asuncion')::date
             RETURNING id, nombre, valido_hasta, company_id, tipo, producto_ids;
         """))
         vencidas = res.fetchall()

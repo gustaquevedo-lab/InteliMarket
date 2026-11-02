@@ -161,15 +161,35 @@ async def run_promotions_daily_sync():
     from api.src.promotions.models import Promotion
     from api.src.promotions.service import _touch_products_for_promo, _sync_balanza_si_aplica
 
+    now_dt = datetime.now(ZoneInfo("America/Asuncion"))
+    today = now_dt.date()
+
     async with async_session_factory() as db:
         try:
-            # 1. Obtener las promociones activas
+            # 1. Expirar automáticamente promociones vencidas por fecha en Paraguay
+            res_vencidas = await db.execute(
+                update(Promotion)
+                .where(
+                    Promotion.activo == True,
+                    Promotion.estado == "activa",
+                    Promotion.valido_hasta < today,
+                )
+                .values(estado="vencida", updated_at=func.now())
+                .returning(Promotion)
+            )
+            vencidas = list(res_vencidas.scalars().all())
+            if vencidas:
+                logger.info("Promociones expiradas automáticamente: %d", len(vencidas))
+                for v in vencidas:
+                    await _touch_products_for_promo(db, v)
+
+            # 2. Obtener las promociones activas
             res = await db.execute(
                 select(Promotion).where(Promotion.activo == True, Promotion.estado == "activa")
             )
             promos = list(res.scalars().all())
 
-            # 2. Tocar las promociones activas para que el trigger PostgreSQL 'trg_sync_promo_precio_fijo'
+            # 3. Tocar las promociones activas para que el trigger PostgreSQL 'trg_sync_promo_precio_fijo'
             # reevalúe la vigencia del día actual (valido_desde, valido_hasta, dias_semana)
             if promos:
                 promo_ids = [pr.id for pr in promos]
@@ -179,7 +199,7 @@ async def run_promotions_daily_sync():
                     .values(updated_at=func.now())
                 )
 
-            # 2. Tocar los productos vinculados y sincronizar balanzas
+            # 4. Tocar los productos vinculados y sincronizar balanzas
             for pr in promos:
                 try:
                     await _touch_products_for_promo(db, pr)
@@ -210,6 +230,22 @@ async def run_promotions_window_watch():
     today, now_time, dow = now_dt.date(), now_dt.time(), (now_dt.weekday() + 1) % 7
     async with async_session_factory() as db:
         try:
+            # 1. Expirar de inmediato cualquier promo cuya fecha de fin ya expiró
+            res_vencidas = await db.execute(
+                update(Promotion)
+                .where(
+                    Promotion.activo == True,
+                    Promotion.estado == "activa",
+                    Promotion.valido_hasta < today,
+                )
+                .values(estado="vencida", updated_at=func.now())
+                .returning(Promotion)
+            )
+            vencidas = list(res_vencidas.scalars().all())
+            for v in vencidas:
+                _promo_vigencia_prev.pop(v.id, None)
+                await _touch_products_for_promo(db, v)
+
             res = await db.execute(select(Promotion).where(Promotion.activo == True, Promotion.estado == "activa"))
             flipped = []
             seen = set()
@@ -229,9 +265,12 @@ async def run_promotions_window_watch():
                 _promo_vigencia_prev.pop(gone, None)
             for pr in flipped:
                 await _touch_products_for_promo(db, pr)
-            if flipped:
+            if flipped or vencidas:
                 await db.commit()
-                logger.info("Vigia de promos: %d promo(s) cambiaron de vigencia, productos tocados.", len(flipped))
+                if flipped:
+                    logger.info("Vigia de promos: %d promo(s) cambiaron de vigencia, productos tocados.", len(flipped))
+                if vencidas:
+                    logger.info("Vigia de promos: %d promo(s) marcadas como vencidas automáticamente.", len(vencidas))
         except Exception as e:
             await db.rollback()
             logger.error("Error en vigia de ventanas de promociones: %s", e)
