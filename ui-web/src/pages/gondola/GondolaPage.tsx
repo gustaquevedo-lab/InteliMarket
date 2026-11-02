@@ -366,7 +366,7 @@ export default function GondolaPage() {
             title="Cargar los productos aprobados de la auditoría de precios"
           >
             {cargandoAuditoria ? <Loader2 className="w-4 h-4 animate-spin" /> : <Tags className="w-4 h-4" />}
-            <span className="hidden sm:inline">Cargar Auditoría (456)</span>
+            <span className="hidden sm:inline">Cargar de Auditoría</span>
             <span className="sm:hidden">Auditoría</span>
           </button>
           {cola.length > 0 && (
