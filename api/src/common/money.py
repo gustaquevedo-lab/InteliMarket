@@ -24,3 +24,14 @@ def iva_incluido(total, tasa) -> Decimal:
 def iva_sobre_neto(base, tasa) -> Decimal:
     """IVA a sumar sobre una base neta, al más próximo."""
     return (Decimal(str(base)) * Decimal(str(tasa or 0)) / Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+
+def desglose_iva_incluido(exenta, gravada_5, gravada_10):
+    """Bases netas e IVA de un comprobante a partir de sus gravadas IVA incluido (como las guarda
+    la factura del proveedor). Sin gravadas conocidas (None) no hay desglose: devuelve None."""
+    if gravada_5 is None or gravada_10 is None:
+        return None
+    g5, g10 = gs(gravada_5), gs(gravada_10)
+    i5, i10 = iva_incluido(g5, 5), iva_incluido(g10, 10)
+    return {"base_exenta": int(gs(exenta)), "base_gravada_5": int(g5 - i5), "iva_5": int(i5),
+            "base_gravada_10": int(g10 - i10), "iva_10": int(i10)}

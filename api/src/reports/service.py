@@ -633,20 +633,42 @@ async def get_inventory_rotation(db: AsyncSession, company_id: Optional[str] = N
     return sorted(items, key=lambda x: x["ventas_30d"], reverse=True)
 
 
-async def get_fiscal_book(db: AsyncSession, company_id: Optional[str] = None, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+def _sql_libro(tipo_libro: str, company_id, fecha_desde, fecha_hasta, resumen: bool = False):
+    """SQL del libro IVA (o de su resumen) con bases e IVA guardados en cada comprobante.
+    Ventas: sales. Compras: purchase_orders (desglose de la factura del proveedor, ver sync)."""
+    a = "v" if tipo_libro == "ventas" else "po"
     params = {}
-    where = "v.estado <> 'cancelado'"
+    where = f"{a}.estado <> 'cancelado'"
+    if company_id:
+        where += f" AND {a}.company_id = :company_id"
+        params["company_id"] = company_id
     if fecha_desde:
-        where += " AND v.fecha >= :fecha_desde"
+        where += f" AND {a}.fecha >= :fecha_desde"
         params["fecha_desde"] = fecha_desde
     if fecha_hasta:
-        where += " AND v.fecha < CAST(:fecha_hasta AS date) + interval '1 day'"
+        where += f" AND {a}.fecha < CAST(:fecha_hasta AS date) + interval '1 day'"
         params["fecha_hasta"] = fecha_hasta
+    tabla = "sales v" if tipo_libro == "ventas" else "purchase_orders po"
+
+    if resumen:
+        return f"""
+            SELECT
+                COUNT(*) as total_operaciones,
+                COUNT(*) FILTER (WHERE {a}.base_gravada_10 IS NULL) as sin_desglose,
+                COALESCE(SUM({a}.base_gravada_5), 0) as total_5,
+                COALESCE(SUM({a}.base_gravada_10), 0) as total_10,
+                COALESCE(SUM({a}.base_exenta), 0) as total_exento,
+                COALESCE(SUM({a}.iva_5), 0) as total_iva_5,
+                COALESCE(SUM({a}.iva_10), 0) as total_iva_10,
+                COALESCE(SUM({a}.total), 0) as total_general
+            FROM {tabla}
+            WHERE {where}
+        """, params
 
     if tipo_libro == "ventas":
-        query = f"""
+        return f"""
             SELECT
-                v.fecha,
+                (v.fecha AT TIME ZONE 'America/Asuncion')::date as fecha,
                 v.numero as nro_comprobante,
                 NULL as ruc_emisor,
                 c.ruc as ruc_receptor,
@@ -662,30 +684,57 @@ async def get_fiscal_book(db: AsyncSession, company_id: Optional[str] = None, ti
             LEFT JOIN customers c ON c.id = v.customer_id
             WHERE {where}
             ORDER BY v.fecha
-        """
-    else:
-        where_c = where.replace("v.", "po.")
-        query = f"""
-            SELECT
-                po.fecha,
-                po.numero as nro_comprobante,
-                s.ruc as ruc_emisor,
-                NULL as ruc_receptor,
-                s.razon_social,
-                'Contribuyente' as condicion_iva,
-                0 as monto_5,
-                po.total as monto_10,
-                0 as monto_exento,
-                0 as iva_5,
-                ROUND(COALESCE(po.total,0) * 0.1 / 1.1, 0) as iva_10,
-                po.total
-            FROM purchase_orders po
-            JOIN suppliers s ON s.id = po.supplier_id
-            WHERE {where_c}
-            ORDER BY po.fecha
-        """
+        """, params
+    return f"""
+        SELECT
+            (po.fecha AT TIME ZONE 'America/Asuncion')::date as fecha,
+            po.numero as nro_comprobante,
+            s.ruc as ruc_emisor,
+            NULL as ruc_receptor,
+            s.razon_social,
+            'Contribuyente' as condicion_iva,
+            po.base_gravada_5 as monto_5,
+            po.base_gravada_10 as monto_10,
+            po.base_exenta as monto_exento,
+            CASE WHEN po.base_gravada_10 IS NULL THEN NULL ELSE po.iva_5 END as iva_5,
+            CASE WHEN po.base_gravada_10 IS NULL THEN NULL ELSE po.iva_10 END as iva_10,
+            po.total
+        FROM purchase_orders po
+        JOIN suppliers s ON s.id = po.supplier_id
+        WHERE {where}
+        ORDER BY po.fecha
+    """, params
 
+
+def _num(x):
+    return None if x is None else float(x)
+
+
+def _fila_libro_compras(r) -> dict:
+    """Una compra sin desglose fiscal guardado (legacy antes de 2016) sale con montos vacíos
+    y sin_desglose=True: nunca se supone que todo es gravado 10%."""
+    return {
+        "fecha": str(r["fecha"]) if r["fecha"] else None,
+        "nro_comprobante": r["nro_comprobante"],
+        "ruc_emisor": r["ruc_emisor"],
+        "ruc_receptor": r["ruc_receptor"],
+        "razon_social": r["razon_social"],
+        "condicion_iva": r["condicion_iva"],
+        "monto_5": _num(r["monto_5"]),
+        "monto_10": _num(r["monto_10"]),
+        "monto_exento": _num(r["monto_exento"]),
+        "iva_5": _num(r["iva_5"]),
+        "iva_10": _num(r["iva_10"]),
+        "total": float(r["total"] or 0),
+        "sin_desglose": r["monto_10"] is None,
+    }
+
+
+async def get_fiscal_book(db: AsyncSession, company_id: Optional[str] = None, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> list:
+    query, params = _sql_libro(tipo_libro, company_id, fecha_desde, fecha_hasta)
     results = (await _exec(db, query, params)).all()
+    if tipo_libro != "ventas":
+        return [_fila_libro_compras(r) for r in results]
     return [
         {
             "fecha": str(r["fecha"]) if r["fecha"] else None,
@@ -706,29 +755,9 @@ async def get_fiscal_book(db: AsyncSession, company_id: Optional[str] = None, ti
 
 
 async def get_fiscal_summary(db: AsyncSession, company_id: Optional[str] = None, tipo_libro: str = "ventas", fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:
-    params = {}
-    where = "v.estado <> 'cancelado'"
-    if fecha_desde:
-        where += " AND v.fecha >= :fecha_desde"
-        params["fecha_desde"] = fecha_desde
-    if fecha_hasta:
-        where += " AND v.fecha < CAST(:fecha_hasta AS date) + interval '1 day'"
-        params["fecha_hasta"] = fecha_hasta
-
-    query = f"""
-        SELECT
-            COUNT(*) as total_operaciones,
-            COALESCE(SUM(v.base_gravada_5), 0) as total_5,
-            COALESCE(SUM(v.base_gravada_10), 0) as total_10,
-            COALESCE(SUM(v.base_exenta), 0) as total_exento,
-            COALESCE(SUM(v.iva_5), 0) as total_iva_5,
-            COALESCE(SUM(v.iva_10), 0) as total_iva_10,
-            COALESCE(SUM(v.total), 0) as total_general
-        FROM sales v
-        WHERE {where}
-    """
+    query, params = _sql_libro(tipo_libro, company_id, fecha_desde, fecha_hasta, resumen=True)
     result = (await _exec(db, query, params)).first()
-    return {
+    out = {
         "total_operaciones": result["total_operaciones"] or 0,
         "total_5": float(result["total_5"] or 0),
         "total_10": float(result["total_10"] or 0),
@@ -737,6 +766,9 @@ async def get_fiscal_summary(db: AsyncSession, company_id: Optional[str] = None,
         "total_iva_10": float(result["total_iva_10"] or 0),
         "total_general": float(result["total_general"] or 0),
     }
+    if tipo_libro != "ventas":
+        out["sin_desglose"] = result["sin_desglose"] or 0
+    return out
 
 
 async def get_financial_summary(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None) -> dict:

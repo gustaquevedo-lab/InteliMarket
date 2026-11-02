@@ -43,7 +43,7 @@ import pymysql.cursors
 import psycopg
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from api.src.common.money import gs  # noqa: E402  (redondeo de Gs.: entero hacia arriba)
+from api.src.common.money import gs, desglose_iva_incluido  # noqa: E402  (redondeo de Gs. / IVA)
 
 # ----------------------------------------------------------------------------
 # Configuración (default MYSQL_HOST = legacy EN VIVO, no la copia local de dev)
@@ -967,7 +967,8 @@ def sync_compras(pg, my, sup_code_map):
         cur.execute(
             "SELECT IDFACCOMPRAS, IDCODPROV, NUMFAC, FECHA, TIMBRADO, "
             "(COALESCE(DEXENT, 0) + COALESCE(DGRAB, 0) + COALESCE(IVA, 0)) as tot, "
-            "(COALESCE(DEXENT, 0) + COALESCE(DGRAB, 0)) as subt "
+            "(COALESCE(DEXENT, 0) + COALESCE(DGRAB, 0)) as subt, "
+            "COALESCE(DEXENT, 0), GRAB5IC, GRAB10IC "
             "FROM fac_compras "
             "WHERE IDFACCOMPRAS > %s ORDER BY IDFACCOMPRAS", (last_id,))
         legacy_rows = cur.fetchall()
@@ -975,16 +976,23 @@ def sync_compras(pg, my, sup_code_map):
         log("  compras: sin filas nuevas")
         return last_id
     max_id, rows = last_id, []
-    for (idfc, idprov, numfac, fecha, timbrado, tot, subt) in legacy_rows:
+    for (idfc, idprov, numfac, fecha, timbrado, tot, subt, ex, g5, g10) in legacy_rows:
         max_id = max(max_id, idfc)
         cod = txt_keep(idprov, 20)
         sid = sup_code_map.get(cod, PLACEHOLDER_SUP_ID) if cod else PLACEHOLDER_SUP_ID
         obs = f"FACT={txt_keep(numfac) or ''} TIMB={txt_keep(timbrado) or ''}".strip()
+        # Libro IVA de compras: desglose de la cabecera (GRAB5IC/GRAB10IC = gravadas IVA incluido).
+        # Antes de 2016 vienen NULL: sin desglose (NULL), nunca se supone gravado 10%.
+        d = desglose_iva_incluido(ex, g5, g10) or dict.fromkeys(
+            ("base_exenta", "base_gravada_5", "iva_5", "base_gravada_10", "iva_10"))
         rows.append((uuid.uuid5(NS, f"comp:{idfc}"), COMPANY_ID, sid, f"C{idfc}"[:20],
                      safe_dt(fecha) or datetime.now(), "recibido", "PYG", obs[:500],
-                     money(tot), money(subt)))
+                     money(tot), money(subt), d["base_gravada_10"], d["base_gravada_5"],
+                     d["base_exenta"], d["iva_10"], d["iva_5"]))
     n = upsert(pg, "purchase_orders", ["id", "company_id", "supplier_id", "numero", "fecha",
-                                        "estado", "moneda", "observaciones", "total", "subtotal"], rows)
+                                        "estado", "moneda", "observaciones", "total", "subtotal",
+                                        "base_gravada_10", "base_gravada_5", "base_exenta",
+                                        "iva_10", "iva_5"], rows)
     log(f"  compras: {n} filas nuevas (IDFACCOMPRAS {last_id} -> {max_id})")
     set_watermark(pg, "compras", last_id=max_id)
     return max_id
@@ -1743,20 +1751,8 @@ def recalcular_iva(pg, sale_ids, purchase_ids):
                   base_exenta     = a.tex
                 FROM a WHERE s.id = a.sale_id
             """, (ids,))
-        if purchase_ids:
-            ids = [uuid.uuid5(NS, f"comp:{i}") for i in purchase_ids]
-            cur.execute("""
-                WITH a AS (
-                  SELECT purchase_order_id,
-                    SUM(total) tot,
-                    SUM(CASE WHEN iva_tasa=10 THEN round(total*10/110.0) ELSE 0 END) i10,
-                    SUM(CASE WHEN iva_tasa=5  THEN round(total*5/105.0)  ELSE 0 END) i5
-                  FROM purchase_order_items WHERE purchase_order_id = ANY(%s)
-                  GROUP BY purchase_order_id)
-                UPDATE purchase_orders p SET
-                  subtotal = a.tot, total = a.tot, iva_10 = a.i10, iva_5 = a.i5
-                FROM a WHERE p.id = a.purchase_order_id
-            """, (ids,))
+        # Compras: el IVA sale de la cabecera del legacy (sync_compras), no de las lineas
+        # (~16% de item_compras no marca GRAV10/GRAV5/EXENTAS).
     pg.commit()
     log("  IVA de cabeceras recalculado")
 

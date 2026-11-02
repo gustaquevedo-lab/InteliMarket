@@ -82,6 +82,10 @@ class PurchaseOrder(Base):
     descuento_total = Column(Numeric(15, 0), default=0)
     iva_10 = Column(Numeric(15, 0), default=0)
     iva_5 = Column(Numeric(15, 0), default=0)
+    # Desglose fiscal de la factura del proveedor (bases netas). NULL = sin desglose conocido.
+    base_gravada_10 = Column(Numeric(15, 0))
+    base_gravada_5 = Column(Numeric(15, 0))
+    base_exenta = Column(Numeric(15, 0))
     total = Column(Numeric(15, 0))
     observaciones = Column(Text)
     user_id = Column(UUID(as_uuid=True))
