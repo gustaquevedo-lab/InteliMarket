@@ -77,33 +77,84 @@
 <body class="h-full flex flex-col overflow-hidden text-sm select-none">
 
   <!-- TOP BAR: KPI METRICS & ACTIONS -->
-  <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 shrink-0 shadow-lg">
-    <div class="max-w-[1920px] mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+  <header class="bg-slate-900 border-b border-slate-800 px-4 py-2.5 shrink-0 shadow-lg">
+    <div class="max-w-[1920px] mx-auto flex flex-col gap-2.5">
       
-      <!-- Brand & Title -->
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-lg text-white shadow-md shadow-blue-500/20">
-          ES
-        </div>
-        <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-base font-bold text-white tracking-wide">Auditor de Precios & Rentabilidad</h1>
-            <!-- Server Sync Badge -->
-            <span id="server-sync-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1.5 transition-all">
-              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span id="server-sync-text">Conectando al servidor...</span>
-            </span>
+      <!-- Fila 1: Marca, Título y Acciones Principales -->
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <!-- Brand & Title -->
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-base text-white shadow-md shadow-blue-500/20 shrink-0">
+            ES
           </div>
-          <p class="text-xs text-slate-400">
-            Ajuste fino de PVP y Escalas Mayoristas persistido en PostgreSQL — Extra Supermercado (PYG)
-          </p>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-base font-bold text-white tracking-wide">Auditor de Precios & Rentabilidad</h1>
+              <!-- Server Sync Badge -->
+              <span id="server-sync-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-700/60 flex items-center gap-1.5 transition-all">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span id="server-sync-text">Conectando al servidor...</span>
+              </span>
+            </div>
+            <p class="text-xs text-slate-400">
+              Ajuste fino de PVP y Escalas Mayoristas persistido en PostgreSQL — Extra Supermercado (PYG)
+            </p>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <!-- Shortcuts modal button -->
+          <button onclick="toggleShortcutsModal()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors" title="Ver atajos de teclado (?)">
+            <kbd class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-400">?</kbd>
+            <span class="hidden sm:inline">Atajos</span>
+          </button>
+
+          <!-- Live Refresh Button -->
+          <button onclick="loadLiveCatalog(true)" id="btn-refresh-catalog" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors" title="Actualizar en vivo costos y precios desde la base de datos">
+            <svg id="refresh-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            <span class="hidden sm:inline">Actualizar Precios</span>
+          </button>
+
+          <!-- Reset Button -->
+          <button onclick="confirmReset()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-red-950/60 text-slate-400 hover:text-red-300 text-xs font-medium border border-slate-700 hover:border-red-800 transition-colors" title="Restaurar toda la auditoría a valores originales">
+            Reiniciar
+          </button>
+
+          <!-- Export Dropdown / Button -->
+          <button onclick="exportApprovedDecisions()" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition-all" title="Descargar copia JSON/CSV de respaldo (Ctrl+S)">
+            <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+            </svg>
+            <span class="hidden sm:inline">CSV / JSON</span>
+          </button>
+
+          <!-- PDF Export Button -->
+          <button onclick="downloadAuditPDF()" id="btn-download-pdf" class="px-3 py-2 rounded-lg bg-red-950/60 hover:bg-red-900 text-red-200 hover:text-white text-xs font-semibold border border-red-800/80 flex items-center gap-1.5 transition-all shadow-sm" title="Descargar reporte PDF oficial en orden alfabético de los productos con precios modificados">
+            <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+            </svg>
+            <span>Descargar PDF</span>
+          </button>
+
+          <!-- Etiquetas de Góndola PWA Button -->
+          <a href="/etiquetas-gondola?origen=auditoria" target="_blank" class="px-3 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 text-xs font-bold border border-amber-500/40 flex items-center gap-1.5 transition-all shadow-sm" title="Abrir PWA de góndola con los productos modificados cargados en la cola de impresión">
+            <span>🏷️ Imprimir Etiquetas Góndola</span>
+          </a>
+
+          <!-- Primary Action: Apply in Production -->
+          <button onclick="openApplyModal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-900/30 flex items-center gap-2 transition-all" title="Aplicar los precios aprobados en la base de datos de producción">
+            <span>🚀 Aplicar en Producción</span>
+          </button>
         </div>
       </div>
 
-      <!-- Live KPIs -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 flex-1 max-w-4xl">
+      <!-- Fila 2: Live KPIs (4 columnas con ancho completo y sin solapamiento) -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5">
         <!-- Audit Progress -->
-        <div class="kpi-card rounded-xl p-2.5">
+        <div class="kpi-card rounded-xl p-2.5 min-w-0">
           <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
             <span>SKUs Auditados</span>
             <span id="kpi-audit-pct" class="font-bold text-blue-400">0%</span>
@@ -115,7 +166,7 @@
         </div>
 
         <!-- Margin Before vs After -->
-        <div class="kpi-card rounded-xl p-2.5">
+        <div class="kpi-card rounded-xl p-2.5 min-w-0">
           <div class="flex items-center justify-between text-xs text-slate-400 mb-1">
             <span>Margen Global Real</span>
             <span id="kpi-margin-delta" class="font-bold text-emerald-400">+0.0%</span>
@@ -128,66 +179,18 @@
         </div>
 
         <!-- Profit Delta -->
-        <div class="kpi-card rounded-xl p-2.5">
+        <div class="kpi-card rounded-xl p-2.5 min-w-0">
           <div class="text-xs text-slate-400 mb-1">Ganancia Adicional</div>
           <div class="text-base font-black text-emerald-400 truncate" id="kpi-profit-delta">+₲ 0</div>
           <div class="text-[10px] text-slate-400 truncate">Margen bruto / mes est.</div>
         </div>
 
         <!-- Price Increases Count -->
-        <div class="kpi-card rounded-xl p-2.5">
+        <div class="kpi-card rounded-xl p-2.5 min-w-0">
           <div class="text-xs text-slate-400 mb-1">Aumentos Aprobados</div>
           <div class="text-base font-black text-indigo-400 truncate" id="kpi-increases-count">0 SKUs</div>
           <div class="text-[10px] text-slate-400 truncate" id="kpi-protected-count">0 protegidos de tráfico</div>
         </div>
-      </div>
-
-      <!-- Actions -->
-      <div class="flex items-center gap-2 shrink-0">
-        <!-- Shortcuts modal button -->
-        <button onclick="toggleShortcutsModal()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors" title="Ver atajos de teclado (?)">
-          <kbd class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-400">?</kbd>
-          <span class="hidden sm:inline">Atajos</span>
-        </button>
-
-        <!-- Live Refresh Button -->
-        <button onclick="loadLiveCatalog(true)" id="btn-refresh-catalog" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors" title="Actualizar en vivo costos y precios desde la base de datos">
-          <svg id="refresh-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-          </svg>
-          <span class="hidden sm:inline">Actualizar Precios</span>
-        </button>
-
-        <!-- Reset Button -->
-        <button onclick="confirmReset()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-red-950/60 text-slate-400 hover:text-red-300 text-xs font-medium border border-slate-700 hover:border-red-800 transition-colors" title="Restaurar toda la auditoría a valores originales">
-          Reiniciar
-        </button>
-
-        <!-- Export Dropdown / Button -->
-        <button onclick="exportApprovedDecisions()" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center gap-1.5 transition-all" title="Descargar copia JSON/CSV de respaldo (Ctrl+S)">
-          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-          </svg>
-          <span class="hidden sm:inline">CSV / JSON</span>
-        </button>
-
-        <!-- PDF Export Button -->
-        <button onclick="downloadAuditPDF()" id="btn-download-pdf" class="px-3 py-2 rounded-lg bg-red-950/60 hover:bg-red-900 text-red-200 hover:text-white text-xs font-semibold border border-red-800/80 flex items-center gap-1.5 transition-all shadow-sm" title="Descargar reporte PDF oficial en orden alfabético de los productos con precios modificados">
-          <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
-          </svg>
-          <span>Descargar PDF</span>
-        </button>
-
-        <!-- Etiquetas de Góndola PWA Button -->
-        <a href="/etiquetas-gondola?origen=auditoria" target="_blank" class="px-3 py-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 text-xs font-bold border border-amber-500/40 flex items-center gap-1.5 transition-all shadow-sm" title="Abrir PWA de góndola con los productos modificados cargados en la cola de impresión">
-          <span>🏷️ Imprimir Etiquetas Góndola</span>
-        </a>
-
-        <!-- Primary Action: Apply in Production -->
-        <button onclick="openApplyModal()" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-900/30 flex items-center gap-2 transition-all" title="Aplicar los precios aprobados en la base de datos de producción">
-          <span>🚀 Aplicar en Producción</span>
-        </button>
       </div>
 
     </div>
