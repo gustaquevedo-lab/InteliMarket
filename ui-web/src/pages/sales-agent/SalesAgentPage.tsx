@@ -41,7 +41,7 @@ export default function SalesAgentPage() {
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; outcome?: any; prompts?: string[] }>>([
     {
       role: "assistant",
-      content: "👋 **Buenas tardes. Bienvenido a la Torre de Control Comercial del Gerente de Ventas IA.**\n\nHe auditado los **movimientos del mes en curso (Agosto 2026 MTD)** con **6.301 tickets** y **Gs. 635.839.971 facturados a la fecha**, proyectando un cierre mensual de **Gs. 1.231M**.\n\nNuestro margen actual del mes se ubica en **16.4%**, situándonos a un **Gap de Gs. 48.009.408** de la meta óptima del **24.0%**.\n\nHe sincronizado las **escalas de precios por cantidad de Ñemuha** para más de **35 SKUs de alta rotación** en Carnicería, PARESA, Bebidas, Lácteos y Almacén.\n\n¿En qué sección comercial querés que enfoquemos las remarcaciones y estrategias de hoy?",
+      content: "👋 **Bienvenido al Gerente de Ventas IA.**\n\nLos números del mes se muestran arriba con los datos reales del sistema. ¿En qué querés que enfoquemos el análisis de hoy?",
       prompts: [
         "¿Cómo cerramos el Gap para llegar al 24%?",
         "Estrategia de precios en Carnicería",
@@ -235,12 +235,12 @@ export default function SalesAgentPage() {
     )
   }
 
-  const margen = analysis?.margen_actual_pct || 16.4
-  const gap24 = analysis?.gap_para_24_pct_gs || 48009408
-  const facturacion = analysis?.facturacion_mes || 635839971
-  const ganancia = analysis?.ganancia_bruta_mes || 104592185
-  const proyeccion = analysis?.proyeccion_cierre_mes_gs || 1231939944
-  const tickets = analysis?.tickets_mes || 6301
+  const margen = analysis?.margen_actual_pct || 0
+  const gap24 = analysis?.gap_para_24_pct_gs || 0
+  const facturacion = analysis?.facturacion_mes || 0
+  const ganancia = analysis?.ganancia_bruta_mes || 0
+  const proyeccion = analysis?.proyeccion_cierre_mes_gs || 0
+  const tickets = analysis?.tickets_mes || 0
 
   const allProposals = analysis?.propuestas_precios || []
   const uniqueCats = Array.from(new Set(allProposals.map((p: any) => String(p.categoria || "general").toLowerCase()))) as string[]
@@ -263,7 +263,7 @@ export default function SalesAgentPage() {
     ? Number((((ganancia + simAddedGain) / (facturacion + simAddedGain)) * 100).toFixed(1))
     : 18.2
 
-  const simulatedGapReduction = Math.min(100, Math.round((simAddedGain / gap24) * 100))
+  const simulatedGapReduction = Math.min(100, Math.round((simAddedGain / (gap24 || 1)) * 100))
   const modalCosto = Number(modalProposal?.costo_unitario || 0)
 
   return (

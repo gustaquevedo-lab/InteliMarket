@@ -335,7 +335,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
             <Target className="w-4 h-4 text-rose-500" />
           </div>
           <p className="text-xl font-black text-slate-900 dark:text-white font-mono">
-            {formatCurrency(paresaCentral?.ventas_actual_gs || 3260989251)}
+            {formatCurrency(paresaCentral?.ventas_actual_gs || 0)}
           </p>
           <div className="flex items-center gap-2 mt-2">
             <div className="flex-1 h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
@@ -348,7 +348,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
               {paresaCentral?.cumplimiento_actual_pct || 80.5}%
             </span>
           </div>
-          <p className="text-[11px] text-slate-400 mt-1 font-medium">Meta: {formatCurrency(paresaCentral?.meta_monto_gs || 4050000000)}</p>
+          <p className="text-[11px] text-slate-400 mt-1 font-medium">Meta: {formatCurrency(paresaCentral?.meta_monto_gs || 0)}</p>
         </div>
 
         {/* Card 2: Rebates Totales Estimados */}
@@ -358,7 +358,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
             <Award className="w-4 h-4 text-emerald-500" />
           </div>
           <p className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
-            {formatCurrency(multiDashboard?.rebate_total_estimado_gs || 81077099)}
+            {formatCurrency(multiDashboard?.rebate_total_estimado_gs || 0)}
           </p>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">
             Cartera de {multiDashboard?.proveedores?.length || 45} acuerdos vigentes
@@ -372,7 +372,7 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
             <ShoppingBag className="w-4 h-4 text-blue-500" />
           </div>
           <p className="text-xl font-black text-slate-900 dark:text-white font-mono">
-            {formatCurrency(multiDashboard?.ventas_total_general_gs || 5494876824)}
+            {formatCurrency(multiDashboard?.ventas_total_general_gs || 0)}
           </p>
           <p className="text-xs text-blue-600 dark:text-blue-400 font-bold mt-1 flex items-center gap-0.5">
             <ArrowUpRight className="w-3.5 h-3.5" /> {multiDashboard?.cumplimiento_global_pct || 72.6}% de la meta global
@@ -386,10 +386,10 @@ Estoy conectado en tiempo real a la base de datos de ventas, metas comerciales y
             <Layers className="w-4 h-4 text-violet-500" />
           </div>
           <p className="text-xl font-black text-slate-900 dark:text-white font-mono">
-            {formatCurrency(multiDashboard?.meta_total_general_gs || 7570000000)}
+            {formatCurrency(multiDashboard?.meta_total_general_gs || 0)}
           </p>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 font-medium">
-            Proyección: {formatCurrency(multiDashboard?.tendencia_global_gs || 5873833846)}
+            Proyección: {formatCurrency(multiDashboard?.tendencia_global_gs || 0)}
           </p>
         </div>
       </div>

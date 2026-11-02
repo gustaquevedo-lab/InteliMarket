@@ -597,7 +597,7 @@ export default function InventoryPage() {
                 📦 {stock.length} registros de stock
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
-                💰 {formatPYG(stats?.total_valor_costo || stats?.total_value_cost || 485000000)} en existencias
+                💰 {formatPYG(stats?.total_valor_costo || stats?.total_value_cost || 0)} en existencias
               </span>
             </div>
           </div>
@@ -641,7 +641,7 @@ export default function InventoryPage() {
               <DollarSign className="w-4 h-4 text-emerald-400" />
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-emerald-400">
-              {formatPYG(stats?.total_valor_costo || stats?.total_value_cost || 485000000)}
+              {formatPYG(stats?.total_valor_costo || stats?.total_value_cost || 0)}
             </p>
             <p className="text-[11px] text-slate-400">Patrimonio en inventario</p>
           </div>

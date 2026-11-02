@@ -93,8 +93,8 @@ async def expenses_by_category(fecha_desde: date | None = Query(None), fecha_has
 
 
 @router.get("/sales/margin-summary")
-async def sales_margin_summary(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db)):
-    return await service.get_margin_summary(db, fecha_desde, fecha_hasta)
+async def sales_margin_summary(fecha_desde: date | None = Query(None), fecha_hasta: date | None = Query(None), db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    return await service.get_margin_summary(db, user["company_id"], fecha_desde, fecha_hasta)
 
 
 @router.get("/sales/by-product")

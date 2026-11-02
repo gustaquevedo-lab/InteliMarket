@@ -949,7 +949,6 @@ async def recalculate_score(db: AsyncSession, company_id: str, customer_id: str)
 async def compute_ebitda(db: AsyncSession, company_id: str, month: str | None = None) -> dict:
     cid = uuid.UUID(company_id)
 
-    from api.src.sales.models import Sale, SaleItem
     from api.src.petty_cash.models import Expense
 
     today = _today()
@@ -958,31 +957,11 @@ async def compute_ebitda(db: AsyncSession, company_id: str, month: str | None = 
     y, m = int(year), int(mes_num)
     inicio, fin = _month_range(y, m)
 
-    # 1. Ventas Netas del Mes
-    sales_r = await db.execute(
-        select(func.coalesce(func.sum(Sale.total), 0)).where(
-            Sale.company_id == cid,
-            Sale.estado == 'confirmado',
-            func.date(Sale.fecha) >= inicio,
-            func.date(Sale.fecha) <= fin,
-        )
-    )
-    ingresos_netos = float(sales_r.scalar() or 0)
-
-    # Costo de ventas real: costo unitario x cantidad de cada linea vendida en el mes
-    # (dato real sincronizado desde el legado, no una aproximacion via compras del mes).
-    cogs_r = await db.execute(
-        select(func.coalesce(func.sum(SaleItem.costo_unitario * SaleItem.cantidad), 0))
-        .select_from(SaleItem)
-        .join(Sale, Sale.id == SaleItem.sale_id)
-        .where(
-            Sale.company_id == cid,
-            Sale.estado == 'confirmado',
-            func.date(Sale.fecha) >= inicio,
-            func.date(Sale.fecha) <= fin,
-        )
-    )
-    costo_ventas = float(cogs_r.scalar() or 0)
+    # Ventas netas sin IVA y costo de las mismas lineas: el mismo calculo que el dashboard
+    from api.src.reports.service import get_sales_summary
+    resumen = await get_sales_summary(db, company_id, inicio, fin)
+    ingresos_netos = float(resumen["monto_sin_iva"])
+    costo_ventas = float(resumen["costo_total"])
 
     # Gastos operativos reales: tabla expenses (sincronizada desde fin_gasto del legado),
     # no una adivinanza por texto sobre facturas de proveedor.
@@ -1005,6 +984,7 @@ async def compute_ebitda(db: AsyncSession, company_id: str, month: str | None = 
         "ingresos_netos": round(ingresos_netos, 2),
         "costo_ventas": round(costo_ventas, 2),
         "resultado_bruto": round(resultado_bruto, 2),
+        "margen_bruto_pct": resumen["margen_bruto_pct"],
         "gastos_operativos": round(gastos_operativos, 2),
         "ebitda": round(ebitda, 2),
         "margen_ebitda": margen_ebitda,

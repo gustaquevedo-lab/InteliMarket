@@ -503,7 +503,7 @@ export default function Customer360Page() {
             { label: "WhatsApp Normalizado", val: `${dashboardStats?.total_with_phone?.toLocaleString("es-PY") || "6.953"} líneas`, sub: "Formato E.164 verificado", color: "text-emerald-400", icon: MessageCircle },
             { label: "Clientes de Brasil (PT)", val: `${dashboardStats?.total_brasil?.toLocaleString("es-PY") || "322"} clientes`, sub: "Idioma Portugués activo (+55)", color: "text-amber-300", icon: Award },
             { label: "Clientes Paraguay", val: `${dashboardStats?.total_paraguay?.toLocaleString("es-PY") || "10.173"} clientes`, sub: "Nacional / Frontera (+595)", color: "text-blue-300", icon: UserCheck },
-            { label: "Puntos ExtraClub", val: `${((dashboardStats?.total_points_loyalty || 1715546) / 1000000).toFixed(2)}M pts`, sub: "Programa de lealtad auditado", color: "text-purple-300", icon: Sparkles },
+            { label: "Puntos ExtraClub", val: `${((dashboardStats?.total_points_loyalty || 0) / 1000000).toFixed(2)}M pts`, sub: "Programa de lealtad auditado", color: "text-purple-300", icon: Sparkles },
             { label: "Socios ExtraClub", val: `${dashboardStats?.total_socios_vip || 341} socios`, sub: "Con tarjeta física o digital", color: "text-indigo-300", icon: HeartHandshake },
           ].map((kpi) => (
             <div key={kpi.label} className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">

@@ -10,10 +10,10 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, PieChart, Pie, Cell
 } from "recharts"
-import { api } from "../../api"
+import { api, COMPANY_ID } from "../../api"
 import { useToast } from "../../context/ToastContext"
 import { useBranch } from "../../context/BranchContext"
-import { formatPYG } from "../../utils/format"
+import { formatPYG, getAsuncionDateStr } from "../../utils/format"
 import PlanillaDetalleDiaTab from "./PlanillaDetalleDiaTab"
 import ConsolidadoDiarioTab from "./ConsolidadoDiarioTab"
 
@@ -39,10 +39,10 @@ export default function ReportsPage() {
   const [supplierSearchText, setSupplierSearchText] = useState("")
 
   // Selector de fechas con zona horaria America/Asuncion
-  const todayStr = useMemo(() => new Date().toISOString().split("T")[0], [])
+  const todayStr = useMemo(() => getAsuncionDateStr(), [])
   const firstDayMonthStr = useMemo(() => {
     const d = new Date()
-    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0]
+    return getAsuncionDateStr(new Date(d.getFullYear(), d.getMonth(), 1))
   }, [])
 
   const [fechaPreset, setFechaPreset] = useState<"hoy" | "ayer" | "7d" | "mes" | "mes_ant" | "custom">("mes")
@@ -53,34 +53,39 @@ export default function ReportsPage() {
   // Datos ejecutivos
   const [executiveData, setExecutiveData] = useState<any>(null)
   const [categoriesData, setCategoriesData] = useState<any[]>([])
+  const [empresa, setEmpresa] = useState<{ razon_social?: string; ruc?: string } | null>(null)
+
+  useEffect(() => {
+    api.companies.get(COMPANY_ID).then(setEmpresa).catch(() => setEmpresa(null))
+  }, [])
 
   // Handler de cambio de preset
   const handlePresetChange = (preset: "hoy" | "ayer" | "7d" | "mes" | "mes_ant" | "custom") => {
     setFechaPreset(preset)
     const now = new Date()
     if (preset === "hoy") {
-      const s = now.toISOString().split("T")[0]
+      const s = getAsuncionDateStr(now)
       setFechaDesde(s)
       setFechaHasta(s)
     } else if (preset === "ayer") {
       const y = new Date(now)
       y.setDate(y.getDate() - 1)
-      const s = y.toISOString().split("T")[0]
+      const s = getAsuncionDateStr(y)
       setFechaDesde(s)
       setFechaHasta(s)
     } else if (preset === "7d") {
       const d = new Date(now)
       d.setDate(d.getDate() - 7)
-      setFechaDesde(d.toISOString().split("T")[0])
-      setFechaHasta(now.toISOString().split("T")[0])
+      setFechaDesde(getAsuncionDateStr(d))
+      setFechaHasta(getAsuncionDateStr(now))
     } else if (preset === "mes") {
       setFechaDesde(firstDayMonthStr)
       setFechaHasta(todayStr)
     } else if (preset === "mes_ant") {
       const prevMonthLastDay = new Date(now.getFullYear(), now.getMonth(), 0)
       const prevMonthFirstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      setFechaDesde(prevMonthFirstDay.toISOString().split("T")[0])
-      setFechaHasta(prevMonthLastDay.toISOString().split("T")[0])
+      setFechaDesde(getAsuncionDateStr(prevMonthFirstDay))
+      setFechaHasta(getAsuncionDateStr(prevMonthLastDay))
     }
   }
 
@@ -110,14 +115,7 @@ export default function ReportsPage() {
       if (catRes.status === "fulfilled" && Array.isArray(catRes.value) && catRes.value.length > 0) {
         setCategoriesData(catRes.value)
       } else {
-        setCategoriesData([
-          { categoria: "Carnicería & Desposte", monto: 1150000000, porcentaje: 26.1, items: 12400 },
-          { categoria: "Bebidas & Cervezas", monto: 920000000, porcentaje: 20.9, items: 28900 },
-          { categoria: "Almacén & Secos", monto: 850000000, porcentaje: 19.3, items: 34500 },
-          { categoria: "Lácteos & Fiambrería", monto: 780000000, porcentaje: 17.7, items: 19800 },
-          { categoria: "Verdulería & Frutas", monto: 420000000, porcentaje: 9.5, items: 15200 },
-          { categoria: "Limpieza & Higiene", monto: 285900000, porcentaje: 6.5, items: 8400 },
-        ])
+        setCategoriesData([])
       }
 
       if (supRes.status === "fulfilled" && Array.isArray(supRes.value)) {
@@ -242,43 +240,15 @@ export default function ReportsPage() {
   }
 
   const resumen = executiveData?.resumen || {
-    total_vendido: 4405900000,
-    cmv: 3348484000,
-    utilidad_bruta: 1057416000,
-    margen_bruto_pct: 24.0,
-    descuentos_pos: 42800000,
-    devoluciones_nc: 15600000,
-    resultado_neto: 1041816000,
-    resultado_neto_pct: 23.65,
-    total_tickets: 38450,
-    ticket_promedio: 114587,
+    total_vendido: 0, cmv: 0, utilidad_bruta: 0, margen_bruto_pct: 0, descuentos_pos: 0,
+    devoluciones_nc: 0, resultado_neto: 0, resultado_neto_pct: 0, total_tickets: 0, ticket_promedio: 0,
   }
 
-  const lineas = executiveData?.lineas_ejecutivas || [
-    { orden: 1, concepto: "1. Facturación Bruta (Total Vendido)", monto: resumen.total_vendido, tipo: "ingreso", descripcion: "Ventas brutas acumuladas en POS" },
-    { orden: 2, concepto: "2. Costo Mercadería Vendida (CMV)", monto: resumen.cmv, tipo: "costo", descripcion: "Costo promedio ponderado de reposición" },
-    { orden: 3, concepto: "3. Margen / Utilidad Comercial Bruta", monto: resumen.utilidad_bruta, tipo: "resultado", descripcion: "Margen comercial bruto (L1 - L2)" },
-    { orden: 4, concepto: "4. % Margen Comercial Bruto", monto: resumen.margen_bruto_pct, tipo: "porcentaje", descripcion: "Porcentaje de utilidad sobre ventas" },
-    { orden: 5, concepto: "5. Descuentos Otorgados en Cajas", monto: resumen.descuentos_pos, tipo: "descuento", descripcion: "Promociones y descuentos en POS" },
-    { orden: 6, concepto: "6. Devoluciones & Notas de Crédito", monto: resumen.devoluciones_nc, tipo: "devolucion", descripcion: "Devoluciones de clientes y NC" },
-    { orden: 7, concepto: "7. Resultado Comercial Neto", monto: resumen.resultado_neto, tipo: "resultado_final", descripcion: "Utilidad comercial neta final (L3 - L6)" },
-  ]
+  const lineas: any[] = executiveData?.lineas_ejecutivas || []
 
-  const mediosPago = executiveData?.medios_pago || [
-    { etiqueta: "🇵🇾 Efectivo Guaraníes (PYG)", moneda: "PYG", cantidad: 16500, monto: 1924228547, porcentaje: 43.7 },
-    { etiqueta: "💵 Efectivo Reales (R$ cobrado en gaveta)", moneda: "BRL", cantidad: 3200, monto: 450000000, porcentaje: 10.2 },
-    { etiqueta: "💳 Tarjetas Bancard (POS)", moneda: "PYG", cantidad: 12400, monto: 1462313041, porcentaje: 33.2 },
-    { etiqueta: "📱 QR Bancard / Zimple", moneda: "PYG", cantidad: 5800, monto: 1005876029, porcentaje: 22.8 },
-    { etiqueta: "💳 Tarjetas Dinelco (POS)", moneda: "PYG", cantidad: 250, monto: 13482383, porcentaje: 0.3 },
-  ]
+  const mediosPago: any[] = executiveData?.medios_pago || []
 
-  const cajeras = executiveData?.cajeras || [
-    { cajera: "Lilian Paredes (Boca 011)", turnos: 26, tickets: 4820, total_ventas: 554000000, descuentos: 5400000, ticket_promedio: 114937, porcentaje_ventas: 12.6 },
-    { cajera: "Rossana Ortiz (Boca 012)", turnos: 25, tickets: 4610, total_ventas: 529000000, descuentos: 5100000, ticket_promedio: 114750, porcentaje_ventas: 12.0 },
-    { cajera: "Fátima Duarte (Boca 013)", turnos: 26, tickets: 4750, total_ventas: 545000000, descuentos: 5300000, ticket_promedio: 114736, porcentaje_ventas: 12.4 },
-    { cajera: "María González (Boca 014)", turnos: 24, tickets: 4320, total_ventas: 496000000, descuentos: 4800000, ticket_promedio: 114814, porcentaje_ventas: 11.3 },
-    { cajera: "Sandra Romero (Boca 015)", turnos: 25, tickets: 4500, total_ventas: 516000000, descuentos: 5000000, ticket_promedio: 114666, porcentaje_ventas: 11.7 },
-  ]
+  const cajeras: any[] = executiveData?.cajeras || []
 
   // Memoized cálculos de proveedores
   const filteredSuppliers = useMemo(() => {
@@ -379,11 +349,11 @@ export default function ReportsPage() {
               <div>
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <span className="text-[10px] font-extrabold tracking-widest text-emerald-400 uppercase bg-emerald-500/10 px-2.5 py-0.5 rounded-md border border-emerald-500/20">
-                    INTELIGENCIA DE NEGOCIO · EXTRA SUPERMERCADO
+                    INTELIGENCIA DE NEGOCIO
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                     <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                    GRUPO SANTA TERESA E.A.S. · RUC 80150377-9
+                    {empresa?.razon_social || "—"}{empresa?.ruc ? ` · RUC ${empresa.ruc}` : ""}
                   </span>
                 </div>
                 <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
@@ -646,7 +616,7 @@ export default function ReportsPage() {
           }`}
         >
           <CreditCard className="w-4 h-4" />
-          Medios de Pago & Gaveta
+          Medios de Pago
         </button>
         <button
           onClick={() => setActiveTab("cajeras")}
@@ -657,7 +627,7 @@ export default function ReportsPage() {
           }`}
         >
           <UserCheck className="w-4 h-4" />
-          Rendimiento por Cajera
+          Ventas por Vendedor
         </button>
         <button
           onClick={() => setActiveTab("categorias")}
@@ -701,7 +671,7 @@ export default function ReportsPage() {
                   Estructura Económica Oficial de Rentabilidad Comercial
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Desglose de 7 líneas exigido para Extra Supermercado (GRUPO SANTA TERESA E.A.S.)
+                  Desglose de 7 líneas de utilidad del período
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -816,7 +786,7 @@ export default function ReportsPage() {
               Desglose de Cobranzas por Medio de Pago
             </h3>
             <p className="text-xs text-slate-400 mb-4">
-              Ventas 100% en Guaraníes. Las divisas (R$, US$) se capturan como medio de pago físico en gaveta.
+              Facturas del período por medio de pago registrado; las del legacy, por condición de venta.
             </p>
 
             <div className="overflow-x-auto">
@@ -884,9 +854,6 @@ export default function ReportsPage() {
                   </PieChart>
                 </ResponsiveContainer>
               </div>
-            </div>
-            <div className="text-[11px] text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-3">
-              💡 <em>Cobranzas en Reales (R$) y Dólares (US$) se concilian en gaveta al tipo de cambio de apertura.</em>
             </div>
           </div>
         </div>
@@ -1482,10 +1449,10 @@ export default function ReportsPage() {
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <div>
               <h3 className="text-base font-black text-slate-900 dark:text-white">
-                Rendimiento Comercial y Productividad por Cajera / Turno
+                Ventas por Vendedor
               </h3>
               <p className="text-xs text-slate-400">
-                Auditoría de tickets emitidos, volumen facturado, descuentos otorgados y ticket medio por boca de caja
+                Facturas emitidas, monto facturado y ticket promedio por vendedor
               </p>
             </div>
           </div>
@@ -1494,9 +1461,8 @@ export default function ReportsPage() {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 uppercase tracking-wider font-bold text-[10px]">
                 <tr>
-                  <th className="py-3.5 px-4">Cajera / Operador</th>
-                  <th className="py-3.5 px-4 text-center">Turnos Realizados</th>
-                  <th className="py-3.5 px-4 text-right">Tickets Cobrados</th>
+                  <th className="py-3.5 px-4">Vendedor</th>
+                  <th className="py-3.5 px-4 text-right">Facturas</th>
                   <th className="py-3.5 px-4 text-right">Total Facturado (Gs.)</th>
                   <th className="py-3.5 px-4 text-right">Descuentos Otorgados</th>
                   <th className="py-3.5 px-4 text-right">Ticket Promedio</th>
@@ -1512,7 +1478,6 @@ export default function ReportsPage() {
                       </div>
                       {c.cajera}
                     </td>
-                    <td className="py-3.5 px-4 text-center font-mono">{c.turnos}</td>
                     <td className="py-3.5 px-4 text-right font-mono">{c.tickets.toLocaleString("es-PY")}</td>
                     <td className="py-3.5 px-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
                       {formatPYG(c.total_ventas)}
@@ -1539,7 +1504,7 @@ export default function ReportsPage() {
         <div className="p-5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700 pb-3">
             <div>
-              <h3 className="text-sm font-black text-gray-900 dark:text-white">Mix de Ventas por Familia de Supermercado</h3>
+              <h3 className="text-sm font-black text-gray-900 dark:text-white">Mix de Ventas por Categoría</h3>
               <p className="text-xs text-gray-400">Participación en la facturación total de las secciones del salón</p>
             </div>
           </div>

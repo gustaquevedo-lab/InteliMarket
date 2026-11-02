@@ -333,7 +333,7 @@ export default function IntegratedFinancePage() {
                         (+) Ingresos Operativos por Ventas
                       </div>
                       <span className="font-bold text-sm text-emerald-700 dark:text-emerald-400">
-                        {formatPYG(ebitdaData?.ingresos_operativos || dashboardData?.ingresos || 2485000000)}
+                        {ebitdaData ? formatPYG(ebitdaData.ingresos_netos ?? 0) : "—"}
                       </span>
                     </div>
 
@@ -344,7 +344,7 @@ export default function IntegratedFinancePage() {
                         (-) Costo de Mercaderías Vendidas (CMV)
                       </div>
                       <span className="font-semibold text-slate-800 dark:text-slate-200">
-                        {formatPYG(ebitdaData?.costo_ventas || 1789200000)}
+                        {ebitdaData ? formatPYG(ebitdaData.costo_ventas ?? 0) : "—"}
                       </span>
                     </div>
 
@@ -354,7 +354,7 @@ export default function IntegratedFinancePage() {
                         (=) Margen Bruto
                       </span>
                       <span className="font-bold text-indigo-600 dark:text-indigo-400">
-                        {formatPYG((ebitdaData?.ingresos_operativos || 2485000000) - (ebitdaData?.costo_ventas || 1789200000))} (28.0%)
+                        {ebitdaData ? `${formatPYG(ebitdaData.resultado_bruto ?? 0)} (${(ebitdaData.margen_bruto_pct ?? 0).toFixed(1)}%)` : "—"}
                       </span>
                     </div>
 
@@ -365,7 +365,7 @@ export default function IntegratedFinancePage() {
                         (-) Gastos Administrativos, Personal y Salarios
                       </div>
                       <span className="font-semibold text-slate-800 dark:text-slate-200">
-                        {formatPYG(ebitdaData?.gastos_operativos || 238000000)}
+                        {ebitdaData ? formatPYG(ebitdaData.gastos_operativos ?? 0) : "—"}
                       </span>
                     </div>
 
@@ -376,20 +376,20 @@ export default function IntegratedFinancePage() {
                         (=) EBITDA (Resultado Operacional antes de D&A)
                       </div>
                       <span className="font-black text-base text-indigo-700 dark:text-indigo-300">
-                        {formatPYG(ebitdaData?.ebitda || 457800000)}
+                        {ebitdaData ? formatPYG(ebitdaData.ebitda ?? 0) : "—"}
                       </span>
                     </div>
 
                     {/* Depreciación */}
                     <div className="flex items-center justify-between p-2.5 text-slate-500 dark:text-slate-400">
                       <span className="font-sans">(-) Depreciación & Amortización de Activos Fijos</span>
-                      <span>{formatPYG(ebitdaData?.depreciaciones || 42000000)}</span>
+                      <span>sin cargar</span>
                     </div>
 
                     {/* EBIT */}
                     <div className="flex items-center justify-between p-3 rounded-xl bg-slate-100 dark:bg-slate-800 font-black text-slate-900 dark:text-white">
                       <span className="font-sans">(=) EBIT / Resultado Operativo Neto</span>
-                      <span>{formatPYG((ebitdaData?.ebitda || 457800000) - (ebitdaData?.depreciaciones || 42000000))}</span>
+                      <span>—</span>
                     </div>
                   </div>
                 </div>
@@ -668,7 +668,7 @@ export default function IntegratedFinancePage() {
                               {w.proveedor_nombre || w.contraparte_nombre || "Proveedor Local"}
                             </td>
                             <td className="p-3.5 text-slate-600 dark:text-slate-400">
-                              {w.ruc || "80012345-6"}
+                              {w.ruc || "—"}
                             </td>
                             <td className="p-3.5 text-right font-semibold text-slate-900 dark:text-white">
                               {formatPYG(w.monto_base || 0)}
