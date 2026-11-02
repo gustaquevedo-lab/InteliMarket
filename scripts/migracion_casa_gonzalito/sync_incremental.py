@@ -881,6 +881,10 @@ def reconciliar_ventas(pg, my, desde, hasta):
             cur.execute("DELETE FROM sale_items WHERE sale_id = ANY(%s) AND NOT (id = ANY(%s))",
                         (sale_ids, [r[0] for r in items]))
         pg.commit()
+    with pg.cursor() as cur:  # el resumen mensual del dashboard de esos meses se recalcula solo
+        cur.execute("DELETE FROM sales_summary_monthly WHERE mes >= date_trunc('month', %s::date) AND mes <= %s",
+                    (desde, hasta))
+    pg.commit()
     log(f"  reconciliacion ventas {desde}..{hasta}: {len(malas)} de {len(legacy)} reparadas (respaldo {respaldo})")
     return len(malas)
 

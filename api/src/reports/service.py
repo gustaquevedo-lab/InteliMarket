@@ -11,7 +11,7 @@ Nota: consultas migradas a los nombres reales del esquema (modelos ORM):
   anulado=false → estado <> 'cancelado'.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,30 +35,65 @@ def margen_bruto(monto_total: float, iva: float, costo: float) -> dict:
     return {"monto_sin_iva": monto_sin_iva, "costo_total": costo_total, "margen_bruto_gs": margen, "margen_bruto_pct": pct}
 
 
-async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> dict:
+_SIN_SUCURSAL = "00000000-0000-0000-0000-000000000000"
+_CAMPOS_RESUMEN = ("total_ventas", "monto_total", "monto_iva_10", "monto_iva_5", "total_pagado", "saldo_pendiente",
+                   "total_items", "costo_total", "items_sin_costo", "venta_lineas", "iva_lineas",
+                   "ventas_sin_importe", "paresa_uc")
+# Un mes cerrado entra al resumen guardado pasados estos dias: antes la reconciliacion
+# con el legacy (ultimos 7 dias) todavia puede cambiarle lineas.
+_DIAS_GRACIA = 10
+
+
+def _inicio_mes(d: date) -> date:
+    return d.replace(day=1)
+
+
+def _mes_siguiente(d: date) -> date:
+    return (d.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+
+def _tramo_cache(fecha_desde: Optional[date], fecha_hasta: Optional[date], hoy: date):
+    """Meses completos [ini, fin) que salen del resumen guardado; ini None = desde el principio.
+    None si el rango no contiene ningun mes cerrado completo."""
+    ini = None if fecha_desde is None else (fecha_desde if fecha_desde.day == 1 else _mes_siguiente(fecha_desde))
+    fin = _inicio_mes(hoy - timedelta(days=_DIAS_GRACIA))
+    if fecha_hasta is not None:
+        fin = min(fin, _inicio_mes(fecha_hasta + timedelta(days=1)))
+    if ini is not None and ini >= fin:
+        return None
+    return ini, fin
+
+
+def _where_ventas(company_id, desde, hasta_excl, branch_id):
     params = {}
     where = "v.estado <> 'cancelado'"
     if company_id:
         where += " AND v.company_id = :company_id"
         params["company_id"] = company_id
-    if fecha_desde:
-        where += " AND v.fecha >= :fecha_desde"
-        params["fecha_desde"] = fecha_desde
-    if fecha_hasta:
-        where += " AND v.fecha < CAST(:fecha_hasta AS date) + interval '1 day'"
-        params["fecha_hasta"] = fecha_hasta
+    if desde:
+        where += " AND v.fecha >= :desde"
+        params["desde"] = desde
+    if hasta_excl:
+        where += " AND v.fecha < :hasta_excl"
+        params["hasta_excl"] = hasta_excl
     if branch_id:
         where += " AND v.branch_id = :branch_id"
         params["branch_id"] = branch_id
+    return where, params
 
+
+async def _resumen_por_mes(db: AsyncSession, company_id, desde, hasta_excl, branch_id) -> list:
+    """Totales de ventas por (mes, sucursal) calculados en vivo."""
+    where, params = _where_ventas(company_id, desde, hasta_excl, branch_id)
     query = f"""
         WITH filtered_sales AS (
-            SELECT v.id, v.total, v.iva_10, v.iva_5, v.total_pagado, v.saldo, v.tipo_comprobante
+            SELECT v.id, date_trunc('month', v.fecha)::date as mes, v.branch_id,
+                   v.total, v.iva_10, v.iva_5, v.total_pagado, v.saldo, v.tipo_comprobante
             FROM sales v
             WHERE {where}
         ),
         sales_totals AS (
-            SELECT
+            SELECT mes, branch_id,
                 COUNT(*) as total_ventas,
                 COALESCE(SUM(total), 0) as monto_total,
                 COALESCE(SUM(iva_10), 0) as monto_iva_10,
@@ -66,10 +101,12 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
                 COALESCE(SUM(total_pagado), 0) as total_pagado,
                 COALESCE(SUM(saldo), 0) as saldo_pendiente
             FROM filtered_sales
+            GROUP BY mes, branch_id
         ),
         por_venta AS (
             -- una fila por venta: venta, IVA y costo de sus lineas
             SELECT
+                fs.mes, fs.branch_id,
                 fs.total as total_cab,
                 SUM(ABS(vi.total)) as importe_lineas,
                 SUM(vi.cantidad) as cantidad,
@@ -88,13 +125,13 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
             JOIN filtered_sales fs ON fs.id = vi.sale_id
             LEFT JOIN products p ON p.id = vi.product_id
             LEFT JOIN suppliers sp ON sp.id = p.supplier_id
-            GROUP BY vi.sale_id, fs.total
+            GROUP BY vi.sale_id, fs.mes, fs.branch_id, fs.total
         ),
         items_totals AS (
             -- Utilidad: venta y costo de LAS MISMAS lineas. Se excluye solo la venta con total en la
             -- factura pero sin importe en ninguna linea (migradas antes de 2021: el legacy no guardaba
             -- el importe por linea). Las entregas sin cargo (total 0) si cuentan, con su costo.
-            SELECT
+            SELECT mes, branch_id,
                 COALESCE(SUM(cantidad), 0) as total_items,
                 COALESCE(SUM(venta) FILTER (WHERE NOT falta), 0) as venta_lineas,
                 COALESCE(SUM(iva) FILTER (WHERE NOT falta), 0) as iva_lineas,
@@ -103,25 +140,77 @@ async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, 
                 COALESCE(SUM(sin_costo), 0) as items_sin_costo,
                 COALESCE(SUM(uc), 0) as paresa_uc
             FROM (SELECT *, (total_cab <> 0 AND importe_lineas = 0) as falta FROM por_venta) pv
+            GROUP BY mes, branch_id
         )
-        SELECT
-            st.total_ventas,
-            st.monto_total,
-            st.monto_iva_10,
-            st.monto_iva_5,
-            st.total_pagado,
-            st.saldo_pendiente,
-            it.total_items,
-            it.costo_total,
-            it.items_sin_costo,
-            it.venta_lineas,
-            it.iva_lineas,
-            it.ventas_sin_importe,
-            it.paresa_uc
+        SELECT st.*,
+            COALESCE(it.total_items, 0) as total_items,
+            COALESCE(it.costo_total, 0) as costo_total,
+            COALESCE(it.items_sin_costo, 0) as items_sin_costo,
+            COALESCE(it.venta_lineas, 0) as venta_lineas,
+            COALESCE(it.iva_lineas, 0) as iva_lineas,
+            COALESCE(it.ventas_sin_importe, 0) as ventas_sin_importe,
+            COALESCE(it.paresa_uc, 0) as paresa_uc
         FROM sales_totals st
-        CROSS JOIN items_totals it
+        LEFT JOIN items_totals it ON it.mes = st.mes AND it.branch_id IS NOT DISTINCT FROM st.branch_id
     """
-    result = (await _exec(db, query, params)).first()
+    return [dict(r) for r in (await _exec(db, query, params)).all()]
+
+
+async def _resumen_guardado(db: AsyncSession, company_id, ini, fin, branch_id) -> list:
+    """Filas de sales_summary_monthly para los meses [ini, fin). Los meses cuya firma
+    (cantidad y total de ventas por sucursal) ya no coincide se recalculan y se guardan."""
+    rango = " AND mes >= :ini" if ini else ""
+    p = {"c": company_id, "fin": fin, **({"ini": ini} if ini else {})}
+    firma = {}
+    for r in (await _exec(db, f"""
+        SELECT date_trunc('month', fecha)::date as mes, COALESCE(branch_id, CAST(:z AS uuid)) as b, COUNT(*) as n, SUM(total) as t
+        FROM sales WHERE company_id = :c AND estado <> 'cancelado' AND fecha < :fin {rango.replace('mes', 'fecha')}
+        GROUP BY 1, 2""", {**p, "z": _SIN_SUCURSAL})).all():
+        firma.setdefault(r["mes"], set()).add((str(r["b"]), int(r["n"]), float(r["t"] or 0)))
+    guardado, filas = {}, {}
+    for r in (await _exec(db, f"SELECT * FROM sales_summary_monthly WHERE company_id = :c AND mes < :fin {rango}", p)).all():
+        guardado.setdefault(r["mes"], set()).add((str(r["branch_id"]), int(r["total_ventas"]), float(r["monto_total"])))
+        filas.setdefault(r["mes"], []).append(dict(r))
+    viejos = sorted(m for m in set(firma) | set(guardado) if firma.get(m) != guardado.get(m))
+    if viejos:
+        nuevas = [f for f in await _resumen_por_mes(db, company_id, viejos[0], _mes_siguiente(viejos[-1]), None)
+                  if f["mes"] in set(viejos)]
+        try:
+            await db.execute(text("DELETE FROM sales_summary_monthly WHERE company_id = :c AND mes = ANY(:m)"),
+                             {"c": company_id, "m": viejos})
+            for f in nuevas:
+                f["branch_id"] = str(f["branch_id"] or _SIN_SUCURSAL)
+                await db.execute(text(f"""
+                    INSERT INTO sales_summary_monthly (company_id, mes, branch_id, {', '.join(_CAMPOS_RESUMEN)})
+                    VALUES (:c, :mes, :branch_id, {', '.join(':' + k for k in _CAMPOS_RESUMEN)})
+                    ON CONFLICT (company_id, mes, branch_id) DO NOTHING"""), {"c": company_id, **f})
+            await db.commit()
+        except Exception:
+            await db.rollback()  # el reporte sale igual; se reintenta en la proxima consulta
+        for m in viejos:
+            filas.pop(m, None)
+        for f in nuevas:
+            filas.setdefault(f["mes"], []).append(f)
+    todas = [f for fs in filas.values() for f in fs]
+    if branch_id:
+        todas = [f for f in todas if str(f["branch_id"]) == str(branch_id)]
+    return todas
+
+
+async def get_sales_summary(db: AsyncSession, company_id: Optional[str] = None, fecha_desde: Optional[date] = None, fecha_hasta: Optional[date] = None, branch_id: Optional[str] = None) -> dict:
+    hasta_excl = fecha_hasta + timedelta(days=1) if fecha_hasta else None
+    tramo = _tramo_cache(fecha_desde, fecha_hasta, date.today()) if company_id else None
+    if tramo is None:
+        filas = await _resumen_por_mes(db, company_id, fecha_desde, hasta_excl, branch_id)
+    else:
+        # meses cerrados del resumen guardado; los bordes (mes parcial, mes en curso) en vivo
+        ini, fin = tramo
+        filas = await _resumen_guardado(db, company_id, ini, fin, branch_id)
+        if ini and fecha_desde and fecha_desde < ini:
+            filas += await _resumen_por_mes(db, company_id, fecha_desde, ini, branch_id)
+        if hasta_excl is None or fin < hasta_excl:
+            filas += await _resumen_por_mes(db, company_id, fin, hasta_excl, branch_id)
+    result = {k: sum(float(f[k] or 0) for f in filas) for k in _CAMPOS_RESUMEN}
 
     total_ventas = int(result["total_ventas"] or 0)
     monto_total = float(result["monto_total"] or 0)
