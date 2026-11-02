@@ -53,10 +53,10 @@ async def run_lifecycle_test():
         precios_json = json.dumps({str(pid1): 15000, str(pid2): 22000})
         await db.execute(text("""
             INSERT INTO promotions (
-                id, company_id, nombre, tipo, activo, estado, valido_desde, valido_hasta,
+                id, company_id, nombre, tipo, aplica_a, activo, estado, valido_desde, valido_hasta,
                 producto_ids, precios_por_producto, created_at, updated_at
             ) VALUES (
-                :prm, :cid, 'PROMO TEST LIFECYCLE', 'precio_fijo_oferta', true, 'activa',
+                :prm, :cid, 'PROMO TEST LIFECYCLE', 'precio_fijo_oferta', 'producto', true, 'activa',
                 :vdesde, :vhasta, ARRAY[:p1, :p2]::uuid[],
                 CAST(:p_json AS json),
                 NOW(), NOW()
