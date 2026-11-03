@@ -5128,6 +5128,24 @@ async def create_payment_adjustment(
     await db.commit()
     await db.refresh(adj)
 
+    # 🔄 Auto-sincronizar pre-asientos de Bancos si esta sesión ya fue incorporada a Bóveda & Bancos
+    chk_bt = await db.execute(
+        select(BankTransaction.id).where(
+            BankTransaction.company_id == cid,
+            BankTransaction.referencia.like(f"ARQUEO-{str(sid)[:8]}-%"),
+        ).limit(1)
+    )
+    if chk_bt.scalar_one_or_none():
+        try:
+            await incorporate_session_to_vault_and_banks(
+                db, str(sid), str(cid),
+                str(user_id) if user_id else str(uuid.uuid4()),
+                user_nombre or "Tesorería",
+                observaciones="Auto-sincronización tras ajuste de reclasificación",
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo auto-sincronizar bancos tras ajuste de reclasificación: {e}")
+
     return {
         "id": str(adj.id),
         "company_id": str(adj.company_id),
@@ -5235,6 +5253,25 @@ async def delete_payment_adjustment(db: AsyncSession, adjustment_id: str, sessio
 
     await db.delete(adj)
     await db.commit()
+
+    # 🔄 Auto-sincronizar pre-asientos de Bancos si esta sesión ya fue incorporada a Bóveda & Bancos
+    chk_bt = await db.execute(
+        select(BankTransaction.id).where(
+            BankTransaction.company_id == cid,
+            BankTransaction.referencia.like(f"ARQUEO-{str(sid)[:8]}-%"),
+        ).limit(1)
+    )
+    if chk_bt.scalar_one_or_none():
+        try:
+            await incorporate_session_to_vault_and_banks(
+                db, str(sid), str(cid),
+                str(user_id) if user_id else str(uuid.uuid4()),
+                "Tesorería",
+                observaciones="Auto-sincronización tras eliminación de reclasificación",
+            )
+        except Exception as e:
+            logger.warning(f"No se pudo auto-sincronizar bancos tras eliminación de reclasificación: {e}")
+
     return True
 
 
@@ -6619,19 +6656,22 @@ async def incorporate_session_to_vault_and_banks(
         return res
 
     ref_codes = [f"ARQUEO-{str(sid)[:8]}-{canal_key}" for canal_key in mapping_by_key.keys()]
-    existing_refs = set()
+    existing_bt_map: dict[str, BankTransaction] = {}
     if ref_codes:
         chk_res = await db.execute(
-            select(BankTransaction.referencia).where(
+            select(BankTransaction).where(
                 BankTransaction.company_id == cid,
                 BankTransaction.referencia.in_(ref_codes),
             )
         )
-        existing_refs = set(chk_res.scalars().all())
+        existing_bt_map = {bt.referencia: bt for bt in chk_res.scalars().all()}
 
     for canal_key, map_info in mapping_by_key.items():
         v_info = summary_methods.get(canal_key, {})
         m_gs = Decimal(str(v_info.get("monto_gs") or 0))
+        ref_code = f"ARQUEO-{str(sid)[:8]}-{canal_key}"
+        existing_bt = existing_bt_map.get(ref_code)
+
         if m_gs > 0:
             comis_pct = Decimal(str(map_info.get("comision_porcentaje") or 0))
             comis_fija = Decimal(str(map_info.get("comision_fija_gs") or 0))
@@ -6641,35 +6681,48 @@ async def incorporate_session_to_vault_and_banks(
             tipo_plz = map_info.get("tipo_plazo") or "habiles"
             fecha_acred = _calcular_fecha_acreditacion(fecha_trx, plazo_d, tipo_plz)
 
-            ref_code = f"ARQUEO-{str(sid)[:8]}-{canal_key}"
-            # Evitar duplicar BankTransaction si ya fue asentado
-            if ref_code not in existing_refs:
-                existing_refs.add(ref_code)
-                desc_comis = f" (Bruto: {m_gs:,.0f} Gs. | Comis. {comis_pct:.2f}%: -{retencion_gs:,.0f} Gs.)" if retencion_gs > 0 else ""
+            desc_comis = f" (Bruto: {m_gs:,.0f} Gs. | Comis. {comis_pct:.2f}%: -{retencion_gs:,.0f} Gs.)" if retencion_gs > 0 else ""
+            desc_txt = f"Recaudación {map_info['canal_label']}{desc_comis} Turno {session_obj.cajero_nombre} ({reg.nombre}) - Acred. est.: {fecha_acred.strftime('%d/%m/%Y')}"
+            target_bank_id = uuid.UUID(map_info["bank_account_id"])
+
+            if existing_bt:
+                # Si ya existía y no está conciliado con extracto, actualizarlo con el valor post-reclasificación de Tesorería
+                if not existing_bt.conciliado:
+                    existing_bt.monto = monto_neto_gs
+                    existing_bt.bank_account_id = target_bank_id
+                    existing_bt.fecha = fecha_acred
+                    existing_bt.descripcion = desc_txt
+                    existing_bt.contraparte = map_info["canal_label"]
+            else:
                 bt = BankTransaction(
                     company_id=cid,
-                    bank_account_id=uuid.UUID(map_info["bank_account_id"]),
+                    bank_account_id=target_bank_id,
                     fecha=fecha_acred,
                     tipo="credito",
                     monto=monto_neto_gs,
                     moneda=map_info.get("moneda") or "PYG",
-                    descripcion=f"Recaudación {map_info['canal_label']}{desc_comis} Turno {session_obj.cajero_nombre} ({reg.nombre}) - Acred. est.: {fecha_acred.strftime('%d/%m/%Y')}",
+                    descripcion=desc_txt,
                     referencia=ref_code,
                     contraparte=map_info["canal_label"],
                     conciliado=False,
                     categoria="ventas_pos",
                 )
                 db.add(bt)
-                bank_transactions_creadas.append({
-                    "banco": map_info.get("banco_nombre"),
-                    "cuenta": map_info.get("numero_cuenta"),
-                    "canal": map_info["canal_label"],
-                    "monto_bruto_gs": float(m_gs),
-                    "comision_gs": float(retencion_gs),
-                    "monto_neto_gs": float(monto_neto_gs),
-                    "fecha_acreditacion": fecha_acred.isoformat(),
-                    "referencia": ref_code,
-                })
+
+            bank_transactions_creadas.append({
+                "banco": map_info.get("banco_nombre"),
+                "cuenta": map_info.get("numero_cuenta"),
+                "canal": map_info["canal_label"],
+                "monto_bruto_gs": float(m_gs),
+                "comision_gs": float(retencion_gs),
+                "monto_neto_gs": float(monto_neto_gs),
+                "fecha_acreditacion": fecha_acred.isoformat(),
+                "referencia": ref_code,
+            })
+        else:
+            # Si tras una reclasificación en Tesorería el canal quedó en 0 Gs y existía una transacción no conciliada, eliminarla
+            if existing_bt and not existing_bt.conciliado:
+                await db.delete(existing_bt)
 
     # 3. FALTANTE DE CAJA: Generar solicitud de descuento para SueldOK
     diferencia_gs = float(count_obj.diferencia or 0)
@@ -6708,6 +6761,20 @@ async def incorporate_session_to_vault_and_banks(
                     "estado": "pendiente",
                     "periodo": periodo_str,
                 }
+
+    # 2b. Recalcular saldo_actual dinámico de las cuentas bancarias afectadas
+    affected_acc_ids = {uuid.UUID(m["bank_account_id"]) for m in mapping_by_key.values() if m.get("bank_account_id")}
+    for b_acc_id in affected_acc_ids:
+        row_sum = await db.execute(
+            select(
+                func.coalesce(func.sum(case((BankTransaction.tipo == "credito", BankTransaction.monto), else_=0)), 0),
+                func.coalesce(func.sum(case((BankTransaction.tipo == "debito", BankTransaction.monto), else_=0)), 0),
+            ).where(BankTransaction.bank_account_id == b_acc_id)
+        )
+        c_tot, d_tot = row_sum.one()
+        b_acc = await db.get(BankAccount, b_acc_id)
+        if b_acc:
+            b_acc.saldo_actual = (b_acc.saldo_inicial or Decimal("0")) + Decimal(str(c_tot)) - Decimal(str(d_tot))
 
     now_py = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
     nota = f"\n[ASENTAMIENTO BÓVEDA & BANCOS ({now_py}) por {user_nombre}]: Bóveda ({len(vault_entries_creados)} entradas), Bancos ({len(bank_transactions_creadas)} transacciones)."
