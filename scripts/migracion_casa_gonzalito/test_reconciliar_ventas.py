@@ -37,3 +37,14 @@ def test_fecha_con_hora_usa_dia_de_factura_y_hora_de_carga():
     assert fecha_con_hora(date(2014, 2, 20), "0000-00-00 00:00:00") == datetime(2014, 2, 20)
     assert fecha_con_hora(date(2014, 2, 20), datetime(1899, 12, 30, 0, 0)) == datetime(2014, 2, 20)
     assert fecha_con_hora(None, datetime(2016, 6, 15, 10, 0)) is None
+
+
+def test_borra_solo_lo_que_ya_no_esta_en_el_legacy():
+    from sync_incremental import a_borrar
+    assert a_borrar({1, 2, 3}, {1, 3}, tope=20) == {2}
+    assert a_borrar({1, 2}, {1, 2}, tope=20) == set()
+
+
+def test_demasiados_borrados_no_borra_nada():
+    from sync_incremental import a_borrar
+    assert a_borrar(set(range(30)), set(), tope=20) == set()

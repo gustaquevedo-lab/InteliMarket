@@ -899,6 +899,64 @@ def reconciliar_ventas(pg, my, desde, hasta):
     return len(malas)
 
 
+def a_borrar(im_ids, existentes, tope):
+    """Documentos de InteliMarket que ya no existen en el legacy. Si son mas que `tope`
+    no devuelve nada: es mas probable una falla de lectura que un borrado real."""
+    faltan = set(im_ids) - set(existentes)
+    return set() if len(faltan) > tope else faltan
+
+
+def purgar_borrados(pg, my, dias=30, tope=20):
+    """Borra de InteliMarket las facturas y notas de credito de los ultimos `dias` que se
+    borraron en el legacy despues de sincronizadas (el incremental solo trae altas).
+    Solo toca documentos con el UUID que les da este conector; respaldo antes de borrar."""
+    desde = date.today() - timedelta(days=dias)
+    tipos = (("factura", "fac", "fac_ventas", "IDFACVENTAS", lambda n: n),
+             ("notacredito", "nc", "notacredito", "IDNOTACREDITO", lambda n: n[2:]))
+    for tipo, pref, tabla, col, num_legacy in tipos:
+        with pg.cursor() as cur:
+            cur.execute("SELECT id, numero FROM sales WHERE company_id = %s AND tipo_comprobante = %s "
+                        "AND fecha >= %s", (COMPANY_ID, tipo, desde))
+            im = {}
+            for sid, numero in cur.fetchall():
+                n = num_legacy(str(numero))
+                if n.isdigit() and str(sid) == str(uuid.uuid5(NS, f"{pref}:{int(n)}")):
+                    im[int(n)] = sid
+        existentes = set()
+        ids = sorted(im)
+        with my.cursor() as cur:
+            for i in range(0, len(ids), 1000):
+                lote = ids[i:i + 1000]
+                cur.execute(f"SELECT {col} FROM {tabla} WHERE {col} IN ({','.join(['%s'] * len(lote))})", lote)
+                existentes |= {r[0] for r in cur.fetchall()}
+        faltan = set(im) - existentes
+        borrar = a_borrar(im, existentes, tope)
+        if faltan and not borrar:
+            log(f"  borrados en legacy ({tipo}): {len(faltan)} > {tope}, NO se borra nada; revisar a mano")
+            continue
+        if not borrar:
+            log(f"  borrados en legacy ({tipo}): ninguno en {len(im)} desde {desde}")
+            continue
+        if DRY_RUN:
+            log(f"  borrados en legacy ({tipo}): {sorted(borrar)} [DRY RUN]")
+            continue
+        sale_ids = [im[n] for n in borrar]
+        respaldo = os.path.expanduser(f"~/casa-gonzalito/reconciliacion/borrados_{tipo}_{datetime.now():%Y%m%d_%H%M%S}")
+        os.makedirs(os.path.dirname(respaldo), exist_ok=True)
+        with pg.cursor() as cur:
+            for t, c in (("sales", "id"), ("sale_items", "sale_id")):
+                cur.execute(f"SELECT * FROM {t} WHERE {c} = ANY(%s)", (sale_ids,))
+                cols = [d[0] for d in cur.description]
+                with open(f"{respaldo}.{t}.tsv", "w") as f:
+                    f.write("\t".join(cols) + "\n")
+                    for r in cur.fetchall():
+                        f.write("\t".join("" if v is None else str(v) for v in r) + "\n")
+            cur.execute("DELETE FROM sale_items WHERE sale_id = ANY(%s)", (sale_ids,))
+            cur.execute("DELETE FROM sales WHERE id = ANY(%s)", (sale_ids,))
+        pg.commit()
+        log(f"  borrados en legacy ({tipo}): {sorted(borrar)} eliminados (respaldo {respaldo}.*)")
+
+
 def sync_notas(pg, my):
     last_id, _ = get_watermark(pg, "notas")
     with my.cursor() as cur:
@@ -2213,6 +2271,7 @@ def main():
         "limite_credito": lambda: sync_limite_credito(pg, my),
         "saldo_credito": lambda: sync_saldo_credito(pg, my),
         "reconciliar": None,  # a mano, ver mas abajo
+        "borrados": None,  # facturas/notas borradas en el legacy, ultimos 30 dias
     }
     if ONLY and ONLY not in entities:
         log(f"ERROR: entidad desconocida '{ONLY}'. Opciones: {', '.join(entities)}")
@@ -2252,6 +2311,8 @@ def main():
         notas_ids = set()
         max_id = sync_notas(pg, my)
         sync_items_notas(pg, my)
+    if not ONLY or ONLY == "borrados":
+        purgar_borrados(pg, my)
     if not ONLY or ONLY == "compras":
         sync_compras(pg, my, sup_map)
         sync_items_compras(pg, my)
