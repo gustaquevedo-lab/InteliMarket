@@ -1224,33 +1224,49 @@ async def sync_payroll_dossier_from_sueldok(
     items = approved.get("items", [])
     deductions = data.get("deductions", [])
 
-    # 3. Clasificar lotes bancarios y efectivo
+    # 3. Clasificar lotes por canal consolidado: Transferencia SIPAP, Efectivo (Sobres) o Cheques
     lotes_banco: dict[str, BankBatch] = {}
     lotes_efectivo: dict[str, BankBatch] = {}
+    lote_cheque_entries: list[DisbursementBatchEntry] = []
+    lote_cheque_total = 0.0
 
     for it in items:
         banco = (it.get("bank") or "").strip().upper()
         cuenta = (it.get("bankAccount") or "").strip()
+        method = (it.get("paymentMethod") or "Transferencia").strip().lower()
         net_sal = float(it.get("totalNet", 0))
+
         entry = DisbursementBatchEntry(
             employee_id=str(it.get("employeeId") or it.get("id")),
             name=it.get("nombre", "Funcionario"),
             ci=str(it.get("ci", "—")),
             net_salary=net_sal,
             account_number=cuenta or None,
-            bank_account_type=it.get("paymentMethod") or "transferencia"
+            bank_account_type=banco or "SIPAP"
         )
-        if banco and cuenta:
-            if banco not in lotes_banco:
-                lotes_banco[banco] = BankBatch(employees=[], total=0.0)
-            lotes_banco[banco].employees.append(entry)
-            lotes_banco[banco].total += net_sal
+
+        if "cheque" in method:
+            lote_cheque_entries.append(entry)
+            lote_cheque_total += net_sal
+        elif "efectivo" in method:
+            # Lote consolidado único de Efectivo
+            key_efectivo = "General"
+            if key_efectivo not in lotes_efectivo:
+                lotes_efectivo[key_efectivo] = BankBatch(employees=[], total=0.0)
+            lotes_efectivo[key_efectivo].employees.append(entry)
+            lotes_efectivo[key_efectivo].total += net_sal
         else:
-            depto = (it.get("depto") or "Central / Salón").strip()
-            if depto not in lotes_efectivo:
-                lotes_efectivo[depto] = BankBatch(employees=[], total=0.0)
-            lotes_efectivo[depto].employees.append(entry)
-            lotes_efectivo[depto].total += net_sal
+            # Transferencia Bancaria (SIPAP) - Consolidado
+            key_banco = banco if banco else "SIPAP"
+            if key_banco not in lotes_banco:
+                lotes_banco[key_banco] = BankBatch(employees=[], total=0.0)
+            lotes_banco[key_banco].employees.append(entry)
+            lotes_banco[key_banco].total += net_sal
+
+    lote_cheque = None
+    if lote_cheque_total > 0:
+        from api.src.sueldok.schemas import ChequeeBatch
+        lote_cheque = ChequeeBatch(employees=lote_cheque_entries, total=lote_cheque_total)
 
     # 4. Clasificar deducciones reales (Extra Club, Uniformes, Malou, Credi Pora, Anticipos)
     extra_club: list[ExtraClubTicket] = []
@@ -1390,6 +1406,7 @@ async def sync_payroll_dossier_from_sueldok(
         total_judiciales=tot_judicial,
         lotes_banco=lotes_banco,
         lotes_efectivo=lotes_efectivo,
+        lote_cheque=lote_cheque,
         extra_club_tickets=extra_club,
         uniformes_items=uniformes,
         terceros_desglose=terceros_desglose,
@@ -1443,18 +1460,28 @@ async def execute_net_phase(
         from api.src.financial.schemas import SupplierPaymentOrderCreate
         from api.src.financial import service as financial_service
 
-        is_bank = phase.phase_type == "salario_neto_sipap"
+        is_bank = "banco" in phase.phase_type or "sipap" in phase.phase_type
+        is_cheque = "cheque" in phase.phase_type
         doss_res = await db.execute(select(PayrollDossier).where(PayrollDossier.id == did))
         curr_dossier = doss_res.scalars().first()
         periodo = curr_dossier.periodo if curr_dossier else "2026-09"
-        beneficiario = f"Nómina {periodo} - {'SIPAP Bancario' if is_bank else 'Salarios Efectivo'}"
+        
+        if is_bank:
+            beneficiario = f"Nómina {periodo} - SIPAP Bancario"
+            desembolso_desc = "Bancario SIPAP"
+        elif is_cheque:
+            beneficiario = f"Nómina {periodo} - Cheques"
+            desembolso_desc = "Cheques Físicos"
+        else:
+            beneficiario = f"Nómina {periodo} - Salarios Efectivo"
+            desembolso_desc = "Efectivo en Bóveda/Sobres"
 
         op_payload = SupplierPaymentOrderCreate(
             subtipo="nomina_salarios",
             beneficiario_nombre=beneficiario,
             periodo_nomina=periodo,
             monto_neto=Decimal(str(int(phase.monto))),
-            observaciones=f"Desembolso {'Bancario SIPAP' if is_bank else 'Efectivo en Bóveda/Sobres'} - Nómina Salarial {periodo}. Ref: {referencia or banco or 'General'}",
+            observaciones=f"Desembolso {desembolso_desc} - Nómina Salarial {periodo}. Ref: {referencia or banco or 'General'}",
             sueldok_sync_id=str(phase.id)
         )
         op_res = await financial_service.create_supplier_payment_order(
