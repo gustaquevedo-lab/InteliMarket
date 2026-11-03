@@ -6,7 +6,7 @@ ningun enganche a sales/service.py todavia -- deliberadamente inactivo hasta
 que se decida activarlo."""
 
 from sqlalchemy import Column, String, Boolean, Text, DateTime, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 
 from api.src.db import Base
@@ -46,7 +46,12 @@ class IntelifactConfig(Base):
     ambiente = Column(String(20), nullable=False, default="test")  # test | production
 
     # Donde vive el microservicio Node para este tenant (cada uno puede correr su propia instancia)
-    service_base_url = Column(String(255), nullable=True)  # ej. http://localhost:3000
+    service_base_url = Column(String(255), nullable=True)  # ej. https://intelifact.intellihouse.lat
+
+    # Servicio actual (POST /v1/documents): clave ifk_... del cliente, cifrada con encrypt_value
+    api_key = Column(Text, nullable=True)
+    # {branch_id: "001-002"}: punto de expedicion de cada sucursal; sin entrada usa el del alta
+    puntos_por_sucursal = Column(JSONB, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

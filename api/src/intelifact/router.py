@@ -6,6 +6,7 @@ hardcodeado (a diferencia de como quedo en la vertical Distribuidora)."""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
+from uuid import UUID
 
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
@@ -57,3 +58,39 @@ async def telemetry_status(db: AsyncSession = Depends(get_db), user=Depends(requ
         return TelemetryStatusResponse(disponible=False, error="Microservicio InteliFact no alcanzable")
     except httpx.HTTPStatusError as e:
         return TelemetryStatusResponse(disponible=False, error=str(e))
+
+
+# ── Emision de facturas por el servicio actual (POST /v1/documents) ─────────
+
+async def _venta_propia(db: AsyncSession, sale_id: str, company_id) -> None:
+    from sqlalchemy import text
+    ok = (await db.execute(text("SELECT 1 FROM sales WHERE id = :id AND company_id = :c"),
+                           {"id": sale_id, "c": str(company_id)})).first()
+    if not ok:
+        raise HTTPException(status_code=404, detail="Venta no encontrada")
+
+
+@router.post("/ventas/{sale_id}/emitir")
+async def emitir_venta(sale_id: UUID, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """Emite (o reintenta) la factura electronica de una venta. Seguro de repetir:
+    Intelifact usa el id de la venta como clave y nunca crea un duplicado."""
+    from api.src.intelifact import emision
+    await _venta_propia(db, str(sale_id), user["company_id"])
+    try:
+        return await emision.emitir_venta(db, str(sale_id))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/ventas/con-problemas")
+async def ventas_con_problemas(dias: int = 30, db: AsyncSession = Depends(get_db), user=Depends(require_auth)):
+    """Facturas electronicas que no quedaron aprobadas, con el motivo."""
+    from sqlalchemy import text
+    filas = (await db.execute(text(
+        "SELECT s.id, s.numero, s.fecha, s.total, s.sifen_estado, s.cdc, s.factura_numero, "
+        "s.sifen_xml_response AS error, s.sifen_fecha_respuesta, c.razon_social AS cliente "
+        "FROM sales s LEFT JOIN customers c ON c.id = s.customer_id "
+        "WHERE s.company_id = :c AND s.sifen_estado IN ('pendiente','error_envio','error_datos','rechazado') "
+        "AND s.fecha > now() - make_interval(days => :d) ORDER BY s.fecha DESC LIMIT 500"),
+        {"c": str(user["company_id"]), "d": max(1, min(dias, 365))})).mappings().all()
+    return [dict(f) for f in filas]

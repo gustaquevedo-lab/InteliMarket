@@ -16,7 +16,7 @@ from api.src.intelifact.models import IntelifactConfig
 from api.src.intelifact.schemas import IntelifactConfigUpsert, InvoicePreviewRequest
 
 DEFAULT_SERVICE_URL = "http://localhost:3000"
-SENSITIVE_CONFIG_FIELDS = {"cert_p12_base64", "cert_password"}
+SENSITIVE_CONFIG_FIELDS = {"cert_p12_base64", "cert_password", "api_key"}
 
 
 # ── Config por tenant ────────────────────────────────────────────────────
@@ -31,6 +31,9 @@ async def get_config(db: AsyncSession, company_id: str) -> IntelifactConfig | No
 async def upsert_config(db: AsyncSession, company_id: str, data: IntelifactConfigUpsert) -> IntelifactConfig:
     existing = await get_config(db, company_id)
     payload = data.model_dump()
+    if payload.get("api_key"):
+        from api.src.payment_integrations.crypto import encrypt_value
+        payload["api_key"] = encrypt_value(payload["api_key"])
     if existing:
         for field, value in payload.items():
             # Si no viene un cert/password nuevo (string vacio), se preserva el guardado --
@@ -53,6 +56,7 @@ def to_response_dict(row: IntelifactConfig) -> dict:
     d = {c.name: getattr(row, c.name) for c in row.__table__.columns}
     d["cert_cargado"] = bool(d.pop("cert_p12_base64", None))
     d.pop("cert_password", None)
+    d["api_key_cargada"] = bool(d.pop("api_key", None))
     return d
 
 

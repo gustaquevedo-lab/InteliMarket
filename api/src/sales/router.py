@@ -187,13 +187,21 @@ async def fire_sale_side_effects(db: AsyncSession, sale, tipo_comprobante: str) 
     except Exception:
         pass
 
-    # Auto-fire SIFEN for POS sales
+    # Factura electronica. Con Intelifact habilitado para la empresa se emite por el
+    # servicio actual (POST /v1/documents); si falla, la venta queda con su estado
+    # (pendiente / error_envio / error_datos) y el reintento periodico o el boton la retoman.
     if tipo_comprobante in ("ticket", "factura"):
         try:
-            from api.src.sifen.service import send_sale_to_sifen
-            await send_sale_to_sifen(db, str(sale.id))
+            from api.src.intelifact import emision
+            if await emision.config_activa(db, sale.company_id):
+                await emision.emitir_venta(db, str(sale.id))
+            else:
+                from api.src.sifen.service import send_sale_to_sifen
+                await send_sale_to_sifen(db, str(sale.id))
         except Exception:
-            pass
+            import logging
+            logging.getLogger("intelimarket.sales").exception("Fallo la emision electronica de la venta %s", sale.id)
+            await db.rollback()
 
     # Fire webhook event
     try:

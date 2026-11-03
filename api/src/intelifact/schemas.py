@@ -24,6 +24,8 @@ class IntelifactConfigUpsert(BaseModel):
     cert_password: Optional[str] = None
     ambiente: str = "test"
     service_base_url: Optional[str] = None
+    api_key: Optional[str] = None  # solo escritura: vacio conserva la guardada
+    puntos_por_sucursal: Optional[dict[str, str]] = None
 
 
 class IntelifactConfigResponse(BaseModel):
@@ -47,6 +49,8 @@ class IntelifactConfigResponse(BaseModel):
     ambiente: str
     service_base_url: Optional[str] = None
     cert_cargado: bool = False  # nunca se devuelve el cert en si, solo si hay uno guardado
+    api_key_cargada: bool = False  # idem con la clave ifk_ del servicio
+    puntos_por_sucursal: Optional[dict[str, str]] = None
     created_at: datetime
     updated_at: datetime
 

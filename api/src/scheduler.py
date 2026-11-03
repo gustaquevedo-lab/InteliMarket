@@ -131,6 +131,18 @@ async def run_fixed_assets_depreciation():
             logger.error(f"Fixed assets depreciation job failed: {e}")
 
 
+async def run_intelifact_retries():
+    """Reintenta facturas electronicas pendientes o sin enviar (Intelifact)."""
+    from api.src.intelifact.emision import reintentar_pendientes
+    async with async_session_factory() as db:
+        try:
+            r = await reintentar_pendientes(db)
+            if r["revisadas"]:
+                logger.info("Reintento de facturas electronicas: %s", r)
+        except Exception:
+            logger.exception("Fallo el reintento de facturas electronicas")
+
+
 async def run_weekly_analytics_report():
     """Generate weekly delivery analytics PDF for all active tenants."""
     logger.info("Starting weekly analytics report job...")
@@ -282,6 +294,18 @@ def update_schedule(config: dict):
             id="fixed_assets_depreciation",
             name="Fixed Assets Monthly Depreciation",
             replace_existing=True,
+        )
+
+    # Facturas electronicas pendientes — cada 5 minutos (SIFEN acepta hasta 72 h)
+    if not scheduler.get_job("intelifact_retries"):
+        scheduler.add_job(
+            run_intelifact_retries,
+            trigger=CronTrigger(minute="*/5"),
+            id="intelifact_retries",
+            name="Intelifact: reintento de facturas pendientes",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
         )
 
     # Weekly analytics report — every Monday at 6:00 AM
