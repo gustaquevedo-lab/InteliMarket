@@ -1224,6 +1224,12 @@ class Perform3WayMatchResponse(BaseModel):
     timbrado: Optional[str] = None
     cdc: Optional[str] = None
     purchase_order_id: Optional[str] = None
+
+
+class AdjustInvoiceTotalRequest(BaseModel):
+    total_factura_impreso: Decimal
+    motivo: Optional[str] = None
+    user_id: Optional[str] = None
     purchase_order_numero: Optional[str] = None
     purchase_order_total: Optional[float] = None
     diferencia_pedido_monto: Optional[float] = None

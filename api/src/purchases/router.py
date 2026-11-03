@@ -1160,6 +1160,51 @@ async def get_invoice_match(invoice_id: str, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/purchases/invoices/{invoice_id}/adjust-total")
+async def adjust_invoice_total(
+    invoice_id: str,
+    body: AdjustInvoiceTotalRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        from api.src.financial.models import SupplierInvoice
+        import uuid
+        inv_uuid = uuid.UUID(invoice_id)
+        inv_q = select(SupplierInvoice).where(SupplierInvoice.id == inv_uuid)
+        inv_res = await db.execute(inv_q)
+        invoice = inv_res.scalar_one_or_none()
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Factura no encontrada.")
+
+        old_total = invoice.total or Decimal("0")
+        new_total = body.total_factura_impreso.quantize(Decimal("1"))
+        diff = new_total - old_total
+
+        pagado = old_total - (invoice.saldo_pendiente or old_total)
+        invoice.total = new_total
+        invoice.saldo_pendiente = max(Decimal("0"), new_total - pagado)
+        motivo_str = (body.motivo or "Ajuste de redondeo impreso").strip()
+        invoice.notas = f"{(invoice.notas or '').strip()} [{motivo_str}: {diff:+,} ₲]".strip()
+
+        await db.commit()
+
+        match_res = await matching_service.perform_3way_match(db, invoice_id, body.user_id)
+        return {
+            "success": True,
+            "invoice_id": str(invoice.id),
+            "numero_factura": invoice.numero_factura,
+            "total_anterior": float(old_total),
+            "nuevo_total": float(new_total),
+            "diferencia": float(diff),
+            "matching": match_res,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ajustando total de factura {invoice_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ── SOLICITUDES Y RESOLUCIÓN DE NOTAS DE CRÉDITO ("Sin NC no hay pago") ───────
 
 @router.get("/companies/{company_id}/supplier-nc-requests", response_model=list[SupplierNcRequestResponse])

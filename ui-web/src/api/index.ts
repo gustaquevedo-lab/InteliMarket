@@ -3341,6 +3341,8 @@ export const api = {
       client.post<any>(`/v1/purchases/invoices/${invoiceId}/associate-receipt`, { receipt_id: receiptId, user_id: userId }),
     approveInvoiceMatching: (invoiceId: string, motivo: string, userId?: string) =>
       client.post<any>(`/v1/purchases/invoices/${invoiceId}/approve-matching`, { motivo_aprobacion: motivo, user_id: userId }),
+    adjustInvoiceTotal: (invoiceId: string, data: { total_factura_impreso: number; motivo?: string; user_id?: string }) =>
+      client.post<any>(`/v1/purchases/invoices/${invoiceId}/adjust-total`, data),
     autoLinkReceipts: (companyId?: string) =>
       client.post<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-invoices/auto-link-receipts`, {}),
     getInvoice3WayMatch: (invoiceId: string) =>

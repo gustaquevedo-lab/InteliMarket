@@ -8,7 +8,7 @@ import {
   AlertTriangle, Filter, ChevronDown, ChevronUp, Edit, Edit3, Send, Ban, RefreshCw,
   UserPlus, FileSpreadsheet, ClipboardList, TrendingUp, ArrowUp, ArrowDown, ArrowRight,
   MessageSquare, Calendar, Hash, Percent, Printer, Link2, Check, Save, ExternalLink,
-  Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, Scale, CheckCircle,
+  Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, Scale, CheckCircle, Calculator,
   HelpCircle, AlertCircle, Box, Layers, Building2, Phone, Mail, MapPin, SlidersHorizontal,
   ChevronRight, ArrowUpDown, ChevronLeft, CheckSquare, Square, PieChart, Undo2, Receipt, History, Star,
   Lock, Unlock, FileCheck, Barcode, RotateCcw, CreditCard, Briefcase, Wrench, Globe, LayoutGrid, Table
@@ -352,6 +352,9 @@ export default function PurchasesPage() {
   const [matchResult, setMatchResult] = useState<any>(null)
   const [selectedMatchReceiptId, setSelectedMatchReceiptId] = useState("")
   const [performingMatch, setPerformingMatch] = useState(false)
+  const [showAdjustTotalInMatch, setShowAdjustTotalInMatch] = useState(false)
+  const [adjustTotalValue, setAdjustTotalValue] = useState<string>("")
+  const [adjustingTotal, setAdjustingTotal] = useState(false)
   const [showResolveNcModal, setShowResolveNcModal] = useState(false)
   const [selectedNcRequestForResolve, setSelectedNcRequestForResolve] = useState<any>(null)
   const [resolveNcForm, setResolveNcForm] = useState({
@@ -1769,6 +1772,8 @@ export default function PurchasesPage() {
 
   // ── Handlers 3-Way Match y Solicitudes de NC ────────────────────────────────
   const handleOpen3WayMatch = async (invoiceId: string) => {
+    setShowAdjustTotalInMatch(false)
+    setAdjustTotalValue("")
     setPerformingMatch(true)
     setShowMatchModal(true)
     setMatchResult(null)
@@ -1837,6 +1842,36 @@ export default function PurchasesPage() {
       toast.error("Error al vincular recepción", err.message || String(err))
     } finally {
       setPerformingMatch(false)
+    }
+  }
+
+  const handleApplyAdjustTotalInMatch = async (invoiceId: string) => {
+    if (!invoiceId || !adjustTotalValue) return
+    const num = Math.round(Number(adjustTotalValue))
+    if (isNaN(num) || num <= 0) {
+      toast.error("Monto Inválido", "Por favor ingrese un monto válido para la factura.")
+      return
+    }
+    setAdjustingTotal(true)
+    try {
+      const res = await api.purchases.adjustInvoiceTotal(invoiceId, {
+        total_factura_impreso: num,
+        motivo: "Ajuste de redondeo impreso desde Auditoría 3-Way",
+        user_id: user?.id,
+      })
+      if (res && res.matching) {
+        setMatchResult(res.matching)
+      } else {
+        const refreshed = await api.purchases.reconcile3WayMatch(invoiceId, user?.id)
+        setMatchResult(refreshed)
+      }
+      toast.success("Monto Actualizado", `El total de la factura fue ajustado a ${formatPYG(num)} y el match fue recalculado.`)
+      setShowAdjustTotalInMatch(false)
+      fetchAll()
+    } catch (err: any) {
+      toast.error("Error al ajustar total", err.message || String(err))
+    } finally {
+      setAdjustingTotal(false)
     }
   }
 
@@ -9208,6 +9243,75 @@ export default function PurchasesPage() {
                     </p>
                   </div>
                 </div>
+
+                {/* Ajuste de Monto Impreso en Factura (Redondeo / Discrepancias Menores) */}
+                {matchResult.invoice_id && (
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
+                    {!showAdjustTotalInMatch ? (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <span className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                            <Calculator className="w-3.5 h-3.5 text-indigo-500" />
+                            Ajuste de Monto Impreso en Factura Física (Redondeo Decimal)
+                          </span>
+                          <p className="text-[11px] text-gray-500 mt-0.5">
+                            Total actual registrado: <strong className="font-mono text-gray-700 dark:text-gray-300">{formatPYG(matchResult.total_factura || 0)}</strong>. Si la factura en papel totaliza diferente por cálculo de decimales de IVA del proveedor, calibre el monto aquí.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAdjustTotalValue(String(matchResult.total_factura || ""))
+                            setShowAdjustTotalInMatch(true)
+                          }}
+                          className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition flex items-center justify-center gap-1.5 shrink-0 shadow-xs"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 text-indigo-500" />
+                          <span>Ajustar Monto Impreso</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                            <Calculator className="w-4 h-4 text-indigo-600" />
+                            Ingresar Monto Real Impreso en la Factura Física
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowAdjustTotalInMatch(false)}
+                            className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <div className="flex-1">
+                            <CurrencyInput
+                              currency="PYG"
+                              placeholder="Ej. 8.770.435"
+                              className="input-field text-xs font-mono font-bold w-full"
+                              value={adjustTotalValue}
+                              onChangeValue={(val) => setAdjustTotalValue(val ? String(val) : "")}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            disabled={adjustingTotal || !adjustTotalValue}
+                            onClick={() => handleApplyAdjustTotalInMatch(matchResult.invoice_id)}
+                            className="btn-primary text-xs px-4 py-2 font-bold whitespace-nowrap bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center gap-1.5 disabled:opacity-50"
+                          >
+                            {adjustingTotal ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                            <span>Guardar y Recalcular Match</span>
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-gray-400 leading-tight">
+                          Al guardar, el sistema actualizará el valor total de la factura, ajustará el saldo exigible en Tesorería y recalculará inmediatamente la conciliación matemática ítem por ítem.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Si se generó Solicitud de NC */}
                 {matchResult.nc_request_generada && (

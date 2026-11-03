@@ -4,7 +4,7 @@ import {
   XCircle, AlertTriangle, Clock, Calendar, RefreshCw, Loader2,
   Building2, Landmark, User, FileText, ArrowUpRight, ArrowDownLeft, ShieldCheck,
   Check, X, FileSpreadsheet, History, Info, Sparkles, DollarSign, Receipt, Ban,
-  ArrowUp, ArrowDown, ArrowUpDown
+  ArrowUp, ArrowDown, ArrowUpDown, Printer
 } from "lucide-react"
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -12,6 +12,7 @@ import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatCurrency, getTodayAsuncion } from "../../utils/format"
 import CurrencyInput from "../../components/CurrencyInput"
 import SupplierSearchInput from "../../components/SupplierSearchInput"
+import ImprimirChequeContinentalModal from "./ImprimirChequeContinentalModal"
 
 type ChequeTab = "cartera" | "emitidos" | "depositados" | "rechazados" | "dashboard"
 type ChequeTipo = "recibido" | "emitido"
@@ -82,6 +83,10 @@ export default function ChequesPage() {
   // Modal Rechazo & Imputación de Costos
   const [chequeARechazar, setChequeARechazar] = useState<any>(null)
   const [motivoRechazo, setMotivoRechazo] = useState("Falta de fondos suficientes")
+
+  // Modal Impresión Cheque Continental (Epson LX-300+ ESC/P)
+  const [showPrintModal, setShowPrintModal] = useState(false)
+  const [chequeAImprimir, setChequeAImprimir] = useState<any | null>(null)
   const [otroMotivo, setOtroMotivo] = useState("")
   const [imputarCosto, setImputarCosto] = useState(false)
   const [costoRechazo, setCostoRechazo] = useState("")
@@ -494,6 +499,18 @@ export default function ChequesPage() {
             </button>
             <button
               onClick={() => {
+                setChequeAImprimir(null)
+                setShowPrintModal(true)
+              }}
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition flex items-center gap-2 shadow-lg shadow-emerald-600/25"
+              title="Imprimir Cheque Banco Continental en Epson LX-300+ (Formulario Continuo ESC/P)"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Imprimir Cheque</span>
+            </button>
+
+            <button
+              onClick={() => {
                 setForm({
                   numero: "",
                   banco_emisor: BANCOS_PARAGUAY[0],
@@ -847,6 +864,29 @@ export default function ChequesPage() {
                       </td>
                       <td className="p-3.5 text-right">
                         <div className="flex items-center justify-end gap-1.5 flex-nowrap">
+                          {/* IMPRIMIR CHEQUE EN EPSON LX-300+ */}
+                          <button
+                            onClick={() => {
+                              setChequeAImprimir({
+                                id: c.id,
+                                numero: c.numero,
+                                monto: c.monto,
+                                beneficiario: c.beneficiario || c.supplier_nombre || supplierMap[c.supplier_id] || "",
+                                esDiferido: c.diferido,
+                                fechaEmision: c.fecha_emision,
+                                fechaPago: c.fecha_pago,
+                                cruzado: c.cruzado ?? true,
+                                noALaOrden: c.no_a_la_orden ?? true,
+                                concepto: c.observaciones || c.concepto || "",
+                              })
+                              setShowPrintModal(true)
+                            }}
+                            className="p-1.5 rounded-lg text-emerald-400 hover:text-emerald-200 hover:bg-emerald-950/60 border border-emerald-500/30 transition"
+                            title="Imprimir Cheque en Epson LX-300+ (Banco Continental)"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                          </button>
+
                           {/* HISTORIAL (Icon-only sobrio) */}
                           <button
                             onClick={() => handleVerHistorial(c)}
@@ -1707,6 +1747,19 @@ export default function ChequesPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL IMPRESIÓN CHEQUE BANCO CONTINENTAL (EPSON LX-300+ ESC/P) */}
+      <ImprimirChequeContinentalModal
+        isOpen={showPrintModal}
+        onClose={() => {
+          setShowPrintModal(false)
+          setChequeAImprimir(null)
+        }}
+        chequeData={chequeAImprimir}
+        onChequeImpreso={() => {
+          loadData()
+        }}
+      />
     </div>
   )
 }
