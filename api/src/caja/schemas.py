@@ -258,6 +258,38 @@ class PaymentMethodBankMappingResponse(BaseModel):
     cargo_cliente_porcentaje: float = 0.0
     cargo_cliente_minimo_gs: float = 0.0
     activo: bool
+    recalculated_txs_count: int = 0
+
+
+class PaymentMethodCommissionAuditItem(BaseModel):
+    canal_key: str
+    canal_label: str
+    banco_nombre: Optional[str] = None
+    numero_cuenta: Optional[str] = None
+    tasa_configurada_pct: float
+    comision_fija_gs: float
+    total_bruto_pos: float
+    comision_teorica: float
+    neto_esperado: float
+    total_acreditado_real: float
+    comision_real_retenida: float
+    tasa_real_efectiva_pct: float
+    desvio_monto_gs: float
+    desvio_pct: float
+    transacciones_count: int
+    conciliadas_count: int
+    estado: str  # CONFORME, DESVIO_LEVE, SOBRECOBRO, FAVORABLE, PENDIENTE_EXTRACTO
+
+
+class PaymentMethodCommissionAuditResponse(BaseModel):
+    desde: str
+    hasta: str
+    total_bruto_pos: float
+    total_comision_teorica: float
+    total_neto_esperado: float
+    total_acreditado_real: float
+    total_desvio_gs: float
+    canales: list[PaymentMethodCommissionAuditItem]
 
 
 class CashShortageConfigUpdate(BaseModel):

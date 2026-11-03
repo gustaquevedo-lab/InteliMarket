@@ -522,6 +522,43 @@ export default function CajaPage() {
   const [savingMappingKey, setSavingMappingKey] = useState<string | null>(null)
   const [editingMappings, setEditingMappings] = useState<Record<string, Partial<BankMappingItem>>>({})
 
+  // ── Auditoría Activa de Comisiones (Teórica vs Real) ──
+  const [commissionAudit, setCommissionAudit] = useState<{
+    desde: string
+    hasta: string
+    total_bruto_pos: number
+    total_comision_teorica: number
+    total_neto_esperado: number
+    total_acreditado_real: number
+    total_desvio_gs: number
+    canales: Array<{
+      canal_key: string
+      canal_label: string
+      banco_nombre?: string | null
+      numero_cuenta?: string | null
+      tasa_configurada_pct: number
+      comision_fija_gs: number
+      total_bruto_pos: number
+      comision_teorica: number
+      neto_esperado: number
+      total_acreditado_real: number
+      comision_real_retenida: number
+      tasa_real_efectiva_pct: number
+      desvio_monto_gs: number
+      desvio_pct: number
+      transacciones_count: number
+      conciliadas_count: number
+      estado: string
+    }>
+  } | null>(null)
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditDesde, setAuditDesde] = useState(() => {
+    const today = getTodayAsuncion()
+    const [year, month] = today.split("-")
+    return `${year}-${month}-01`
+  })
+  const [auditHasta, setAuditHasta] = useState(() => getTodayAsuncion())
+
   // ── Faltantes & SueldOK ──
   const [shortageConfig, setShortageConfig] = useState<ShortageConfigData | null>(null)
   const [shortageConfigLoading, setShortageConfigLoading] = useState(false)
@@ -1014,6 +1051,21 @@ export default function CajaPage() {
     }
   }
 
+  const fetchCommissionAudit = async (customDesde?: string, customHasta?: string) => {
+    setAuditLoading(true)
+    try {
+      const data = await api.caja.bankMappings.audit({
+        desde: customDesde || auditDesde,
+        hasta: customHasta || auditHasta,
+      })
+      setCommissionAudit(data)
+    } catch (err: any) {
+      toast.error("Error al auditar comisiones", err?.message)
+    } finally {
+      setAuditLoading(false)
+    }
+  }
+
   const handleUpdateBankMapping = async (
     canalKey: string,
     bankAccountId: string | null,
@@ -1028,7 +1080,7 @@ export default function CajaPage() {
   ) => {
     setSavingMappingKey(canalKey)
     try {
-      await api.caja.bankMappings.update(canalKey, {
+      const res = await api.caja.bankMappings.update(canalKey, {
         bank_account_id: bankAccountId || null,
         activo,
         comision_porcentaje: comisionPorcentaje,
@@ -1039,8 +1091,10 @@ export default function CajaPage() {
         cargo_cliente_porcentaje: cargoClientePct,
         cargo_cliente_minimo_gs: cargoClienteMin,
       })
-      toast.success("Mapeo Bancario Actualizado", `Canal ${canalKey} configurado exitosamente.`)
+      const recMsg = res?.recalculated_txs_count > 0 ? ` Se recalcularon ${res.recalculated_txs_count} asientos pendientes con la nueva tasa.` : ""
+      toast.success("Mapeo Bancario Actualizado", `Canal ${canalKey} configurado.${recMsg}`)
       fetchBankMappings()
+      fetchCommissionAudit()
     } catch (err: any) {
       toast.error("Error al actualizar mapeo", err?.message)
     } finally {
@@ -1131,7 +1185,10 @@ export default function CajaPage() {
   useEffect(() => {
     if (activeTab === "donaciones") fetchDonationsData()
     if (activeTab === "reportes" && !salesByCashierData) fetchReportesCaja()
-    if (activeTab === "bancos_mapping") fetchBankMappings()
+    if (activeTab === "bancos_mapping") {
+      fetchBankMappings()
+      fetchCommissionAudit()
+    }
     if (activeTab === "sueldok_faltantes") fetchShortageData()
   }, [activeTab])
 
@@ -3694,6 +3751,209 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
               })}
             </div>
           )}
+
+          {/* Panel de Auditoría y Comparación Activa de Comisiones */}
+          <div className="card p-6 bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl space-y-5 mt-6">
+            {/* Encabezado y Filtros */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                  <Calculator className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                    Auditoría Activa de Comisiones (Teórica vs Real)
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      Cálculo Reactivo
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Comparación automática entre el arancel contractual configurado en el ERP vs lo efectivamente acreditado en banco por la procesadora.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
+                  <span className="text-[11px] font-bold text-slate-400">Desde:</span>
+                  <input
+                    type="date"
+                    value={auditDesde}
+                    onChange={(e) => setAuditDesde(e.target.value)}
+                    className="bg-transparent text-xs text-white border-0 focus:outline-none font-mono"
+                  />
+                </div>
+                <div className="flex items-center gap-2 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700">
+                  <span className="text-[11px] font-bold text-slate-400">Hasta:</span>
+                  <input
+                    type="date"
+                    value={auditHasta}
+                    onChange={(e) => setAuditHasta(e.target.value)}
+                    className="bg-transparent text-xs text-white border-0 focus:outline-none font-mono"
+                  />
+                </div>
+                <button
+                  onClick={() => fetchCommissionAudit(auditDesde, auditHasta)}
+                  disabled={auditLoading}
+                  className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${auditLoading ? "animate-spin" : ""}`} />
+                  <span>Recalcular Comparativa</span>
+                </button>
+              </div>
+            </div>
+
+            {/* KPIs Resumen */}
+            {commissionAudit && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Bruto Facturado en POS</span>
+                  <div className="text-base font-black text-white font-mono">
+                    ₲ {formatPYG(commissionAudit.total_bruto_pos)}
+                  </div>
+                  <span className="text-[10px] text-slate-500">Total ventas con tarjeta/QR</span>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Comisión Teórica ERP</span>
+                  <div className="text-base font-black text-indigo-400 font-mono">
+                    ₲ {formatPYG(commissionAudit.total_comision_teorica)}
+                  </div>
+                  <span className="text-[10px] text-slate-500">Según tasas configuradas</span>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Neto Acreditado en Bancos</span>
+                  <div className="text-base font-black text-emerald-400 font-mono">
+                    ₲ {formatPYG(commissionAudit.total_acreditado_real)}
+                  </div>
+                  <span className="text-[10px] text-slate-500">Créditos reales en extracto</span>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Desvío de Comisión</span>
+                  <div className={`text-base font-black font-mono ${
+                    commissionAudit.total_desvio_gs > 0 ? "text-rose-400" : "text-emerald-400"
+                  }`}>
+                    {commissionAudit.total_desvio_gs > 0 ? "+" : ""}₲ {formatPYG(commissionAudit.total_desvio_gs)}
+                  </div>
+                  <span className="text-[10px] text-slate-500">
+                    {commissionAudit.total_desvio_gs > 0 ? "Retención en exceso" : "En línea o favorable"}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Tabla Comparativa */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="py-2.5 px-3">Canal / Procesadora</th>
+                    <th className="py-2.5 px-3">Cuenta Destino</th>
+                    <th className="py-2.5 px-3 text-right">Tasa Teórica</th>
+                    <th className="py-2.5 px-3 text-right">Bruto POS</th>
+                    <th className="py-2.5 px-3 text-right">Comis. Teórica</th>
+                    <th className="py-2.5 px-3 text-right">Neto Esperado</th>
+                    <th className="py-2.5 px-3 text-right">Acreditado Banco</th>
+                    <th className="py-2.5 px-3 text-right">Tasa Real</th>
+                    <th className="py-2.5 px-3 text-right">Desvío (Gs.)</th>
+                    <th className="py-2.5 px-3 text-center">Estado Auditoría</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-mono text-slate-200">
+                  {auditLoading ? (
+                    <tr>
+                      <td colSpan={10} className="py-8 text-center text-slate-400">
+                        <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-400" />
+                        <span>Calculando auditoría de procesadoras...</span>
+                      </td>
+                    </tr>
+                  ) : !commissionAudit || commissionAudit.canales.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="py-8 text-center text-slate-500">
+                        No se encontraron transacciones en el período seleccionado.
+                      </td>
+                    </tr>
+                  ) : (
+                    commissionAudit.canales.map((c) => {
+                      const isOk = c.estado === "CONFORME"
+                      const isWarn = c.estado === "DESVIO_LEVE"
+                      const isAlert = c.estado === "SOBRECOBRO"
+                      const isPend = c.estado === "PENDIENTE_EXTRACTO"
+                      return (
+                        <tr key={c.canal_key} className="hover:bg-slate-800/40 transition">
+                          <td className="py-2 px-3 font-sans font-bold text-white whitespace-nowrap">
+                            {c.canal_label}
+                            <span className="block text-[10px] font-mono text-slate-500">{c.canal_key}</span>
+                          </td>
+                          <td className="py-2 px-3 font-sans text-[11px] text-slate-400">
+                            {c.banco_nombre ? (
+                              <span>{c.banco_nombre} ({c.numero_cuenta})</span>
+                            ) : (
+                              <span className="text-amber-500">Sin vincular</span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-right text-indigo-400 font-bold">
+                            {c.tasa_configurada_pct.toFixed(2)}%
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            ₲ {formatPYG(c.total_bruto_pos)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-indigo-300">
+                            ₲ {formatPYG(c.comision_teorica)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-slate-300">
+                            ₲ {formatPYG(c.neto_esperado)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-emerald-400 font-bold">
+                            ₲ {formatPYG(c.total_acreditado_real)}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            {c.total_acreditado_real > 0 ? `${c.tasa_real_efectiva_pct.toFixed(2)}%` : "—"}
+                          </td>
+                          <td className={`py-2 px-3 text-right font-bold ${
+                            c.desvio_monto_gs > 0 ? "text-rose-400" : (c.desvio_monto_gs < 0 ? "text-emerald-400" : "text-slate-400")
+                          }`}>
+                            {c.total_acreditado_real > 0 ? (
+                              `${c.desvio_monto_gs > 0 ? "+" : ""}₲ ${formatPYG(c.desvio_monto_gs)}`
+                            ) : "—"}
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            {isOk && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                Conforme
+                              </span>
+                            )}
+                            {isWarn && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                Desvío Leve ({c.desvio_pct > 0 ? "+" : ""}{c.desvio_pct.toFixed(2)}%)
+                              </span>
+                            )}
+                            {isAlert && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                Sobrecobro ({c.desvio_pct > 0 ? "+" : ""}{c.desvio_pct.toFixed(2)}%)
+                              </span>
+                            )}
+                            {isPend && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">
+                                Pend. Extracto
+                              </span>
+                            )}
+                            {c.estado === "SIN_MOVIMIENTOS" && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-medium text-slate-600">
+                                Sin ventas
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 

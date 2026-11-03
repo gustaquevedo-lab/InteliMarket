@@ -20,6 +20,7 @@ from api.src.caja.schemas import (
     CreateTreasuryRemittanceRequest, ReceiveTreasuryRemittanceRequest,
     DepositVaultToBankRequest, DepositVaultAmountToBankRequest, SavePunteoAuditRequest,
     PaymentMethodBankMappingUpdate, PaymentMethodBankMappingResponse,
+    PaymentMethodCommissionAuditResponse,
     CashShortageConfigUpdate, CashShortageConfigResponse,
     ResolveCashShortageRequest, IncorporateSessionVaultAndBanksRequest,
     ConfirmSessionCashReceptionRequest, CashSessionRendicionUpdate,
@@ -931,6 +932,17 @@ async def list_bank_mappings(
     user=Depends(require_auth),
 ):
     return await service.list_payment_method_bank_mappings(db, user["company_id"])
+
+
+@router.get("/caja/config/bank-mappings/audit", response_model=PaymentMethodCommissionAuditResponse)
+async def audit_bank_mappings_commissions(
+    desde: date | None = Query(None, description="Fecha de inicio (YYYY-MM-DD)"),
+    hasta: date | None = Query(None, description="Fecha de fin (YYYY-MM-DD)"),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Audita y compara en tiempo real las comisiones teóricas contractuales vs la recaudación real de procesadoras."""
+    return await service.audit_payment_method_commissions(db, user["company_id"], desde, hasta)
 
 
 @router.put("/caja/config/bank-mappings/{canal_key}", response_model=PaymentMethodBankMappingResponse)

@@ -6327,6 +6327,86 @@ async def update_payment_method_bank_mapping(
             mapping.cargo_cliente_minimo_gs = cargo_cliente_minimo_gs
         mapping.updated_at = datetime.now(timezone.utc)
 
+    # ── RECÁLCULO ACTIVO DE PRE-ASIENTOS PENDIENTES ────────────────────────────
+    # Si existen pre-asientos generados por turnos de caja que aún no fueron conciliados
+    # con el extracto bancario, se recalculan inmediatamente con la nueva tasa de procesadora.
+    recalculated_txs_count = 0
+    accounts_to_recalc = set()
+    if bid:
+        accounts_to_recalc.add(bid)
+
+    pending_res = await db.execute(
+        select(BankTransaction).where(
+            BankTransaction.company_id == cid,
+            BankTransaction.referencia.like(f"ARQUEO-%-{canal_key}"),
+            BankTransaction.conciliado == False,
+        )
+    )
+    pending_txs = pending_res.scalars().all()
+
+    for p_tx in pending_txs:
+        # Extraer el monto bruto original de la descripción o del punteo
+        m_bruto = re.search(r'Bruto:\s*([\d\.,]+)\s*Gs', p_tx.descripcion or "")
+        m_gs = None
+        if m_bruto:
+            s_bruto = m_bruto.group(1).replace(".", "").replace(",", "")
+            try:
+                m_gs = Decimal(s_bruto)
+            except Exception:
+                pass
+
+        if not m_gs and p_tx.referencia:
+            parts = p_tx.referencia.split("-")
+            if len(parts) >= 2:
+                short_sid = parts[1]
+                sess_q = await db.execute(
+                    select(CashSession.id).where(
+                        CashSession.company_id == cid,
+                        text("cast(id as text) like :p")
+                    ).params(p=f"{short_sid}%")
+                )
+                full_sid = sess_q.scalar_one_or_none()
+                if full_sid:
+                    p_data = await get_session_punteo_data(db, str(full_sid), str(cid))
+                    v_inf = p_data.get("summary_by_method", {}).get(canal_key, {})
+                    m_gs = Decimal(str(v_inf.get("monto_gs") or 0))
+
+        if m_gs and m_gs > 0:
+            comis_pct = Decimal(str(mapping.comision_porcentaje or 0))
+            comis_fija = Decimal(str(mapping.comision_fija_gs or 0))
+            retencion_gs = round(m_gs * (comis_pct / Decimal("100"))) + comis_fija
+            monto_neto_gs = max(Decimal("0"), m_gs - retencion_gs)
+
+            accounts_to_recalc.add(p_tx.bank_account_id)
+            p_tx.monto = monto_neto_gs
+            if bid:
+                p_tx.bank_account_id = bid
+                accounts_to_recalc.add(bid)
+
+            desc_comis = f" (Bruto: {m_gs:,.0f} Gs. | Comis. {comis_pct:.2f}%: -{retencion_gs:,.0f} Gs.)" if retencion_gs > 0 else ""
+            m_turno = re.search(r'(Turno\s+.+)', p_tx.descripcion or "")
+            turno_str = m_turno.group(1) if m_turno else ""
+            p_tx.descripcion = f"Recaudación {mapping.canal_label}{desc_comis} {turno_str}".strip()
+            db.add(p_tx)
+            recalculated_txs_count += 1
+
+    # Recalcular saldos de cuentas afectadas
+    for acc_id in accounts_to_recalc:
+        if not acc_id:
+            continue
+        bal_res = await db.execute(
+            select(
+                func.coalesce(func.sum(case((BankTransaction.tipo == 'credito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("creditos"),
+                func.coalesce(func.sum(case((BankTransaction.tipo == 'debito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("debitos"),
+            ).where(BankTransaction.bank_account_id == acc_id)
+        )
+        b_row = bal_res.fetchone()
+        acc_q = await db.execute(select(BankAccount).where(BankAccount.id == acc_id))
+        acc_obj = acc_q.scalar_one_or_none()
+        if acc_obj:
+            acc_obj.saldo_actual = (acc_obj.saldo_inicial or Decimal("0")) + b_row.creditos - b_row.debitos
+            db.add(acc_obj)
+
     await db.commit()
     await db.refresh(mapping)
 
@@ -6355,6 +6435,198 @@ async def update_payment_method_bank_mapping(
         "cargo_cliente_porcentaje": float(mapping.cargo_cliente_porcentaje or 0),
         "cargo_cliente_minimo_gs": float(mapping.cargo_cliente_minimo_gs or 0),
         "activo": mapping.activo,
+        "recalculated_txs_count": recalculated_txs_count,
+    }
+
+
+async def audit_payment_method_commissions(
+    db: AsyncSession,
+    company_id: str,
+    desde: date | None = None,
+    hasta: date | None = None,
+) -> dict:
+    """Audita y compara en tiempo real las comisiones teóricas contractuales vs la recaudación real de procesadoras."""
+    cid = uuid.UUID(company_id)
+    d_desde = desde or date(date.today().year, date.today().month, 1)
+    d_hasta = hasta or date.today()
+
+    mappings = await list_payment_method_bank_mappings(db, company_id)
+
+    canales_audit: list[dict] = []
+    tot_bruto_pos = Decimal("0")
+    tot_comis_teorica = Decimal("0")
+    tot_neto_esperado = Decimal("0")
+    tot_acred_real = Decimal("0")
+    tot_desvio_gs = Decimal("0")
+
+    PROCESSOR_PATTERNS = {
+        "BANCARD": ["EXTRA SUPERMERCADO", "CREDITOS AUTOMATICO A COMERCIOS", "BANCARD", "CLEARING DE PROCESADORAS"],
+        "DINELCO": ["BEPSA", "DINELCO", "CR.COM.BEPSA", "PAGO.QRHUB", "PAGO.BEPSA"],
+        "PLUGPAY": ["PLUGPAY", "PAGO.PROVEED.CONTINENTAL | 01236201156", "PLUG PAY"],
+        "SIPAP": ["SIPAP", "TRANSF. RECIBIDA WEB", "TRANSFERENCIA RECIBIDA"],
+    }
+
+    bank_credits_cache: dict[uuid.UUID, list[BankTransaction]] = {}
+    account_ids = {uuid.UUID(m["bank_account_id"]) for m in mappings if m.get("bank_account_id")}
+    if account_ids:
+        c_res = await db.execute(
+            select(BankTransaction).where(
+                BankTransaction.company_id == cid,
+                BankTransaction.bank_account_id.in_(account_ids),
+                BankTransaction.tipo == "credito",
+                BankTransaction.fecha >= d_desde,
+                BankTransaction.fecha <= d_hasta,
+                BankTransaction.categoria != "deposito_recaudacion_caja",
+            )
+        )
+        for tx in c_res.scalars().all():
+            bank_credits_cache.setdefault(tx.bank_account_id, []).append(tx)
+
+    for m in mappings:
+        canal_key = m["canal_key"]
+        tasa_pct = Decimal(str(m.get("comision_porcentaje") or 0))
+        fija_gs = Decimal(str(m.get("comision_fija_gs") or 0))
+        bank_id_str = m.get("bank_account_id")
+        bank_uuid = uuid.UUID(bank_id_str) if bank_id_str else None
+
+        # 1. Transacciones generadas por arqueos / turnos en el rango
+        txs_res = await db.execute(
+            select(BankTransaction).where(
+                BankTransaction.company_id == cid,
+                BankTransaction.referencia.like(f"ARQUEO-%-{canal_key}"),
+                BankTransaction.fecha >= d_desde,
+                BankTransaction.fecha <= d_hasta,
+            )
+        )
+        txs = txs_res.scalars().all()
+
+        bruto_canal = Decimal("0")
+        conciliadas_count = 0
+
+        for tx in txs:
+            if tx.conciliado:
+                conciliadas_count += 1
+            m_bruto = re.search(r'Bruto:\s*([\d\.,]+)\s*Gs', tx.descripcion or "")
+            if m_bruto:
+                s_b = m_bruto.group(1).replace(".", "").replace(",", "")
+                try:
+                    bruto_canal += Decimal(s_b)
+                except Exception:
+                    bruto_canal += (tx.monto or Decimal("0"))
+            else:
+                bruto_canal += (tx.monto or Decimal("0"))
+
+        # Si no hubo arqueos registrados en bank_transactions pero existen transacciones POS en terminales
+        if bruto_canal == 0:
+            pos_types = []
+            if canal_key == "BANCARD_DEBITO":
+                pos_types = ["venta_debito"]
+            elif canal_key == "BANCARD_CREDITO":
+                pos_types = ["venta_credito", "venta_credito_2cuotas", "venta_credito_3cuotas", "venta_credito_6cuotas"]
+            elif canal_key == "BANCARD_QR":
+                pos_types = ["venta_qr"]
+            elif canal_key == "DINELCO_DEBITO":
+                pos_types = ["dinelco_venta_debito"]
+            elif canal_key == "DINELCO_CREDITO":
+                pos_types = ["dinelco_venta_credito"]
+            elif canal_key == "DINELCO_QR":
+                pos_types = ["dinelco_qr"]
+            elif canal_key == "DINELCO_PIX":
+                pos_types = ["dinelco_pix"]
+            elif canal_key == "PLUGPAY_PIX":
+                pos_types = ["venta_qr_pix", "plugpay_pix"]
+
+            if pos_types:
+                pos_q = await db.execute(
+                    select(func.coalesce(func.sum(PosTerminalTransaction.monto), Decimal("0"))).where(
+                        PosTerminalTransaction.company_id == cid,
+                        PosTerminalTransaction.tipo_operacion.in_(pos_types),
+                        PosTerminalTransaction.exitosa == True,
+                        func.cast(PosTerminalTransaction.created_at, date) >= d_desde,
+                        func.cast(PosTerminalTransaction.created_at, date) <= d_hasta,
+                    )
+                )
+                bruto_canal = pos_q.scalar() or Decimal("0")
+
+        # Comisión teórica activa
+        comis_teorica_canal = round(bruto_canal * (tasa_pct / Decimal("100"))) + (fija_gs * len(txs))
+        neto_esperado_canal = max(Decimal("0"), bruto_canal - comis_teorica_canal)
+
+        # 2. Créditos bancarios reales para este procesador
+        acreditado_real_canal = Decimal("0")
+        if bank_uuid and bank_uuid in bank_credits_cache:
+            proc_key = "BANCARD" if "BANCARD" in canal_key else ("DINELCO" if "DINELCO" in canal_key else ("PLUGPAY" if "PLUG" in canal_key else "SIPAP"))
+            patterns = PROCESSOR_PATTERNS.get(proc_key, [])
+            for b_tx in bank_credits_cache[bank_uuid]:
+                desc_u = (b_tx.descripcion or "").upper()
+                ref_u = (b_tx.referencia or "").upper()
+                if any(pat in desc_u or pat in ref_u for pat in patterns):
+                    acreditado_real_canal += (b_tx.monto or Decimal("0"))
+
+        # Determinar desvío y estado
+        desvio_gs = Decimal("0")
+        desvio_pct = Decimal("0")
+        if acreditado_real_canal > 0 and bruto_canal > 0:
+            comis_real = max(Decimal("0"), bruto_canal - acreditado_real_canal)
+            tasa_efectiva = round((comis_real / bruto_canal) * Decimal("100"), 2)
+            desvio_gs = comis_real - comis_teorica_canal
+            desvio_pct = tasa_efectiva - tasa_pct
+            if abs(desvio_pct) <= Decimal("0.05"):
+                estado = "CONFORME"
+            elif abs(desvio_pct) <= Decimal("0.50"):
+                estado = "DESVIO_LEVE"
+            elif desvio_pct > Decimal("0.50"):
+                estado = "SOBRECOBRO"
+            else:
+                estado = "FAVORABLE"
+        elif acreditado_real_canal == 0 and bruto_canal > 0:
+            comis_real = Decimal("0")
+            tasa_efectiva = Decimal("0")
+            desvio_gs = Decimal("0")
+            desvio_pct = Decimal("0")
+            estado = "PENDIENTE_EXTRACTO"
+        else:
+            comis_real = Decimal("0")
+            tasa_efectiva = Decimal("0")
+            desvio_gs = Decimal("0")
+            desvio_pct = Decimal("0")
+            estado = "SIN_MOVIMIENTOS"
+
+        tot_bruto_pos += bruto_canal
+        tot_comis_teorica += comis_teorica_canal
+        tot_neto_esperado += neto_esperado_canal
+        tot_acred_real += acreditado_real_canal
+        tot_desvio_gs += desvio_gs
+
+        canales_audit.append({
+            "canal_key": canal_key,
+            "canal_label": m["canal_label"],
+            "banco_nombre": m.get("banco_nombre"),
+            "numero_cuenta": m.get("numero_cuenta"),
+            "tasa_configurada_pct": float(tasa_pct),
+            "comision_fija_gs": float(fija_gs),
+            "total_bruto_pos": float(bruto_canal),
+            "comision_teorica": float(comis_teorica_canal),
+            "neto_esperado": float(neto_esperado_canal),
+            "total_acreditado_real": float(acreditado_real_canal),
+            "comision_real_retenida": float(comis_real),
+            "tasa_real_efectiva_pct": float(tasa_efectiva),
+            "desvio_monto_gs": float(desvio_gs),
+            "desvio_pct": float(desvio_pct),
+            "transacciones_count": len(txs),
+            "conciliadas_count": conciliadas_count,
+            "estado": estado,
+        })
+
+    return {
+        "desde": d_desde.isoformat(),
+        "hasta": d_hasta.isoformat(),
+        "total_bruto_pos": float(tot_bruto_pos),
+        "total_comision_teorica": float(tot_comis_teorica),
+        "total_neto_esperado": float(tot_neto_esperado),
+        "total_acreditado_real": float(tot_acred_real),
+        "total_desvio_gs": float(tot_desvio_gs),
+        "canales": canales_audit,
     }
 
 

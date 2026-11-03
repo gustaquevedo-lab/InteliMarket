@@ -2831,6 +2831,35 @@ export const api = {
         cargo_cliente_minimo_gs?: number
         activo?: boolean
       }) => client.put<any>(`/v1/caja/config/bank-mappings/${canalKey}`, data),
+      audit: (params?: { desde?: string; hasta?: string }) =>
+        client.get<{
+          desde: string
+          hasta: string
+          total_bruto_pos: number
+          total_comision_teorica: number
+          total_neto_esperado: number
+          total_acreditado_real: number
+          total_desvio_gs: number
+          canales: Array<{
+            canal_key: string
+            canal_label: string
+            banco_nombre?: string | null
+            numero_cuenta?: string | null
+            tasa_configurada_pct: number
+            comision_fija_gs: number
+            total_bruto_pos: number
+            comision_teorica: number
+            neto_esperado: number
+            total_acreditado_real: number
+            comision_real_retenida: number
+            tasa_real_efectiva_pct: number
+            desvio_monto_gs: number
+            desvio_pct: number
+            transacciones_count: number
+            conciliadas_count: number
+            estado: "CONFORME" | "DESVIO_LEVE" | "SOBRECOBRO" | "FAVORABLE" | "PENDIENTE_EXTRACTO" | "SIN_MOVIMIENTOS"
+          }>
+        }>("/v1/caja/config/bank-mappings/audit", params as any),
     },
     shortageConfig: {
       get: () => client.get<{ umbral_aprobacion_gs: number; requerir_aprobacion_siempre: boolean; permitir_cuotas: boolean; max_cuotas: number }>("/v1/caja/config/shortages"),
