@@ -43,7 +43,7 @@ def _classify_sheet(sheet_name: str, title) -> str | None:
     """Devuelve 'cuenta_corriente' | 'ahorro' | 'ahorro_pix' según el nombre
     de hoja / título, o None si no es una hoja de cuenta reconocible."""
     t = (title if isinstance(title, str) else "").upper()
-    s = (sheet_name or "").upper()
+    s = (sheet_name or "").upper().strip()
     if "PIX" in s or "PIX" in t:
         return "ahorro_pix"
     if "CTE" in s or "CORRIENTE" in s or "CTE" in t or "CORRIENTE" in t:
@@ -68,6 +68,33 @@ def account_tipo_normalizado(tipo: str | None, titular: str | None, numero_cuent
     return "cuenta_corriente"
 
 
+def _parse_cell_date(v, mes: int, anio: int) -> date | None:
+    """Parsea fechas tanto de objetos date/datetime como cadenas ('01 08:34:22', '01/10/2026', '2026-10-01')."""
+    if isinstance(v, (datetime, date)):
+        d = v.date() if isinstance(v, datetime) else v
+        max_day = calendar.monthrange(anio, mes)[1]
+        return date(anio, mes, min(d.day, max_day))
+    if isinstance(v, str):
+        v = v.strip()
+        parts = v.split()
+        if parts:
+            first = parts[0]
+            try:
+                if "/" in first:
+                    sp = first.split("/")
+                    day = int(sp[0])
+                elif "-" in first:
+                    sp = first.split("-")
+                    day = int(sp[0] if len(sp[0]) <= 2 else sp[2])
+                else:
+                    day = int(first)
+                max_day = calendar.monthrange(anio, mes)[1]
+                return date(anio, mes, min(day, max_day))
+            except (ValueError, IndexError):
+                return None
+    return None
+
+
 def parse_statement(file_bytes: bytes, mes: int, anio: int, banco: str, account_tipo: str) -> dict:
     """Parsea un extracto Excel y devuelve las transacciones de la hoja que
     coincide con account_tipo ('cuenta_corriente'/'ahorro'/'ahorro_pix').
@@ -75,7 +102,6 @@ def parse_statement(file_bytes: bytes, mes: int, anio: int, banco: str, account_
     import io
 
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
-    es_interfisa = "INTERFISA" in (banco or "").upper()
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
@@ -98,25 +124,19 @@ def parse_statement(file_bytes: bytes, mes: int, anio: int, banco: str, account_
                 continue
 
             debito_n, credito_n, saldo_n = _to_num(debito), _to_num(credito), _to_num(saldo)
-            if es_interfisa:
-                debito_n, credito_n = credito_n, debito_n
 
-            if isinstance(fecha, (datetime, date)):
-                cell_date = fecha.date() if isinstance(fecha, datetime) else fecha
-                if cell_date.month == mes and cell_date.year != anio:
-                    fecha_real = date(anio, mes, cell_date.day)
-                else:
-                    fecha_real = cell_date
-                if not (fecha_real.year == anio and fecha_real.month == mes):
-                    last_day = calendar.monthrange(anio, mes)[1]
-                    fecha_real = date(anio, mes, min(cell_date.day, last_day))
-
-                descripcion = mov or ""
+            fecha_real = _parse_cell_date(fecha, mes, anio)
+            if fecha_real is not None:
+                descripcion = str(mov or "")
                 referencia = str(numop) if numop is not None else None
+
+                # En el libro mayor del contador de la empresa (Activo Bancario):
+                # Columna D (DÉBITO) = Aumentos de cuenta / Ingresos / Depósitos -> tipo: "credito" en InteliMarket (+)
+                # Columna E (CRÉDITO) = Disminuciones de cuenta / Egresos / Pagos -> tipo: "debito" en InteliMarket (-)
                 if debito_n is not None:
-                    txs.append({"fecha": fecha_real, "tipo": "debito", "monto": Decimal(str(debito_n)), "descripcion": descripcion, "referencia": referencia})
+                    txs.append({"fecha": fecha_real, "tipo": "credito", "monto": Decimal(str(debito_n)), "descripcion": descripcion, "referencia": referencia})
                 if credito_n is not None:
-                    txs.append({"fecha": fecha_real, "tipo": "credito", "monto": Decimal(str(credito_n)), "descripcion": descripcion, "referencia": referencia})
+                    txs.append({"fecha": fecha_real, "tipo": "debito", "monto": Decimal(str(credito_n)), "descripcion": descripcion, "referencia": referencia})
                 continue
 
             if fecha is None and mov is None and (debito_n is not None or credito_n is not None) and saldo_n is not None:
