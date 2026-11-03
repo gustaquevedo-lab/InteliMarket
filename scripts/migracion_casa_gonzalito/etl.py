@@ -47,7 +47,7 @@ PG_DSN = os.getenv(
 SCHEMA_SQL = os.getenv("SCHEMA_SQL", os.path.expanduser("~/intelimarket/db/schema.sql"))
 
 EMPRESA = dict(
-    ruc=os.getenv("CG_RUC", "80012345-6"),
+    ruc=os.getenv("CG_RUC", "80005427-0"),
     razon_social="CASA GONZALITO S.R.L.",
     nombre_fantasia="Casa Gonzalito",
     regimen_tributario="general",
