@@ -1,6 +1,6 @@
 """Caja (Cash Register) service"""
 
-from sqlalchemy import select, func, text, or_, and_, delete, case, literal_column, update
+from sqlalchemy import select, func, text, or_, and_, delete, case, literal_column, update, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from datetime import datetime, timezone, date, timedelta, time
@@ -6542,8 +6542,8 @@ async def audit_payment_method_commissions(
                         PosTerminalTransaction.company_id == cid,
                         PosTerminalTransaction.tipo_operacion.in_(pos_types),
                         PosTerminalTransaction.exitosa == True,
-                        func.cast(PosTerminalTransaction.created_at, date) >= d_desde,
-                        func.cast(PosTerminalTransaction.created_at, date) <= d_hasta,
+                        func.cast(PosTerminalTransaction.created_at, Date) >= d_desde,
+                        func.cast(PosTerminalTransaction.created_at, Date) <= d_hasta,
                     )
                 )
                 bruto_canal = pos_q.scalar() or Decimal("0")
