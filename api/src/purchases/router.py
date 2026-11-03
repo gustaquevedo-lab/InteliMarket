@@ -1066,24 +1066,90 @@ async def auto_link_receipts(company_id: str, db: AsyncSession = Depends(get_db)
 _SCANNED_DIR = Path(__file__).resolve().parents[2] / "static" / "uploads" / "comprobantes"
 
 
-def _save_scanned_file(content: bytes, filename: str) -> str:
-    ext = Path(filename).suffix.lower()
-    allowed = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
-    if ext not in allowed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Formato no permitido: '{ext}'. Se aceptan documentos PDF o imágenes (JPG, PNG, WebP)."
-        )
-    if len(content) > 25 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="El archivo escaneado supera el tamaño máximo permitido (25MB).")
-    if len(content) == 0:
-        raise HTTPException(status_code=400, detail="El archivo escaneado está vacío.")
+def _save_scanned_files(files_data: list[tuple[bytes, str]]) -> str:
+    """
+    Guarda una o varias hojas escaneadas de la factura física.
+    - Si se sube una sola hoja (PDF o imagen): se almacena directamente.
+    - Si se suben varias imágenes (fotos de varias hojas): se combinan automáticamente
+      en un único documento PDF multipágina ordenado (Hoja 1, Hoja 2, Hoja 3...) usando Pillow.
+    """
+    if not files_data:
+        raise HTTPException(status_code=400, detail="No se recibieron archivos escaneados.")
 
     _SCANNED_DIR.mkdir(parents=True, exist_ok=True)
-    unique_name = f"fac_scan_{uuid.uuid4().hex[:12]}{ext}"
-    dest = _SCANNED_DIR / unique_name
-    dest.write_bytes(content)
-    return f"/static/uploads/comprobantes/{unique_name}"
+    allowed = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+
+    # Caso 1: Un solo archivo
+    if len(files_data) == 1:
+        content, filename = files_data[0]
+        ext = Path(filename).suffix.lower()
+        if ext not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Formato no permitido: '{ext}'. Se aceptan documentos PDF o imágenes (JPG, PNG, WebP)."
+            )
+        if len(content) > 35 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="El archivo escaneado supera el tamaño máximo permitido (35MB).")
+        if len(content) == 0:
+            raise HTTPException(status_code=400, detail="El archivo escaneado está vacío.")
+
+        unique_name = f"fac_scan_{uuid.uuid4().hex[:12]}{ext}"
+        dest = _SCANNED_DIR / unique_name
+        dest.write_bytes(content)
+        return f"/static/uploads/comprobantes/{unique_name}"
+
+    # Caso 2: Múltiples hojas (fotos / escaneos)
+    from PIL import Image
+    import io
+
+    pil_images = []
+    total_size = 0
+    first_pdf = None
+
+    for content, filename in files_data:
+        ext = Path(filename).suffix.lower()
+        if ext not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Formato no permitido en una de las hojas ('{filename}'): '{ext}'."
+            )
+        if len(content) == 0:
+            continue
+        total_size += len(content)
+        if total_size > 60 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="El conjunto de hojas supera el tamaño máximo permitido (60MB).")
+
+        if ext == ".pdf":
+            if not first_pdf:
+                first_pdf = (content, filename)
+        else:
+            try:
+                img = Image.open(io.BytesIO(content)).convert("RGB")
+                pil_images.append(img)
+            except Exception as e:
+                logger.error(f"Error procesando hoja de imagen {filename}: {e}")
+                raise HTTPException(status_code=400, detail=f"Error al procesar la imagen {filename}: {str(e)}")
+
+    if pil_images:
+        # Combinar todas las hojas de imagen en un único PDF multipágina ordenado
+        unique_name = f"fac_scan_multipage_{uuid.uuid4().hex[:12]}.pdf"
+        dest = _SCANNED_DIR / unique_name
+        buf = io.BytesIO()
+        pil_images[0].save(buf, format="PDF", save_all=True, append_images=pil_images[1:])
+        dest.write_bytes(buf.getvalue())
+        return f"/static/uploads/comprobantes/{unique_name}"
+    elif first_pdf:
+        content, _ = first_pdf
+        unique_name = f"fac_scan_{uuid.uuid4().hex[:12]}.pdf"
+        dest = _SCANNED_DIR / unique_name
+        dest.write_bytes(content)
+        return f"/static/uploads/comprobantes/{unique_name}"
+
+    raise HTTPException(status_code=400, detail="No se encontraron hojas válidas para procesar.")
+
+
+def _save_scanned_file(content: bytes, filename: str) -> str:
+    return _save_scanned_files([(content, filename)])
 
 
 @router.post("/companies/{company_id}/purchase-orders/{order_id}/receive-invoice")
@@ -1092,6 +1158,7 @@ async def receive_invoice_for_order(
     order_id: str,
     file: Optional[UploadFile] = File(None),
     scanned_file: Optional[UploadFile] = File(None),
+    scanned_files: Optional[list[UploadFile]] = File(None),
     invoice_id: Optional[str] = Form(None),
     user_id: Optional[str] = Form(None),
     total_factura_impreso: Optional[Decimal] = Form(None),
@@ -1108,11 +1175,23 @@ async def receive_invoice_for_order(
         po_uuid = uuid.UUID(order_id)
         diff_redondeo_aplicado = Decimal("0")
 
+        # Recolectar todas las hojas escaneadas (sea individual o múltiple)
+        all_scans = []
+        if scanned_files:
+            all_scans.extend(scanned_files)
+        if scanned_file:
+            all_scans.append(scanned_file)
+
+        valid_scans_data = []
+        for sf in all_scans:
+            if sf and sf.filename:
+                b = await sf.read()
+                if len(b) > 0:
+                    valid_scans_data.append((b, sf.filename))
+
         saved_scan_url = None
-        if scanned_file and scanned_file.filename:
-            scan_bytes = await scanned_file.read()
-            if len(scan_bytes) > 0:
-                saved_scan_url = _save_scanned_file(scan_bytes, scanned_file.filename)
+        if valid_scans_data:
+            saved_scan_url = _save_scanned_files(valid_scans_data)
 
         if file:
             content = await file.read()
@@ -1337,7 +1416,8 @@ async def adjust_invoice_total(
 @router.post("/purchases/invoices/{invoice_id}/attach-scanned-file")
 async def attach_scanned_file_to_invoice(
     invoice_id: str,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    files: Optional[list[UploadFile]] = File(None),
     db: AsyncSession = Depends(get_db)
 ):
     try:
@@ -1347,15 +1427,30 @@ async def attach_scanned_file_to_invoice(
         if not invoice:
             raise HTTPException(status_code=404, detail="Factura no encontrada.")
 
-        content = await file.read()
-        url = _save_scanned_file(content, file.filename or "factura_escaneada.pdf")
+        all_files = []
+        if files:
+            all_files.extend(files)
+        if file:
+            all_files.append(file)
+
+        valid_data = []
+        for f in all_files:
+            if f and f.filename:
+                b = await f.read()
+                if len(b) > 0:
+                    valid_data.append((b, f.filename))
+
+        if not valid_data:
+            raise HTTPException(status_code=400, detail="No se seleccionó ningún archivo de hoja escaneada.")
+
+        url = _save_scanned_files(valid_data)
         invoice.comprobante_url = url
         await db.commit()
         return {
             "success": True,
             "invoice_id": str(invoice.id),
             "comprobante_url": url,
-            "filename": file.filename
+            "total_hojas": len(valid_data)
         }
     except HTTPException:
         raise

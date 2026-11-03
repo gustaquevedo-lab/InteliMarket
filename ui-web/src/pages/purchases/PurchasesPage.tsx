@@ -401,8 +401,8 @@ export default function PurchasesPage() {
   const [selectedPoForInvoiceReceipt, setSelectedPoForInvoiceReceipt] = useState<PurchaseOrder | null>(null)
   const [receivingInvoiceMode, setReceivingInvoiceMode] = useState<"xml" | "existente" | "manual">("xml")
   const [receivingInvoiceFile, setReceivingInvoiceFile] = useState<File | null>(null)
-  const [receivingScannedFile, setReceivingScannedFile] = useState<File | null>(null)
-  const [receivingScannedPreview, setReceivingScannedPreview] = useState<string | null>(null)
+  const [receivingScannedFiles, setReceivingScannedFiles] = useState<File[]>([])
+  const [receivingScannedPreviews, setReceivingScannedPreviews] = useState<{ url: string; isImage: boolean }[]>([])
   const [dragOverScanned, setDragOverScanned] = useState(false)
   const [receivingManualNumero, setReceivingManualNumero] = useState<string>("")
   const [receivingManualTimbrado, setReceivingManualTimbrado] = useState<string>("")
@@ -2028,30 +2028,55 @@ export default function PurchasesPage() {
   }
 
   // ── Handlers Recepción de Factura y Matching contra Pedido ─────────────────
-  const handleSelectScannedFile = (file: File) => {
-    setReceivingScannedFile(file)
-    if (file.type.startsWith("image/")) {
-      const url = URL.createObjectURL(file)
-      setReceivingScannedPreview(url)
-    } else {
-      setReceivingScannedPreview(null)
-    }
+  const handleAddScannedFiles = (newFiles: FileList | File[]) => {
+    const fileArray = Array.from(newFiles)
+    if (!fileArray.length) return
+    const updatedFiles = [...receivingScannedFiles, ...fileArray]
+    setReceivingScannedFiles(updatedFiles)
+
+    const updatedPreviews = updatedFiles.map((f) => ({
+      url: URL.createObjectURL(f),
+      isImage: f.type.startsWith("image/"),
+    }))
+    setReceivingScannedPreviews((prev) => {
+      prev.forEach((p) => URL.revokeObjectURL(p.url))
+      return updatedPreviews
+    })
   }
 
-  const handleClearScannedFile = () => {
-    if (receivingScannedPreview) {
-      URL.revokeObjectURL(receivingScannedPreview)
-    }
-    setReceivingScannedFile(null)
-    setReceivingScannedPreview(null)
+  const handleRemoveScannedFile = (index: number) => {
+    const updated = receivingScannedFiles.filter((_, i) => i !== index)
+    setReceivingScannedFiles(updated)
+    setReceivingScannedPreviews((prev) => {
+      prev.forEach((p, i) => {
+        if (i === index) URL.revokeObjectURL(p.url)
+      })
+      return updated.map((f) => ({
+        url: URL.createObjectURL(f),
+        isImage: f.type.startsWith("image/"),
+      }))
+    })
   }
 
-  const handleUploadScannedFileInMatch = async (invoiceId: string, file: File) => {
+  const handleClearScannedFiles = () => {
+    receivingScannedPreviews.forEach((p) => URL.revokeObjectURL(p.url))
+    setReceivingScannedFiles([])
+    setReceivingScannedPreviews([])
+  }
+
+  const handleUploadScannedFileInMatch = async (invoiceId: string, files: FileList | File[]) => {
+    const fileArray = Array.from(files)
+    if (!fileArray.length) return
     setUploadingScannedInMatch(true)
     try {
-      const res = await api.purchases.attachScannedFileToInvoice(invoiceId, file)
+      const res = await api.purchases.attachScannedFileToInvoice(invoiceId, fileArray)
       if (res.success) {
-        toast.success("Comprobante Escaneado Guardado", "La factura física escaneada se adjuntó y vinculó a la factura.")
+        toast.success(
+          "Comprobante Escaneado Guardado",
+          fileArray.length > 1
+            ? `Se combinaron y guardaron ${fileArray.length} hojas en un único PDF multipágina ordenado.`
+            : "La factura física escaneada se adjuntó y vinculó a la factura."
+        )
         if (matchResult && matchResult.invoice_id === invoiceId) {
           setMatchResult({
             ...matchResult,
@@ -2073,7 +2098,7 @@ export default function PurchasesPage() {
     setSelectedPoForInvoiceReceipt(po)
     setReceivingInvoiceMode("xml")
     setReceivingInvoiceFile(null)
-    handleClearScannedFile()
+    handleClearScannedFiles()
     setReceivingManualNumero("")
     setReceivingManualTimbrado("")
     setReceivingManualFecha(getTodayAsuncion())
@@ -2105,7 +2130,7 @@ export default function PurchasesPage() {
         selectedPoForInvoiceReceipt.id,
         {
           file: receivingInvoiceFile || undefined,
-          scanned_file: receivingScannedFile || undefined,
+          scanned_files: receivingScannedFiles.length > 0 ? receivingScannedFiles : undefined,
           invoice_id: selectedExistingInvoiceId || undefined,
           user_id: user?.id,
           total_factura_impreso: receivingInvoiceTotalImpreso ? Number(receivingInvoiceTotalImpreso) : undefined,
@@ -9425,12 +9450,13 @@ export default function PurchasesPage() {
                         <label className="cursor-pointer px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition flex items-center justify-center gap-1.5 shadow-xs">
                           <input
                             type="file"
+                            multiple
                             accept=".pdf,image/*"
                             disabled={uploadingScannedInMatch}
                             className="hidden"
                             onChange={(e) => {
-                              if (e.target.files && e.target.files[0]) {
-                                handleUploadScannedFileInMatch(matchResult.invoice_id, e.target.files[0])
+                              if (e.target.files && e.target.files.length > 0) {
+                                handleUploadScannedFileInMatch(matchResult.invoice_id, e.target.files)
                               }
                             }}
                           />
@@ -10026,50 +10052,94 @@ export default function PurchasesPage() {
                   </div>
                 )}
 
-                {/* Zona de Carga de Factura Física Escaneada (PDF / Imagen) */}
+                {/* Zona de Carga de Factura Física Escaneada (PDF / Imágenes / Varias Hojas) */}
                 <div className="space-y-2 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
                       <Paperclip className="w-4 h-4 text-indigo-500" />
-                      Adjuntar Factura Física Escaneada (PDF o Imagen)
+                      Adjuntar Factura Física Escaneada (Admite una o varias hojas)
                     </label>
                     <span className="text-[10px] text-gray-400 font-medium">
-                      PDF, JPG, PNG, WEBP (Hasta 25MB)
+                      PDF multipágina o fotos JPG / PNG (Hasta 60MB en total)
                     </span>
                   </div>
 
-                  {receivingScannedFile ? (
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800">
-                      <div className="flex items-center gap-3">
-                        {receivingScannedPreview ? (
-                          <img
-                            src={receivingScannedPreview}
-                            alt="Preview factura"
-                            className="w-12 h-12 rounded object-cover border border-slate-200 dark:border-slate-700"
-                          />
-                        ) : (
-                          <div className="w-12 h-12 rounded bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600">
-                            <FileText className="w-6 h-6" />
-                          </div>
-                        )}
-                        <div>
-                          <div className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                            {receivingScannedFile.name}
-                          </div>
-                          <span className="text-[10px] text-gray-400">
-                            {(receivingScannedFile.size / 1024).toFixed(1)} KB • {receivingScannedFile.type || "Documento"}
-                          </span>
+                  {receivingScannedFiles.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-gray-700 dark:text-gray-300">
+                          {receivingScannedFiles.length === 1
+                            ? "1 hoja cargada"
+                            : `${receivingScannedFiles.length} hojas cargadas (se unirán en 1 solo PDF ordenado)`}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <label className="cursor-pointer text-[11px] font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 flex items-center gap-1">
+                            <input
+                              type="file"
+                              multiple
+                              accept=".pdf,image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files) handleAddScannedFiles(e.target.files)
+                              }}
+                            />
+                            <Upload className="w-3.5 h-3.5" />
+                            + Agregar otra hoja
+                          </label>
+                          <button
+                            type="button"
+                            onClick={handleClearScannedFiles}
+                            className="text-[11px] font-semibold text-rose-500 hover:text-rose-700"
+                          >
+                            Limpiar todo
+                          </button>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleClearScannedFile}
-                        className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50"
-                        title="Quitar archivo escaneado"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1">
+                        {receivingScannedFiles.map((file, idx) => {
+                          const preview = receivingScannedPreviews[idx]
+                          return (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs"
+                            >
+                              <div className="flex items-center gap-2.5 overflow-hidden">
+                                {preview?.isImage ? (
+                                  <img
+                                    src={preview.url}
+                                    alt={`Hoja ${idx + 1}`}
+                                    className="w-10 h-10 rounded object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-10 h-10 rounded bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 shrink-0">
+                                    <FileText className="w-5 h-5" />
+                                  </div>
+                                )}
+                                <div className="truncate">
+                                  <div className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1">
+                                    <span className="px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-300 text-[10px] font-extrabold shrink-0">
+                                      Hoja {idx + 1}
+                                    </span>
+                                    <span className="truncate">{file.name}</span>
+                                  </div>
+                                  <span className="text-[10px] text-gray-400 block">
+                                    {(file.size / 1024).toFixed(1)} KB • {file.type || "Documento"}
+                                  </span>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveScannedFile(idx)}
+                                className="p-1 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 shrink-0 ml-1"
+                                title="Eliminar esta hoja"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
                   ) : (
                     <div
@@ -10078,8 +10148,8 @@ export default function PurchasesPage() {
                       onDrop={(e) => {
                         e.preventDefault()
                         setDragOverScanned(false)
-                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                          handleSelectScannedFile(e.dataTransfer.files[0])
+                        if (e.dataTransfer.files) {
+                          handleAddScannedFiles(e.dataTransfer.files)
                         }
                       }}
                       className={`p-4 border-2 border-dashed rounded-xl flex flex-col items-center justify-center text-center transition-all ${
@@ -10091,11 +10161,12 @@ export default function PurchasesPage() {
                       <label className="cursor-pointer w-full flex items-center justify-center gap-3">
                         <input
                           type="file"
+                          multiple
                           accept=".pdf,image/*"
                           className="hidden"
                           onChange={(e) => {
-                            if (e.target.files && e.target.files[0]) {
-                              handleSelectScannedFile(e.target.files[0])
+                            if (e.target.files) {
+                              handleAddScannedFiles(e.target.files)
                             }
                           }}
                         />
@@ -10104,10 +10175,10 @@ export default function PurchasesPage() {
                         </div>
                         <div className="text-left">
                           <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
-                            Arrastre aquí la factura escaneada o haga click para buscar
+                            Arrastre aquí las hojas escaneadas o haga click para buscar
                           </span>
                           <span className="text-[10px] text-gray-400">
-                            Soporta archivos escaneados en PDF o fotografías nítidas del papel impreso
+                            Admite seleccionar varias fotos a la vez (Hoja 1, Hoja 2...) o un PDF de varias páginas
                           </span>
                         </div>
                       </label>

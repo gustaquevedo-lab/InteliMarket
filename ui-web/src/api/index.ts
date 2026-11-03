@@ -3330,6 +3330,7 @@ export const api = {
       data: {
         file?: File;
         scanned_file?: File;
+        scanned_files?: File[];
         invoice_id?: string;
         user_id?: string;
         total_factura_impreso?: number;
@@ -3341,7 +3342,11 @@ export const api = {
     ) => {
       const formData = new FormData()
       if (data.file) formData.append("file", data.file)
-      if (data.scanned_file) formData.append("scanned_file", data.scanned_file)
+      if (data.scanned_files && data.scanned_files.length > 0) {
+        data.scanned_files.forEach((f) => formData.append("scanned_files", f))
+      } else if (data.scanned_file) {
+        formData.append("scanned_file", data.scanned_file)
+      }
       if (data.invoice_id) formData.append("invoice_id", data.invoice_id)
       if (data.user_id) formData.append("user_id", data.user_id)
       if (data.total_factura_impreso !== undefined && data.total_factura_impreso !== null) {
@@ -3352,9 +3357,13 @@ export const api = {
       if (data.fecha_emision) formData.append("fecha_emision", data.fecha_emision)
       return requestMultipart<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-orders/${orderId}/receive-invoice`, formData)
     },
-    attachScannedFileToInvoice: (invoiceId: string, file: File) => {
+    attachScannedFileToInvoice: (invoiceId: string, fileOrFiles: File | File[]) => {
       const formData = new FormData()
-      formData.append("file", file)
+      if (Array.isArray(fileOrFiles)) {
+        fileOrFiles.forEach((f) => formData.append("files", f))
+      } else {
+        formData.append("file", fileOrFiles)
+      }
       return requestMultipart<any>(`/v1/purchases/invoices/${invoiceId}/attach-scanned-file`, formData)
     },
     reconcile3WayMatch: (invoiceId: string, userId?: string) =>
