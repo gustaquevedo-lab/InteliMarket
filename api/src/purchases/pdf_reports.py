@@ -399,9 +399,9 @@ def generate_purchase_order_pdf(company: dict, order: dict, items: list[dict], g
 def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: str = "") -> bytes:
     """Genera el Comprobante Oficial de Auditoría Interna:
     'Acta de Recepción y Cierre de Compras — Cotejo 3-Way Match & Fijación Comercial'.
-    Formato horizontal A4 (Landscape, 273mm de ancho útil).
+    Formato vertical A4 (Portrait, 186mm de ancho útil).
     Incluye datos de OC, Muelle, Factura, semáforo 3-way, y la tabla completa de fijación
-    comercial con Costo Promedio (PPP), PVP Salón, PVP Mayorista y sus márgenes respectivos.
+    comercial con Costo Factura, Costo Promedio (PPP), PVP Salón, PVP Mayorista y márgenes.
     """
     buffer = io.BytesIO()
     order = data.get("order") or {}
@@ -415,16 +415,30 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
     rec_num = receipt.get("numero") or "S/N"
     title = f"Acta de Recepción y Cierre de Compras - {po_num}"
 
-    doc, styles = _base_landscape_doc(buffer, title, company, generated_by)
+    # Formato Portrait A4 (ancho útil 186mm con márgenes de 12mm)
+    doc, styles = _base_doc(buffer, title, company, generated_by)
 
-    # Estilos auxiliares para la grilla
-    c_text = styles["CellText"]
-    c_text_bold = styles["CellTextBold"]
-    c_num = styles["CellNum"]
-    c_num_bold = styles["CellNumBold"]
-    c_head = styles["CellHead"]
-    c_head_right = styles["CellHeadRight"]
-    c_head_center = styles["CellHeadCenter"]
+    # Estilos tipográficos locales para asegurar contraste y legibilidad absoluta
+    th_style = ParagraphStyle("ActaTh", fontName=FONT_BOLD, fontSize=5.5, leading=7, textColor=WHITE, alignment=TA_LEFT)
+    th_style_right = ParagraphStyle("ActaThRight", parent=th_style, alignment=TA_RIGHT)
+    th_style_center = ParagraphStyle("ActaThCenter", parent=th_style, alignment=TA_CENTER)
+
+    td_text = ParagraphStyle("ActaTdText", fontName=FONT_REGULAR, fontSize=5.5, leading=7, textColor=GRAY_DARK)
+    td_text_bold = ParagraphStyle("ActaTdTextBold", fontName=FONT_BOLD, fontSize=5.5, leading=7, textColor=GRAY_DARK)
+    td_barcode = ParagraphStyle("ActaTdBarcode", fontName=FONT_REGULAR, fontSize=5.0, leading=6.5, textColor=GRAY_DARK)
+    td_num = ParagraphStyle("ActaTdNum", fontName=FONT_REGULAR, fontSize=5.5, leading=7, textColor=GRAY_DARK, alignment=TA_RIGHT)
+    td_num_bold = ParagraphStyle("ActaTdNumBold", fontName=FONT_BOLD, fontSize=5.5, leading=7, textColor=GRAY_DARK, alignment=TA_RIGHT)
+    td_center = ParagraphStyle("ActaTdCenter", fontName=FONT_REGULAR, fontSize=5.5, leading=7, textColor=GRAY_DARK, alignment=TA_CENTER)
+
+    tot_text = ParagraphStyle("ActaTotText", fontName=FONT_BOLD, fontSize=5.5, leading=7, textColor=GRAY_DARK)
+    tot_text_right = ParagraphStyle("ActaTotRight", fontName=FONT_BOLD, fontSize=5.5, leading=7, textColor=GRAY_DARK, alignment=TA_RIGHT)
+
+    tri_title = ParagraphStyle("TriTitle", fontName=FONT_BOLD, fontSize=6.5, leading=8.5, textColor=HexColor("#0F172A"))
+    tri_text = ParagraphStyle("TriText", fontName=FONT_REGULAR, fontSize=6, leading=7.5, textColor=HexColor("#0F172A"))
+    tri_bold = ParagraphStyle("TriBold", fontName=FONT_BOLD, fontSize=6, leading=7.5, textColor=HexColor("#0F172A"))
+
+    kpi_lbl = ParagraphStyle("KpiLbl", fontName=FONT_BOLD, fontSize=5.5, leading=7, textColor=GRAY_MEDIUM)
+    kpi_val = lambda color=None: ParagraphStyle("KpiVal", fontName=FONT_BOLD, fontSize=8.5, leading=10, textColor=color or PRIMARY_COLOR)
 
     # Razón Social oficial de la empresa
     company_data = {
@@ -437,7 +451,7 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
         "logo_url": company.get("logo_url"),
     }
 
-    elements = _company_landscape_header(
+    elements = _company_header(
         company_data, styles,
         "ACTA DE RECEPCIÓN Y CIERRE DE COMPRAS",
         f"COTEJO 3-WAY MATCH & FIJACIÓN COMERCIAL — OC: {po_num} · REC: {rec_num}",
@@ -477,42 +491,42 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
     prov_razon = supplier.get("razon_social") or order.get("supplier_name") or "—"
     prov_ruc = supplier.get("ruc") or "—"
 
-    # 1. FICHA TRIPARTITA: ORDEN DE COMPRA / RECEPCIÓN MUELLE / FACTURA PROVEEDOR (273 mm total)
+    # 1. FICHA TRIPARTITA: ORDEN DE COMPRA / RECEPCIÓN MUELLE / FACTURA PROVEEDOR (186 mm total = 62mm x 3)
     col_oc = [
-        Paragraph("<b>1. ORDEN DE COMPRA PACTADA (OC)</b>", c_head),
-        Paragraph(f"<b>N° de Orden:</b> {po_num}", c_text),
-        Paragraph(f"<b>Fecha Emisión:</b> {po_fecha_str}", c_text),
-        Paragraph(f"<b>Comprador:</b> {po_comprador}", c_text),
-        Paragraph(f"<b>Condición:</b> {order.get('condiciones_pago') or '30 Días'}", c_text),
-        Paragraph(f"<b>Moneda:</b> {order.get('moneda') or 'PYG'}", c_text),
+        Paragraph("<b>1. ORDEN DE COMPRA (OC)</b>", tri_title),
+        Paragraph(f"<b>N° de Orden:</b> {po_num}", tri_text),
+        Paragraph(f"<b>Fecha Emisión:</b> {po_fecha_str}", tri_text),
+        Paragraph(f"<b>Comprador:</b> {po_comprador}", tri_text),
+        Paragraph(f"<b>Condición:</b> {order.get('condiciones_pago') or '30 Días'}", tri_text),
+        Paragraph(f"<b>Moneda:</b> {order.get('moneda') or 'PYG'}", tri_text),
     ]
 
     col_rec = [
-        Paragraph("<b>2. RECEPCIÓN FÍSICA EN MUELLE</b>", c_head),
-        Paragraph(f"<b>N° Recepción:</b> {rec_num}", c_text),
-        Paragraph(f"<b>Ref. Comprobante:</b> {rec_ref}", c_text),
-        Paragraph(f"<b>Fecha Descarga:</b> {rec_fecha_str}", c_text),
-        Paragraph(f"<b>Depósito Receptor:</b> {rec_deposito}", c_text),
-        Paragraph(f"<b>Receptor Físico:</b> {rec_usuario}", c_text),
+        Paragraph("<b>2. RECEPCIÓN FÍSICA EN MUELLE</b>", tri_title),
+        Paragraph(f"<b>N° Recepción:</b> {rec_num}", tri_text),
+        Paragraph(f"<b>Ref. Comprobante:</b> {rec_ref}", tri_text),
+        Paragraph(f"<b>Fecha Descarga:</b> {rec_fecha_str}", tri_text),
+        Paragraph(f"<b>Depósito Receptor:</b> {rec_deposito}", tri_text),
+        Paragraph(f"<b>Receptor Físico:</b> {rec_usuario}", tri_text),
     ]
 
     inv_total_impreso = invoice.get("total_factura_impreso") or invoice.get("total") or receipt.get("total") or 0
     col_inv = [
-        Paragraph("<b>3. FACTURA FISCAL & PROVEEDOR</b>", c_head),
-        Paragraph(f"<b>Proveedor:</b> {prov_razon}", c_text),
-        Paragraph(f"<b>RUC:</b> {prov_ruc}", c_text),
-        Paragraph(f"<b>N° Factura:</b> {inv_num}", c_text),
-        Paragraph(f"<b>Timbrado:</b> {inv_timbrado} · {inv_fecha_str}", c_text),
-        Paragraph(f"<b>Monto Impreso:</b> {_fmt_gs(inv_total_impreso)}", c_text_bold),
+        Paragraph("<b>3. FACTURA FISCAL & PROV.</b>", tri_title),
+        Paragraph(f"<b>Proveedor:</b> {prov_razon}", tri_text),
+        Paragraph(f"<b>RUC:</b> {prov_ruc}", tri_text),
+        Paragraph(f"<b>N° Factura:</b> {inv_num}", tri_text),
+        Paragraph(f"<b>Timbrado:</b> {inv_timbrado} · {inv_fecha_str}", tri_text),
+        Paragraph(f"<b>Monto Impreso:</b> {_fmt_gs(inv_total_impreso)}", tri_bold),
     ]
 
-    info_table = Table([[col_oc, col_rec, col_inv]], colWidths=[91 * mm, 91 * mm, 91 * mm])
+    info_table = Table([[col_oc, col_rec, col_inv]], colWidths=[62 * mm, 62 * mm, 62 * mm])
     info_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), GRAY_LIGHT),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LINEBEFORE", (1, 0), (1, -1), 0.5, WHITE),
         ("LINEBEFORE", (2, 0), (2, -1), 0.5, WHITE),
@@ -520,7 +534,7 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
     elements.append(info_table)
     elements.append(Spacer(1, 4))
 
-    # 2. SEMÁFORO 3-WAY MATCH & AJUSTE DE REDONDEO (273 mm)
+    # 2. SEMÁFORO 3-WAY MATCH & AJUSTE DE REDONDEO (186 mm total: 35 + 35 + 35 + 33 + 48)
     tot_oc_val = Decimal(str(order.get("total") or 0))
     tot_rec_val = Decimal(str(receipt.get("total") or matching.get("total_recibido") or 0))
     tot_inv_val = Decimal(str(invoice.get("total") or matching.get("total_factura") or tot_rec_val))
@@ -530,33 +544,28 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
     snc_num = matching.get("snc_numero") or (matching.get("nc_request_generada", {}).get("numero_solicitud") if isinstance(matching.get("nc_request_generada"), dict) else None)
 
     if not is_bloqueada:
-        match_badge_text = "<b>MATCH CONFORME 100%</b><br/><font size=6 color='#059669'>Habilitada a Pago en Tesorería</font>"
+        match_badge_text = "<b>MATCH CONFORME 100%</b><br/><font size=5.5 color='#059669'>Habilitada a Pago en Tesorería</font>"
         match_bg = HexColor("#ECFDF5")
         match_line = HexColor("#10B981")
     else:
         snc_label = f" (SNC {snc_num})" if snc_num else ""
-        match_badge_text = f"<b>DISCREPANCIA DETECTADA</b><br/><font size=6 color='#DC2626'>Bloqueada para Pago{snc_label}</font>"
+        match_badge_text = f"<b>DISCREPANCIA DETECTADA</b><br/><font size=5.5 color='#DC2626'>Bloqueada para Pago{snc_label}</font>"
         match_bg = HexColor("#FEF2F2")
         match_line = HexColor("#EF4444")
-
-    kpi_p = lambda label, val, color=None: [
-        Paragraph(label, ParagraphStyle("KpiH", fontName=FONT_BOLD, fontSize=6, leading=7.5, textColor=GRAY_MEDIUM)),
-        Paragraph(f"<b>{val}</b>", ParagraphStyle("KpiV", fontName=FONT_BOLD, fontSize=9, leading=11, textColor=color or PRIMARY_COLOR)),
-    ]
 
     redondeo_label = "0"
     if diff_redondeo != 0:
         redondeo_label = f"{diff_redondeo:+,}".replace(",", ".")
 
     kpi_cells = [
-        kpi_p("TOTAL PACTADO OC", _fmt_gs(tot_oc_val)),
-        kpi_p("TOTAL RECIBIDO MUELLE", _fmt_gs(tot_rec_val)),
-        kpi_p("TOTAL FACTURA PROVEEDOR", _fmt_gs(tot_inv_val)),
-        kpi_p("AJUSTE POR REDONDEO", redondeo_label, color=HexColor("#4338CA") if diff_redondeo != 0 else None),
-        [Paragraph(match_badge_text, ParagraphStyle("MatchStatus", fontName=FONT_BOLD, fontSize=7, leading=9, alignment=TA_CENTER))],
+        [Paragraph("TOTAL PACTADO OC", kpi_lbl), Paragraph(f"<b>{_fmt_gs(tot_oc_val)}</b>", kpi_val())],
+        [Paragraph("TOTAL RECIBIDO", kpi_lbl), Paragraph(f"<b>{_fmt_gs(tot_rec_val)}</b>", kpi_val())],
+        [Paragraph("TOTAL FACTURA", kpi_lbl), Paragraph(f"<b>{_fmt_gs(tot_inv_val)}</b>", kpi_val())],
+        [Paragraph("AJUSTE REDONDEO", kpi_lbl), Paragraph(f"<b>{redondeo_label}</b>", kpi_val(HexColor("#4338CA") if diff_redondeo != 0 else None))],
+        [Paragraph(match_badge_text, ParagraphStyle("MatchStatus", fontName=FONT_BOLD, fontSize=6.5, leading=8.5, alignment=TA_CENTER))],
     ]
 
-    kpi_table = Table([kpi_cells], colWidths=[54 * mm, 54 * mm, 54 * mm, 51 * mm, 60 * mm])
+    kpi_table = Table([kpi_cells], colWidths=[35 * mm, 35 * mm, 35 * mm, 33 * mm, 48 * mm])
     kpi_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (3, -1), GRAY_LIGHT),
         ("BACKGROUND", (4, 0), (4, -1), match_bg),
@@ -564,30 +573,42 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 3),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
         ("LINEAFTER", (0, 0), (2, -1), 0.5, WHITE),
     ]))
     elements.append(kpi_table)
-    elements.append(Spacer(1, 5))
+    elements.append(Spacer(1, 4))
 
-    # 3. TABLA MAESTRA DE RENGLONES Y FIJACIÓN COMERCIAL (273 mm)
-    # Anchos exactos para 11 columnas sumando 273 mm:
-    # 8 + 15 + 26 + 60 + 17 + 25 + 25 + 24 + 24 + 25 + 24 = 273 mm
-    col_widths = [8 * mm, 15 * mm, 26 * mm, 60 * mm, 17 * mm, 25 * mm, 25 * mm, 24 * mm, 24 * mm, 25 * mm, 24 * mm]
+    # 3. TABLA MAESTRA DE RENGLONES Y FIJACIÓN COMERCIAL (186 mm total)
+    # Anchos para 11 columnas sumando exactamente 186 mm:
+    # 5.5 + 11 + 21.5 + 43 + 10 + 16 + 16 + 16 + 15 + 16 + 16 = 186 mm
+    col_widths = [
+        5.5 * mm,   # #
+        11 * mm,    # Cód. (SKU)
+        21.5 * mm,  # Cód. Barra (EAN-13)
+        43 * mm,    # Descripción
+        10 * mm,    # Cant.
+        16 * mm,    # Costo Fact.
+        16 * mm,    # Costo PPP
+        16 * mm,    # PVP Salón
+        15 * mm,    # Marg.% Salón
+        16 * mm,    # PVP Mayor.
+        16 * mm,    # Marg.% Mayor.
+    ]
 
     head_row = [
-        Paragraph("#", c_head_center),
-        Paragraph("Cód.", c_head),
-        Paragraph("Cód. Barra", c_head),
-        Paragraph("Descripción del Producto", c_head),
-        Paragraph("Cant. Rec.", c_head_right),
-        Paragraph("Costo Fact.", c_head_right),
-        Paragraph("Costo PPP", c_head_right),
-        Paragraph("PVP Salón", c_head_right),
-        Paragraph("Margen %", c_head_right),
-        Paragraph("PVP Mayor.", c_head_right),
-        Paragraph("Marg. May.%", c_head_right),
+        Paragraph("#", th_style_center),
+        Paragraph("Cód.", th_style),
+        Paragraph("Cód. Barra", th_style),
+        Paragraph("Descripción del Producto", th_style),
+        Paragraph("Cant.", th_style_right),
+        Paragraph("Costo Fact.", th_style_right),
+        Paragraph("Costo PPP", th_style_right),
+        Paragraph("PVP Salón", th_style_right),
+        Paragraph("Marg.%", th_style_right),
+        Paragraph("PVP May.", th_style_right),
+        Paragraph("Marg. May.%", th_style_right),
     ]
 
     data_rows = [head_row]
@@ -636,32 +657,30 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
         if pvp_salon > Decimal("0") and costo_ppp > Decimal("0"):
             margen_salon = ((pvp_salon - costo_ppp) / pvp_salon) * Decimal("100")
             margen_salon_str = f"{margen_salon:.1f}%"
-            # Alerta: Si margen < 15% destacar en rojo
             if margen_salon < Decimal("15.0"):
-                margen_salon_cell = Paragraph(f"<font color='#DC2626'><b>{margen_salon_str}</b></font>", c_num_bold)
+                margen_salon_cell = Paragraph(f"<font color='#DC2626'><b>{margen_salon_str}</b></font>", td_num_bold)
             elif margen_salon >= Decimal("25.0"):
-                margen_salon_cell = Paragraph(f"<font color='#059669'><b>{margen_salon_str}</b></font>", c_num_bold)
+                margen_salon_cell = Paragraph(f"<font color='#059669'><b>{margen_salon_str}</b></font>", td_num_bold)
             else:
-                margen_salon_cell = Paragraph(f"<b>{margen_salon_str}</b>", c_num)
+                margen_salon_cell = Paragraph(f"<b>{margen_salon_str}</b>", td_num)
         else:
-            margen_salon_cell = Paragraph("—", c_num)
+            margen_salon_cell = Paragraph("—", td_num)
 
         if pvp_mayorista > Decimal("0") and costo_ppp > Decimal("0"):
             margen_may = ((pvp_mayorista - costo_ppp) / pvp_mayorista) * Decimal("100")
             margen_may_str = f"{margen_may:.1f}%"
             if margen_may < Decimal("10.0"):
-                margen_may_cell = Paragraph(f"<font color='#DC2626'><b>{margen_may_str}</b></font>", c_num_bold)
+                margen_may_cell = Paragraph(f"<font color='#DC2626'><b>{margen_may_str}</b></font>", td_num_bold)
             elif margen_may >= Decimal("18.0"):
-                margen_may_cell = Paragraph(f"<font color='#059669'><b>{margen_may_str}</b></font>", c_num_bold)
+                margen_may_cell = Paragraph(f"<font color='#059669'><b>{margen_may_str}</b></font>", td_num_bold)
             else:
-                margen_may_cell = Paragraph(f"<b>{margen_may_str}</b>", c_num)
+                margen_may_cell = Paragraph(f"<b>{margen_may_str}</b>", td_num)
         else:
-            margen_may_cell = Paragraph("—", c_num)
+            margen_may_cell = Paragraph("—", td_num)
 
         prod_desc = it.get("descripcion") or it.get("nombre") or "Ítem"
         sku_code = str(it.get("sku") or it.get("codigo_interno") or "—")
         barcode = str(it.get("codigo_barra") or "—")
-        um = str(it.get("unidad_medida") or "").strip().upper()
 
         if cant % 1 == 0:
             cant_str = f"{int(cant):,}".replace(",", ".")
@@ -674,16 +693,16 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
         pvp_may_str = _fmt_gs(pvp_mayorista) if pvp_mayorista > 0 else "—"
 
         data_rows.append([
-            Paragraph(str(idx), c_text),
-            Paragraph(sku_code, c_text),
-            Paragraph(barcode, c_text),
-            Paragraph(prod_desc, c_text_bold),
-            Paragraph(cant_str, c_num_bold),
-            Paragraph(_fmt_gs(costo_fact), c_num),
-            Paragraph(_fmt_gs(costo_ppp), c_num_bold),
-            Paragraph(pvp_salon_str, c_num),
+            Paragraph(str(idx), td_center),
+            Paragraph(sku_code, td_text),
+            Paragraph(barcode, td_barcode),
+            Paragraph(prod_desc, td_text_bold),
+            Paragraph(cant_str, td_num_bold),
+            Paragraph(_fmt_gs(costo_fact), td_num),
+            Paragraph(_fmt_gs(costo_ppp), td_num_bold),
+            Paragraph(pvp_salon_str, td_num),
             margen_salon_cell,
-            Paragraph(pvp_may_str, c_num),
+            Paragraph(pvp_may_str, td_num),
             margen_may_cell,
         ])
 
@@ -701,17 +720,17 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
     tot_cant_str = " / ".join(cant_tot_parts)
 
     data_rows.append([
-        Paragraph("TOTAL", c_head),
-        Paragraph("", c_head),
-        Paragraph("", c_head),
-        Paragraph(f"{len(items)} Renglones Recibidos", c_head),
-        Paragraph(tot_cant_str, c_head_right),
-        Paragraph(_fmt_gs(total_costo_factura), c_head_right),
-        Paragraph("", c_head),
-        Paragraph("", c_head),
-        Paragraph("", c_head),
-        Paragraph("", c_head),
-        Paragraph("", c_head),
+        Paragraph("TOTAL", tot_text),
+        Paragraph("", tot_text),
+        Paragraph("", tot_text),
+        Paragraph(f"{len(items)} Renglones Recibidos", tot_text),
+        Paragraph(tot_cant_str, tot_text_right),
+        Paragraph(_fmt_gs(total_costo_factura), tot_text_right),
+        Paragraph("", tot_text),
+        Paragraph("", tot_text),
+        Paragraph("", tot_text),
+        Paragraph("", tot_text),
+        Paragraph("", tot_text),
     ])
 
     items_table = Table(data_rows, colWidths=col_widths, repeatRows=1)
@@ -720,41 +739,45 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
         ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ROWBACKGROUNDS", (0, 1), (-1, -2), [WHITE, GRAY_LIGHT]),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
         ("BACKGROUND", (0, -1), (-1, -1), GRAY_LIGHT),
         ("LINEABOVE", (0, -1), (-1, -1), 0.75, GRAY_DARK),
         ("LINEBELOW", (0, 0), (-1, 0), 0.5, PRIMARY_COLOR),
+        ("SPAN", (0, -1), (2, -1)),
     ]))
     elements.append(items_table)
     elements.append(Spacer(1, 4))
 
-    # 4. CUADRO DE LIQUIDACIÓN IMPOSITIVA Y TOTAL (273 mm)
+    # 4. CUADRO DE LIQUIDACIÓN IMPOSITIVA Y TOTAL (186 mm total: 105 + 81)
     gravada_10 = subtotal_10 - iva_10
     gravada_5 = subtotal_5 - iva_5
 
+    summary_h = ParagraphStyle("SumH", fontName=FONT_BOLD, fontSize=6, leading=8, textColor=GRAY_DARK)
+    summary_t = ParagraphStyle("SumT", fontName=FONT_REGULAR, fontSize=5.5, leading=7.5, textColor=GRAY_DARK)
+
     summary_cells = [
         [
-            Paragraph("<b>LIQUIDACIÓN IMPOSITIVA DEL LOTE RECIBIDO:</b>", c_head),
-            Paragraph(f"Gravadas 10%: {_fmt_gs(gravada_10)} | IVA 10%: {_fmt_gs(iva_10)}", c_text),
-            Paragraph(f"Gravadas 5%: {_fmt_gs(gravada_5)} | IVA 5%: {_fmt_gs(iva_5)} | Exentas: {_fmt_gs(subtotal_exenta)}", c_text),
+            Paragraph("<b>LIQUIDACIÓN IMPOSITIVA DEL LOTE RECIBIDO:</b>", summary_h),
+            Paragraph(f"Gravadas 10%: {_fmt_gs(gravada_10)} | IVA 10%: {_fmt_gs(iva_10)}", summary_t),
+            Paragraph(f"Gravadas 5%: {_fmt_gs(gravada_5)} | IVA 5%: {_fmt_gs(iva_5)} | Exentas: {_fmt_gs(subtotal_exenta)}", summary_t),
         ],
         [
-            Paragraph("<b>TOTAL LOTE FACTURADO (IVA INCLUIDO):</b>", c_head),
-            Paragraph(f"<font size=10 color='#1E40AF'><b>{_fmt_gs(tot_inv_val)}</b></font>", styles["Normal"]),
-            Paragraph("Moneda: <b>Guaraníes (PYG)</b> · Condición: <b>" + str(inv_condicion) + "</b>", c_text),
+            Paragraph("<b>TOTAL LOTE FACTURADO (IVA INCLUIDO):</b>", summary_h),
+            Paragraph(f"<font size=9.5 color='#1E40AF'><b>{_fmt_gs(tot_inv_val)}</b></font>", styles["Normal"]),
+            Paragraph("Moneda: <b>Guaraníes (PYG)</b> · Condición: <b>" + str(inv_condicion) + "</b>", summary_t),
         ]
     ]
-    summary_table = Table([summary_cells], colWidths=[150 * mm, 123 * mm])
+    summary_table = Table([summary_cells], colWidths=[105 * mm, 81 * mm])
     summary_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, -1), GRAY_LIGHT),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
         ("LINEBEFORE", (1, 0), (1, -1), 0.5, WHITE),
     ]))
     elements.append(summary_table)
@@ -762,21 +785,24 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
     obs = receipt.get("observaciones") or order.get("observaciones")
     if obs:
         elements.append(Spacer(1, 3))
-        elements.append(Paragraph(f"<b>Observaciones Operativas:</b> {obs}", c_text))
+        elements.append(Paragraph(f"<b>Observaciones Operativas:</b> {obs}", td_text))
 
-    # 5. BLOQUE DE FIRMAS TRIPARTITAS (273 mm = 91mm x 3)
-    elements.append(Spacer(1, 10))
+    # 5. BLOQUE DE FIRMAS TRIPARTITAS (186 mm = 62mm x 3)
+    elements.append(Spacer(1, 8))
+    sig_style = ParagraphStyle("SigStyle", fontName=FONT_REGULAR, fontSize=5.5, leading=7.5, textColor=GRAY_DARK, alignment=TA_CENTER)
     signatures_data = [
         [
-            Paragraph("_________________________________________<br/><b>Recepción Física en Muelle</b><br/>Firma y Aclaración: " + str(rec_usuario) + "<br/><font size=6 color='#64748B'>Descarga, Conteo Físico & Control Lotes</font>", styles["Small"]),
-            Paragraph("_________________________________________<br/><b>Auditoría 3-Way Match</b><br/>Firma y Sello: Auditoría Interna / Sistema<br/><font size=6 color='#64748B'>Conciliación OC vs Muelle vs Factura</font>", styles["Small"]),
-            Paragraph("_________________________________________<br/><b>Cierre de Compras & Precios</b><br/>Firma y Sello: Gerencia Comercial<br/><font size=6 color='#64748B'>Aprobación de Costos & Márgenes en Góndola</font>", styles["Small"]),
+            Paragraph("_________________________________________<br/><b>Recepción Física en Muelle</b><br/>Firma y Aclaración: " + str(rec_usuario) + "<br/><font size=5 color='#64748B'>Descarga, Conteo Físico & Control Lotes</font>", sig_style),
+            Paragraph("_________________________________________<br/><b>Auditoría 3-Way Match</b><br/>Firma y Sello: Auditoría Interna / Sistema<br/><font size=5 color='#64748B'>Conciliación OC vs Muelle vs Factura</font>", sig_style),
+            Paragraph("_________________________________________<br/><b>Cierre de Compras & Precios</b><br/>Firma y Sello: Gerencia Comercial<br/><font size=5 color='#64748B'>Aprobación de Costos & Márgenes en Góndola</font>", sig_style),
         ]
     ]
-    signatures_table = Table(signatures_data, colWidths=[91 * mm, 91 * mm, 91 * mm])
+    signatures_table = Table(signatures_data, colWidths=[62 * mm, 62 * mm, 62 * mm])
     signatures_table.setStyle(TableStyle([
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
     ]))
     elements.append(signatures_table)
 

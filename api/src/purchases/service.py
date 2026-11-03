@@ -4017,8 +4017,8 @@ async def get_3way_receipt_data(
         prod = prod_map.get(pid)
 
         cant = getattr(it, "cantidad_recibida", None)
-        if cant is None:
-            cant = getattr(it, "cantidad", 0)
+        if cant is None or float(cant) == 0:
+            cant = getattr(it, "cantidad_ordenada", None) or getattr(it, "cantidad", 0)
 
         costo_u = getattr(it, "costo_unitario", None)
         if costo_u is None:
