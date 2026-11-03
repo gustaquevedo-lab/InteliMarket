@@ -2242,31 +2242,119 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
         transacciones = parsed["transacciones"]
         sheet_matched = parsed["sheet_matched"]
 
-    existing = await db.execute(
-        select(BankTransaction.fecha, BankTransaction.tipo, BankTransaction.monto, BankTransaction.descripcion, BankTransaction.referencia)
+    existing_txs_res = await db.execute(
+        select(BankTransaction)
         .where(BankTransaction.bank_account_id == uuid.UUID(bank_account_id))
     )
-    existing_keys = {(row.fecha, row.tipo, row.monto, row.descripcion or "", row.referencia or "") for row in existing.all()}
+    existing_txs = existing_txs_res.scalars().all()
+    existing_keys = {(row.fecha, row.tipo, row.monto, row.descripcion or "", row.referencia or "") for row in existing_txs}
+
+    from api.src.cheques.models import Cheque
+    from api.src.financial.pdf_parser import _extract_nro_cheque
 
     nuevas = 0
+    auto_conciliadas = 0
     new_inserted: list[tuple[BankTransaction, dict]] = []
+
     for t in transacciones:
         ref_val = t.get("referencia") or ""
-        key = (t["fecha"], t["tipo"], t["monto"], t["descripcion"] or "", ref_val)
+        desc_val = t.get("descripcion") or ""
+        key = (t["fecha"], t["tipo"], t["monto"], desc_val, ref_val)
         if key in existing_keys:
             continue
+
+        # 1. Detección y auto-conciliación de Depósitos de Bóveda (Créditos)
+        if t["tipo"] == "credito":
+            m_boleta = re.search(r'\b(\d{7,8})\b', f"{ref_val} {desc_val}")
+            boleta = m_boleta.group(1) if m_boleta else None
+            matched_boveda = None
+            if boleta:
+                matched_boveda = next((
+                    tx for tx in existing_txs
+                    if tx.tipo == "credito" and (boleta in (tx.referencia or "") or boleta in (tx.descripcion or ""))
+                ), None)
+
+            if matched_boveda:
+                if not matched_boveda.conciliado:
+                    matched_boveda.conciliado = True
+                    matched_boveda.fecha_conciliacion = _now()
+                    db.add(matched_boveda)
+                    auto_conciliadas += 1
+                # Se saltea la inserción para no duplicar el ingreso en el saldo
+                continue
+
+        # 2. Detección y enriquecimiento de Cheques / Clearing (Débitos)
+        elif t["tipo"] == "debito":
+            nro = t.get("nro_cheque") or _extract_nro_cheque(desc_val, ref_val)
+            if nro:
+                chq_res = await db.execute(
+                    select(Cheque).where(
+                        Cheque.company_id == uuid.UUID(company_id),
+                        Cheque.numero.ilike(f"%{nro}%")
+                    )
+                )
+                found_chq = chq_res.scalar_one_or_none()
+
+                existing_chq_tx = next((
+                    tx for tx in existing_txs
+                    if tx.tipo == "debito" and (
+                        (found_chq and tx.cheque_id == found_chq.id) or (nro in (tx.referencia or ""))
+                    )
+                ), None)
+
+                if existing_chq_tx:
+                    if not existing_chq_tx.conciliado:
+                        existing_chq_tx.conciliado = True
+                        existing_chq_tx.fecha_conciliacion = _now()
+                        if found_chq and not existing_chq_tx.cheque_id:
+                            existing_chq_tx.cheque_id = found_chq.id
+                        db.add(existing_chq_tx)
+                        auto_conciliadas += 1
+                    # Ya registrado previamente en libros
+                    continue
+
+                # Si no existía transacción previa, insertar con descripción legible enriquecida
+                desc_enriquecida = desc_val
+                cat = "otros"
+                chq_id_val = None
+                if found_chq:
+                    desc_enriquecida = f"PAGO A {found_chq.beneficiario} (Clearing Cheque #{found_chq.numero})"
+                    cat = "pago_proveedor"
+                    chq_id_val = found_chq.id
+
+                bt = BankTransaction(
+                    company_id=uuid.UUID(company_id),
+                    bank_account_id=uuid.UUID(bank_account_id),
+                    fecha=t["fecha"],
+                    tipo=t["tipo"],
+                    monto=t["monto"],
+                    moneda=account.moneda,
+                    descripcion=desc_enriquecida,
+                    referencia=ref_val or None,
+                    categoria=cat,
+                    cheque_id=chq_id_val,
+                    conciliado=True,
+                    fecha_conciliacion=_now()
+                )
+                db.add(bt)
+                existing_keys.add(key)
+                nuevas += 1
+                auto_conciliadas += 1
+                new_inserted.append((bt, t))
+                continue
+
+        # 3. Transacciones generales
         bt = BankTransaction(
             company_id=uuid.UUID(company_id), bank_account_id=uuid.UUID(bank_account_id),
             fecha=t["fecha"], tipo=t["tipo"], monto=t["monto"], moneda=account.moneda,
-            descripcion=t["descripcion"], referencia=ref_val or None, categoria="otros",
+            descripcion=desc_val, referencia=ref_val or None, categoria="otros",
         )
         db.add(bt)
-        account.saldo_actual = (account.saldo_actual or Decimal("0")) + (t["monto"] if t["tipo"] == "credito" else -t["monto"])
         existing_keys.add(key)
         nuevas += 1
         new_inserted.append((bt, t))
 
-    if nuevas > 0:
+    if nuevas > 0 or auto_conciliadas > 0:
         account.saldo_verificado_manualmente = False
         account.saldo_verificado_at = None
         account.saldo_verificado_por = None
@@ -2274,40 +2362,17 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
 
     await db.flush()
 
-    # Auto-conciliación inmediata de alta certeza (Verde)
-    auto_conciliadas = 0
-    from api.src.cheques.models import Cheque
-    for bt, t in new_inserted:
-        nro = t.get("nro_cheque")
-        if nro and bt.tipo == "debito":
-            chq_match = await db.execute(
-                select(Cheque).where(
-                    Cheque.company_id == uuid.UUID(company_id),
-                    Cheque.estado.in_(["pendiente", "entregado"]),
-                    Cheque.numero.ilike(f"%{nro}%"),
-                    Cheque.monto == bt.monto,
-                )
-            )
-            found_chq = chq_match.scalar_one_or_none()
-            if found_chq:
-                await reconcile_transaction(db, str(bt.id), "cheque", str(found_chq.id))
-                auto_conciliadas += 1
-        elif bt.tipo == "credito":
-            try:
-                from api.src.caja.models import VaultEntry
-                ve_match = await db.execute(
-                    select(VaultEntry).where(
-                        VaultEntry.company_id == uuid.UUID(company_id),
-                        VaultEntry.estado == "en_boveda",
-                        VaultEntry.monto_pyg == bt.monto,
-                    )
-                )
-                found_ve = ve_match.scalar_one_or_none()
-                if found_ve:
-                    await reconcile_transaction(db, str(bt.id), "vault_entry", str(found_ve.id))
-                    auto_conciliadas += 1
-            except Exception:
-                pass
+    # Recalcular saldo canónico exacto de forma dinámica para garantizar consistencia total
+    bal_res = await db.execute(
+        select(
+            func.coalesce(func.sum(case((BankTransaction.tipo == 'credito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("creditos"),
+            func.coalesce(func.sum(case((BankTransaction.tipo == 'debito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("debitos"),
+        ).where(BankTransaction.bank_account_id == account.id)
+    )
+    b_row = bal_res.fetchone()
+    account.saldo_actual = (account.saldo_inicial or Decimal("0")) + b_row.creditos - b_row.debitos
+    db.add(account)
+    await db.flush()
 
     return {
         "sheet_matched": sheet_matched,
