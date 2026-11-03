@@ -11,7 +11,8 @@ import {
   Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, Scale, CheckCircle, Calculator,
   HelpCircle, AlertCircle, Box, Layers, Building2, Phone, Mail, MapPin, SlidersHorizontal,
   ChevronRight, ArrowUpDown, ChevronLeft, CheckSquare, Square, PieChart, Undo2, Receipt, History, Star,
-  Lock, Unlock, FileCheck, Barcode, RotateCcw, CreditCard, Briefcase, Wrench, Globe, LayoutGrid, Table
+  Lock, Unlock, FileCheck, Barcode, RotateCcw, CreditCard, Briefcase, Wrench, Globe, LayoutGrid, Table,
+  Upload, Paperclip, Image as ImageIcon
 } from "lucide-react"
 import * as XLSX from "xlsx"
 import {
@@ -398,8 +399,18 @@ export default function PurchasesPage() {
   // Estados para Recepción de Factura y Matching contra Pedido
   const [showReceiveInvoiceModal, setShowReceiveInvoiceModal] = useState(false)
   const [selectedPoForInvoiceReceipt, setSelectedPoForInvoiceReceipt] = useState<PurchaseOrder | null>(null)
-  const [receivingInvoiceMode, setReceivingInvoiceMode] = useState<"xml" | "existente">("xml")
+  const [receivingInvoiceMode, setReceivingInvoiceMode] = useState<"xml" | "existente" | "manual">("xml")
   const [receivingInvoiceFile, setReceivingInvoiceFile] = useState<File | null>(null)
+  const [receivingScannedFile, setReceivingScannedFile] = useState<File | null>(null)
+  const [receivingScannedPreview, setReceivingScannedPreview] = useState<string | null>(null)
+  const [dragOverScanned, setDragOverScanned] = useState(false)
+  const [receivingManualNumero, setReceivingManualNumero] = useState<string>("")
+  const [receivingManualTimbrado, setReceivingManualTimbrado] = useState<string>("")
+  const [receivingManualFecha, setReceivingManualFecha] = useState<string>(getTodayAsuncion())
+  const [viewDocModalOpen, setViewDocModalOpen] = useState(false)
+  const [viewDocUrl, setViewDocUrl] = useState<string | null>(null)
+  const [viewDocTitle, setViewDocTitle] = useState<string>("")
+  const [uploadingScannedInMatch, setUploadingScannedInMatch] = useState(false)
   const [selectedExistingInvoiceId, setSelectedExistingInvoiceId] = useState<string>("")
   const [receivingInvoiceTotalImpreso, setReceivingInvoiceTotalImpreso] = useState<string>("")
   const [processingInvoiceReceipt, setProcessingInvoiceReceipt] = useState(false)
@@ -2017,11 +2028,57 @@ export default function PurchasesPage() {
   }
 
   // ── Handlers Recepción de Factura y Matching contra Pedido ─────────────────
+  const handleSelectScannedFile = (file: File) => {
+    setReceivingScannedFile(file)
+    if (file.type.startsWith("image/")) {
+      const url = URL.createObjectURL(file)
+      setReceivingScannedPreview(url)
+    } else {
+      setReceivingScannedPreview(null)
+    }
+  }
+
+  const handleClearScannedFile = () => {
+    if (receivingScannedPreview) {
+      URL.revokeObjectURL(receivingScannedPreview)
+    }
+    setReceivingScannedFile(null)
+    setReceivingScannedPreview(null)
+  }
+
+  const handleUploadScannedFileInMatch = async (invoiceId: string, file: File) => {
+    setUploadingScannedInMatch(true)
+    try {
+      const res = await api.purchases.attachScannedFileToInvoice(invoiceId, file)
+      if (res.success) {
+        toast.success("Comprobante Escaneado Guardado", "La factura física escaneada se adjuntó y vinculó a la factura.")
+        if (matchResult && matchResult.invoice_id === invoiceId) {
+          setMatchResult({
+            ...matchResult,
+            comprobante_url: res.comprobante_url,
+          })
+        }
+        fetchAll()
+      } else {
+        toast.error("Error al adjuntar", res.error || "No se pudo subir el archivo escaneado.")
+      }
+    } catch (e: any) {
+      toast.error("Error al adjuntar comprobante", e.message)
+    } finally {
+      setUploadingScannedInMatch(false)
+    }
+  }
+
   const handleOpenReceiveInvoiceModal = (po: PurchaseOrder) => {
     setSelectedPoForInvoiceReceipt(po)
     setReceivingInvoiceMode("xml")
     setReceivingInvoiceFile(null)
+    handleClearScannedFile()
+    setReceivingManualNumero("")
+    setReceivingManualTimbrado("")
+    setReceivingManualFecha(getTodayAsuncion())
     setSelectedExistingInvoiceId("")
+    setReceivingInvoiceTotalImpreso("")
     setReceiptMatchingResult(null)
     setShowReceiveInvoiceModal(true)
   }
@@ -2037,6 +2094,10 @@ export default function PurchasesPage() {
       toast.error("Factura requerida", "Por favor seleccione una factura existente de la lista.")
       return
     }
+    if (receivingInvoiceMode === "manual" && !receivingManualNumero.trim()) {
+      toast.error("Número de factura requerido", "Por favor ingrese el número de comprobante de la factura física.")
+      return
+    }
 
     setProcessingInvoiceReceipt(true)
     try {
@@ -2044,9 +2105,13 @@ export default function PurchasesPage() {
         selectedPoForInvoiceReceipt.id,
         {
           file: receivingInvoiceFile || undefined,
+          scanned_file: receivingScannedFile || undefined,
           invoice_id: selectedExistingInvoiceId || undefined,
           user_id: user?.id,
           total_factura_impreso: receivingInvoiceTotalImpreso ? Number(receivingInvoiceTotalImpreso) : undefined,
+          numero_factura: receivingInvoiceMode === "manual" ? receivingManualNumero.trim() : undefined,
+          timbrado: receivingInvoiceMode === "manual" ? receivingManualTimbrado.trim() : undefined,
+          fecha_emision: receivingInvoiceMode === "manual" ? receivingManualFecha : undefined,
         }
       )
 
@@ -5686,8 +5751,22 @@ export default function PurchasesPage() {
                           </td>
                         )}
                         <td className="p-3">
-                          <div className="font-mono font-bold text-gray-900 dark:text-white">
-                            {inv.numero_factura || "S/N"}
+                          <div className="font-mono font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                            <span>{inv.numero_factura || "S/N"}</span>
+                            {inv.comprobante_url && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setViewDocUrl(inv.comprobante_url!)
+                                  setViewDocTitle(`Factura Escaneada: ${inv.numero_factura || "S/N"}`)
+                                  setViewDocModalOpen(true)
+                                }}
+                                className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 p-0.5 rounded hover:bg-indigo-50 dark:hover:bg-indigo-950/50 inline-flex items-center"
+                                title="Ver Factura Física Escaneada (PDF / Imagen)"
+                              >
+                                <Paperclip className="w-3.5 h-3.5 text-indigo-500" />
+                              </button>
+                            )}
                           </div>
                           {inv.cdc && (
                             <div className="text-[9px] font-mono text-indigo-500 truncate max-w-[140px]" title={inv.cdc}>
@@ -9313,6 +9392,60 @@ export default function PurchasesPage() {
                   </div>
                 )}
 
+                {/* Factura Física Escaneada / Comprobante de Respaldo */}
+                {matchResult.invoice_id && (
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <span className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                          <Paperclip className="w-3.5 h-3.5 text-indigo-500" />
+                          Factura Física Escaneada (PDF / Imagen)
+                        </span>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          {matchResult.comprobante_url
+                            ? "Comprobante escaneado disponible como respaldo físico para Tesorería."
+                            : "No hay comprobante escaneado adjunto a esta factura. Puede subir un PDF o foto de la factura recibida."}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {matchResult.comprobante_url && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setViewDocUrl(matchResult.comprobante_url)
+                              setViewDocTitle(`Factura Escaneada: ${matchResult.numero_factura || "S/N"}`)
+                              setViewDocModalOpen(true)
+                            }}
+                            className="px-3 py-1.5 text-xs font-bold rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition flex items-center justify-center gap-1.5 shadow-xs"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-indigo-500" />
+                            <span>Ver Escaneo</span>
+                          </button>
+                        )}
+                        <label className="cursor-pointer px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-gray-700 dark:text-gray-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition flex items-center justify-center gap-1.5 shadow-xs">
+                          <input
+                            type="file"
+                            accept=".pdf,image/*"
+                            disabled={uploadingScannedInMatch}
+                            className="hidden"
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files[0]) {
+                                handleUploadScannedFileInMatch(matchResult.invoice_id, e.target.files[0])
+                              }
+                            }}
+                          />
+                          {uploadingScannedInMatch ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                          ) : (
+                            <Upload className="w-3.5 h-3.5 text-indigo-500" />
+                          )}
+                          <span>{matchResult.comprobante_url ? "Reemplazar Escaneo" : "Adjuntar Escaneo"}</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Si se generó Solicitud de NC */}
                 {matchResult.nc_request_generada && (
                   <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 space-y-2">
@@ -9697,6 +9830,27 @@ export default function PurchasesPage() {
                   </div>
                 </div>
 
+                {receiptMatchingResult.comprobante_url && (
+                  <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-xl border border-indigo-200 dark:border-indigo-800 flex items-center justify-between">
+                    <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                      <Paperclip className="w-4 h-4 text-indigo-600" />
+                      Factura Física Escaneada Registrada Correctamente
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewDocUrl(receiptMatchingResult.comprobante_url)
+                        setViewDocTitle(`Factura Escaneada: ${receiptMatchingResult.numero_factura || "S/N"}`)
+                        setViewDocModalOpen(true)
+                      }}
+                      className="px-3 py-1 text-xs font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-1 shadow-xs"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      Ver Comprobante
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-700">
                   <button
                     type="button"
@@ -9739,6 +9893,17 @@ export default function PurchasesPage() {
                     }`}
                   >
                     Seleccionar Factura Existente de Bandeja
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReceivingInvoiceMode("manual")}
+                    className={`pb-2 font-bold px-3 transition-colors ${
+                      receivingInvoiceMode === "manual"
+                        ? "border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400"
+                        : "text-gray-500 hover:text-gray-800"
+                    }`}
+                  >
+                    Cargar Factura Física / Escaneada (Sin XML)
                   </button>
                 </div>
 
@@ -9794,7 +9959,7 @@ export default function PurchasesPage() {
                       )}
                     </label>
                   </div>
-                ) : (
+                ) : receivingInvoiceMode === "existente" ? (
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
                       Seleccione una factura de este proveedor ingresada en el sistema:
@@ -9814,7 +9979,141 @@ export default function PurchasesPage() {
                         ))}
                     </select>
                   </div>
+                ) : (
+                  /* Modo manual: comprobante físico directo */
+                  <div className="space-y-3 p-3.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-xs font-bold text-gray-800 dark:text-gray-200 block">
+                      Datos de la Factura Física Recibida
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                          N° de Factura <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Ej. 001-001-0012345"
+                          value={receivingManualNumero}
+                          onChange={(e) => setReceivingManualNumero(e.target.value.toUpperCase())}
+                          className="input-field text-xs font-mono font-bold w-full uppercase"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                          Timbrado (Opcional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej. 18545636"
+                          value={receivingManualTimbrado}
+                          onChange={(e) => setReceivingManualTimbrado(e.target.value.toUpperCase())}
+                          className="input-field text-xs font-mono w-full uppercase"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-600 dark:text-gray-400 block mb-1">
+                          Fecha de Emisión
+                        </label>
+                        <input
+                          type="date"
+                          value={receivingManualFecha}
+                          onChange={(e) => setReceivingManualFecha(e.target.value)}
+                          className="input-field text-xs w-full"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 )}
+
+                {/* Zona de Carga de Factura Física Escaneada (PDF / Imagen) */}
+                <div className="space-y-2 p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                      <Paperclip className="w-4 h-4 text-indigo-500" />
+                      Adjuntar Factura Física Escaneada (PDF o Imagen)
+                    </label>
+                    <span className="text-[10px] text-gray-400 font-medium">
+                      PDF, JPG, PNG, WEBP (Hasta 25MB)
+                    </span>
+                  </div>
+
+                  {receivingScannedFile ? (
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-white dark:bg-slate-800 border border-indigo-200 dark:border-indigo-800">
+                      <div className="flex items-center gap-3">
+                        {receivingScannedPreview ? (
+                          <img
+                            src={receivingScannedPreview}
+                            alt="Preview factura"
+                            className="w-12 h-12 rounded object-cover border border-slate-200 dark:border-slate-700"
+                          />
+                        ) : (
+                          <div className="w-12 h-12 rounded bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600">
+                            <FileText className="w-6 h-6" />
+                          </div>
+                        )}
+                        <div>
+                          <div className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                            {receivingScannedFile.name}
+                          </div>
+                          <span className="text-[10px] text-gray-400">
+                            {(receivingScannedFile.size / 1024).toFixed(1)} KB • {receivingScannedFile.type || "Documento"}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleClearScannedFile}
+                        className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50"
+                        title="Quitar archivo escaneado"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setDragOverScanned(true); }}
+                      onDragLeave={() => setDragOverScanned(false)}
+                      onDrop={(e) => {
+                        e.preventDefault()
+                        setDragOverScanned(false)
+                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                          handleSelectScannedFile(e.dataTransfer.files[0])
+                        }
+                      }}
+                      className={`p-4 border-2 border-dashed rounded-xl flex flex-col items-center justify-center text-center transition-all ${
+                        dragOverScanned
+                          ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40"
+                          : "border-slate-300 dark:border-slate-700 hover:border-indigo-400 bg-white dark:bg-slate-800"
+                      }`}
+                    >
+                      <label className="cursor-pointer w-full flex items-center justify-center gap-3">
+                        <input
+                          type="file"
+                          accept=".pdf,image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              handleSelectScannedFile(e.target.files[0])
+                            }
+                          }}
+                        />
+                        <div className="w-8 h-8 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 shrink-0">
+                          <Upload className="w-4 h-4" />
+                        </div>
+                        <div className="text-left">
+                          <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 block">
+                            Arrastre aquí la factura escaneada o haga click para buscar
+                          </span>
+                          <span className="text-[10px] text-gray-400">
+                            Soporta archivos escaneados en PDF o fotografías nítidas del papel impreso
+                          </span>
+                        </div>
+                      </label>
+                    </div>
+                  )}
+                </div>
 
                 <div className="space-y-1.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700">
                   <div className="flex items-center justify-between">
@@ -9847,7 +10146,12 @@ export default function PurchasesPage() {
                   </button>
                   <button
                     type="submit"
-                    disabled={processingInvoiceReceipt || (receivingInvoiceMode === "xml" && !receivingInvoiceFile) || (receivingInvoiceMode === "existente" && !selectedExistingInvoiceId)}
+                    disabled={
+                      processingInvoiceReceipt ||
+                      (receivingInvoiceMode === "xml" && !receivingInvoiceFile) ||
+                      (receivingInvoiceMode === "existente" && !selectedExistingInvoiceId) ||
+                      (receivingInvoiceMode === "manual" && !receivingManualNumero.trim())
+                    }
                     className="btn-primary text-xs px-6 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-2 disabled:opacity-50"
                   >
                     {processingInvoiceReceipt ? (
@@ -12810,6 +13114,60 @@ export default function PurchasesPage() {
         subtitle="Remito de devolución a proveedor en formato estándar A4 con casillas y firmas de control"
         filename={viewerPdfFilename}
       />
+
+      {/* ── MODAL: VISOR DE FACTURA FÍSICA ESCANEADA (PDF O IMAGEN) ── */}
+      {viewDocModalOpen && viewDocUrl && (
+        viewDocUrl.toLowerCase().includes(".pdf") ? (
+          <PdfViewerModal
+            open={viewDocModalOpen}
+            onClose={() => setViewDocModalOpen(false)}
+            pdfUrl={viewDocUrl}
+            title={viewDocTitle || "Factura Escaneada"}
+            subtitle="Comprobante fiscal físico escaneado en PDF de respaldo para Tesorería"
+            filename={(viewDocTitle || "factura_escaneada").replace(/[^a-zA-Z0-9_-]/g, "_") + ".pdf"}
+          />
+        ) : (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm">
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-4xl w-full p-4 border border-slate-200 dark:border-slate-700 flex flex-col max-h-[92vh] overflow-hidden">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700 shrink-0">
+                <div className="flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5 text-indigo-600" />
+                  <h4 className="font-bold text-sm text-gray-900 dark:text-white">
+                    {viewDocTitle || "Factura Física Escaneada"}
+                  </h4>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={viewDocUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    download
+                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-600 dark:text-gray-300 text-xs font-bold flex items-center gap-1"
+                    title="Descargar o abrir en pestaña nueva"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span className="hidden sm:inline">Descargar</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setViewDocModalOpen(false)}
+                    className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-gray-400"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-100 dark:bg-slate-950/60 rounded-xl mt-3">
+                <img
+                  src={viewDocUrl}
+                  alt="Factura Escaneada"
+                  className="max-w-full max-h-[75vh] object-contain rounded-lg shadow-md border border-slate-200 dark:border-slate-700"
+                />
+              </div>
+            </div>
+          </div>
+        )
+      )}
 
       {/* ──────────────────────────────────────────────────────────────────────────
           MODAL: COMPARATIVA DE PRECIOS ENTRE PROVEEDORES (QUIÉN VENDE MÁS BARATO)

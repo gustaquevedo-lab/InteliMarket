@@ -70,6 +70,8 @@ async def perform_3way_match(
         return {
             "invoice_id": str(invoice.id),
             "numero_factura": invoice.numero_factura,
+            "comprobante_url": getattr(invoice, "comprobante_url", None),
+            "xml_sifen_url": getattr(invoice, "xml_sifen_url", None),
             "estado_match": "factura_ya_saldada",
             "bloqueada_para_pago": False,
             "monto_retenido_nc": 0.0,
@@ -609,6 +611,8 @@ async def perform_3way_match(
         "numero_factura": invoice.numero_factura,
         "timbrado": invoice.timbrado,
         "cdc": invoice.cdc,
+        "comprobante_url": getattr(invoice, "comprobante_url", None),
+        "xml_sifen_url": getattr(invoice, "xml_sifen_url", None),
         "purchase_order_id": str(po.id) if po else None,
         "purchase_order_numero": po.numero if po else None,
         "purchase_order_total": po_total_num,

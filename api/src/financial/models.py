@@ -51,6 +51,7 @@ class SupplierInvoice(Base):
     monto_retenido_nc = Column(Numeric(15, 0), default=0)
     requiere_nc = Column(Boolean, default=False)
     xml_sifen_url = Column(Text)
+    comprobante_url = Column(Text, nullable=True)
     created_by = Column(UUID(as_uuid=True))
     approved_by = Column(UUID(as_uuid=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())

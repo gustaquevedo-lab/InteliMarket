@@ -33,6 +33,7 @@ class SupplierInvoiceCreate(BaseModel):
     tipo_comprobante: str = "factura"
     concepto: Optional[str] = None
     notas: Optional[str] = None
+    comprobante_url: Optional[str] = None
     created_by: Optional[UUID] = None
 
 
@@ -43,6 +44,7 @@ class SupplierInvoiceUpdate(BaseModel):
     fecha_vencimiento: Optional[date] = None
     total_brl: Optional[Decimal] = None
     saldo_pendiente_brl: Optional[Decimal] = None
+    comprobante_url: Optional[str] = None
     notas: Optional[str] = None
     concepto: Optional[str] = None
 
@@ -78,6 +80,8 @@ class SupplierInvoiceResponse(BaseModel):
     estado: str
     concepto: Optional[str] = None
     notas: Optional[str] = None
+    comprobante_url: Optional[str] = None
+    xml_sifen_url: Optional[str] = None
     created_by: Optional[UUID] = None
     approved_by: Optional[UUID] = None
     notas_credito: list[dict] = []

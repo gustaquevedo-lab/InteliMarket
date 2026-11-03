@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
@@ -41,7 +42,7 @@ from api.src.purchases.schemas import (
     ConsignmentSettlementCreate, ConsignmentSettlementResponse, ConsignmentSettlementPreview,
 )
 from decimal import Decimal
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from api.src.purchases import service
 from api.src.purchases import imap_service
 from api.src.purchases import matching_service
@@ -1062,25 +1063,56 @@ async def auto_link_receipts(company_id: str, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=400, detail=str(e))
 
 
+_SCANNED_DIR = Path(__file__).resolve().parents[2] / "static" / "uploads" / "comprobantes"
+
+
+def _save_scanned_file(content: bytes, filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    allowed = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+    if ext not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formato no permitido: '{ext}'. Se aceptan documentos PDF o imágenes (JPG, PNG, WebP)."
+        )
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="El archivo escaneado supera el tamaño máximo permitido (25MB).")
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="El archivo escaneado está vacío.")
+
+    _SCANNED_DIR.mkdir(parents=True, exist_ok=True)
+    unique_name = f"fac_scan_{uuid.uuid4().hex[:12]}{ext}"
+    dest = _SCANNED_DIR / unique_name
+    dest.write_bytes(content)
+    return f"/static/uploads/comprobantes/{unique_name}"
+
+
 @router.post("/companies/{company_id}/purchase-orders/{order_id}/receive-invoice")
 async def receive_invoice_for_order(
     company_id: str,
     order_id: str,
     file: Optional[UploadFile] = File(None),
+    scanned_file: Optional[UploadFile] = File(None),
     invoice_id: Optional[str] = Form(None),
     user_id: Optional[str] = Form(None),
     total_factura_impreso: Optional[Decimal] = Form(None),
+    numero_factura: Optional[str] = Form(None),
+    timbrado: Optional[str] = Form(None),
+    fecha_emision: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db)
 ):
     try:
-        import uuid
-        from decimal import Decimal
-        from api.src.financial.models import SupplierInvoice
-        from api.src.purchases.models import PurchaseReceipt
-        from sqlalchemy import select
+        from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem
+        from api.src.purchases.models import PurchaseOrder, PurchaseOrderItem, PurchaseReceipt
+        from api.src.purchases.utils import normalize_invoice_number
 
         po_uuid = uuid.UUID(order_id)
         diff_redondeo_aplicado = Decimal("0")
+
+        saved_scan_url = None
+        if scanned_file and scanned_file.filename:
+            scan_bytes = await scanned_file.read()
+            if len(scan_bytes) > 0:
+                saved_scan_url = _save_scanned_file(scan_bytes, scanned_file.filename)
 
         if file:
             content = await file.read()
@@ -1097,14 +1129,17 @@ async def receive_invoice_for_order(
                 purchase_order_id=order_id
             )
             inv_obj = await db.get(SupplierInvoice, uuid.UUID(res["id"]))
-            if total_factura_impreso and total_factura_impreso > 0 and inv_obj:
-                diff_redondeo = (total_factura_impreso - (inv_obj.total or Decimal("0"))).quantize(Decimal("1"))
-                if abs(diff_redondeo) <= Decimal("5000"):
-                    diff_redondeo_aplicado = diff_redondeo
-                    inv_obj.total = total_factura_impreso.quantize(Decimal("1"))
-                    inv_obj.saldo_pendiente = total_factura_impreso.quantize(Decimal("1"))
-                    inv_obj.notas = f"{(inv_obj.notas or '').strip()} [Ajuste de redondeo impreso: {diff_redondeo:+,} ₲]".strip()
-                    res["total"] = float(inv_obj.total)
+            if inv_obj:
+                if saved_scan_url:
+                    inv_obj.comprobante_url = saved_scan_url
+                if total_factura_impreso and total_factura_impreso > 0:
+                    diff_redondeo = (total_factura_impreso - (inv_obj.total or Decimal("0"))).quantize(Decimal("1"))
+                    if abs(diff_redondeo) <= Decimal("5000"):
+                        diff_redondeo_aplicado = diff_redondeo
+                        inv_obj.total = total_factura_impreso.quantize(Decimal("1"))
+                        inv_obj.saldo_pendiente = total_factura_impreso.quantize(Decimal("1"))
+                        inv_obj.notas = f"{(inv_obj.notas or '').strip()} [Ajuste de redondeo impreso: {diff_redondeo:+,} ₲]".strip()
+                        res["total"] = float(inv_obj.total)
             await db.commit()
             match_res = await matching_service.perform_3way_match(db, res["id"], user_id)
             if diff_redondeo_aplicado != Decimal("0") and isinstance(match_res, dict):
@@ -1114,7 +1149,8 @@ async def receive_invoice_for_order(
                 "factura_id": res["id"],
                 "numero_factura": res.get("numero_factura"),
                 "total": res.get("total"),
-                "matching": match_res
+                "matching": match_res,
+                "comprobante_url": saved_scan_url or (inv_obj.comprobante_url if inv_obj else None)
             }
         elif invoice_id:
             inv_uuid = uuid.UUID(invoice_id)
@@ -1123,6 +1159,8 @@ async def receive_invoice_for_order(
             invoice = inv_res.scalar_one_or_none()
             if not invoice:
                 raise HTTPException(status_code=404, detail="Factura no encontrada.")
+            if saved_scan_url:
+                invoice.comprobante_url = saved_scan_url
             if total_factura_impreso and total_factura_impreso > 0:
                 diff_redondeo = (total_factura_impreso - (invoice.total or Decimal("0"))).quantize(Decimal("1"))
                 if abs(diff_redondeo) <= Decimal("5000"):
@@ -1140,10 +1178,101 @@ async def receive_invoice_for_order(
                 "factura_id": str(invoice.id),
                 "numero_factura": invoice.numero_factura,
                 "total": float(invoice.total),
-                "matching": match_res
+                "matching": match_res,
+                "comprobante_url": invoice.comprobante_url
+            }
+        elif scanned_file or numero_factura:
+            po_q = select(PurchaseOrder).where(PurchaseOrder.id == po_uuid)
+            po = (await db.execute(po_q)).scalar_one_or_none()
+            if not po:
+                raise HTTPException(status_code=404, detail="Orden de compra no encontrada.")
+
+            norm_num = normalize_invoice_number(numero_factura or "") or (numero_factura or "").strip() or f"FAC-{po.numero}"
+            ex_q = select(SupplierInvoice).where(
+                SupplierInvoice.company_id == uuid.UUID(company_id),
+                SupplierInvoice.supplier_id == po.supplier_id,
+                SupplierInvoice.numero_factura == norm_num,
+                SupplierInvoice.estado.not_in(["cancelada", "cancelado", "anulada"])
+            )
+            ex_inv = (await db.execute(ex_q)).scalar_one_or_none()
+            if ex_inv:
+                invoice = ex_inv
+                if saved_scan_url:
+                    invoice.comprobante_url = saved_scan_url
+                if total_factura_impreso and total_factura_impreso > 0:
+                    diff_redondeo = (total_factura_impreso - (invoice.total or Decimal("0"))).quantize(Decimal("1"))
+                    if abs(diff_redondeo) <= Decimal("5000"):
+                        diff_redondeo_aplicado = diff_redondeo
+                        invoice.total = total_factura_impreso.quantize(Decimal("1"))
+                        invoice.saldo_pendiente = total_factura_impreso.quantize(Decimal("1"))
+                        invoice.notas = f"{(invoice.notas or '').strip()} [Ajuste de redondeo impreso: {diff_redondeo:+,} ₲]".strip()
+                invoice.purchase_order_id = po_uuid
+                await db.commit()
+                match_res = await matching_service.perform_3way_match(db, str(invoice.id), user_id)
+                return {
+                    "success": True,
+                    "factura_id": str(invoice.id),
+                    "numero_factura": invoice.numero_factura,
+                    "total": float(invoice.total),
+                    "matching": match_res,
+                    "comprobante_url": invoice.comprobante_url
+                }
+
+            total_val = (total_factura_impreso if (total_factura_impreso and total_factura_impreso > 0) else po.total or Decimal("0")).quantize(Decimal("1"))
+            try:
+                fem = datetime.strptime(fecha_emision, "%Y-%m-%d").date() if fecha_emision else date.today()
+            except Exception:
+                fem = date.today()
+
+            new_inv = SupplierInvoice(
+                company_id=uuid.UUID(company_id),
+                supplier_id=po.supplier_id,
+                numero_factura=norm_num,
+                timbrado=timbrado.strip() if timbrado else None,
+                fecha_emision=fem,
+                fecha_recepcion=date.today(),
+                fecha_vencimiento=fem + timedelta(days=30),
+                subtotal=total_val,
+                total=total_val,
+                saldo_pendiente=total_val,
+                moneda=po.moneda or "PYG",
+                purchase_order_id=po.id,
+                condicion="credito",
+                tipo_comprobante="factura",
+                estado="pendiente",
+                comprobante_url=saved_scan_url,
+                notas=f"Factura escaneada adjunta: {scanned_file.filename if scanned_file else 'Sin archivo'}",
+                created_by=uuid.UUID(user_id) if user_id else None
+            )
+            db.add(new_inv)
+            await db.flush()
+
+            po_items_q = select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == po.id)
+            po_items_res = await db.execute(po_items_q)
+            for poi in po_items_res.scalars().all():
+                inv_item = SupplierInvoiceItem(
+                    invoice_id=new_inv.id,
+                    product_id=poi.product_id,
+                    codigo_proveedor=poi.codigo_proveedor,
+                    descripcion=poi.descripcion or "Item",
+                    cantidad=poi.cantidad,
+                    precio_unitario=poi.precio_unitario,
+                    total=poi.total,
+                )
+                db.add(inv_item)
+
+            await db.commit()
+            match_res = await matching_service.perform_3way_match(db, str(new_inv.id), user_id)
+            return {
+                "success": True,
+                "factura_id": str(new_inv.id),
+                "numero_factura": new_inv.numero_factura,
+                "total": float(new_inv.total),
+                "matching": match_res,
+                "comprobante_url": new_inv.comprobante_url
             }
         else:
-            raise HTTPException(status_code=400, detail="Debe proporcionar un archivo XML o seleccionar una factura existente.")
+            raise HTTPException(status_code=400, detail="Debe proporcionar un archivo XML, seleccionar una factura existente o adjuntar la factura escaneada.")
     except HTTPException:
         raise
     except Exception as e:
@@ -1202,6 +1331,36 @@ async def adjust_invoice_total(
         raise
     except Exception as e:
         logger.error(f"Error ajustando total de factura {invoice_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/purchases/invoices/{invoice_id}/attach-scanned-file")
+async def attach_scanned_file_to_invoice(
+    invoice_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db)
+):
+    try:
+        from api.src.financial.models import SupplierInvoice
+        inv_uuid = uuid.UUID(invoice_id)
+        invoice = await db.get(SupplierInvoice, inv_uuid)
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Factura no encontrada.")
+
+        content = await file.read()
+        url = _save_scanned_file(content, file.filename or "factura_escaneada.pdf")
+        invoice.comprobante_url = url
+        await db.commit()
+        return {
+            "success": True,
+            "invoice_id": str(invoice.id),
+            "comprobante_url": url,
+            "filename": file.filename
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adjuntando archivo escaneado a factura {invoice_id}: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=str(e))
 
 

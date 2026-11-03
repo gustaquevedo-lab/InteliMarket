@@ -1696,7 +1696,7 @@ export interface SupplierInvoiceWithPayments extends SupplierInvoice {
   items?: SupplierInvoiceItem[]
 }
 
-export interface SupplierInvoice { id: string; company_id?: string; supplier_id?: string; supplier_nombre?: string; supplier_ruc?: string; numero_factura?: string; timbrado?: string; cdc?: string; fecha_emision?: string; fecha_recepcion?: string; fecha_vencimiento?: string; subtotal?: number; descuento?: number; iva_10?: number; iva_5?: number; total?: number; saldo_pendiente?: number; moneda?: string; tipo_cambio?: number; total_brl?: number; saldo_pendiente_brl?: number; condicion?: string; tipo_comprobante?: string; estado?: string; concepto?: string; notas?: string; created_by?: string; approved_by?: string; purchase_order_id?: string; purchase_order_numero?: string; oc_numero?: string; receipt_id?: string; created_at?: string; notas_credito?: any[]; solicitudes_nc?: any[]; bloqueada_para_pago?: boolean; motivo_bloqueo?: string; monto_retenido_nc?: number; requiere_nc?: boolean }
+export interface SupplierInvoice { id: string; company_id?: string; supplier_id?: string; supplier_nombre?: string; supplier_ruc?: string; numero_factura?: string; timbrado?: string; cdc?: string; fecha_emision?: string; fecha_recepcion?: string; fecha_vencimiento?: string; subtotal?: number; descuento?: number; iva_10?: number; iva_5?: number; total?: number; saldo_pendiente?: number; moneda?: string; tipo_cambio?: number; total_brl?: number; saldo_pendiente_brl?: number; condicion?: string; tipo_comprobante?: string; estado?: string; concepto?: string; notas?: string; comprobante_url?: string; xml_sifen_url?: string; created_by?: string; approved_by?: string; purchase_order_id?: string; purchase_order_numero?: string; oc_numero?: string; receipt_id?: string; created_at?: string; notas_credito?: any[]; solicitudes_nc?: any[]; bloqueada_para_pago?: boolean; motivo_bloqueo?: string; monto_retenido_nc?: number; requiere_nc?: boolean }
 export interface SupplierInvoicePayment { id: string; invoice_id?: string; payment_method?: string; monto?: number; moneda?: string; fecha_pago?: string; referencia?: string; estado?: string; created_at?: string }
 export interface BankAccount { id: string; company_id?: string; alias?: string | null; banco?: string; tipo?: string; numero_cuenta?: string; moneda?: string; saldo_inicial?: number; saldo_actual?: number; titular?: string; activo?: boolean; saldo_minimo_alerta?: number | null; saldo_verificado_manualmente?: boolean; saldo_verificado_at?: string | null; saldo_verificado_por?: string | null; created_at?: string }
 export interface BankBalanceCorrection { id: string; company_id?: string; bank_account_id: string; origen: string; saldo_actual: number; saldo_propuesto: number; motivo?: string; estado: string; solicitado_por?: string | null; aprobado_supervisor_id?: string | null; aprobado_supervisor_at?: string | null; aprobado_gerente_id?: string | null; aprobado_gerente_at?: string | null; rechazado_por?: string | null; rechazado_motivo?: string | null; created_at?: string }
@@ -3325,15 +3325,37 @@ export const api = {
     },
     associateInvoiceToPO: (invoiceId: string, purchaseOrderId: string, userId?: string) =>
       client.post<any>(`/v1/purchases/invoices/${invoiceId}/associate-po`, { purchase_order_id: purchaseOrderId, user_id: userId }),
-    receiveInvoiceForOrder: (orderId: string, data: { file?: File; invoice_id?: string; user_id?: string; total_factura_impreso?: number }, companyId?: string) => {
+    receiveInvoiceForOrder: (
+      orderId: string,
+      data: {
+        file?: File;
+        scanned_file?: File;
+        invoice_id?: string;
+        user_id?: string;
+        total_factura_impreso?: number;
+        numero_factura?: string;
+        timbrado?: string;
+        fecha_emision?: string;
+      },
+      companyId?: string
+    ) => {
       const formData = new FormData()
       if (data.file) formData.append("file", data.file)
+      if (data.scanned_file) formData.append("scanned_file", data.scanned_file)
       if (data.invoice_id) formData.append("invoice_id", data.invoice_id)
       if (data.user_id) formData.append("user_id", data.user_id)
       if (data.total_factura_impreso !== undefined && data.total_factura_impreso !== null) {
         formData.append("total_factura_impreso", String(data.total_factura_impreso))
       }
+      if (data.numero_factura) formData.append("numero_factura", data.numero_factura)
+      if (data.timbrado) formData.append("timbrado", data.timbrado)
+      if (data.fecha_emision) formData.append("fecha_emision", data.fecha_emision)
       return requestMultipart<any>(`/v1/companies/${companyId || COMPANY_ID}/purchase-orders/${orderId}/receive-invoice`, formData)
+    },
+    attachScannedFileToInvoice: (invoiceId: string, file: File) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      return requestMultipart<any>(`/v1/purchases/invoices/${invoiceId}/attach-scanned-file`, formData)
     },
     reconcile3WayMatch: (invoiceId: string, userId?: string) =>
       client.post<any>("/v1/purchases/matching/reconcile", { invoice_id: invoiceId, user_id: userId }),

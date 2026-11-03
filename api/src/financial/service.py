@@ -143,6 +143,7 @@ async def create_invoice(db: AsyncSession, data: SupplierInvoiceCreate, user_id:
         estado="pendiente",
         concepto=data.concepto,
         notas=data.notas,
+        comprobante_url=data.comprobante_url,
         created_by=uuid.UUID(user_id) if user_id else None,
     )
     db.add(invoice)

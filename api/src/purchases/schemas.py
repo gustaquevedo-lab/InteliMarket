@@ -1218,18 +1218,20 @@ class MatchItemLine(BaseModel):
     motivos: str
 
 
+class AdjustInvoiceTotalRequest(BaseModel):
+    total_factura_impreso: Decimal
+    motivo: Optional[str] = None
+    user_id: Optional[str] = None
+
+
 class Perform3WayMatchResponse(BaseModel):
     invoice_id: str
     numero_factura: str
     timbrado: Optional[str] = None
     cdc: Optional[str] = None
+    comprobante_url: Optional[str] = None
+    xml_sifen_url: Optional[str] = None
     purchase_order_id: Optional[str] = None
-
-
-class AdjustInvoiceTotalRequest(BaseModel):
-    total_factura_impreso: Decimal
-    motivo: Optional[str] = None
-    user_id: Optional[str] = None
     purchase_order_numero: Optional[str] = None
     purchase_order_total: Optional[float] = None
     diferencia_pedido_monto: Optional[float] = None
