@@ -375,6 +375,19 @@ async def cleanup_tenant_backups(db: AsyncSession, tenant_id: str, max_backups: 
         logger.info(f"Cleaned up {len(to_delete)} old backups for tenant {tenant_id}")
 
 
+async def run_auto_close_cash_sessions():
+    """Cierra proactivamente turnos huérfanos de jornadas anteriores para evitar que queden en el limbo."""
+    logger.info("Verificando sesiones de caja huérfanas de jornadas anteriores...")
+    from api.src.caja.service import auto_close_stale_cash_sessions
+    async with async_session_factory() as db:
+        try:
+            cnt = await auto_close_stale_cash_sessions(db)
+            if cnt > 0:
+                logger.info(f"Cierre automático de cajas: {cnt} sesiones huérfanas cerradas exitosamente.")
+        except Exception as e:
+            logger.error(f"Error en job de cierre automático de cajas: {e}", exc_info=True)
+
+
 def update_schedule(config: dict):
     """Update the scheduler with new configuration."""
     frequency = config.get("frequency", "daily")
@@ -476,6 +489,16 @@ def update_schedule(config: dict):
             replace_existing=True,
         )
 
+    # Cierre automático de cajas huérfanas de jornadas anteriores (cada 30 min)
+    if not scheduler.get_job("auto_close_cash_sessions"):
+        scheduler.add_job(
+            run_auto_close_cash_sessions,
+            trigger=CronTrigger(minute="5,35", timezone=py_tz),
+            id="auto_close_cash_sessions",
+            name="Auto-close Stale Cash Sessions (America/Asuncion)",
+            replace_existing=True,
+        )
+
     logger.info(f"Scheduler updated: {frequency} at {hour:02d}:{minute:02d}")
 
 
@@ -491,11 +514,12 @@ def start_scheduler():
 
     update_schedule(config)
 
-    # Ejecutar sync de promociones inmediatamente al arrancar el API
+    # Ejecutar sync de promociones y cierre de cajas huérfanas inmediatamente al arrancar el API
     try:
         asyncio.create_task(run_promotions_daily_sync())
+        asyncio.create_task(run_auto_close_cash_sessions())
     except Exception as e:
-        logger.warning("No se pudo iniciar sync inmediato de promociones al arrancar: %s", e)
+        logger.warning("No se pudo iniciar tareas inmediatas de background al arrancar: %s", e)
 
     logger.info("Scheduler started.")
     return scheduler

@@ -126,6 +126,9 @@ interface SessionSummary {
   } | null
   recon?: any
   diferencia_vouchers_gs?: number | null
+  observaciones?: string | null
+  register_nombre?: string | null
+  register_codigo?: string | null
 }
 
 interface PaymentBreakdownItem {
@@ -861,13 +864,15 @@ export default function CajaPage() {
   const fetchData = async () => {
     setLoading(true)
     try {
-      const [regsData, sessionsData, handoffsData] = await Promise.allSettled([
+      const [regsData, sessionsData, handoffsData, histData] = await Promise.allSettled([
         api.caja.registers.list(),
         api.caja.sessionsSummary({ estado: "abierta" }),
         api.caja.handoffs.list(),
+        api.caja.sessionsSummary({ estado: "cerrada", limit: 250 }),
       ])
       if (regsData.status === "fulfilled") setRegisters(regsData.value)
       if (sessionsData.status === "fulfilled") setSessions(sessionsData.value)
+      if (histData.status === "fulfilled") setHistorial(histData.value)
       if (handoffsData.status === "fulfilled") {
         const sortedHandoffs = [...(handoffsData.value || [])].sort((a, b) =>
           new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
@@ -887,6 +892,14 @@ export default function CajaPage() {
   }, [])
 
   const pendingHandoffs = handoffs.filter(h => h.estado === "pendiente")
+
+  const pendingCerradas = useMemo(() => {
+    return historial.filter(s => s.estado === "cerrada" && !LEGACY_SESSION_IDS.has(s.id))
+  }, [historial])
+
+  const autoClosedPending = useMemo(() => {
+    return pendingCerradas.filter(s => s.observaciones?.includes("[Cierre automático"))
+  }, [pendingCerradas])
 
   const fetchHistorial = async (lim?: number, overrideFilters?: { fecha_desde?: string; fecha_hasta?: string; cajero?: string; estado?: string }) => {
     setHistorialLoading(true)
@@ -1670,13 +1683,52 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
         </div>
       </div>
 
+      {/* ⚠️ ALERTA: TURNOS CERRADOS PENDIENTES DE RECEPCIÓN / VERIFICACIÓN EN TESORERÍA */}
+      {pendingCerradas.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black uppercase tracking-wider text-amber-900 dark:text-amber-200">
+                  {pendingCerradas.length} turno(s) cerrado(s) pendiente(s) de recuento en Tesorería
+                </span>
+                {autoClosedPending.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                    {autoClosedPending.length} por Cierre Automático (relevo/jornada)
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">
+                {pendingCerradas.map(p => `${p.cajero_nombre || 'Cajero'} (${p.register_nombre || getRegisterName(p.register_id)})`).slice(0, 3).join(", ")}
+                {pendingCerradas.length > 3 ? ` y ${pendingCerradas.length - 3} más` : ""}
+                {" — Requiere recepción física de sobre y verificación de comprobantes."}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setActiveTab("historial")
+              setHistorialEstadoFilter("cerrada")
+              fetchHistorial(undefined, { estado: "cerrada" })
+            }}
+            className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shrink-0 transition shadow-sm flex items-center gap-1.5"
+          >
+            <span>Auditar en Historial</span>
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
           { key: "registers", label: "Línea de Cajas & Terminales", icon: Store, count: totalRegisters },
           { key: "sessions", label: "Turnos Abiertos en Vivo", icon: Activity, count: openSessionsCount },
           { key: "entregas", label: "Entregas a Bóveda", icon: ShieldCheck, count: pendingHandoffs.length },
-          { key: "historial", label: "Historial de Arqueos & Cierres", icon: Clock },
+          { key: "historial", label: "Historial de Arqueos & Cierres", icon: Clock, count: pendingCerradas.length },
           { key: "cajeros", label: "Scorecard de Cajeros", icon: Users },
           { key: "donaciones", label: "❤️ Donaciones & RSE", icon: Heart, count: donationStats?.cantidad_donaciones },
           { key: "reportes", label: "📊 Centro de Reportes", icon: FileSpreadsheet },
@@ -2228,6 +2280,9 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                         <td className="p-3.5 font-bold text-gray-900 dark:text-white">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <div className="text-xs font-bold">{getCajero(s)}</div>
+                            <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                              ({s.register_nombre || getRegisterName(s.register_id)})
+                            </span>
                             {s.estado === "verificada" ? (
                               <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
                                 ✓ Verificada
@@ -2237,9 +2292,16 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                                 ⚪ Sin Movimiento
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
-                                Cerrada
-                              </span>
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                                  Cerrada (Pendiente)
+                                </span>
+                                {s.observaciones?.includes("[Cierre automático") && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700" title={s.observaciones}>
+                                    ⚠️ Auto-Cierre
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
                           {s.handoff ? (
@@ -2274,7 +2336,13 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                           )}
                         </td>
                         <td className="p-3.5 text-right font-mono font-bold text-gray-800 dark:text-gray-200">
-                          {formatPYG(s.monto_cierre || 0)}
+                          {s.observaciones?.includes("[Cierre automático") && (!s.monto_cierre || Number(s.monto_cierre) === 0) ? (
+                            <span className="text-[11px] font-normal text-amber-600 dark:text-amber-400 italic" title="Turno cerrado automáticamente. Pendiente recepción y recuento en sobre por Tesorería.">
+                              Sin arqueo (auto)
+                            </span>
+                          ) : (
+                            formatPYG(s.monto_cierre || 0)
+                          )}
                         </td>
                         <td className="p-3.5 text-right font-mono text-gray-500">
                           {formatPYG(s.monto_cierre_esperado || 0)}

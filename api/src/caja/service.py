@@ -350,6 +350,51 @@ async def get_open_session(db: AsyncSession, register_id: str) -> CashSession | 
     return sess
 
 
+async def auto_close_stale_cash_sessions(db: AsyncSession) -> int:
+    """Busca y cierra automáticamente todas las sesiones que hayan quedado abiertas
+    de días anteriores (según America/Asuncion) o con más de 14 horas de antigüedad.
+    Garantiza que ningún turno quede 'en el limbo' y todos aparezcan en el Historial de Cierres."""
+    ahora_utc = datetime.now(timezone.utc)
+    hoy_asuncion = ahora_utc.astimezone(TZ_ASUNCION).date()
+    limite_antiguedad = ahora_utc - timedelta(hours=14)
+
+    stale_res = await db.execute(
+        select(CashSession)
+        .where(CashSession.estado.in_(["abierta", "pausada"]))
+    )
+    stale_sessions = list(stale_res.scalars().all())
+    cerradas_count = 0
+
+    for sess in stale_sessions:
+        ap_dt = sess.fecha_apertura
+        if ap_dt.tzinfo is None:
+            ap_dt = ap_dt.replace(tzinfo=timezone.utc)
+        ap_local = ap_dt.astimezone(TZ_ASUNCION)
+
+        # Si pertenece a un día anterior en Paraguay O tiene >14h abierta
+        if ap_local.date() < hoy_asuncion or ap_dt < limite_antiguedad:
+            sales_cnt = (
+                await db.execute(select(func.count(Sale.id)).where(Sale.session_id == sess.id))
+            ).scalar() or 0
+            if sales_cnt == 0:
+                sess.estado = "sin_movimiento"
+                sess.fecha_cierre = sess.fecha_apertura
+                sess.observaciones = (sess.observaciones or "") + " [Cierre automático: jornada anterior sin ventas]"
+            else:
+                sess.estado = "cerrada"
+                sess.fecha_cierre = ahora_utc
+                sess.observaciones = (sess.observaciones or "") + " [Cierre automático por cambio de jornada]"
+            cerradas_count += 1
+            logger.info(
+                f"[AutoCloseScheduler] Sesión {sess.id} ({sess.cajero_nombre}) auto-cerrada a {sess.estado} "
+                f"(ventas: {sales_cnt}, apertura: {ap_local.strftime('%Y-%m-%d %H:%M')})"
+            )
+
+    if cerradas_count > 0:
+        await db.commit()
+    return cerradas_count
+
+
 async def list_sessions(
     db: AsyncSession,
     company_id: str,
@@ -563,9 +608,39 @@ async def open_session(db: AsyncSession, data: dict) -> CashSession:
         # 2. Si ya cerró su turno hoy, las sesiones cerradas NUNCA deben reabrirse automáticamente
         # para no destruir ni invalidar el arqueo físico de caja impreso por el cajero.
 
-    # 3. Crear una sesión INDEPENDIENTE y limpia para este cajero
+    # 2.5. Si en esta caja física existe una sesión abierta o pausada de OTRA persona,
+    # cerrarla automáticamente para relevar la terminal y forzar que ingrese de inmediato al Historial de Cierres.
     user_res = await db.execute(select(User).where(User.id == user_id)) if user_id else None
     user_obj = user_res.scalar_one_or_none() if user_res else None
+
+    if register_id:
+        prev_sessions_res = await db.execute(
+            select(CashSession)
+            .where(CashSession.register_id == register_id)
+            .where(CashSession.estado.in_(["abierta", "pausada"]))
+            .where(CashSession.user_id != user_id if user_id else True)
+        )
+        nuevo_cajero_nom = data.get("cajero_nombre") or (user_obj.nombre if user_obj else "nuevo cajero")
+        ahora_utc = datetime.now(timezone.utc)
+        for prev_s in prev_sessions_res.scalars().all():
+            sales_cnt = (
+                await db.execute(select(func.count(Sale.id)).where(Sale.session_id == prev_s.id))
+            ).scalar() or 0
+            if sales_cnt == 0:
+                prev_s.estado = "sin_movimiento"
+                prev_s.fecha_cierre = ahora_utc
+                prev_s.observaciones = (prev_s.observaciones or "") + f" [Cierre automático: relevo por {nuevo_cajero_nom} sin ventas]"
+            else:
+                prev_s.estado = "cerrada"
+                prev_s.fecha_cierre = ahora_utc
+                prev_s.observaciones = (prev_s.observaciones or "") + f" [Cierre automático por relevo de terminal: ingresa {nuevo_cajero_nom}]"
+            logger.warning(
+                f"Auto-cerrando sesión previa huérfana {prev_s.id} ({prev_s.cajero_nombre}) en caja {register_id} "
+                f"por relevo de {nuevo_cajero_nom}. Ventas: {sales_cnt}"
+            )
+        await db.flush()
+
+    # 3. Crear una sesión INDEPENDIENTE y limpia para este cajero
     user_rol = (user_obj.rol if user_obj else "").lower()
     cajero_nom = (data.get("cajero_nombre") or (user_obj.nombre if user_obj else "")).lower()
     is_supervisora = (
@@ -1956,9 +2031,12 @@ async def list_sessions_with_totals(
         else:
             handoff_data = None
 
+        reg_info = registers_map.get(s.register_id)
         out.append({
             "id": str(s.id),
             "register_id": str(s.register_id),
+            "register_nombre": reg_info.nombre if reg_info else "Caja",
+            "register_codigo": reg_info.codigo if reg_info else "",
             "user_id": str(s.user_id),
             "cajero_nombre": s.cajero_nombre,
             "fecha_apertura": s.fecha_apertura.isoformat() if s.fecha_apertura else None,
