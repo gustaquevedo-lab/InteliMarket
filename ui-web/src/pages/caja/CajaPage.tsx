@@ -3809,7 +3809,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Bruto Facturado en POS</span>
                   <div className="text-base font-black text-white font-mono">
-                    ₲ {formatPYG(commissionAudit.total_bruto_pos)}
+                    {formatPYG(commissionAudit.total_bruto_pos)}
                   </div>
                   <span className="text-[10px] text-slate-500">Total ventas con tarjeta/QR</span>
                 </div>
@@ -3817,7 +3817,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Comisión Teórica ERP</span>
                   <div className="text-base font-black text-indigo-400 font-mono">
-                    ₲ {formatPYG(commissionAudit.total_comision_teorica)}
+                    {formatPYG(commissionAudit.total_comision_teorica)}
                   </div>
                   <span className="text-[10px] text-slate-500">Según tasas configuradas</span>
                 </div>
@@ -3825,7 +3825,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                 <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-1">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Neto Acreditado en Bancos</span>
                   <div className="text-base font-black text-emerald-400 font-mono">
-                    ₲ {formatPYG(commissionAudit.total_acreditado_real)}
+                    {formatPYG(commissionAudit.total_acreditado_real)}
                   </div>
                   <span className="text-[10px] text-slate-500">Créditos reales en extracto</span>
                 </div>
@@ -3835,7 +3835,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                   <div className={`text-base font-black font-mono ${
                     commissionAudit.total_desvio_gs > 0 ? "text-rose-400" : "text-emerald-400"
                   }`}>
-                    {commissionAudit.total_desvio_gs > 0 ? "+" : ""}₲ {formatPYG(commissionAudit.total_desvio_gs)}
+                    {commissionAudit.total_desvio_gs > 0 ? "+" : ""}{formatPYG(commissionAudit.total_desvio_gs)}
                   </div>
                   <span className="text-[10px] text-slate-500">
                     {commissionAudit.total_desvio_gs > 0 ? "Retención en exceso" : "En línea o favorable"}
@@ -3898,16 +3898,16 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             {c.tasa_configurada_pct.toFixed(2)}%
                           </td>
                           <td className="py-2 px-3 text-right">
-                            ₲ {formatPYG(c.total_bruto_pos)}
+                            {formatPYG(c.total_bruto_pos)}
                           </td>
                           <td className="py-2 px-3 text-right text-indigo-300">
-                            ₲ {formatPYG(c.comision_teorica)}
+                            {formatPYG(c.comision_teorica)}
                           </td>
                           <td className="py-2 px-3 text-right text-slate-300">
-                            ₲ {formatPYG(c.neto_esperado)}
+                            {formatPYG(c.neto_esperado)}
                           </td>
                           <td className="py-2 px-3 text-right text-emerald-400 font-bold">
-                            ₲ {formatPYG(c.total_acreditado_real)}
+                            {formatPYG(c.total_acreditado_real)}
                           </td>
                           <td className="py-2 px-3 text-right">
                             {c.total_acreditado_real > 0 ? `${c.tasa_real_efectiva_pct.toFixed(2)}%` : "—"}
@@ -3916,7 +3916,7 @@ ${discrepancia !== 0 ? `<div class="row" style="color:#c00;font-weight:bold;"><s
                             c.desvio_monto_gs > 0 ? "text-rose-400" : (c.desvio_monto_gs < 0 ? "text-emerald-400" : "text-slate-400")
                           }`}>
                             {c.total_acreditado_real > 0 ? (
-                              `${c.desvio_monto_gs > 0 ? "+" : ""}₲ ${formatPYG(c.desvio_monto_gs)}`
+                              `${c.desvio_monto_gs > 0 ? "+" : ""}${formatPYG(c.desvio_monto_gs)}`
                             ) : "—"}
                           </td>
                           <td className="py-2 px-3 text-center">
