@@ -313,6 +313,49 @@ async def delete_register(db: AsyncSession, register_id: str, company_id: str) -
     return True
 
 
+async def _generate_auto_close_records(db: AsyncSession, sess: CashSession, ahora_utc: datetime) -> None:
+    """Genera CashCount y CashHandoff automáticos para una sesión cerrada de oficio,
+    calculando la reconciliación y dejando el reporte de cierre listo para reimpresión."""
+    sess.monto_cierre = Decimal("0")
+    recon = await get_session_reconciliation_data(db, sess.id)
+    esp_total = Decimal(str(recon.get("esperado_total_gs", 0))) if recon else Decimal("0")
+    dif_total = Decimal(str(recon.get("diferencia_consolidada_gs", -esp_total))) if recon else -esp_total
+
+    reg_res = await db.execute(select(CashRegister).where(CashRegister.id == sess.register_id))
+    reg = reg_res.scalar_one_or_none()
+
+    count = CashCount(
+        session_id=sess.id,
+        monto_efectivo=Decimal("0"),
+        monto_total=Decimal("0"),
+        diferencia=dif_total,
+        monto_efectivo_usd=Decimal("0"),
+        monto_efectivo_brl=Decimal("0"),
+        diferencia_usd=Decimal("0"),
+        diferencia_brl=Decimal("0"),
+        requiere_revision=True,
+        observaciones="Cierre automático por cambio de jornada",
+    )
+    db.add(count)
+    await db.flush()
+
+    handoff = CashHandoff(
+        company_id=reg.company_id if reg else None,
+        session_id=sess.id,
+        cash_count_id=count.id,
+        entregado_por=sess.user_id,
+        entregado_por_nombre=sess.cajero_nombre,
+        monto_pyg=Decimal("0"),
+        monto_usd=Decimal("0"),
+        monto_brl=Decimal("0"),
+        requiere_revision=True,
+        estado="pendiente",
+        observaciones="Cierre automático por cambio de jornada - Pendiente de rendición física en Tesorería",
+    )
+    db.add(handoff)
+    await db.flush()
+
+
 async def get_open_session(db: AsyncSession, register_id: str) -> CashSession | None:
     result = await db.execute(
         select(CashSession)
@@ -345,6 +388,7 @@ async def get_open_session(db: AsyncSession, register_id: str) -> CashSession | 
             sess.estado = "cerrada"
             sess.fecha_cierre = ahora_utc
             sess.observaciones = (sess.observaciones or "") + " [Cierre automático por cambio de jornada]"
+            await _generate_auto_close_records(db, sess, ahora_utc)
         await db.commit()
         return None
     return sess
@@ -384,6 +428,7 @@ async def auto_close_stale_cash_sessions(db: AsyncSession) -> int:
                 sess.estado = "cerrada"
                 sess.fecha_cierre = ahora_utc
                 sess.observaciones = (sess.observaciones or "") + " [Cierre automático por cambio de jornada]"
+                await _generate_auto_close_records(db, sess, ahora_utc)
             cerradas_count += 1
             logger.info(
                 f"[AutoCloseScheduler] Sesión {sess.id} ({sess.cajero_nombre}) auto-cerrada a {sess.estado} "
@@ -501,6 +546,7 @@ async def get_active_user_session(db: AsyncSession, user_id: str) -> dict | None
             session_obj.estado = "cerrada"
             session_obj.fecha_cierre = ahora_utc
             session_obj.observaciones = (session_obj.observaciones or "") + " [Cierre automático por cambio de jornada]"
+            await _generate_auto_close_records(db, session_obj, ahora_utc)
         await db.commit()
         return None
 
