@@ -3,12 +3,14 @@ import {
   X, Check, AlertTriangle, Plus, Trash2, CreditCard,
   Building2, Wallet, FileText, Calendar, CheckCircle2,
   DollarSign, ShieldAlert, ArrowRight, Loader2, ReceiptText, Sparkles,
-  Search, CheckSquare, Square, RefreshCw, ChevronDown, ChevronUp, FileCheck2
+  Search, CheckSquare, Square, RefreshCw, ChevronDown, ChevronUp, FileCheck2,
+  Printer
 } from "lucide-react"
 import { api, SupplierPaymentOrder } from "../../api"
-import { formatPYG, formatDate } from "../../utils/format"
+import { formatPYG, formatDate, getTodayAsuncion } from "../../utils/format"
 import CurrencyInput from "../../components/CurrencyInput"
 import { useToast } from "../../context/ToastContext"
+import ImprimirChequeContinentalModal from "../cheques/ImprimirChequeContinentalModal"
 
 
 interface InvoiceToPay {
@@ -117,6 +119,10 @@ export default function SupplierPaymentOrderModal({
 
   // Desembolsos / medios de pago
   const [disbursements, setDisbursements] = useState<DisbursementRow[]>([])
+
+  // Modal Impresión Cheque Banco Continental (Epson LX-300+ ESC/P)
+  const [showPrintModal, setShowPrintModal] = useState(false)
+  const [chequeAImprimir, setChequeAImprimir] = useState<any | null>(null)
 
   // Facturas comerciales legales de respaldo (para justificar tickets provisorios/sin factura)
   const [legalInvoices, setLegalInvoices] = useState<LegalInvoiceFormItem[]>([])
@@ -2395,6 +2401,34 @@ export default function SupplierPaymentOrderModal({
                                 />
                               </div>
 
+                              {/* BOTÓN IMPRIMIR CHEQUE EN EPSON LX-300+ */}
+                              <div className="sm:col-span-3 pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800">
+                                <span className="text-[11px] text-slate-500">
+                                  ¿Confeccionar e imprimir cheque físico ahora?
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setChequeAImprimir({
+                                      numero: d.numero_cheque,
+                                      monto: d.monto || summaryFacturas.neto,
+                                      beneficiario: d.titular_cheque || supplier?.razon_social || "",
+                                      esDiferido: d.es_cheque_diferido,
+                                      fechaEmision: d.fecha_cheque_emision || getTodayAsuncion(),
+                                      fechaPago: d.fecha_cheque_vencimiento || getTodayAsuncion(),
+                                      cruzado: true,
+                                      noALaOrden: true,
+                                      concepto: `OP: ${supplier?.razon_social || ""}`,
+                                    })
+                                    setShowPrintModal(true)
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow-sm transition"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                  <span>Imprimir Cheque en Epson LX-300+</span>
+                                </button>
+                              </div>
+
                               {/* OPCIÓN CHEQUE MATRIZ COMPARTIDO */}
                               <div className="sm:col-span-3 pt-2 border-t border-slate-100 dark:border-slate-800">
                                 <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300">
@@ -2575,6 +2609,16 @@ export default function SupplierPaymentOrderModal({
         </div>
 
       </div>
+
+      {/* MODAL IMPRESIÓN CHEQUE BANCO CONTINENTAL (EPSON LX-300+ ESC/P) */}
+      <ImprimirChequeContinentalModal
+        isOpen={showPrintModal}
+        onClose={() => {
+          setShowPrintModal(false)
+          setChequeAImprimir(null)
+        }}
+        chequeData={chequeAImprimir}
+      />
     </div>
   )
 }
