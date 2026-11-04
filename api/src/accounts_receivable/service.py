@@ -446,179 +446,243 @@ async def _record_treasury_ingress(
 ) -> dict:
     """Registra el impacto del cobro en el subsistema correspondiente de tesorería:
     - Efectivo: genera entrada en VaultEntry (Bóveda Central con desglose en PYG, BRL y USD) o vincula caja_session_id.
-    - Transferencia / PIX / QR: genera BankTransaction (tipo='credito') y actualiza bank_account.saldo_actual.
-    - Cheque: registra el cheque recibido en cartera (tabla cheques) con sus fechas y emisor."""
+    - Transferencia / Depósito / Tarjetas / PIX / QR: genera BankTransaction (tipo='credito') y actualiza bank_account.saldo_actual.
+    - Cheques: registra cada cheque recibido en cartera (tabla cheques) con historial (cheque_historial)."""
     forma_pago = (getattr(data, "forma_pago", None) or "efectivo").lower()
     bank_account_id = getattr(data, "bank_account_id", None)
     caja_session_id = getattr(data, "caja_session_id", None)
-    es_bancario = forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr")
+    es_bancario = forma_pago in (
+        "transferencia", "deposito_bancario", "deposito", "pix", "qr",
+        "tarjeta_debito", "tarjeta_credito", "tarjeta", "banco"
+    )
     destino_fondos = getattr(data, "destino_fondos", None) or ("banco" if es_bancario else "boveda")
+    uid = uuid.UUID(str(registrado_por)) if registrado_por else None
 
     vault_entry_id = None
     cheque_id = None
     bank_tx_id = None
 
     # 1. Ingreso de Efectivo en Bóveda / Caja (si aplica)
-    if forma_pago in ("efectivo", "mixto"):
-        monto_pyg = Decimal(str(getattr(data, "monto_pyg", 0) or 0))
-        monto_brl = Decimal(str(getattr(data, "monto_brl", 0) or 0))
-        monto_usd = Decimal(str(getattr(data, "monto_usd", 0) or 0))
-        if forma_pago == "efectivo" and monto_pyg == 0 and monto_brl == 0 and monto_usd == 0:
-            mon_str = (getattr(data, "moneda", "PYG") or "PYG").upper()
-            if mon_str == "BRL":
-                monto_brl = monto
-            elif mon_str == "USD":
-                monto_usd = monto
-            else:
-                monto_pyg = monto
+    monto_pyg = Decimal(str(getattr(data, "monto_pyg", 0) or 0))
+    monto_brl = Decimal(str(getattr(data, "monto_brl", 0) or 0))
+    monto_usd = Decimal(str(getattr(data, "monto_usd", 0) or 0))
+    if forma_pago == "efectivo" and monto_pyg == 0 and monto_brl == 0 and monto_usd == 0:
+        mon_str = (getattr(data, "moneda", "PYG") or "PYG").upper()
+        if mon_str == "BRL":
+            monto_brl = monto
+        elif mon_str == "USD":
+            monto_usd = monto
+        else:
+            monto_pyg = monto
 
-        if (monto_pyg > 0 or monto_brl > 0 or monto_usd > 0) and not (destino_fondos == "caja" and caja_session_id):
-            det_monedas = []
-            if monto_pyg > 0:
-                det_monedas.append(f"Gs. {int(monto_pyg):,}")
-            if monto_brl > 0:
-                det_monedas.append(f"R$ {monto_brl:,.2f}")
-            if monto_usd > 0:
-                det_monedas.append(f"US$ {monto_usd:,.2f}")
-            det_str = f" ({' + '.join(det_monedas)})" if det_monedas else ""
+    if (monto_pyg > 0 or monto_brl > 0 or monto_usd > 0) and not (destino_fondos == "caja" and caja_session_id):
+        det_monedas = []
+        if monto_pyg > 0:
+            det_monedas.append(f"Gs. {int(monto_pyg):,}")
+        if monto_brl > 0:
+            det_monedas.append(f"R$ {monto_brl:,.2f}")
+        if monto_usd > 0:
+            det_monedas.append(f"US$ {monto_usd:,.2f}")
+        det_str = f" ({' + '.join(det_monedas)})" if det_monedas else ""
 
-            vault_entry_id = uuid.uuid4()
-            await db.execute(
-                text("""
-                    INSERT INTO vault_entries
-                        (id, company_id, origen, monto_pyg, monto_brl, monto_usd, estado, observaciones, registrado_por, created_at)
-                    VALUES
-                        (:id, :company_id, 'cobranza_ar', :monto_pyg, :monto_brl, :monto_usd, 'en_boveda', :obs, :user_id, NOW())
-                """),
-                {
-                    "id": vault_entry_id,
-                    "company_id": company_id,
-                    "monto_pyg": float(monto_pyg),
-                    "monto_brl": float(monto_brl),
-                    "monto_usd": float(monto_usd),
-                    "obs": f"Cobro AR Recibo #{numero_recibo}{det_str} - Cliente: {customer_name}",
-                    "user_id": registrado_por,
-                },
-            )
+        vault_entry_id = uuid.uuid4()
+        await db.execute(
+            text("""
+                INSERT INTO vault_entries
+                    (id, company_id, origen, monto_pyg, monto_brl, monto_usd, estado, observaciones, registrado_por, created_at)
+                VALUES
+                    (:id, :company_id, 'cobranza_ar', :monto_pyg, :monto_brl, :monto_usd, 'en_boveda', :obs, :user_id, NOW())
+            """),
+            {
+                "id": vault_entry_id,
+                "company_id": company_id,
+                "monto_pyg": float(monto_pyg),
+                "monto_brl": float(monto_brl),
+                "monto_usd": float(monto_usd),
+                "obs": f"Cobro AR Recibo #{numero_recibo}{det_str} - Cliente: {customer_name}",
+                "user_id": uid,
+            },
+        )
 
-    # 2. Depósito / Transferencia / PIX / QR a Cuenta Bancaria
-    if (forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr") or forma_pago == "mixto") and bank_account_id:
-        m_banco = Decimal(str(getattr(data, "monto_transferencia", 0) or (monto if forma_pago != "mixto" else 0)))
-        if m_banco > 0:
-            bank_tx_id = uuid.uuid4()
-            desc_tipo = "Depósito Bancario" if "deposito" in forma_pago else ("PIX" if forma_pago == "pix" else ("QR" if forma_pago == "qr" else "Transferencia"))
-            ref_val = getattr(data, "referencia_transferencia", None) or getattr(data, "referencia", None)
-            ref_str = f" - Boleta/Ref: {ref_val}" if ref_val else ""
-            fecha_op = getattr(data, "fecha_transferencia", None) or getattr(data, "fecha", None) or date.today()
-            await db.execute(
-                text("""
-                    INSERT INTO bank_transactions
-                        (id, company_id, bank_account_id, fecha, tipo, monto, moneda, descripcion, referencia, contraparte, conciliado, fecha_conciliacion, categoria, created_at)
-                    VALUES
-                        (:id, :company_id, :bank_account_id, :fecha, 'credito', :monto, :moneda, :descripcion, :referencia, :contraparte, false, NULL, 'cobranzas', NOW())
-                """),
-                {
-                    "id": bank_tx_id,
-                    "company_id": company_id,
-                    "bank_account_id": str(bank_account_id),
-                    "fecha": fecha_op,
-                    "monto": float(m_banco),
-                    "moneda": getattr(data, "moneda", "PYG") or "PYG",
-                    "descripcion": f"Cobro AR {desc_tipo} Recibo #{numero_recibo}{ref_str} - Cliente: {customer_name}",
-                    "referencia": ref_val,
-                    "contraparte": customer_name,
-                },
-            )
+    # 2. Canales Bancarios y Medios Digitales (Transferencia, Depósito, Tarjetas, QR, PIX)
+    if bank_account_id:
+        m_transf = Decimal(str(getattr(data, "monto_transferencia", 0) or 0))
+        m_deposito = Decimal(str(getattr(data, "monto_deposito", 0) or 0))
+        m_debito = Decimal(str(getattr(data, "monto_tarjeta_debito", 0) or 0))
+        m_credito = Decimal(str(getattr(data, "monto_tarjeta_credito", 0) or 0))
+        m_qr = Decimal(str(getattr(data, "monto_qr", 0) or 0))
+        m_pix = Decimal(str(getattr(data, "monto_pix", 0) or 0))
+
+        # Si el usuario seleccionó un método simple (no mixto) y no especificó desglose:
+        if forma_pago == "transferencia" and m_transf == 0:
+            m_transf = monto
+        elif forma_pago in ("deposito", "deposito_bancario") and m_deposito == 0:
+            m_deposito = monto
+        elif forma_pago == "tarjeta_debito" and m_debito == 0:
+            m_debito = monto
+        elif forma_pago in ("tarjeta_credito", "tarjeta") and m_credito == 0:
+            m_credito = monto
+        elif forma_pago == "qr" and m_qr == 0:
+            m_qr = monto
+        elif forma_pago == "pix" and m_pix == 0:
+            m_pix = monto
+
+        bank_items = [
+            ("Transferencia", m_transf, getattr(data, "referencia_transferencia", None) or getattr(data, "referencia", None), getattr(data, "fecha_transferencia", None)),
+            ("Depósito Bancario", m_deposito, getattr(data, "referencia_deposito", None) or getattr(data, "referencia", None), None),
+            ("Tarjeta Débito", m_debito, getattr(data, "voucher_tarjeta_debito", None) or getattr(data, "referencia", None), None),
+            ("Tarjeta Crédito", m_credito, getattr(data, "voucher_tarjeta_credito", None) or getattr(data, "referencia", None), None),
+            ("Cobro QR", m_qr, getattr(data, "referencia_qr", None) or getattr(data, "referencia", None), None),
+            ("PIX", m_pix, getattr(data, "referencia_pix", None) or getattr(data, "referencia", None), None),
+        ]
+
+        total_banco = Decimal("0")
+        for desc_tipo, m_val, ref_val, f_val in bank_items:
+            if m_val > 0:
+                tx_id = uuid.uuid4()
+                if not bank_tx_id:
+                    bank_tx_id = tx_id
+                ref_str = f" - Ref/Voucher: {ref_val}" if ref_val else ""
+                fecha_op = f_val or getattr(data, "fecha", None) or getattr(data, "fecha_pago", None) or date.today()
+                await db.execute(
+                    text("""
+                        INSERT INTO bank_transactions
+                            (id, company_id, bank_account_id, fecha, tipo, monto, moneda, descripcion, referencia, contraparte, conciliado, fecha_conciliacion, categoria, created_at)
+                        VALUES
+                            (:id, :company_id, :bank_account_id, :fecha, 'credito', :monto, :moneda, :descripcion, :referencia, :contraparte, false, NULL, 'cobranzas', NOW())
+                    """),
+                    {
+                        "id": tx_id,
+                        "company_id": company_id,
+                        "bank_account_id": str(bank_account_id),
+                        "fecha": fecha_op,
+                        "monto": float(m_val),
+                        "moneda": getattr(data, "moneda", "PYG") or "PYG",
+                        "descripcion": f"Cobro AR {desc_tipo} Recibo #{numero_recibo}{ref_str} - Cliente: {customer_name}",
+                        "referencia": ref_val,
+                        "contraparte": customer_name,
+                    },
+                )
+                total_banco += m_val
+
+        if total_banco > 0:
             await db.execute(
                 text("""
                     UPDATE bank_accounts
                     SET saldo_actual = saldo_actual + :monto, updated_at = NOW()
                     WHERE id = :bank_account_id
                 """),
-                {"monto": float(m_banco), "bank_account_id": str(bank_account_id)},
+                {"monto": float(total_banco), "bank_account_id": str(bank_account_id)},
             )
 
     # 3. Uno o Varios Cheques Recibidos
-    if forma_pago in ("cheque", "mixto"):
-        cheques_in = getattr(data, "cheques", None)
-        if cheques_in and isinstance(cheques_in, list):
-            for ch in cheques_in:
-                c_num = ch.get("numero") or ch.get("numero_cheque")
-                c_monto = Decimal(str(ch.get("monto", 0) or 0))
-                if c_monto <= 0:
-                    continue
-                ch_id = uuid.uuid4()
-                c_em = ch.get("fecha_emision") or getattr(data, "fecha", None) or date.today()
-                c_cob = ch.get("fecha_cobro") or ch.get("fecha_vencimiento") or c_em
-                dif = bool(c_cob and c_em and str(c_cob) > str(c_em))
-                await db.execute(
-                    text("""
-                        INSERT INTO cheques
-                            (id, company_id, numero, banco_emisor, beneficiario, librador_nombre, librador_documento,
-                             monto, moneda, fecha_emision, fecha_pago, diferido, estado, tipo_cheque, customer_id,
-                             receivable_payment_id, concepto, notas, created_by, created_at, updated_at)
-                        VALUES
-                            (:id, :company_id, :numero, :banco, 'Extra Supermercado Mayorista', :librador, :ruc,
-                             :monto, :moneda, :f_emision, :f_pago, :diferido, 'en_cartera', 'recibido', :cust_id,
-                             :payment_id, :concepto, :notas, :user_id, NOW(), NOW())
-                    """),
-                    {
-                        "id": ch_id,
-                        "company_id": company_id,
-                        "numero": c_num or f"CHQ-{str(ch_id)[:8].upper()}",
-                        "banco": ch.get("banco") or ch.get("banco_emisor") or "N/A",
-                        "librador": ch.get("librador") or customer_name,
-                        "ruc": ch.get("ruc") or customer_ruc,
-                        "monto": float(c_monto),
-                        "moneda": ch.get("moneda") or "PYG",
-                        "f_emision": c_em,
-                        "f_pago": c_cob,
-                        "diferido": dif,
-                        "cust_id": customer_id,
-                        "payment_id": payment_id,
-                        "concepto": f"Cobro AR Recibo #{numero_recibo}",
-                        "notas": getattr(data, "observaciones", None),
-                        "user_id": registrado_por,
-                    },
-                )
+    cheques_in = getattr(data, "cheques", None)
+    if cheques_in and isinstance(cheques_in, list):
+        for ch in cheques_in:
+            c_num = ch.get("numero") or ch.get("numero_cheque")
+            c_monto = Decimal(str(ch.get("monto", 0) or 0))
+            if c_monto <= 0:
+                continue
+            ch_id = uuid.uuid4()
+            c_em = ch.get("fecha_emision") or getattr(data, "fecha", None) or getattr(data, "fecha_pago", None) or date.today()
+            c_cob = ch.get("fecha_cobro") or ch.get("fecha_vencimiento") or c_em
+            dif = bool(c_cob and c_em and str(c_cob) > str(c_em))
+            await db.execute(
+                text("""
+                    INSERT INTO cheques
+                        (id, company_id, numero, banco_emisor, beneficiario, librador_nombre, librador_documento,
+                         monto, moneda, fecha_emision, fecha_pago, diferido, estado, tipo_cheque, customer_id,
+                         receivable_payment_id, concepto, notas, created_by, created_at, updated_at)
+                    VALUES
+                        (:id, :company_id, :numero, :banco, 'Extra Supermercado Mayorista', :librador, :ruc,
+                         :monto, :moneda, :f_emision, :f_pago, :diferido, 'en_cartera', 'recibido', :cust_id,
+                         :payment_id, :concepto, :notas, :user_id, NOW(), NOW())
+                """),
+                {
+                    "id": ch_id,
+                    "company_id": company_id,
+                    "numero": c_num or f"CHQ-{str(ch_id)[:8].upper()}",
+                    "banco": ch.get("banco") or ch.get("banco_emisor") or "N/A",
+                    "librador": ch.get("librador") or customer_name,
+                    "ruc": ch.get("ruc") or customer_ruc,
+                    "monto": float(c_monto),
+                    "moneda": ch.get("moneda") or "PYG",
+                    "f_emision": c_em,
+                    "f_pago": c_cob,
+                    "diferido": dif,
+                    "cust_id": customer_id if customer_id else None,
+                    "payment_id": payment_id,
+                    "concepto": f"Cobro AR Recibo #{numero_recibo}",
+                    "notas": getattr(data, "observaciones", None) or getattr(data, "notas", None),
+                    "user_id": uid,
+                },
+            )
+            await db.execute(
+                text("""
+                    INSERT INTO cheque_historial
+                        (id, cheque_id, estado_anterior, estado_nuevo, user_id, user_nombre, notas, created_at)
+                    VALUES
+                        (gen_random_uuid(), :cheque_id, NULL, 'en_cartera', :user_id, 'Sistema (Cobranzas)', :notas, NOW())
+                """),
+                {
+                    "cheque_id": ch_id,
+                    "user_id": uid,
+                    "notas": f"Cheque {'diferido' if dif else 'al día'} #{c_num or ''} recibido de {customer_name} por Recibo #{numero_recibo}",
+                },
+            )
+            if not cheque_id:
                 cheque_id = ch_id
-        elif getattr(data, "cheque_numero", None) or (forma_pago == "cheque" and monto > 0):
-            m_ch = Decimal(str(getattr(data, "monto_cheque", 0) or (monto if forma_pago != "mixto" else 0)))
-            if m_ch > 0:
-                cheque_id = uuid.uuid4()
-                chq_f_emision = getattr(data, "cheque_fecha_emision", None) or getattr(data, "fecha", None) or date.today()
-                chq_f_cobro = getattr(data, "cheque_fecha_cobro", None) or chq_f_emision
-                diferido = bool(chq_f_cobro and chq_f_emision and chq_f_cobro > chq_f_emision)
-                await db.execute(
-                    text("""
-                        INSERT INTO cheques
-                            (id, company_id, numero, banco_emisor, beneficiario, librador_nombre, librador_documento,
-                             monto, moneda, fecha_emision, fecha_pago, diferido, estado, tipo_cheque, customer_id,
-                             receivable_payment_id, concepto, notas, created_by, created_at, updated_at)
-                        VALUES
-                            (:id, :company_id, :numero, :banco, 'Extra Supermercado Mayorista', :librador, :ruc,
-                             :monto, :moneda, :f_emision, :f_pago, :diferido, 'en_cartera', 'recibido', :cust_id,
-                             :payment_id, :concepto, :notas, :user_id, NOW(), NOW())
-                    """),
-                    {
-                        "id": cheque_id,
-                        "company_id": company_id,
-                        "numero": getattr(data, "cheque_numero", None) or f"CHQ-{str(payment_id)[:8].upper()}",
-                        "banco": getattr(data, "cheque_banco", None) or "N/A",
-                        "librador": getattr(data, "cheque_librador", None) or customer_name,
-                        "ruc": getattr(data, "cheque_ruc", None) or customer_ruc,
-                        "monto": float(m_ch),
-                        "moneda": getattr(data, "moneda", "PYG") or "PYG",
-                        "f_emision": chq_f_emision,
-                        "f_pago": chq_f_cobro,
-                        "diferido": diferido,
-                        "cust_id": customer_id,
-                        "payment_id": payment_id,
-                        "concepto": f"Cobro AR Recibo #{numero_recibo}",
-                        "notas": getattr(data, "observaciones", None),
-                        "user_id": registrado_por,
-                    },
-                )
+    elif getattr(data, "cheque_numero", None) or getattr(data, "numero_cheque", None) or (forma_pago == "cheque" and monto > 0) or Decimal(str(getattr(data, "monto_cheque", 0) or 0)) > 0:
+        m_ch = Decimal(str(getattr(data, "monto_cheque", 0) or (monto if forma_pago == "cheque" else 0)))
+        if m_ch > 0:
+            cheque_id = uuid.uuid4()
+            chq_f_emision = getattr(data, "cheque_fecha_emision", None) or getattr(data, "fecha_cheque_emision", None) or getattr(data, "fecha", None) or getattr(data, "fecha_pago", None) or date.today()
+            chq_f_cobro = getattr(data, "cheque_fecha_cobro", None) or getattr(data, "fecha_cheque_cobro", None) or chq_f_emision
+            diferido = bool(getattr(data, "es_cheque_diferido", False) or (chq_f_cobro and chq_f_emision and chq_f_cobro > chq_f_emision))
+            c_num = getattr(data, "cheque_numero", None) or getattr(data, "numero_cheque", None) or getattr(data, "referencia", None) or f"CHQ-{str(payment_id)[:8].upper()}"
+            await db.execute(
+                text("""
+                    INSERT INTO cheques
+                        (id, company_id, numero, banco_emisor, beneficiario, librador_nombre, librador_documento,
+                         monto, moneda, fecha_emision, fecha_pago, diferido, estado, tipo_cheque, customer_id,
+                         receivable_payment_id, concepto, notas, created_by, created_at, updated_at)
+                    VALUES
+                        (:id, :company_id, :numero, :banco, 'Extra Supermercado Mayorista', :librador, :ruc,
+                         :monto, :moneda, :f_emision, :f_pago, :diferido, 'en_cartera', 'recibido', :cust_id,
+                         :payment_id, :concepto, :notas, :user_id, NOW(), NOW())
+                """),
+                {
+                    "id": cheque_id,
+                    "company_id": company_id,
+                    "numero": c_num,
+                    "banco": getattr(data, "cheque_banco", None) or getattr(data, "banco_cheque", None) or "N/A",
+                    "librador": getattr(data, "cheque_librador", None) or getattr(data, "titular_cheque", None) or customer_name,
+                    "ruc": getattr(data, "cheque_ruc", None) or customer_ruc,
+                    "monto": float(m_ch),
+                    "moneda": getattr(data, "moneda", "PYG") or "PYG",
+                    "f_emision": chq_f_emision,
+                    "f_pago": chq_f_cobro,
+                    "diferido": diferido,
+                    "cust_id": customer_id if customer_id else None,
+                    "payment_id": payment_id,
+                    "concepto": f"Cobro AR Recibo #{numero_recibo}",
+                    "notas": getattr(data, "observaciones", None) or getattr(data, "notas", None),
+                    "user_id": uid,
+                },
+            )
+            await db.execute(
+                text("""
+                    INSERT INTO cheque_historial
+                        (id, cheque_id, estado_anterior, estado_nuevo, user_id, user_nombre, notas, created_at)
+                    VALUES
+                        (gen_random_uuid(), :cheque_id, NULL, 'en_cartera', :user_id, 'Sistema (Cobranzas)', :notas, NOW())
+                """),
+                {
+                    "cheque_id": cheque_id,
+                    "user_id": uid,
+                    "notas": f"Cheque {'diferido' if diferido else 'al día'} #{c_num} recibido de {customer_name} por Recibo #{numero_recibo}",
+                },
+            )
 
     await db.execute(
         text("""
@@ -1070,6 +1134,31 @@ async def apply_global_payment(
     tasa_usd = Decimal(str(getattr(data, "tasa_usd", 1) or 1))
     monto_cheque = Decimal(str(getattr(data, "monto_cheque", 0) or 0))
     monto_transf = Decimal(str(getattr(data, "monto_transferencia", 0) or 0))
+    monto_deposito = Decimal(str(getattr(data, "monto_deposito", 0) or 0))
+    monto_debito = Decimal(str(getattr(data, "monto_tarjeta_debito", 0) or 0))
+    monto_credito = Decimal(str(getattr(data, "monto_tarjeta_credito", 0) or 0))
+    monto_qr = Decimal(str(getattr(data, "monto_qr", 0) or 0))
+    monto_pix = Decimal(str(getattr(data, "monto_pix", 0) or 0))
+
+    cheques_in = getattr(data, "cheques", None)
+    if cheques_in and isinstance(cheques_in, list):
+        sum_ch = sum(Decimal(str(c.get("monto", 0) or 0)) for c in cheques_in)
+        if sum_ch > 0:
+            monto_cheque = sum_ch
+
+    total_componentes = (
+        monto_pyg
+        + (monto_brl * tasa_brl)
+        + (monto_usd * tasa_usd)
+        + monto_cheque
+        + monto_transf
+        + monto_deposito
+        + monto_debito
+        + monto_credito
+        + monto_qr
+        + monto_pix
+    ).quantize(Decimal("1"))
+
     monto_facturas = Decimal(
         str(getattr(data, "monto_facturas_canceladas", None) or data.monto_total)
     ).quantize(Decimal("1"))
@@ -1093,8 +1182,8 @@ async def apply_global_payment(
         tipo_diferencia = "exacto"
         diferencia_monto = Decimal("0")
     else:
-        if monto_pyg > 0 or monto_brl > 0 or monto_usd > 0 or monto_cheque > 0 or monto_transf > 0:
-            monto_entregado_gs = (monto_pyg + (monto_brl * tasa_brl) + (monto_usd * tasa_usd) + monto_cheque + monto_transf).quantize(Decimal("1"))
+        if total_componentes > 0:
+            monto_entregado_gs = total_componentes
         else:
             monto_entregado_gs = Decimal(str(data.monto_total)).quantize(Decimal("1"))
 
@@ -1136,6 +1225,24 @@ async def apply_global_payment(
     retencion_porcentaje = Decimal(str(getattr(data, "retencion_porcentaje", 30.00) or 30.00)) if aplica_retencion else Decimal("30.00")
     monto_efectivo_recibido = max(Decimal("0"), monto_entregado_gs - monto_retencion)
 
+    desglose_parts = []
+    if monto_pyg > 0: desglose_parts.append(f"Efectivo: ₲ {int(monto_pyg):,}")
+    if monto_brl > 0: desglose_parts.append(f"Reales: R$ {monto_brl:,.2f} (@ {tasa_brl})")
+    if monto_usd > 0: desglose_parts.append(f"Dólares: US$ {monto_usd:,.2f} (@ {tasa_usd})")
+    if monto_transf > 0: desglose_parts.append(f"Transferencia: ₲ {int(monto_transf):,}")
+    if monto_deposito > 0: desglose_parts.append(f"Depósito: ₲ {int(monto_deposito):,}")
+    if monto_cheque > 0: desglose_parts.append(f"Cheques: ₲ {int(monto_cheque):,}")
+    if monto_debito > 0: desglose_parts.append(f"Tarjeta Débito: ₲ {int(monto_debito):,}")
+    if monto_credito > 0: desglose_parts.append(f"Tarjeta Crédito: ₲ {int(monto_credito):,}")
+    if monto_qr > 0: desglose_parts.append(f"QR: ₲ {int(monto_qr):,}")
+    if monto_pix > 0: desglose_parts.append(f"PIX: ₲ {int(monto_pix):,}")
+    if aplica_retencion and monto_retencion > 0: desglose_parts.append(f"Retención Tesakã: ₲ {int(monto_retencion):,}")
+
+    obs_final = data.observaciones or ""
+    if desglose_parts:
+        tag_desglose = f"[Cobro Combinado: {' + '.join(desglose_parts)}]"
+        obs_final = f"{obs_final} | {tag_desglose}".strip(" |")
+
     bank_account_id = getattr(data, "bank_account_id", None)
     fecha_transferencia = getattr(data, "fecha_transferencia", None)
     referencia_transferencia = getattr(data, "referencia_transferencia", None)
@@ -1161,7 +1268,7 @@ async def apply_global_payment(
             "forma_pago": data.forma_pago or "efectivo",
             "referencia": data.referencia,
             "fecha": fecha_pago,
-            "observaciones": data.observaciones,
+            "observaciones": obs_final,
             "registrado_por": registrado_por,
             "numero_recibo": numero_recibo,
             "aplica_retencion": aplica_retencion,
@@ -2319,108 +2426,55 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
     if saldo_actual <= Decimal("0"):
         return {"error": "La remisión ya se encuentra totalmente saldada"}
 
-    monto_pago = Decimal(str(data.monto))
+    forma_pago = (data.forma_pago or "transferencia").lower()
+
+    # Desglose multimoneda y métodos combinados
+    monto_pyg = Decimal(str(getattr(data, "monto_pyg", 0) or 0))
+    monto_brl = Decimal(str(getattr(data, "monto_brl", 0) or 0))
+    monto_usd = Decimal(str(getattr(data, "monto_usd", 0) or 0))
+    tasa_brl = Decimal(str(getattr(data, "tasa_brl", 1450) or 1450))
+    tasa_usd = Decimal(str(getattr(data, "tasa_usd", 7800) or 7800))
+    monto_transf = Decimal(str(getattr(data, "monto_transferencia", 0) or 0))
+    monto_deposito = Decimal(str(getattr(data, "monto_deposito", 0) or 0))
+    monto_cheque = Decimal(str(getattr(data, "monto_cheque", 0) or 0))
+    monto_debito = Decimal(str(getattr(data, "monto_tarjeta_debito", 0) or 0))
+    monto_credito = Decimal(str(getattr(data, "monto_tarjeta_credito", 0) or 0))
+    monto_qr = Decimal(str(getattr(data, "monto_qr", 0) or 0))
+    monto_pix = Decimal(str(getattr(data, "monto_pix", 0) or 0))
+    aplica_retencion = bool(getattr(data, "aplica_retencion", False))
+    monto_retencion = Decimal(str(getattr(data, "monto_retencion", 0) or 0)) if aplica_retencion else Decimal("0")
+
+    cheques_in = getattr(data, "cheques", None)
+    if cheques_in and isinstance(cheques_in, list):
+        sum_ch = sum(Decimal(str(c.get("monto", 0) or 0)) for c in cheques_in)
+        if sum_ch > 0:
+            monto_cheque = sum_ch
+
+    total_combinado = (
+        monto_pyg
+        + (monto_brl * tasa_brl)
+        + (monto_usd * tasa_usd)
+        + monto_transf
+        + monto_deposito
+        + monto_cheque
+        + monto_debito
+        + monto_credito
+        + monto_qr
+        + monto_pix
+        + monto_retencion
+    ).quantize(Decimal("1"))
+
+    if forma_pago == "mixto" or total_combinado > 0:
+        monto_pago = total_combinado
+    else:
+        monto_pago = Decimal(str(getattr(data, "monto", 0) or 0))
+
+    if monto_pago <= Decimal("0"):
+        return {"error": "El monto a cobrar debe ser mayor a 0"}
     if monto_pago > saldo_actual:
         return {"error": f"El monto del pago (Gs. {int(monto_pago):,}) supera el saldo adeudado por la empresa (Gs. {int(saldo_actual):,})"}
 
     empresa_nombre = rem.empresa_vinculada_nombre
-    numero_recibo = f"REC-CORP-{rem.numero_remision}"
-    forma_pago = (data.forma_pago or "transferencia").lower()
-
-    if forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr") and getattr(data, "bank_account_id", None):
-        bank_tx_id = uuid.uuid4()
-        await db.execute(
-            text("""
-                INSERT INTO bank_transactions
-                    (id, company_id, bank_account_id, fecha, tipo, monto, moneda, descripcion, referencia, contraparte, conciliado, fecha_conciliacion, categoria, created_at)
-                VALUES
-                    (:id, :company_id, :bank_account_id, :fecha, 'credito', :monto, 'PYG', :descripcion, :referencia, :contraparte, true, NOW(), 'cobranzas_corporativas', NOW())
-            """),
-            {
-                "id": bank_tx_id,
-                "company_id": company_id,
-                "bank_account_id": str(data.bank_account_id),
-                "fecha": getattr(data, "fecha_pago", None) or date.today(),
-                "monto": float(monto_pago),
-                "descripcion": f"Cobro Remisión {rem.numero_remision} - {empresa_nombre}",
-                "referencia": getattr(data, "referencia", None),
-                "contraparte": empresa_nombre,
-            },
-        )
-        await db.execute(
-            text("UPDATE bank_accounts SET saldo_actual = saldo_actual + :monto, updated_at = NOW() WHERE id = :id"),
-            {"monto": float(monto_pago), "id": str(data.bank_account_id)},
-        )
-    elif forma_pago == "efectivo":
-        await db.execute(
-            text("""
-                INSERT INTO vault_entries
-                    (id, company_id, origen, monto_pyg, estado, observaciones, registrado_por, created_at)
-                VALUES
-                    (gen_random_uuid(), :company_id, 'cobranza_ar', :monto, 'en_boveda', :obs, :user_id, NOW())
-            """),
-            {
-                "company_id": company_id,
-                "monto": float(monto_pago),
-                "obs": f"Cobro Remisión {rem.numero_remision} - {empresa_nombre}",
-                "user_id": user_id,
-            },
-        )
-    elif forma_pago == "cheque":
-        cheque_id = uuid.uuid4()
-        chq_f_emision = getattr(data, "fecha_cheque_emision", None) or getattr(data, "fecha_pago", None) or date.today()
-        chq_f_cobro = getattr(data, "fecha_cheque_cobro", None) or chq_f_emision
-        es_diferido = bool(getattr(data, "es_cheque_diferido", False) or (chq_f_cobro and chq_f_emision and chq_f_cobro > chq_f_emision))
-        chq_numero = getattr(data, "numero_cheque", None) or getattr(data, "referencia", None) or f"CHQ-{rem.numero_remision}"
-        chq_banco = getattr(data, "banco_cheque", None) or "Banco"
-        chq_librador = getattr(data, "titular_cheque", None) or empresa_nombre
-        uid = uuid.UUID(str(user_id)) if user_id else None
-
-        await db.execute(
-            text("""
-                INSERT INTO cheques
-                    (id, company_id, numero, banco_emisor, beneficiario, librador_nombre, librador_documento,
-                     monto, moneda, fecha_emision, fecha_pago, diferido, estado, tipo_cheque,
-                     customer_id, concepto, notas, created_by, created_at, updated_at)
-                VALUES
-                    (:id, :company_id, :numero, :banco, 'Extra Supermercado Mayorista', :librador, :ruc,
-                     :monto, 'PYG', :f_emision, :f_pago, :diferido, 'en_cartera', 'recibido',
-                     :customer_id, :concepto, :notas, :user_id, NOW(), NOW())
-            """),
-            {
-                "id": cheque_id,
-                "company_id": company_id,
-                "numero": chq_numero,
-                "banco": chq_banco,
-                "librador": chq_librador,
-                "ruc": getattr(rem, "empresa_vinculada_ruc", None),
-                "monto": float(monto_pago),
-                "f_emision": chq_f_emision,
-                "f_pago": chq_f_cobro,
-                "diferido": es_diferido,
-                "customer_id": getattr(rem, "empresa_customer_id", None),
-                "concepto": f"Cobro Remisión {rem.numero_remision} - {empresa_nombre}",
-                "notas": getattr(data, "notas", None),
-                "user_id": uid,
-            },
-        )
-        await db.execute(
-            text("""
-                INSERT INTO cheque_historial
-                    (id, cheque_id, estado_anterior, estado_nuevo, user_id, user_nombre, notas, created_at)
-                VALUES
-                    (gen_random_uuid(), :cheque_id, NULL, 'en_cartera', :user_id, 'Sistema (Cobranzas)', :notas, NOW())
-            """),
-            {
-                "cheque_id": cheque_id,
-                "user_id": uid,
-                "notas": f"Cheque {'diferido' if es_diferido else 'al día'} recibido de {empresa_nombre} por remisión {rem.numero_remision}",
-            },
-        )
-
-    nuevo_saldo = saldo_actual - monto_pago
-    nuevo_estado = "PAGADO" if nuevo_saldo <= Decimal("0") else "PAGADO_PARCIAL"
-
     # Resolver customer_id de la empresa o comprobantes
     cust_id = getattr(rem, "empresa_customer_id", None)
     if not cust_id:
@@ -2440,20 +2494,45 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
     )
     daily_seq = (seq_res.scalar() or 0) + 1
     p_date_str = p_date.strftime("%Y%m%d") if hasattr(p_date, "strftime") else str(p_date).replace("-", "")
-    numero_recibo = f"REC-{p_date_str}-{daily_seq:04d}"
+    numero_recibo = f"REC-CORP-{p_date_str}-{daily_seq:04d}"
 
+    retencion_numero_comprobante = getattr(data, "retencion_numero_comprobante", None) if aplica_retencion else None
+    retencion_fecha = getattr(data, "retencion_fecha", None) if aplica_retencion else None
+    retencion_porcentaje = Decimal(str(getattr(data, "retencion_porcentaje", 30.00) or 30.00)) if aplica_retencion else Decimal("30.00")
+    monto_efectivo_recibido = max(Decimal("0"), monto_pago - monto_retencion)
+
+    obs_corp = f"Cobro Remisión {rem.numero_remision} - {empresa_nombre} (Período: {rem.periodo_mes})"
+    desglose_parts = []
+    if monto_pyg > 0: desglose_parts.append(f"Efectivo: ₲ {int(monto_pyg):,}")
+    if monto_brl > 0: desglose_parts.append(f"Reales: R$ {monto_brl:,.2f} (@ {tasa_brl})")
+    if monto_usd > 0: desglose_parts.append(f"Dólares: US$ {monto_usd:,.2f} (@ {tasa_usd})")
+    if monto_transf > 0: desglose_parts.append(f"Transferencia: ₲ {int(monto_transf):,}")
+    if monto_deposito > 0: desglose_parts.append(f"Depósito: ₲ {int(monto_deposito):,}")
+    if monto_cheque > 0: desglose_parts.append(f"Cheques: ₲ {int(monto_cheque):,}")
+    if monto_debito > 0: desglose_parts.append(f"Tarjeta Débito: ₲ {int(monto_debito):,}")
+    if monto_credito > 0: desglose_parts.append(f"Tarjeta Crédito: ₲ {int(monto_credito):,}")
+    if monto_qr > 0: desglose_parts.append(f"QR: ₲ {int(monto_qr):,}")
+    if monto_pix > 0: desglose_parts.append(f"PIX: ₲ {int(monto_pix):,}")
+    if aplica_retencion and monto_retencion > 0: desglose_parts.append(f"Retención Tesakã: ₲ {int(monto_retencion):,}")
+    if desglose_parts:
+        obs_corp += f" | Desglose: {' + '.join(desglose_parts)}"
+    if getattr(data, "notas", None):
+        obs_corp += f" | Notas: {data.notas}"
+
+    uid = uuid.UUID(str(user_id)) if user_id else None
     if cust_id:
-        uid = uuid.UUID(str(user_id)) if user_id else None
         await db.execute(
             text("""
                 INSERT INTO receivable_payments
                     (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha, observaciones, registrado_por, numero_recibo,
-                     bank_account_id, cheque_id, destino_fondos, monto_pyg, monto_facturas_canceladas,
-                     monto_transferencia, monto_cheque, referencia_transferencia, created_at)
+                     aplica_retencion, monto_retencion, retencion_numero_comprobante, retencion_fecha, retencion_porcentaje, monto_efectivo_recibido,
+                     monto_pyg, monto_brl, monto_usd, tasa_brl, tasa_usd, monto_facturas_canceladas, diferencia_monto, tipo_diferencia,
+                     bank_account_id, fecha_transferencia, monto_transferencia, monto_cheque, referencia_transferencia, created_at)
                 VALUES
                     (:id, :company_id, :customer_id, :monto_total, 'PYG', :forma_pago, :referencia, :fecha, :observaciones, :registrado_por, :numero_recibo,
-                     :bank_account_id, :cheque_id, :destino_fondos, :monto_pyg, :monto_facturas_canceladas,
-                     :monto_transferencia, :monto_cheque, :referencia_transferencia, NOW())
+                     :aplica_retencion, :monto_retencion, :retencion_numero_comprobante, :retencion_fecha, :retencion_porcentaje, :monto_efectivo_recibido,
+                     :monto_pyg, :monto_brl, :monto_usd, :tasa_brl, :tasa_usd, :monto_facturas_canceladas, 0, 'exacto',
+                     :bank_account_id, :fecha_transferencia, :monto_transferencia, :monto_cheque, :referencia_transferencia, NOW())
             """),
             {
                 "id": p_id,
@@ -2463,24 +2542,48 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
                 "forma_pago": forma_pago,
                 "referencia": getattr(data, "referencia", None) or f"Remisión {rem.numero_remision}",
                 "fecha": p_date,
-                "observaciones": f"Cobro Remisión {rem.numero_remision} - {empresa_nombre} (Período: {rem.periodo_mes})",
+                "observaciones": obs_corp,
                 "registrado_por": uid,
                 "numero_recibo": numero_recibo,
-                "bank_account_id": getattr(data, "bank_account_id", None),
-                "cheque_id": cheque_id if forma_pago == "cheque" else None,
-                "destino_fondos": "banco" if forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr") else ("boveda" if forma_pago == "efectivo" else "cartera"),
-                "monto_pyg": float(monto_pago),
+                "aplica_retencion": aplica_retencion,
+                "monto_retencion": float(monto_retencion),
+                "retencion_numero_comprobante": retencion_numero_comprobante,
+                "retencion_fecha": retencion_fecha,
+                "retencion_porcentaje": float(retencion_porcentaje),
+                "monto_efectivo_recibido": float(monto_efectivo_recibido),
+                "monto_pyg": float(monto_pyg),
+                "monto_brl": float(monto_brl),
+                "monto_usd": float(monto_usd),
+                "tasa_brl": float(tasa_brl),
+                "tasa_usd": float(tasa_usd),
                 "monto_facturas_canceladas": float(monto_pago),
-                "monto_transferencia": float(monto_pago) if forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr") else 0,
-                "monto_cheque": float(monto_pago) if forma_pago == "cheque" else 0,
-                "referencia_transferencia": getattr(data, "referencia", None),
+                "bank_account_id": getattr(data, "bank_account_id", None),
+                "fecha_transferencia": getattr(data, "fecha_transferencia", None),
+                "monto_transferencia": float(monto_transf) if monto_transf > 0 else (float(monto_pago) if forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr") else None),
+                "monto_cheque": float(monto_cheque) if monto_cheque > 0 else (float(monto_pago) if forma_pago == "cheque" else None),
+                "referencia_transferencia": getattr(data, "referencia_transferencia", None) or getattr(data, "referencia", None),
             }
         )
 
+        # Impacto financiero en Tesorería (Bóveda / Bancos / Cartera de Cheques)
+        await _record_treasury_ingress(
+            db=db,
+            company_id=company_id,
+            payment_id=p_id,
+            customer_id=str(cust_id),
+            customer_name=empresa_nombre,
+            customer_ruc=getattr(rem, "empresa_vinculada_ruc", None) or "—",
+            monto=monto_efectivo_recibido,
+            data=data,
+            registrado_por=str(user_id) if user_id else None,
+            numero_recibo=numero_recibo,
+        )
+
+        # Amortización en cascada sobre los documentos AR de la remisión
         q_ars = text("""
             SELECT id, saldo_pendiente, monto_original 
             FROM accounts_receivable 
-            WHERE corporate_remission_id = :rem_id 
+            WHERE corporate_remission_id = :rem_id AND saldo_pendiente > 0
             ORDER BY fecha_emision ASC
         """)
         ars_res = await db.execute(q_ars, {"rem_id": remission_id})
@@ -2488,8 +2591,8 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
         for ar_row in ars_res.fetchall():
             if remanente <= Decimal("0"):
                 break
-            m_orig = Decimal(str(ar_row.monto_original or 0))
-            m_ap = min(remanente, m_orig)
+            s_pend = Decimal(str(ar_row.saldo_pendiente or 0))
+            m_ap = min(remanente, s_pend)
             if m_ap > 0:
                 await db.execute(
                     text("""
@@ -2500,7 +2603,20 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
                     """),
                     {"pid": p_id, "arid": ar_row.id, "monto": float(m_ap)}
                 )
+                n_saldo = max(Decimal("0"), s_pend - m_ap)
+                n_estado = "pagado" if n_saldo <= Decimal("0") else "pendiente"
+                await db.execute(
+                    text("""
+                        UPDATE accounts_receivable
+                        SET saldo_pendiente = :saldo, estado = :estado, ultimo_pago = NOW()
+                        WHERE id = :arid
+                    """),
+                    {"saldo": float(n_saldo), "estado": n_estado, "arid": ar_row.id}
+                )
                 remanente -= m_ap
+
+    nuevo_saldo = max(Decimal("0"), saldo_actual - monto_pago)
+    nuevo_estado = "PAGADO" if nuevo_saldo <= Decimal("0") else "PAGADO_PARCIAL"
 
     await db.execute(
         text("""
@@ -2524,6 +2640,24 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
             {"rem_id": remission_id},
         )
 
+    # Contabilidad formal
+    await _post_ar_payment_accounting(
+        db=db,
+        company_id=company_id,
+        payment_id=p_id,
+        fecha=p_date,
+        numero_recibo=numero_recibo,
+        customer_name=empresa_nombre,
+        monto_total=monto_pago,
+        aplica_retencion=aplica_retencion,
+        monto_retencion=monto_retencion,
+        retencion_numero_comprobante=retencion_numero_comprobante,
+        tipo_diferencia="exacto",
+        diferencia_monto=Decimal("0"),
+        monto_facturas_canceladas=monto_pago,
+        forma_pago=forma_pago,
+    )
+
     await db.flush()
     return {
         "remission_id": str(remission_id),
@@ -2533,6 +2667,7 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
         "monto_pagado": float(monto_pago),
         "saldo_pendiente": float(nuevo_saldo),
         "estado": nuevo_estado,
+        "empresa": empresa_nombre,
     }
 
 

@@ -110,6 +110,18 @@ interface CollectionAction {
   monto_comprometido?: number | null
 }
 
+export interface ChequeItem {
+  id: string
+  numero: string
+  banco: string
+  librador: string
+  ruc: string
+  monto: number
+  fecha_emision: string
+  fecha_cobro: string
+  es_diferido: boolean
+}
+
 export default function AccountsReceivablePage() {
   const [tab, setTab] = useState<TabType>("documentos")
   const [docs, setDocs] = useState<AccountsReceivable[]>([])
@@ -184,6 +196,19 @@ export default function AccountsReceivablePage() {
   const [payMontoCheque, setPayMontoCheque] = useState<number>(0)
   const [payTasaBRL, setPayTasaBRL] = useState<number>(1450)
   const [payTasaUSD, setPayTasaUSD] = useState<number>(7800)
+
+  // 🏦 Medios Digitales y Bancarios Adicionales
+  const [payMontoDeposito, setPayMontoDeposito] = useState<number>(0)
+  const [payReferenciaDeposito, setPayReferenciaDeposito] = useState("")
+  const [payMontoTarjetaDebito, setPayMontoTarjetaDebito] = useState<number>(0)
+  const [payVoucherTarjetaDebito, setPayVoucherTarjetaDebito] = useState("")
+  const [payMontoTarjetaCredito, setPayMontoTarjetaCredito] = useState<number>(0)
+  const [payVoucherTarjetaCredito, setPayVoucherTarjetaCredito] = useState("")
+  const [payMontoQR, setPayMontoQR] = useState<number>(0)
+  const [payReferenciaQR, setPayReferenciaQR] = useState("")
+  const [payMontoPIX, setPayMontoPIX] = useState<number>(0)
+  const [payReferenciaPIX, setPayReferenciaPIX] = useState("")
+  const [payChequesList, setPayChequesList] = useState<ChequeItem[]>([])
 
   // 🏛️ Tesorería, Bóveda y Bancos
   const [bankAccounts, setBankAccounts] = useState<any[]>([])
@@ -364,7 +389,33 @@ export default function AccountsReceivablePage() {
     fecha_cheque_emision: getTodayAsuncion(),
     fecha_cheque_cobro: getTodayAsuncion(),
     titular_cheque: "",
+    // Medios combinados / multimedio
+    monto_pyg: 0,
+    monto_brl: 0,
+    monto_usd: 0,
+    tasa_brl: 1450,
+    tasa_usd: 7800,
+    monto_transferencia: 0,
+    fecha_transferencia: getTodayAsuncion(),
+    referencia_transferencia: "",
+    monto_deposito: 0,
+    referencia_deposito: "",
+    monto_cheque: 0,
+    monto_tarjeta_debito: 0,
+    voucher_tarjeta_debito: "",
+    monto_tarjeta_credito: 0,
+    voucher_tarjeta_credito: "",
+    monto_qr: 0,
+    referencia_qr: "",
+    monto_pix: 0,
+    referencia_pix: "",
+    aplica_retencion: false,
+    monto_retencion: 0,
+    retencion_numero_comprobante: "",
+    retencion_fecha: getTodayAsuncion(),
+    retencion_porcentaje: 30,
   })
+  const [payRemChequesList, setPayRemChequesList] = useState<ChequeItem[]>([])
   const [payingRemission, setPayingRemission] = useState(false)
 
   // 📝 Estados para Edición de Remisión Corporativa
@@ -854,21 +905,32 @@ export default function AccountsReceivablePage() {
 
   const handlePayRemission = async () => {
     if (!showPayRemissionModal) return
-    const rawMonto = payRemForm.monto
-    const monto = typeof rawMonto === 'number' ? rawMonto : parseFloat(String(rawMonto).replace(/\./g, '').replace(',', '.'))
-    if (!monto || monto <= 0) {
-      toast.warning("Monto requerido", "Ingresá un monto válido pagado por la empresa")
-      return
-    }
+    const isMixto = payRemForm.forma_pago === "mixto"
+    let monto = 0
 
-    if (payRemForm.forma_pago === "cheque") {
-      if (!payRemForm.numero_cheque.trim()) {
-        toast.warning("N° de Cheque requerido", "Por favor ingresá el número del cheque recibido")
+    if (isMixto) {
+      monto = totalMixtoRemisionCargado
+      if (monto <= 0) {
+        toast.warning("Monto requerido", "Cargá al menos un medio de cobro en el desglose combinado")
         return
       }
-      if (payRemForm.es_cheque_diferido && !payRemForm.fecha_cheque_cobro) {
-        toast.warning("Fecha de Cobro requerida", "Ingresá la fecha de cobro para el cheque diferido")
+    } else {
+      const rawMonto = payRemForm.monto
+      monto = typeof rawMonto === 'number' ? rawMonto : parseFloat(String(rawMonto).replace(/\./g, '').replace(',', '.'))
+      if (!monto || monto <= 0) {
+        toast.warning("Monto requerido", "Ingresá un monto válido pagado por la empresa")
         return
+      }
+
+      if (payRemForm.forma_pago === "cheque") {
+        if (!payRemForm.numero_cheque.trim()) {
+          toast.warning("N° de Cheque requerido", "Por favor ingresá el número del cheque recibido")
+          return
+        }
+        if (payRemForm.es_cheque_diferido && !payRemForm.fecha_cheque_cobro) {
+          toast.warning("Fecha de Cobro requerida", "Ingresá la fecha de cobro para el cheque diferido")
+          return
+        }
       }
     }
 
@@ -881,13 +943,48 @@ export default function AccountsReceivablePage() {
         referencia: payRemForm.referencia || undefined,
         fecha_pago: payRemForm.fecha_pago || undefined,
         notas: payRemForm.notas || undefined,
-        // Cheques al día / diferidos
+        // Cheques al día / diferidos simples
         numero_cheque: payRemForm.numero_cheque.trim() || undefined,
         banco_cheque: payRemForm.banco_cheque || undefined,
         es_cheque_diferido: payRemForm.es_cheque_diferido,
         fecha_cheque_emision: payRemForm.fecha_cheque_emision || undefined,
         fecha_cheque_cobro: payRemForm.es_cheque_diferido ? payRemForm.fecha_cheque_cobro : (payRemForm.fecha_cheque_emision || undefined),
         titular_cheque: payRemForm.titular_cheque.trim() || undefined,
+        // Medios combinados / multimedio
+        monto_pyg: isMixto ? payRemForm.monto_pyg : (payRemForm.forma_pago === "efectivo" ? monto : 0),
+        monto_brl: isMixto ? payRemForm.monto_brl : 0,
+        monto_usd: isMixto ? payRemForm.monto_usd : 0,
+        tasa_brl: payRemForm.tasa_brl,
+        tasa_usd: payRemForm.tasa_usd,
+        monto_transferencia: isMixto ? payRemForm.monto_transferencia : (payRemForm.forma_pago === "transferencia" ? monto : 0),
+        fecha_transferencia: payRemForm.fecha_transferencia || payRemForm.fecha_pago,
+        referencia_transferencia: payRemForm.referencia_transferencia || payRemForm.referencia,
+        monto_deposito: isMixto ? payRemForm.monto_deposito : (payRemForm.forma_pago === "deposito_bancario" ? monto : 0),
+        referencia_deposito: payRemForm.referencia_deposito || payRemForm.referencia,
+        monto_cheque: isMixto ? (payRemChequesList.length > 0 ? payRemChequesList.reduce((acc, c) => acc + (c.monto || 0), 0) : payRemForm.monto_cheque) : (payRemForm.forma_pago === "cheque" ? monto : 0),
+        cheques: isMixto && payRemChequesList.length > 0 ? payRemChequesList.map(c => ({
+          numero: c.numero,
+          banco: c.banco,
+          librador: c.librador,
+          ruc: c.ruc,
+          monto: c.monto,
+          fecha_emision: c.fecha_emision,
+          fecha_cobro: c.fecha_cobro,
+          diferido: c.es_diferido,
+        })) : undefined,
+        monto_tarjeta_debito: isMixto ? payRemForm.monto_tarjeta_debito : 0,
+        voucher_tarjeta_debito: payRemForm.voucher_tarjeta_debito || undefined,
+        monto_tarjeta_credito: isMixto ? payRemForm.monto_tarjeta_credito : 0,
+        voucher_tarjeta_credito: payRemForm.voucher_tarjeta_credito || undefined,
+        monto_qr: isMixto ? payRemForm.monto_qr : 0,
+        referencia_qr: payRemForm.referencia_qr || undefined,
+        monto_pix: isMixto ? payRemForm.monto_pix : 0,
+        referencia_pix: payRemForm.referencia_pix || undefined,
+        aplica_retencion: payRemForm.aplica_retencion,
+        monto_retencion: payRemForm.aplica_retencion ? payRemForm.monto_retencion : 0,
+        retencion_numero_comprobante: payRemForm.aplica_retencion ? payRemForm.retencion_numero_comprobante : undefined,
+        retencion_fecha: payRemForm.aplica_retencion ? payRemForm.retencion_fecha : undefined,
+        retencion_porcentaje: payRemForm.aplica_retencion ? payRemForm.retencion_porcentaje : undefined,
       })
 
       if (payRemForm.forma_pago === "cheque") {
@@ -1530,14 +1627,185 @@ export default function AccountsReceivablePage() {
     }).catch(() => {})
   }, [])
 
+  // Suma total cargada en cobro combinado / multimedio para cliente individual
+  const totalMixtoClienteCargado = useMemo(() => {
+    const efectivo = (payMontoPYG || 0) + Math.round((payMontoBRL || 0) * payTasaBRL) + Math.round((payMontoUSD || 0) * payTasaUSD)
+    const transf = payMontoTransferencia || 0
+    const dep = payMontoDeposito || 0
+    const deb = payMontoTarjetaDebito || 0
+    const cred = payMontoTarjetaCredito || 0
+    const qr = payMontoQR || 0
+    const pix = payMontoPIX || 0
+    const chqs = payChequesList.length > 0 ? payChequesList.reduce((acc, c) => acc + (c.monto || 0), 0) : (payMontoCheque || 0)
+    const ret = aplicaRetencion ? montoRetencionFinal : 0
+    return efectivo + transf + dep + deb + cred + qr + pix + chqs + ret
+  }, [
+    payMontoPYG, payMontoBRL, payMontoUSD, payTasaBRL, payTasaUSD,
+    payMontoTransferencia, payMontoDeposito, payMontoTarjetaDebito, payMontoTarjetaCredito,
+    payMontoQR, payMontoPIX, payMontoCheque, payChequesList, aplicaRetencion, montoRetencionFinal
+  ])
+
+  const montoExigibleCliente = aplicaRetencion ? montoEfectivoRecibido : montoTotalPago
+  const diferenciaCierreCliente = montoExigibleCliente - totalMixtoClienteCargado
+
+  // Auto-calces para cliente individual
+  const calzarDiferenciaCliente = (tipo: "pyg" | "transferencia" | "cheque" | "deposito") => {
+    if (diferenciaCierreCliente <= 0) return
+    if (tipo === "pyg") {
+      setPayMontoPYG(prev => (prev || 0) + diferenciaCierreCliente)
+    } else if (tipo === "transferencia") {
+      setPayMontoTransferencia(prev => (prev || 0) + diferenciaCierreCliente)
+    } else if (tipo === "deposito") {
+      setPayMontoDeposito(prev => (prev || 0) + diferenciaCierreCliente)
+    } else if (tipo === "cheque") {
+      if (payChequesList.length > 0) {
+        const nuevoCheque: ChequeItem = {
+          id: Math.random().toString(36).substring(2, 9),
+          numero: "",
+          banco: "BANCO CONTINENTAL",
+          librador: paymentCustomerInfo?.razon_social || "",
+          ruc: paymentCustomerInfo?.ruc || "",
+          monto: diferenciaCierreCliente,
+          fecha_emision: getTodayAsuncion(),
+          fecha_cobro: getTodayAsuncion(),
+          es_diferido: false,
+        }
+        setPayChequesList(prev => [...prev, nuevoCheque])
+      } else {
+        setPayMontoCheque(prev => (prev || 0) + diferenciaCierreCliente)
+      }
+    }
+  }
+
+  const agregarChequeCliente = () => {
+    const defaultMonto = diferenciaCierreCliente > 0 ? diferenciaCierreCliente : 0
+    const nuevo: ChequeItem = {
+      id: Math.random().toString(36).substring(2, 9),
+      numero: "",
+      banco: "BANCO CONTINENTAL",
+      librador: paymentCustomerInfo?.razon_social || "",
+      ruc: paymentCustomerInfo?.ruc || "",
+      monto: defaultMonto,
+      fecha_emision: getTodayAsuncion(),
+      fecha_cobro: getTodayAsuncion(),
+      es_diferido: false,
+    }
+    if (payChequesList.length === 0 && payMontoCheque > 0) {
+      const primero: ChequeItem = {
+        id: Math.random().toString(36).substring(2, 9),
+        numero: payChequeNumero || "",
+        banco: payChequeBanco || "BANCO CONTINENTAL",
+        librador: payChequeLibrador || paymentCustomerInfo?.razon_social || "",
+        ruc: payChequeRuc || paymentCustomerInfo?.ruc || "",
+        monto: payMontoCheque,
+        fecha_emision: payChequeFechaEmision || getTodayAsuncion(),
+        fecha_cobro: payChequeFechaCobro || getTodayAsuncion(),
+        es_diferido: payChequeFechaCobro > getTodayAsuncion(),
+      }
+      setPayChequesList([primero, nuevo])
+      setPayMontoCheque(0)
+    } else {
+      setPayChequesList(prev => [...prev, nuevo])
+    }
+  }
+
+  const actualizarChequeCliente = (id: string, campo: keyof ChequeItem, valor: any) => {
+    setPayChequesList(prev => prev.map(c => c.id === id ? { ...c, [campo]: valor } : c))
+  }
+
+  const eliminarChequeCliente = (id: string) => {
+    setPayChequesList(prev => prev.filter(c => c.id !== id))
+  }
+
+  // Suma total cargada en cobro combinado / multimedio para remisión corporativa
+  const totalMixtoRemisionCargado = useMemo(() => {
+    const efectivo = (payRemForm.monto_pyg || 0) + Math.round((payRemForm.monto_brl || 0) * (payRemForm.tasa_brl || 1450)) + Math.round((payRemForm.monto_usd || 0) * (payRemForm.tasa_usd || 7800))
+    const transf = payRemForm.monto_transferencia || 0
+    const dep = payRemForm.monto_deposito || 0
+    const deb = payRemForm.monto_tarjeta_debito || 0
+    const cred = payRemForm.monto_tarjeta_credito || 0
+    const qr = payRemForm.monto_qr || 0
+    const pix = payRemForm.monto_pix || 0
+    const chqs = payRemChequesList.length > 0 ? payRemChequesList.reduce((acc, c) => acc + (c.monto || 0), 0) : (payRemForm.monto_cheque || 0)
+    const ret = payRemForm.aplica_retencion ? (payRemForm.monto_retencion || 0) : 0
+    return efectivo + transf + dep + deb + cred + qr + pix + chqs + ret
+  }, [payRemForm, payRemChequesList])
+
+  const saldoPendienteRemision = Number(showPayRemissionModal?.saldo_pendiente || 0)
+  const diferenciaCierreRemision = saldoPendienteRemision - totalMixtoRemisionCargado
+
+  const calzarDiferenciaRemision = (tipo: "transferencia" | "cheque" | "pyg" | "deposito") => {
+    if (diferenciaCierreRemision <= 0) return
+    if (tipo === "transferencia") {
+      setPayRemForm(prev => ({ ...prev, monto_transferencia: (prev.monto_transferencia || 0) + diferenciaCierreRemision }))
+    } else if (tipo === "pyg") {
+      setPayRemForm(prev => ({ ...prev, monto_pyg: (prev.monto_pyg || 0) + diferenciaCierreRemision }))
+    } else if (tipo === "deposito") {
+      setPayRemForm(prev => ({ ...prev, monto_deposito: (prev.monto_deposito || 0) + diferenciaCierreRemision }))
+    } else if (tipo === "cheque") {
+      if (payRemChequesList.length > 0) {
+        const nuevoCheque: ChequeItem = {
+          id: Math.random().toString(36).substring(2, 9),
+          numero: "",
+          banco: "BANCO CONTINENTAL",
+          librador: showPayRemissionModal?.empresa_vinculada_nombre || "",
+          ruc: "",
+          monto: diferenciaCierreRemision,
+          fecha_emision: getTodayAsuncion(),
+          fecha_cobro: getTodayAsuncion(),
+          es_diferido: false,
+        }
+        setPayRemChequesList(prev => [...prev, nuevoCheque])
+      } else {
+        setPayRemForm(prev => ({ ...prev, monto_cheque: (prev.monto_cheque || 0) + diferenciaCierreRemision }))
+      }
+    }
+  }
+
+  const agregarChequeRemision = () => {
+    const remanente = diferenciaCierreRemision > 0 ? diferenciaCierreRemision : 0
+    const nuevo: ChequeItem = {
+      id: Math.random().toString(36).substring(2, 9),
+      numero: "",
+      banco: "BANCO CONTINENTAL",
+      librador: showPayRemissionModal?.empresa_vinculada_nombre || "",
+      ruc: "",
+      monto: remanente,
+      fecha_emision: getTodayAsuncion(),
+      fecha_cobro: getTodayAsuncion(),
+      es_diferido: false,
+    }
+    if (payRemChequesList.length === 0 && (payRemForm.monto_cheque || 0) > 0) {
+      const primero: ChequeItem = {
+        id: Math.random().toString(36).substring(2, 9),
+        numero: payRemForm.numero_cheque || "",
+        banco: payRemForm.banco_cheque || "BANCO CONTINENTAL",
+        librador: payRemForm.titular_cheque || showPayRemissionModal?.empresa_vinculada_nombre || "",
+        ruc: "",
+        monto: payRemForm.monto_cheque || 0,
+        fecha_emision: payRemForm.fecha_cheque_emision || getTodayAsuncion(),
+        fecha_cobro: payRemForm.fecha_cheque_cobro || getTodayAsuncion(),
+        es_diferido: !!payRemForm.es_cheque_diferido,
+      }
+      setPayRemChequesList([primero, nuevo])
+      setPayRemForm(prev => ({ ...prev, monto_cheque: 0 }))
+    } else {
+      setPayRemChequesList(prev => [...prev, nuevo])
+    }
+  }
+
+  const actualizarChequeRemision = (id: string, campo: keyof ChequeItem, valor: any) => {
+    setPayRemChequesList(prev => prev.map(c => c.id === id ? { ...c, [campo]: valor } : c))
+  }
+
+  const eliminarChequeRemision = (id: string) => {
+    setPayRemChequesList(prev => prev.filter(c => c.id !== id))
+  }
+
   // Cálculo del monto total físico entregado en Guaraníes (convertido de multimonedas)
   const montoFisicoEntregadoGs = useMemo(() => {
     if (payFormaPago === "mixto") {
-      const efectivo = (payMontoPYG || 0) + Math.round((payMontoBRL || 0) * payTasaBRL) + Math.round((payMontoUSD || 0) * payTasaUSD)
-      const transf = payMontoTransferencia || 0
-      const chq = payMontoCheque || 0
-      const total = efectivo + transf + chq
-      return total > 0 ? total : montoTotalPago
+      return totalMixtoClienteCargado > 0 ? totalMixtoClienteCargado : montoTotalPago
     }
     if (payFormaPago !== "efectivo") {
       return montoTotalPago
@@ -1547,7 +1815,7 @@ export default function AccountsReceivablePage() {
       return montoTotalPago
     }
     return totalCalc
-  }, [payFormaPago, payMontoPYG, payMontoBRL, payMontoUSD, payTasaBRL, payTasaUSD, payMontoTransferencia, payMontoCheque, montoTotalPago])
+  }, [payFormaPago, totalMixtoClienteCargado, payMontoPYG, payMontoBRL, payMontoUSD, payTasaBRL, payTasaUSD, montoTotalPago])
 
   // Desbalanceo automático: si entregado < facturas -> descuento, si entregado > facturas -> gastos admin
   const diferenciaCompensacion = montoFisicoEntregadoGs - montoTotalPago
@@ -1565,6 +1833,17 @@ export default function AccountsReceivablePage() {
       setPayMontoUSD(0)
       setPayMontoTransferencia(0)
       setPayMontoCheque(0)
+      setPayMontoDeposito(0)
+      setPayReferenciaDeposito("")
+      setPayMontoTarjetaDebito(0)
+      setPayVoucherTarjetaDebito("")
+      setPayMontoTarjetaCredito(0)
+      setPayVoucherTarjetaCredito("")
+      setPayMontoQR(0)
+      setPayReferenciaQR("")
+      setPayMontoPIX(0)
+      setPayReferenciaPIX("")
+      setPayChequesList([])
     }
   }, [showPaymentModal, isAgenteRetentor, superaUmbralRetencion])
 
@@ -1649,7 +1928,27 @@ export default function AccountsReceivablePage() {
         monto_transferencia: payFormaPago === "mixto" ? payMontoTransferencia : (payFormaPago === "transferencia" ? montoTotalPago : 0),
         fecha_transferencia: (payFormaPago === "transferencia" || payFormaPago === "deposito_bancario" || payFormaPago === "pix" || payFormaPago === "qr" || payFormaPago === "mixto") ? (payFechaTransferencia || payFecha) : undefined,
         referencia_transferencia: payReferenciaTransferencia || undefined,
-        monto_cheque: payFormaPago === "mixto" ? payMontoCheque : (payFormaPago === "cheque" ? montoTotalPago : 0),
+        monto_deposito: payFormaPago === "mixto" ? payMontoDeposito : (payFormaPago === "deposito_bancario" ? montoTotalPago : 0),
+        referencia_deposito: payReferenciaDeposito || undefined,
+        monto_tarjeta_debito: payFormaPago === "mixto" ? payMontoTarjetaDebito : (payFormaPago === "tarjeta_debito" ? montoTotalPago : 0),
+        voucher_tarjeta_debito: payVoucherTarjetaDebito || undefined,
+        monto_tarjeta_credito: payFormaPago === "mixto" ? payMontoTarjetaCredito : (payFormaPago === "tarjeta_credito" ? montoTotalPago : 0),
+        voucher_tarjeta_credito: payVoucherTarjetaCredito || undefined,
+        monto_qr: payFormaPago === "mixto" ? payMontoQR : (payFormaPago === "qr" ? montoTotalPago : 0),
+        referencia_qr: payReferenciaQR || undefined,
+        monto_pix: payFormaPago === "mixto" ? payMontoPIX : (payFormaPago === "pix" ? montoTotalPago : 0),
+        referencia_pix: payReferenciaPIX || undefined,
+        monto_cheque: payFormaPago === "mixto" ? (payChequesList.length > 0 ? payChequesList.reduce((acc, c) => acc + (c.monto || 0), 0) : payMontoCheque) : (payFormaPago === "cheque" ? montoTotalPago : 0),
+        cheques: (payFormaPago === "mixto" && payChequesList.length > 0) ? payChequesList.map(c => ({
+          numero: c.numero,
+          banco: c.banco,
+          librador: c.librador,
+          ruc: c.ruc,
+          monto: c.monto,
+          fecha_emision: c.fecha_emision,
+          fecha_cobro: c.fecha_cobro,
+          diferido: c.es_diferido,
+        })) : undefined,
         tasa_brl: payTasaBRL,
         tasa_usd: payTasaUSD,
         monto_facturas_canceladas: montoTotalPago,
@@ -3012,6 +3311,7 @@ export default function AccountsReceivablePage() {
                                   <button
                                     onClick={() => {
                                       setShowPayRemissionModal(r)
+                                      setPayRemChequesList([])
                                       setPayRemForm({
                                         monto: Number(r.saldo_pendiente || 0),
                                         forma_pago: "transferencia",
@@ -3025,6 +3325,30 @@ export default function AccountsReceivablePage() {
                                         fecha_cheque_emision: getTodayAsuncion(),
                                         fecha_cheque_cobro: getTodayAsuncion(),
                                         titular_cheque: r.empresa_vinculada_nombre || "",
+                                        monto_pyg: 0,
+                                        monto_brl: 0,
+                                        monto_usd: 0,
+                                        tasa_brl: 1450,
+                                        tasa_usd: 7800,
+                                        monto_transferencia: 0,
+                                        fecha_transferencia: getTodayAsuncion(),
+                                        referencia_transferencia: "",
+                                        monto_deposito: 0,
+                                        referencia_deposito: "",
+                                        monto_cheque: 0,
+                                        monto_tarjeta_debito: 0,
+                                        voucher_tarjeta_debito: "",
+                                        monto_tarjeta_credito: 0,
+                                        voucher_tarjeta_credito: "",
+                                        monto_qr: 0,
+                                        referencia_qr: "",
+                                        monto_pix: 0,
+                                        referencia_pix: "",
+                                        aplica_retencion: false,
+                                        monto_retencion: 0,
+                                        retencion_numero_comprobante: "",
+                                        retencion_fecha: getTodayAsuncion(),
+                                        retencion_porcentaje: 30,
                                       })
                                     }}
                                     className="p-1.5 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] inline-flex items-center gap-1 font-bold shadow-2xs transition"
@@ -4292,6 +4616,85 @@ export default function AccountsReceivablePage() {
                 </div>
               )}
 
+              {/* ⚖️ BALANZA INTERACTIVA DE COBRO COMBINADO / MULTIMEDIO */}
+              {payFormaPago === "mixto" && (
+                <div className={`p-4 rounded-2xl border transition-all ${
+                  diferenciaCierreCliente === 0
+                    ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-950 dark:text-emerald-100 shadow-sm"
+                    : diferenciaCierreCliente > 0
+                    ? "bg-amber-500/10 border-amber-500/40 text-amber-950 dark:text-amber-100 shadow-sm"
+                    : "bg-blue-500/10 border-blue-500/40 text-blue-950 dark:text-blue-100 shadow-sm"
+                }`}>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Balanza de Cobro Combinado
+                        </span>
+                        {diferenciaCierreCliente === 0 ? (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-600 text-white shadow-xs flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Monto 100% Cubierto y Cerrado
+                          </span>
+                        ) : diferenciaCierreCliente > 0 ? (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500 text-slate-950 shadow-xs flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-slate-950" />
+                            Falta Cubrir: {formatPYG(diferenciaCierreCliente)}
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-600 text-white shadow-xs">
+                            ℹ️ Excede por: {formatPYG(Math.abs(diferenciaCierreCliente))}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-baseline gap-4 text-xs font-bold">
+                        <span>A Cobrar: <strong className="font-mono text-sm text-slate-900 dark:text-white">{formatPYG(montoExigibleCliente)}</strong></span>
+                        <span>Total Cargado: <strong className="font-mono text-sm text-emerald-600 dark:text-emerald-400">{formatPYG(totalMixtoClienteCargado)}</strong></span>
+                      </div>
+                    </div>
+
+                    {/* Botones de Auto-Calce Rápido de la diferencia */}
+                    {diferenciaCierreCliente > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Calzar Restante:</span>
+                        <button
+                          type="button"
+                          onClick={() => calzarDiferenciaCliente("pyg")}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition cursor-pointer"
+                          title="Sumar diferencia a Efectivo en Guaraníes"
+                        >
+                          + Efectivo Gs.
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => calzarDiferenciaCliente("transferencia")}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-xs transition cursor-pointer"
+                          title="Sumar diferencia a Transferencia SIPAP"
+                        >
+                          + Transferencia
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => calzarDiferenciaCliente("cheque")}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-xs transition cursor-pointer"
+                          title="Calzar en Cheque Recibido"
+                        >
+                          + Cheque
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => calzarDiferenciaCliente("deposito")}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-xs transition cursor-pointer"
+                          title="Sumar diferencia a Boleta de Depósito"
+                        >
+                          + Depósito
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* 🏛️ PANEL DINÁMICO DE TESORERÍA / DESTINO DE FONDOS Y MULTIMONEDA */}
               {(payFormaPago === "efectivo" || payFormaPago === "mixto") && (
                 <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 space-y-3.5">
@@ -4441,199 +4844,468 @@ export default function AccountsReceivablePage() {
                 </div>
               )}
 
+              {/* 🏦 PANEL DE BANCOS Y MEDIOS DIGITALES */}
               {(payFormaPago === "transferencia" || payFormaPago === "deposito_bancario" || payFormaPago === "pix" || payFormaPago === "qr" || payFormaPago === "mixto") && (
-                <div className="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 space-y-2">
+                <div className="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 space-y-3">
                   <div className="flex items-center justify-between text-xs font-bold text-blue-900 dark:text-blue-300">
                     <span className="flex items-center gap-2">
                       <Landmark className="w-4 h-4 text-blue-600" />
-                      {payFormaPago === "deposito_bancario" ? "Cuenta Bancaria Receptora del Depósito" : "Cuenta Bancaria Receptora"}
+                      <span>{payFormaPago === "deposito_bancario" ? "Cuenta Bancaria Receptora del Depósito" : "Cuentas Bancarias y Canales Digitales"}</span>
                     </span>
                     <span className="text-[11px] font-normal text-blue-700 dark:text-blue-400">
-                      {payFormaPago === "deposito_bancario" ? "Acredita saldo en la Cta. Cte. seleccionada según la boleta" : "Acredita saldo y asienta la transacción"}
+                      Acreditación directa en cuentas de tesorería
                     </span>
                   </div>
-                  <div className={`grid ${payFormaPago === "mixto" ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5" : "grid-cols-1"}`}>
-                    <div>
-                      {payFormaPago === "mixto" && (
-                        <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block mb-1">
-                          Cuenta de Acreditación
-                        </label>
+
+                  {/* Selector de cuenta bancaria receptora */}
+                  <div>
+                    <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block mb-1">
+                      Cuenta Bancaria Receptora (Acreditación)
+                    </label>
+                    <select
+                      className="input-field text-xs w-full font-medium"
+                      value={payBankAccountId}
+                      onChange={e => setPayBankAccountId(e.target.value)}
+                    >
+                      {bankAccounts.length === 0 ? (
+                        <option value="">Cargando cuentas bancarias activas...</option>
+                      ) : (
+                        bankAccounts.map(b => (
+                          <option key={b.id} value={b.id}>
+                            {b.banco_nombre} — {b.tipo_cuenta ? b.tipo_cuenta.replace('_', ' ').toUpperCase() : 'Cuenta'} {b.numero_cuenta} ({b.moneda}) · Saldo: {formatPYG(b.saldo_actual)}
+                          </option>
+                        ))
                       )}
-                      <select
-                        className="input-field text-xs w-full font-medium"
-                        value={payBankAccountId}
-                        onChange={e => setPayBankAccountId(e.target.value)}
-                      >
-                        {bankAccounts.length === 0 ? (
-                          <option value="">Cargando cuentas bancarias activas...</option>
-                        ) : (
-                          bankAccounts.map(b => (
-                            <option key={b.id} value={b.id}>
-                              {b.banco_nombre} — {b.tipo_cuenta ? b.tipo_cuenta.replace('_', ' ').toUpperCase() : 'Cuenta'} {b.numero_cuenta} ({b.moneda}) · Saldo: {formatPYG(b.saldo_actual)}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </div>
-                    {payFormaPago === "mixto" && (
-                      <div>
-                        <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block mb-1">
-                          Monto Transferencia / Banco (₲)
-                        </label>
-                        <CurrencyInput
-                          currency="PYG"
-                          value={payMontoTransferencia}
-                          onChangeValue={val => setPayMontoTransferencia(val)}
-                          className="input-field text-xs font-mono font-bold bg-white dark:bg-slate-900 border-blue-300"
-                        />
-                      </div>
-                    )}
-                    {payFormaPago === "mixto" && (
-                      <div>
-                        <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block mb-1 flex items-center justify-between">
-                          <span>Fecha Operación Banco</span>
-                          <span className="text-[9px] text-blue-600 dark:text-blue-400 font-extrabold px-1 rounded bg-blue-100 dark:bg-blue-900/60">Conciliación</span>
-                        </label>
-                        <input
-                          type="date"
-                          className="input-field text-xs bg-white dark:bg-slate-900 border-blue-300 font-medium"
-                          value={payFechaTransferencia}
-                          onChange={e => setPayFechaTransferencia(e.target.value)}
-                        />
-                      </div>
-                    )}
-                    {payFormaPago === "mixto" && (
-                      <div>
-                        <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block mb-1">
-                          N° Ref. / SIPAP Bancario
-                        </label>
-                        <input
-                          type="text"
-                          className="input-field text-xs bg-white dark:bg-slate-900 border-blue-300 font-mono"
-                          placeholder="Ej: SIPAP 984124"
-                          value={payReferenciaTransferencia}
-                          onChange={e => setPayReferenciaTransferencia(e.target.value)}
-                        />
-                      </div>
-                    )}
+                    </select>
                   </div>
-                  {payFormaPago === "mixto" && (
-                    <div className="flex items-center gap-1.5 text-[10px] text-blue-700 dark:text-blue-300 font-medium pt-1 border-t border-blue-200/60 dark:border-blue-900/40">
-                      <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                      <span>
-                        La fecha de la operación se asienta en la transacción bancaria para su conciliación automática con el extracto del banco.
-                      </span>
+
+                  {/* Campos específicos cuando payFormaPago es mixto */}
+                  {payFormaPago === "mixto" ? (
+                    <div className="space-y-3 pt-2 border-t border-blue-200/60 dark:border-blue-900/40">
+                      {/* Grid de Transferencia SIPAP y Depósito Bancario */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/* Transferencia SIPAP */}
+                        <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1.5 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase">
+                              📲 Transferencia SIPAP (₲)
+                            </label>
+                            {payMontoTransferencia > 0 && (
+                              <button type="button" onClick={() => setPayMontoTransferencia(0)} className="text-[10px] text-rose-500 font-bold hover:underline">Quitar</button>
+                            )}
+                          </div>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payMontoTransferencia}
+                            onChangeValue={val => setPayMontoTransferencia(val)}
+                            className="input-field text-xs font-mono font-bold border-blue-300"
+                            placeholder="0"
+                          />
+                          <div className="grid grid-cols-2 gap-1.5 pt-1">
+                            <input
+                              type="date"
+                              className="input-field text-[11px] border-blue-200 py-1"
+                              value={payFechaTransferencia}
+                              onChange={e => setPayFechaTransferencia(e.target.value)}
+                              title="Fecha Operación"
+                            />
+                            <input
+                              type="text"
+                              className="input-field text-[11px] font-mono border-blue-200 py-1"
+                              placeholder="N° Ref. SIPAP"
+                              value={payReferenciaTransferencia}
+                              onChange={e => setPayReferenciaTransferencia(e.target.value)}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Depósito Bancario en Cta. Cte. */}
+                        <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1.5 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase">
+                              📄 Depósito Bancario Cta. Cte. (₲)
+                            </label>
+                            {payMontoDeposito > 0 && (
+                              <button type="button" onClick={() => setPayMontoDeposito(0)} className="text-[10px] text-rose-500 font-bold hover:underline">Quitar</button>
+                            )}
+                          </div>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payMontoDeposito}
+                            onChangeValue={val => setPayMontoDeposito(val)}
+                            className="input-field text-xs font-mono font-bold border-blue-300"
+                            placeholder="0"
+                          />
+                          <input
+                            type="text"
+                            className="input-field text-[11px] font-mono border-blue-200 py-1"
+                            placeholder="N° Boleta de Depósito"
+                            value={payReferenciaDeposito}
+                            onChange={e => setPayReferenciaDeposito(e.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Grid de Tarjetas (Débito y Crédito) y Digitales (QR y PIX) */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                        {/* Tarjeta Débito */}
+                        <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1 shadow-2xs">
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block">
+                            💳 Tarjeta Débito (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payMontoTarjetaDebito}
+                            onChangeValue={val => setPayMontoTarjetaDebito(val)}
+                            className="input-field text-xs font-mono font-bold border-blue-200"
+                            placeholder="0"
+                          />
+                          <input
+                            type="text"
+                            className="input-field text-[10px] font-mono border-blue-200 py-0.5 px-1.5"
+                            placeholder="Voucher / Lote"
+                            value={payVoucherTarjetaDebito}
+                            onChange={e => setPayVoucherTarjetaDebito(e.target.value)}
+                          />
+                        </div>
+
+                        {/* Tarjeta Crédito */}
+                        <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1 shadow-2xs">
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block">
+                            💳 Tarjeta Crédito (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payMontoTarjetaCredito}
+                            onChangeValue={val => setPayMontoTarjetaCredito(val)}
+                            className="input-field text-xs font-mono font-bold border-blue-200"
+                            placeholder="0"
+                          />
+                          <input
+                            type="text"
+                            className="input-field text-[10px] font-mono border-blue-200 py-0.5 px-1.5"
+                            placeholder="Voucher / Lote"
+                            value={payVoucherTarjetaCredito}
+                            onChange={e => setPayVoucherTarjetaCredito(e.target.value)}
+                          />
+                        </div>
+
+                        {/* QR Dinelco / Bancard */}
+                        <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1 shadow-2xs">
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block">
+                            📱 QR Dinelco / Bancard (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payMontoQR}
+                            onChangeValue={val => setPayMontoQR(val)}
+                            className="input-field text-xs font-mono font-bold border-blue-200"
+                            placeholder="0"
+                          />
+                          <input
+                            type="text"
+                            className="input-field text-[10px] font-mono border-blue-200 py-0.5 px-1.5"
+                            placeholder="N° Transacción"
+                            value={payReferenciaQR}
+                            onChange={e => setPayReferenciaQR(e.target.value)}
+                          />
+                        </div>
+
+                        {/* PIX Brasil */}
+                        <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1 shadow-2xs">
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block">
+                            💠 PIX Brasil (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payMontoPIX}
+                            onChangeValue={val => setPayMontoPIX(val)}
+                            className="input-field text-xs font-mono font-bold border-blue-200"
+                            placeholder="0"
+                          />
+                          <input
+                            type="text"
+                            className="input-field text-[10px] font-mono border-blue-200 py-0.5 px-1.5"
+                            placeholder="Ref. / Clave PIX"
+                            value={payReferenciaPIX}
+                            onChange={e => setPayReferenciaPIX(e.target.value)}
+                          />
+                        </div>
+                      </div>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               )}
 
+              {/* 📑 PANEL DE CARTERA DE CHEQUES RECIBIDOS */}
               {(payFormaPago === "cheque" || payFormaPago === "mixto") && (
                 <div className="p-3.5 rounded-xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 space-y-3">
                   <div className="flex items-center justify-between text-xs font-bold text-purple-900 dark:text-purple-300">
                     <span className="flex items-center gap-2">
                       <ReceiptText className="w-4 h-4 text-purple-600" />
-                      Datos del Cheque Recibido en Pago
+                      <span>Cheques Recibidos en Pago (Cartera de Tesorería)</span>
                     </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-purple-200 dark:bg-purple-900 text-purple-900 dark:text-purple-200 font-extrabold">
-                      CARTERA DE CHEQUES
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={agregarChequeCliente}
+                        className="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-xs flex items-center gap-1 transition cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>+ Agregar Otro Cheque</span>
+                      </button>
+                    </div>
                   </div>
-                  <div className={`grid grid-cols-1 ${payFormaPago === "mixto" ? "sm:grid-cols-4" : "sm:grid-cols-3"} gap-2.5 text-xs`}>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">N° de Cheque</label>
-                      <input
-                        className="input-field text-xs font-mono"
-                        placeholder="00012345"
-                        value={payChequeNumero}
-                        onChange={e => setPayChequeNumero(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Banco Emisor</label>
-                      <input
-                        className="input-field text-xs"
-                        placeholder="Ej: Banco Continental / Itaú"
-                        value={payChequeBanco}
-                        onChange={e => setPayChequeBanco(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Librador / Titular</label>
-                      <input
-                        className="input-field text-xs"
-                        placeholder="Nombre o razón social"
-                        value={payChequeLibrador}
-                        onChange={e => setPayChequeLibrador(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">RUC / CI Librador</label>
-                      <input
-                        className="input-field text-xs font-mono"
-                        placeholder="Documento"
-                        value={payChequeRuc}
-                        onChange={e => setPayChequeRuc(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fecha Emisión</label>
-                      <input
-                        type="date"
-                        className="input-field text-xs"
-                        value={payChequeFechaEmision}
-                        onChange={e => setPayChequeFechaEmision(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fecha de Cobro / Vencimiento</label>
-                      <input
-                        type="date"
-                        className="input-field text-xs"
-                        value={payChequeFechaCobro}
-                        onChange={e => setPayChequeFechaCobro(e.target.value)}
-                      />
-                    </div>
-                    {payFormaPago === "mixto" && (
-                      <div className="sm:col-span-2">
-                        <label className="text-[10px] font-black text-purple-900 dark:text-purple-300 uppercase block mb-1">
-                          Monto en Cheque (₲)
-                        </label>
-                        <CurrencyInput
-                          currency="PYG"
-                          value={payMontoCheque}
-                          onChangeValue={val => setPayMontoCheque(val)}
-                          className="input-field text-xs font-mono font-bold bg-white dark:bg-slate-900 border-purple-300"
-                        />
+
+                  {/* Lista Dinámica de Cheques Múltiples */}
+                  {payChequesList.length > 0 ? (
+                    <div className="space-y-2.5">
+                      {payChequesList.map((chq, idx) => (
+                        <div key={chq.id} className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-purple-200 dark:border-slate-800 space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-black uppercase text-purple-900 dark:text-purple-300 flex items-center gap-1.5">
+                              <span>Cheque #{idx + 1}</span>
+                              {chq.es_diferido ? (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-600 border border-amber-500/30">Diferido</span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-600 border border-emerald-500/30">Al Día</span>
+                              )}
+                            </span>
+                            <div className="flex items-center gap-3">
+                              <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 font-semibold cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={chq.es_diferido}
+                                  onChange={e => actualizarChequeCliente(chq.id, "es_diferido", e.target.checked)}
+                                  className="rounded text-purple-600"
+                                />
+                                <span>Diferido</span>
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => eliminarChequeCliente(chq.id)}
+                                className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded transition cursor-pointer"
+                                title="Eliminar Cheque"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">N° Cheque</label>
+                              <input
+                                className="input-field text-xs font-mono py-1"
+                                placeholder="00012345"
+                                value={chq.numero}
+                                onChange={e => actualizarChequeCliente(chq.id, "numero", e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Banco Emisor</label>
+                              <select
+                                className="input-field text-xs py-1"
+                                value={chq.banco}
+                                onChange={e => actualizarChequeCliente(chq.id, "banco", e.target.value)}
+                              >
+                                {BANCOS_PARAGUAY.map(b => (
+                                  <option key={b} value={b}>{b}</option>
+                                ))}
+                                <option value="OTRO">OTRO BANCO</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Librador / Titular</label>
+                              <input
+                                className="input-field text-xs py-1"
+                                placeholder="Nombre o Razón Social"
+                                value={chq.librador}
+                                onChange={e => actualizarChequeCliente(chq.id, "librador", e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">RUC / C.I.</label>
+                              <input
+                                className="input-field text-xs font-mono py-1"
+                                placeholder="Documento"
+                                value={chq.ruc}
+                                onChange={e => actualizarChequeCliente(chq.id, "ruc", e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Fecha Emisión</label>
+                              <input
+                                type="date"
+                                className="input-field text-xs py-1"
+                                value={chq.fecha_emision}
+                                onChange={e => actualizarChequeCliente(chq.id, "fecha_emision", e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Fecha Cobro / Vence</label>
+                              <input
+                                type="date"
+                                className="input-field text-xs py-1"
+                                value={chq.fecha_cobro}
+                                onChange={e => {
+                                  const fecha = e.target.value
+                                  actualizarChequeCliente(chq.id, "fecha_cobro", fecha)
+                                  if (fecha > getTodayAsuncion()) {
+                                    actualizarChequeCliente(chq.id, "es_diferido", true)
+                                  }
+                                }}
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="text-[9px] font-black text-purple-900 dark:text-purple-300 uppercase block mb-0.5">
+                                Importe Cheque (₲)
+                              </label>
+                              <CurrencyInput
+                                currency="PYG"
+                                value={chq.monto}
+                                onChangeValue={val => actualizarChequeCliente(chq.id, "monto", val)}
+                                className="input-field text-xs font-mono font-bold bg-white dark:bg-slate-900 border-purple-300 py-1"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      <div className="flex items-center justify-between text-xs pt-1 font-bold text-purple-900 dark:text-purple-300">
+                        <span>Total ({payChequesList.length} cheques en cartera):</span>
+                        <span className="font-mono text-sm">{formatPYG(payChequesList.reduce((acc, c) => acc + (c.monto || 0), 0))}</span>
                       </div>
-                    )}
-                  </div>
-                  {payChequeFechaCobro > getTodayAsuncion() && (
-                    <div className="text-[11px] font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>Cheque Diferido: quedará asentado en Cartera de Cheques a Depositar hasta la fecha de cobro indicada.</span>
+                    </div>
+                  ) : (
+                    /* Formulario de Cheque Único */
+                    <div className="space-y-2.5">
+                      <div className={`grid grid-cols-1 ${payFormaPago === "mixto" ? "sm:grid-cols-4" : "sm:grid-cols-3"} gap-2.5 text-xs`}>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">N° de Cheque</label>
+                          <input
+                            className="input-field text-xs font-mono"
+                            placeholder="00012345"
+                            value={payChequeNumero}
+                            onChange={e => setPayChequeNumero(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Banco Emisor</label>
+                          <select
+                            className="input-field text-xs"
+                            value={payChequeBanco}
+                            onChange={e => setPayChequeBanco(e.target.value)}
+                          >
+                            {BANCOS_PARAGUAY.map(b => (
+                              <option key={b} value={b}>{b}</option>
+                            ))}
+                            <option value="OTRO">OTRO BANCO</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Librador / Titular</label>
+                          <input
+                            className="input-field text-xs"
+                            placeholder="Nombre o razón social"
+                            value={payChequeLibrador}
+                            onChange={e => setPayChequeLibrador(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">RUC / CI Librador</label>
+                          <input
+                            className="input-field text-xs font-mono"
+                            placeholder="Documento"
+                            value={payChequeRuc}
+                            onChange={e => setPayChequeRuc(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fecha Emisión</label>
+                          <input
+                            type="date"
+                            className="input-field text-xs"
+                            value={payChequeFechaEmision}
+                            onChange={e => setPayChequeFechaEmision(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-gray-500 uppercase block mb-1">Fecha Cobro / Vencimiento</label>
+                          <input
+                            type="date"
+                            className="input-field text-xs"
+                            value={payChequeFechaCobro}
+                            onChange={e => setPayChequeFechaCobro(e.target.value)}
+                          />
+                        </div>
+                        {payFormaPago === "mixto" && (
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-black text-purple-900 dark:text-purple-300 uppercase block mb-1">
+                              Monto en Cheque (₲)
+                            </label>
+                            <CurrencyInput
+                              currency="PYG"
+                              value={payMontoCheque}
+                              onChangeValue={val => setPayMontoCheque(val)}
+                              className="input-field text-xs font-mono font-bold bg-white dark:bg-slate-900 border-purple-300"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {payChequeFechaCobro > getTodayAsuncion() && (
+                        <div className="text-[11px] font-bold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>Cheque Diferido: quedará asentado en Cartera de Cheques a Depositar hasta la fecha de cobro indicada.</span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* 🎯 RESUMEN DE COBRO MIXTO */}
+              {/* 🎯 RESUMEN INTEGRAL DE COBRO MIXTO */}
               {payFormaPago === "mixto" && (
                 <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 dark:from-emerald-950/30 dark:via-teal-950/20 dark:to-blue-950/30 border border-emerald-200 dark:border-emerald-800/60 flex flex-col sm:flex-row items-center justify-between gap-3">
-                  <div className="text-xs space-y-0.5">
+                  <div className="text-xs space-y-1">
                     <span className="font-black text-emerald-900 dark:text-emerald-200 block uppercase tracking-wide">
-                      Resumen Cobro Mixto Percibido:
+                      Resumen Desglosado del Cobro:
                     </span>
-                    <div className="flex flex-wrap gap-3 text-[11px] text-slate-600 dark:text-slate-300 font-bold">
-                      <span>💵 Efectivo: {formatPYG((payMontoPYG || 0) + Math.round((payMontoBRL || 0) * payTasaBRL) + Math.round((payMontoUSD || 0) * payTasaUSD))}</span>
-                      <span>🏦 Banco: {formatPYG(payMontoTransferencia)}{payMontoTransferencia > 0 && payFechaTransferencia ? ` (Op: ${new Date(payFechaTransferencia + 'T00:00:00').toLocaleDateString('es-PY')})` : ''}</span>
-                      <span>📑 Cheque: {formatPYG(payMontoCheque)}</span>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-700 dark:text-slate-300 font-semibold">
+                      {((payMontoPYG || 0) + Math.round((payMontoBRL || 0) * payTasaBRL) + Math.round((payMontoUSD || 0) * payTasaUSD)) > 0 && (
+                        <span>💵 Efectivo: <b>{formatPYG((payMontoPYG || 0) + Math.round((payMontoBRL || 0) * payTasaBRL) + Math.round((payMontoUSD || 0) * payTasaUSD))}</b></span>
+                      )}
+                      {payMontoTransferencia > 0 && (
+                        <span>📲 Transf: <b>{formatPYG(payMontoTransferencia)}</b></span>
+                      )}
+                      {payMontoDeposito > 0 && (
+                        <span>📄 Depósito: <b>{formatPYG(payMontoDeposito)}</b></span>
+                      )}
+                      {payMontoTarjetaDebito > 0 && (
+                        <span>💳 Débito: <b>{formatPYG(payMontoTarjetaDebito)}</b></span>
+                      )}
+                      {payMontoTarjetaCredito > 0 && (
+                        <span>💳 Crédito: <b>{formatPYG(payMontoTarjetaCredito)}</b></span>
+                      )}
+                      {payMontoQR > 0 && (
+                        <span>📱 QR: <b>{formatPYG(payMontoQR)}</b></span>
+                      )}
+                      {payMontoPIX > 0 && (
+                        <span>💠 PIX: <b>{formatPYG(payMontoPIX)}</b></span>
+                      )}
+                      {(payChequesList.length > 0 ? payChequesList.reduce((acc, c) => acc + (c.monto || 0), 0) : (payMontoCheque || 0)) > 0 && (
+                        <span>📑 Cheques: <b>{formatPYG(payChequesList.length > 0 ? payChequesList.reduce((acc, c) => acc + (c.monto || 0), 0) : payMontoCheque)}</b></span>
+                      )}
+                      {aplicaRetencion && montoRetencionFinal > 0 && (
+                        <span>🏢 Ret. Tesakã: <b>{formatPYG(montoRetencionFinal)}</b></span>
+                      )}
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Mixto Declarado</span>
+                    <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Cargado</span>
                     <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">
-                      {formatPYG(montoFisicoEntregadoGs)}
+                      {formatPYG(totalMixtoClienteCargado)}
                     </span>
                   </div>
                 </div>
@@ -5446,7 +6118,7 @@ export default function AccountsReceivablePage() {
       {showPayRemissionModal && (
         <div className="modal-overlay" onClick={() => setShowPayRemissionModal(null)}>
           <div
-            className="modal-content max-w-lg w-full flex flex-col max-h-[90vh] shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+            className={`modal-content ${payRemForm.forma_pago === "mixto" ? "max-w-3xl" : "max-w-lg"} w-full flex flex-col max-h-[90vh] shadow-2xl rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 transition-all`}
             onClick={e => e.stopPropagation()}
           >
             <div className="p-5 border-b shrink-0 flex items-center justify-between bg-white dark:bg-slate-900">
@@ -5456,7 +6128,7 @@ export default function AccountsReceivablePage() {
                   Registrar Pago de Empresa Vinculada
                 </h3>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Ingreso a tesorería de la transferencia o cheque emitido por la empresa para cancelar el lote remitido.
+                  Ingreso a tesorería de transferencias, cheques, retenciones o efectivo para cancelar el lote remitido.
                 </p>
               </div>
               <button
@@ -5476,51 +6148,17 @@ export default function AccountsReceivablePage() {
                 <div className="text-xs text-slate-300">Saldo pendiente: <strong className="text-amber-400 font-mono">{formatPYG(showPayRemissionModal.saldo_pendiente)}</strong></div>
               </div>
 
-              <div>
-                <label className="label-field flex items-center justify-between">
-                  <span>Monto a Cancelar (₲)</span>
-                  <span className="text-[10px] text-gray-500 font-normal">
-                    Saldo del lote: <strong>{formatPYG(showPayRemissionModal.saldo_pendiente)}</strong>
-                  </span>
-                </label>
-                <CurrencyInput
-                  value={payRemForm.monto}
-                  onChangeValue={(numVal) => setPayRemForm({ ...payRemForm, monto: numVal })}
-                  currency="PYG"
-                  className="input-field text-xs font-mono font-bold"
-                  placeholder="0"
-                />
-                {(() => {
-                  const m = typeof payRemForm.monto === 'number' ? payRemForm.monto : parseFloat(String(payRemForm.monto).replace(/\./g, '').replace(',', '.')) || 0
-                  const saldo = Number(showPayRemissionModal.saldo_pendiente || 0)
-                  const remanente = Math.max(0, saldo - m)
-                  if (m > 0 && remanente > 0) {
-                    return (
-                      <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium mt-1 flex items-center gap-1">
-                        ⚠️ <strong>Pago Parcial:</strong> Quedará un saldo pendiente de <strong>{formatPYG(remanente)}</strong> en este lote.
-                      </p>
-                    )
-                  }
-                  if (m >= saldo && saldo > 0) {
-                    return (
-                      <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-1 flex items-center gap-1">
-                        ✓ <strong>Cancelación Total:</strong> Se saldará el 100% de la remisión.
-                      </p>
-                    )
-                  }
-                  return null
-                })()}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
+              {/* Selector de Forma de Pago y Fecha */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="label-field">Forma de Pago</label>
                   <select
-                    className="input-field text-xs"
+                    className="input-field text-xs font-semibold"
                     value={payRemForm.forma_pago}
                     onChange={e => setPayRemForm({ ...payRemForm, forma_pago: e.target.value })}
                   >
                     <option value="transferencia">Transferencia Bancaria (SIPAP)</option>
+                    <option value="mixto">Pago Mixto / Combinado (Multimoneda + Cheques + Bancos + Retención)</option>
                     <option value="deposito_bancario">Depósito Bancario (Boleta / Cta. Cte.)</option>
                     <option value="cheque">Cheque Corporativo</option>
                     <option value="efectivo">Efectivo en Bóveda</option>
@@ -5537,149 +6175,740 @@ export default function AccountsReceivablePage() {
                 </div>
               </div>
 
-              {(payRemForm.forma_pago === "transferencia" || payRemForm.forma_pago === "deposito_bancario") && (
+              {/* ⚖️ BALANZA INTERACTIVA DE COBRO MIXTO DE REMISIÓN */}
+              {payRemForm.forma_pago === "mixto" ? (
+                <div className={`p-4 rounded-2xl border transition-all ${
+                  diferenciaCierreRemision === 0
+                    ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-950 dark:text-emerald-100 shadow-sm"
+                    : diferenciaCierreRemision > 0
+                    ? "bg-amber-500/10 border-amber-500/40 text-amber-950 dark:text-amber-100 shadow-sm"
+                    : "bg-blue-500/10 border-blue-500/40 text-blue-950 dark:text-blue-100 shadow-sm"
+                }`}>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                          Balanza de Cobro Combinado
+                        </span>
+                        {diferenciaCierreRemision === 0 ? (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-600 text-white shadow-xs flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Monto 100% Cubierto y Cerrado
+                          </span>
+                        ) : diferenciaCierreRemision > 0 ? (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500 text-slate-950 shadow-xs flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-slate-950" />
+                            Falta Cubrir: {formatPYG(diferenciaCierreRemision)}
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-600 text-white shadow-xs">
+                            ℹ️ Excede por: {formatPYG(Math.abs(diferenciaCierreRemision))}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-baseline gap-4 text-xs font-bold">
+                        <span>Saldo Lote: <strong className="font-mono text-sm text-slate-900 dark:text-white">{formatPYG(saldoPendienteRemision)}</strong></span>
+                        <span>Total Cargado: <strong className="font-mono text-sm text-emerald-600 dark:text-emerald-400">{formatPYG(totalMixtoRemisionCargado)}</strong></span>
+                      </div>
+                    </div>
+
+                    {/* Botones de Auto-Calce Rápido de la diferencia */}
+                    {diferenciaCierreRemision > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider">Calzar Restante:</span>
+                        <button
+                          type="button"
+                          onClick={() => calzarDiferenciaRemision("transferencia")}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-xs transition cursor-pointer"
+                          title="Sumar diferencia a Transferencia SIPAP"
+                        >
+                          + Transferencia
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => calzarDiferenciaRemision("cheque")}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-xs transition cursor-pointer"
+                          title="Calzar en Cheque Corporativo"
+                        >
+                          + Cheque
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => calzarDiferenciaRemision("pyg")}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white shadow-xs transition cursor-pointer"
+                          title="Sumar diferencia a Efectivo en Guaraníes"
+                        >
+                          + Efectivo Gs.
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => calzarDiferenciaRemision("deposito")}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-xs transition cursor-pointer"
+                          title="Sumar diferencia a Boleta de Depósito"
+                        >
+                          + Depósito
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Monto único cuando forma de pago no es mixto */
                 <div>
-                  <label className="label-field">
-                    {payRemForm.forma_pago === "deposito_bancario" ? "Cuenta Bancaria Receptora del Depósito" : "Cuenta Bancaria de Depósito"}
+                  <label className="label-field flex items-center justify-between">
+                    <span>Monto a Cancelar (₲)</span>
+                    <span className="text-[10px] text-gray-500 font-normal">
+                      Saldo del lote: <strong>{formatPYG(showPayRemissionModal.saldo_pendiente)}</strong>
+                    </span>
                   </label>
-                  <select
-                    className="input-field text-xs"
-                    value={payRemForm.bank_account_id}
-                    onChange={e => setPayRemForm({ ...payRemForm, bank_account_id: e.target.value })}
-                  >
-                    {bankAccounts.map(b => (
-                      <option key={b.id} value={b.id}>
-                        {b.banco_nombre} — {b.tipo_cuenta ? b.tipo_cuenta.replace('_', ' ').toUpperCase() : 'Cta.'} {b.numero_cuenta} ({b.moneda})
-                      </option>
-                    ))}
-                  </select>
+                  <CurrencyInput
+                    value={payRemForm.monto}
+                    onChangeValue={(numVal) => setPayRemForm({ ...payRemForm, monto: numVal })}
+                    currency="PYG"
+                    className="input-field text-xs font-mono font-bold"
+                    placeholder="0"
+                  />
+                  {(() => {
+                    const m = typeof payRemForm.monto === 'number' ? payRemForm.monto : parseFloat(String(payRemForm.monto).replace(/\./g, '').replace(',', '.')) || 0
+                    const saldo = Number(showPayRemissionModal.saldo_pendiente || 0)
+                    const remanente = Math.max(0, saldo - m)
+                    if (m > 0 && remanente > 0) {
+                      return (
+                        <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium mt-1 flex items-center gap-1">
+                          ⚠️ <strong>Pago Parcial:</strong> Quedará un saldo pendiente de <strong>{formatPYG(remanente)}</strong> en este lote.
+                        </p>
+                      )
+                    }
+                    if (m >= saldo && saldo > 0) {
+                      return (
+                        <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-1 flex items-center gap-1">
+                          ✓ <strong>Cancelación Total:</strong> Se saldará el 100% de la remisión.
+                        </p>
+                      )
+                    }
+                    return null
+                  })()}
                 </div>
               )}
 
-              {payRemForm.forma_pago === "cheque" ? (
-                <div className="p-3.5 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900 dark:text-indigo-200">
-                      <CreditCard className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                      <span>Detalles del Cheque Corporativo</span>
-                    </div>
-
-                    {/* Selector de Cheque al Día vs Diferido */}
-                    <div className="flex items-center bg-white dark:bg-slate-900 p-0.5 rounded-lg border border-indigo-200 dark:border-indigo-800">
-                      <button
-                        type="button"
-                        onClick={() => setPayRemForm({ ...payRemForm, es_cheque_diferido: false })}
-                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-colors ${
-                          !payRemForm.es_cheque_diferido
-                            ? "bg-indigo-600 text-white shadow-xs"
-                            : "text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                        }`}
-                      >
-                        Al Día
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPayRemForm({ ...payRemForm, es_cheque_diferido: true })}
-                        className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition-colors ${
-                          payRemForm.es_cheque_diferido
-                            ? "bg-amber-600 text-white shadow-xs"
-                            : "text-gray-500 hover:text-gray-700 dark:text-gray-400"
-                        }`}
-                      >
-                        Diferido
-                      </button>
-                    </div>
+              {/* 💵 PANEL DE EFECTIVO MULTIMONEDA PARA REMISIÓN (Cuando es mixto o efectivo) */}
+              {(payRemForm.forma_pago === "efectivo" || payRemForm.forma_pago === "mixto") && (
+                <div className="p-3.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs font-bold text-amber-900 dark:text-amber-300">
+                    <span className="flex items-center gap-2">
+                      <Banknote className="w-4 h-4 text-emerald-600" />
+                      <span>Efectivo Multimoneda en Bóveda</span>
+                    </span>
+                    <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400">
+                      Total Efectivo: {formatPYG((payRemForm.monto_pyg || 0) + Math.round((payRemForm.monto_brl || 0) * (payRemForm.tasa_brl || 1450)) + Math.round((payRemForm.monto_usd || 0) * (payRemForm.tasa_usd || 7800)))}
+                    </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="label-field text-[11px] font-semibold">
-                        N° de Cheque <span className="text-red-500">*</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {/* PYG */}
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 shadow-2xs">
+                      <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">
+                        🪙 Guaraníes (PYG)
                       </label>
-                      <input
-                        type="text"
-                        placeholder="Ej: 00481920"
-                        className="input-field text-xs font-mono font-bold"
-                        value={payRemForm.numero_cheque}
-                        onChange={e => setPayRemForm({ ...payRemForm, numero_cheque: e.target.value })}
+                      <CurrencyInput
+                        currency="PYG"
+                        value={payRemForm.monto_pyg || 0}
+                        onChangeValue={(num) => setPayRemForm({ ...payRemForm, monto_pyg: num })}
+                        placeholder="0"
+                        className="input-field text-right font-mono font-bold text-xs"
                       />
                     </div>
-                    <div>
-                      <label className="label-field text-[11px] font-semibold">Banco Emisor</label>
-                      <select
-                        className="input-field text-xs"
-                        value={payRemForm.banco_cheque}
-                        onChange={e => setPayRemForm({ ...payRemForm, banco_cheque: e.target.value })}
-                      >
-                        {BANCOS_PARAGUAY.map(b => (
-                          <option key={b} value={b}>{b}</option>
-                        ))}
-                        <option value="OTRO">OTRO BANCO</option>
-                      </select>
+
+                    {/* BRL */}
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 shadow-2xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black text-slate-500 uppercase">
+                          💵 Reales (BRL)
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[9px] font-bold text-slate-400">Cotiz:</span>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payRemForm.tasa_brl || 1450}
+                            onChangeValue={(val) => setPayRemForm({ ...payRemForm, tasa_brl: val > 0 ? val : 1 })}
+                            placeholder="1.450"
+                            className="input-field text-right font-mono font-bold text-[10px] py-0.5 px-1.5 w-16 h-5 bg-slate-100 dark:bg-slate-800"
+                          />
+                        </div>
+                      </div>
+                      <CurrencyInput
+                        currency="BRL"
+                        value={payRemForm.monto_brl || 0}
+                        onChangeValue={(num) => setPayRemForm({ ...payRemForm, monto_brl: num })}
+                        placeholder="0,00"
+                        className="input-field text-right font-mono font-bold text-xs"
+                      />
+                      {(payRemForm.monto_brl || 0) > 0 && (
+                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold block text-right">
+                          ≈ {formatPYG(Math.round((payRemForm.monto_brl || 0) * (payRemForm.tasa_brl || 1450)))}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* USD */}
+                    <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-slate-800 shadow-2xs space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black text-slate-500 uppercase">
+                          💵 Dólares (USD)
+                        </label>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[9px] font-bold text-slate-400">Cotiz:</span>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payRemForm.tasa_usd || 7800}
+                            onChangeValue={(val) => setPayRemForm({ ...payRemForm, tasa_usd: val > 0 ? val : 1 })}
+                            placeholder="7.800"
+                            className="input-field text-right font-mono font-bold text-[10px] py-0.5 px-1.5 w-16 h-5 bg-slate-100 dark:bg-slate-800"
+                          />
+                        </div>
+                      </div>
+                      <CurrencyInput
+                        currency="USD"
+                        value={payRemForm.monto_usd || 0}
+                        onChangeValue={(num) => setPayRemForm({ ...payRemForm, monto_usd: num })}
+                        placeholder="0.00"
+                        className="input-field text-right font-mono font-bold text-xs"
+                      />
+                      {(payRemForm.monto_usd || 0) > 0 && (
+                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-bold block text-right">
+                          ≈ {formatPYG(Math.round((payRemForm.monto_usd || 0) * (payRemForm.tasa_usd || 7800)))}
+                        </span>
+                      )}
                     </div>
                   </div>
+                </div>
+              )}
 
-                  {payRemForm.es_cheque_diferido ? (
-                    <div className="grid grid-cols-2 gap-3 p-2.5 bg-amber-50/80 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800/50">
+              {/* 🏦 PANEL DE BANCOS Y CANALES DIGITALES PARA REMISIÓN */}
+              {(payRemForm.forma_pago === "transferencia" || payRemForm.forma_pago === "deposito_bancario" || payRemForm.forma_pago === "mixto") && (
+                <div className="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-bold text-blue-900 dark:text-blue-300">
+                    <span className="flex items-center gap-2">
+                      <Landmark className="w-4 h-4 text-blue-600" />
+                      <span>{payRemForm.forma_pago === "deposito_bancario" ? "Cuenta Bancaria Receptora del Depósito" : "Cuenta Bancaria Receptora"}</span>
+                    </span>
+                    <span className="text-[11px] font-normal text-blue-700 dark:text-blue-400">
+                      Acreditación en Tesorería
+                    </span>
+                  </div>
+
+                  <div>
+                    <select
+                      className="input-field text-xs w-full font-medium"
+                      value={payRemForm.bank_account_id}
+                      onChange={e => setPayRemForm({ ...payRemForm, bank_account_id: e.target.value })}
+                    >
+                      {bankAccounts.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.banco_nombre} — {b.tipo_cuenta ? b.tipo_cuenta.replace('_', ' ').toUpperCase() : 'Cta.'} {b.numero_cuenta} ({b.moneda}) · Saldo: {formatPYG(b.saldo_actual)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {payRemForm.forma_pago === "mixto" ? (
+                    <div className="space-y-3 pt-2 border-t border-blue-200/60 dark:border-blue-900/40">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/* Transferencia SIPAP */}
+                        <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1.5 shadow-2xs">
+                          <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block">
+                            📲 Transferencia SIPAP (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payRemForm.monto_transferencia || 0}
+                            onChangeValue={val => setPayRemForm({ ...payRemForm, monto_transferencia: val })}
+                            className="input-field text-xs font-mono font-bold border-blue-300"
+                            placeholder="0"
+                          />
+                          <div className="grid grid-cols-2 gap-1.5 pt-1">
+                            <input
+                              type="date"
+                              className="input-field text-[11px] border-blue-200 py-1"
+                              value={payRemForm.fecha_transferencia}
+                              onChange={e => setPayRemForm({ ...payRemForm, fecha_transferencia: e.target.value })}
+                              title="Fecha Operación"
+                            />
+                            <input
+                              type="text"
+                              className="input-field text-[11px] font-mono border-blue-200 py-1"
+                              placeholder="N° Ref. SIPAP"
+                              value={payRemForm.referencia_transferencia}
+                              onChange={e => setPayRemForm({ ...payRemForm, referencia_transferencia: e.target.value })}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Depósito Bancario en Cta. Cte. */}
+                        <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1.5 shadow-2xs">
+                          <label className="text-[10px] font-bold text-blue-900 dark:text-blue-300 uppercase block">
+                            📄 Depósito Bancario Cta. Cte. (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payRemForm.monto_deposito || 0}
+                            onChangeValue={val => setPayRemForm({ ...payRemForm, monto_deposito: val })}
+                            className="input-field text-xs font-mono font-bold border-blue-300"
+                            placeholder="0"
+                          />
+                          <input
+                            type="text"
+                            className="input-field text-[11px] font-mono border-blue-200 py-1"
+                            placeholder="N° Boleta de Depósito"
+                            value={payRemForm.referencia_deposito}
+                            onChange={e => setPayRemForm({ ...payRemForm, referencia_deposito: e.target.value })}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Tarjetas y Digitales */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                        <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1">
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block">
+                            💳 Tarjeta Débito (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payRemForm.monto_tarjeta_debito || 0}
+                            onChangeValue={val => setPayRemForm({ ...payRemForm, monto_tarjeta_debito: val })}
+                            className="input-field text-xs font-mono font-bold border-blue-200"
+                            placeholder="0"
+                          />
+                          <input
+                            type="text"
+                            className="input-field text-[10px] font-mono border-blue-200 py-0.5 px-1.5"
+                            placeholder="Voucher"
+                            value={payRemForm.voucher_tarjeta_debito}
+                            onChange={e => setPayRemForm({ ...payRemForm, voucher_tarjeta_debito: e.target.value })}
+                          />
+                        </div>
+
+                        <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1">
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block">
+                            💳 Tarjeta Crédito (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payRemForm.monto_tarjeta_credito || 0}
+                            onChangeValue={val => setPayRemForm({ ...payRemForm, monto_tarjeta_credito: val })}
+                            className="input-field text-xs font-mono font-bold border-blue-200"
+                            placeholder="0"
+                          />
+                          <input
+                            type="text"
+                            className="input-field text-[10px] font-mono border-blue-200 py-0.5 px-1.5"
+                            placeholder="Voucher"
+                            value={payRemForm.voucher_tarjeta_credito}
+                            onChange={e => setPayRemForm({ ...payRemForm, voucher_tarjeta_credito: e.target.value })}
+                          />
+                        </div>
+
+                        <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1">
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block">
+                            📱 QR Dinelco / Bancard (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payRemForm.monto_qr || 0}
+                            onChangeValue={val => setPayRemForm({ ...payRemForm, monto_qr: val })}
+                            className="input-field text-xs font-mono font-bold border-blue-200"
+                            placeholder="0"
+                          />
+                          <input
+                            type="text"
+                            className="input-field text-[10px] font-mono border-blue-200 py-0.5 px-1.5"
+                            placeholder="Ref QR"
+                            value={payRemForm.referencia_qr}
+                            onChange={e => setPayRemForm({ ...payRemForm, referencia_qr: e.target.value })}
+                          />
+                        </div>
+
+                        <div className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-blue-200 dark:border-slate-800 space-y-1">
+                          <label className="text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase block">
+                            💠 PIX Brasil (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payRemForm.monto_pix || 0}
+                            onChangeValue={val => setPayRemForm({ ...payRemForm, monto_pix: val })}
+                            className="input-field text-xs font-mono font-bold border-blue-200"
+                            placeholder="0"
+                          />
+                          <input
+                            type="text"
+                            className="input-field text-[10px] font-mono border-blue-200 py-0.5 px-1.5"
+                            placeholder="Ref PIX"
+                            value={payRemForm.referencia_pix}
+                            onChange={e => setPayRemForm({ ...payRemForm, referencia_pix: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
+              {/* 📑 PANEL DE CHEQUES CORPORATIVOS (Para "cheque" o "mixto") */}
+              {(payRemForm.forma_pago === "cheque" || payRemForm.forma_pago === "mixto") && (
+                <div className="p-3.5 rounded-xl bg-purple-50/70 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/40 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-bold text-purple-900 dark:text-purple-300">
+                    <span className="flex items-center gap-2">
+                      <ReceiptText className="w-4 h-4 text-purple-600" />
+                      <span>Cheques Corporativos Recibidos</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={agregarChequeRemision}
+                      className="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-xs flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Agregar Cheque</span>
+                    </button>
+                  </div>
+
+                  {payRemChequesList.length > 0 ? (
+                    <div className="space-y-2.5">
+                      {payRemChequesList.map((chq, idx) => (
+                        <div key={chq.id} className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-purple-200 dark:border-slate-800 space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-black uppercase text-purple-900 dark:text-purple-300 flex items-center gap-1.5">
+                              <span>Cheque #{idx + 1}</span>
+                              {chq.es_diferido ? (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-600 border border-amber-500/30">Diferido</span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-600 border border-emerald-500/30">Al Día</span>
+                              )}
+                            </span>
+                            <div className="flex items-center gap-3">
+                              <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 font-semibold cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={chq.es_diferido}
+                                  onChange={e => actualizarChequeRemision(chq.id, "es_diferido", e.target.checked)}
+                                  className="rounded text-purple-600"
+                                />
+                                <span>Diferido</span>
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => eliminarChequeRemision(chq.id)}
+                                className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded transition cursor-pointer"
+                                title="Eliminar Cheque"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">N° Cheque</label>
+                              <input
+                                className="input-field text-xs font-mono py-1"
+                                placeholder="00481920"
+                                value={chq.numero}
+                                onChange={e => actualizarChequeRemision(chq.id, "numero", e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Banco Emisor</label>
+                              <select
+                                className="input-field text-xs py-1"
+                                value={chq.banco}
+                                onChange={e => actualizarChequeRemision(chq.id, "banco", e.target.value)}
+                              >
+                                {BANCOS_PARAGUAY.map(b => (
+                                  <option key={b} value={b}>{b}</option>
+                                ))}
+                                <option value="OTRO">OTRO BANCO</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Librador / Titular</label>
+                              <input
+                                className="input-field text-xs py-1"
+                                placeholder="Nombre empresa"
+                                value={chq.librador}
+                                onChange={e => actualizarChequeRemision(chq.id, "librador", e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">RUC Librador</label>
+                              <input
+                                className="input-field text-xs font-mono py-1"
+                                placeholder="RUC"
+                                value={chq.ruc}
+                                onChange={e => actualizarChequeRemision(chq.id, "ruc", e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Fecha Emisión</label>
+                              <input
+                                type="date"
+                                className="input-field text-xs py-1"
+                                value={chq.fecha_emision}
+                                onChange={e => actualizarChequeRemision(chq.id, "fecha_emision", e.target.value)}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">Fecha Cobro / Vence</label>
+                              <input
+                                type="date"
+                                className="input-field text-xs py-1"
+                                value={chq.fecha_cobro}
+                                onChange={e => {
+                                  const fecha = e.target.value
+                                  actualizarChequeRemision(chq.id, "fecha_cobro", fecha)
+                                  if (fecha > getTodayAsuncion()) {
+                                    actualizarChequeRemision(chq.id, "es_diferido", true)
+                                  }
+                                }}
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="text-[9px] font-black text-purple-900 dark:text-purple-300 uppercase block mb-0.5">
+                                Importe Cheque (₲)
+                              </label>
+                              <CurrencyInput
+                                currency="PYG"
+                                value={chq.monto}
+                                onChangeValue={val => actualizarChequeRemision(chq.id, "monto", val)}
+                                className="input-field text-xs font-mono font-bold bg-white dark:bg-slate-900 border-purple-300 py-1"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+
+                      <div className="flex items-center justify-between text-xs pt-1 font-bold text-purple-900 dark:text-purple-300">
+                        <span>Total ({payRemChequesList.length} cheques):</span>
+                        <span className="font-mono text-sm">{formatPYG(payRemChequesList.reduce((acc, c) => acc + (c.monto || 0), 0))}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Cheque único corporativo */
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-500">Cheque Único</span>
+                        <div className="flex items-center bg-white dark:bg-slate-900 p-0.5 rounded-lg border border-purple-200 dark:border-purple-800">
+                          <button
+                            type="button"
+                            onClick={() => setPayRemForm({ ...payRemForm, es_cheque_diferido: false })}
+                            className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+                              !payRemForm.es_cheque_diferido ? "bg-purple-600 text-white shadow-2xs" : "text-gray-500"
+                            }`}
+                          >
+                            Al Día
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPayRemForm({ ...payRemForm, es_cheque_diferido: true })}
+                            className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+                              payRemForm.es_cheque_diferido ? "bg-amber-600 text-white shadow-2xs" : "text-gray-500"
+                            }`}
+                          >
+                            Diferido
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="label-field text-[11px] font-semibold">N° de Cheque</label>
+                          <input
+                            type="text"
+                            placeholder="Ej: 00481920"
+                            className="input-field text-xs font-mono font-bold"
+                            value={payRemForm.numero_cheque}
+                            onChange={e => setPayRemForm({ ...payRemForm, numero_cheque: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="label-field text-[11px] font-semibold">Banco Emisor</label>
+                          <select
+                            className="input-field text-xs"
+                            value={payRemForm.banco_cheque}
+                            onChange={e => setPayRemForm({ ...payRemForm, banco_cheque: e.target.value })}
+                          >
+                            {BANCOS_PARAGUAY.map(b => (
+                              <option key={b} value={b}>{b}</option>
+                            ))}
+                            <option value="OTRO">OTRO BANCO</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="label-field text-[11px] font-semibold">Fecha Emisión</label>
+                          <input
+                            type="date"
+                            className="input-field text-xs"
+                            value={payRemForm.fecha_cheque_emision}
+                            onChange={e => setPayRemForm({ ...payRemForm, fecha_cheque_emision: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="label-field text-[11px] font-semibold">Fecha Cobro / Vence</label>
+                          <input
+                            type="date"
+                            className="input-field text-xs font-bold border-purple-300"
+                            value={payRemForm.fecha_cheque_cobro}
+                            onChange={e => setPayRemForm({ ...payRemForm, fecha_cheque_cobro: e.target.value })}
+                          />
+                        </div>
+                      </div>
+
                       <div>
-                        <label className="label-field text-[11px] font-semibold text-amber-900 dark:text-amber-200">
-                          Fecha de Emisión
+                        <label className="label-field text-[11px] font-semibold">Librador / Titular de la Cuenta</label>
+                        <input
+                          type="text"
+                          placeholder="Nombre de la empresa o librador"
+                          className="input-field text-xs"
+                          value={payRemForm.titular_cheque}
+                          onChange={e => setPayRemForm({ ...payRemForm, titular_cheque: e.target.value })}
+                        />
+                      </div>
+
+                      {payRemForm.forma_pago === "mixto" && (
+                        <div>
+                          <label className="label-field text-[11px] font-black text-purple-900 dark:text-purple-300">
+                            Monto en Cheque (₲)
+                          </label>
+                          <CurrencyInput
+                            currency="PYG"
+                            value={payRemForm.monto_cheque || 0}
+                            onChangeValue={val => setPayRemForm({ ...payRemForm, monto_cheque: val })}
+                            className="input-field text-xs font-mono font-bold border-purple-300"
+                            placeholder="0"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 🏢 PANEL DE RETENCIÓN DE IVA DNIT / TESAKÃ (Para "mixto") */}
+              {payRemForm.forma_pago === "mixto" && (
+                <div className={`p-3.5 rounded-xl border transition-all ${
+                  payRemForm.aplica_retencion
+                    ? "bg-indigo-50/80 dark:bg-indigo-950/30 border-indigo-300 dark:border-indigo-800 shadow-2xs"
+                    : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700"
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-indigo-600" />
+                      <span className="text-xs font-bold text-slate-900 dark:text-white">
+                        Retención de IVA (Comprobante Virtual Tesakã)
+                      </span>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={payRemForm.aplica_retencion}
+                        onChange={e => setPayRemForm({ ...payRemForm, aplica_retencion: e.target.checked })}
+                        className="sr-only peer"
+                      />
+                      <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-slate-600 peer-checked:bg-indigo-600"></div>
+                    </label>
+                  </div>
+
+                  {payRemForm.aplica_retencion && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-3 mt-2.5 border-t border-indigo-200 dark:border-indigo-900/60">
+                      <div>
+                        <label className="text-[10px] font-bold text-indigo-950 dark:text-indigo-200 uppercase block mb-1">
+                          N° Comprobante Tesakã
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="001-001-0001234"
+                          className="input-field text-xs font-mono font-bold"
+                          value={payRemForm.retencion_numero_comprobante}
+                          onChange={e => setPayRemForm({ ...payRemForm, retencion_numero_comprobante: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-indigo-950 dark:text-indigo-200 uppercase block mb-1">
+                          Fecha Comprobante
                         </label>
                         <input
                           type="date"
                           className="input-field text-xs"
-                          value={payRemForm.fecha_cheque_emision}
-                          onChange={e => setPayRemForm({ ...payRemForm, fecha_cheque_emision: e.target.value })}
+                          value={payRemForm.retencion_fecha}
+                          onChange={e => setPayRemForm({ ...payRemForm, retencion_fecha: e.target.value })}
                         />
                       </div>
                       <div>
-                        <label className="label-field text-[11px] font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1">
-                          <span>Fecha de Cobro</span>
-                          <span className="text-red-500">*</span>
+                        <label className="text-[10px] font-bold text-indigo-950 dark:text-indigo-200 uppercase block mb-1">
+                          Monto Retenido (₲)
                         </label>
-                        <input
-                          type="date"
-                          className="input-field text-xs font-bold border-amber-400"
-                          value={payRemForm.fecha_cheque_cobro}
-                          onChange={e => setPayRemForm({ ...payRemForm, fecha_cheque_cobro: e.target.value })}
+                        <CurrencyInput
+                          currency="PYG"
+                          value={payRemForm.monto_retencion || 0}
+                          onChangeValue={val => setPayRemForm({ ...payRemForm, monto_retencion: val })}
+                          className="input-field text-xs font-mono font-bold text-right text-indigo-600 dark:text-indigo-400"
+                          placeholder="0"
                         />
                       </div>
                     </div>
-                  ) : (
-                    <div>
-                      <label className="label-field text-[11px] font-semibold">
-                        Fecha de Emisión / Cobro
-                      </label>
-                      <input
-                        type="date"
-                        className="input-field text-xs"
-                        value={payRemForm.fecha_cheque_emision}
-                        onChange={e => setPayRemForm({ ...payRemForm, fecha_cheque_emision: e.target.value, fecha_cheque_cobro: e.target.value })}
-                      />
-                    </div>
                   )}
+                </div>
+              )}
 
-                  <div>
-                    <label className="label-field text-[11px] font-semibold">Librador / Titular de la Cuenta</label>
-                    <input
-                      type="text"
-                      placeholder="Nombre de la empresa o librador"
-                      className="input-field text-xs"
-                      value={payRemForm.titular_cheque}
-                      onChange={e => setPayRemForm({ ...payRemForm, titular_cheque: e.target.value })}
-                    />
+              {/* 🎯 RESUMEN INTEGRAL DE COBRO DE REMISIÓN MIXTO */}
+              {payRemForm.forma_pago === "mixto" && (
+                <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 dark:from-emerald-950/30 dark:via-teal-950/20 dark:to-blue-950/30 border border-emerald-200 dark:border-emerald-800/60 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="text-xs space-y-1">
+                    <span className="font-black text-emerald-900 dark:text-emerald-200 block uppercase tracking-wide">
+                      Resumen Desglosado del Pago de Empresa:
+                    </span>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-700 dark:text-slate-300 font-semibold">
+                      {((payRemForm.monto_pyg || 0) + Math.round((payRemForm.monto_brl || 0) * (payRemForm.tasa_brl || 1450)) + Math.round((payRemForm.monto_usd || 0) * (payRemForm.tasa_usd || 7800))) > 0 && (
+                        <span>💵 Efectivo: <b>{formatPYG((payRemForm.monto_pyg || 0) + Math.round((payRemForm.monto_brl || 0) * (payRemForm.tasa_brl || 1450)) + Math.round((payRemForm.monto_usd || 0) * (payRemForm.tasa_usd || 7800)))}</b></span>
+                      )}
+                      {(payRemForm.monto_transferencia || 0) > 0 && (
+                        <span>📲 Transf: <b>{formatPYG(payRemForm.monto_transferencia)}</b></span>
+                      )}
+                      {(payRemForm.monto_deposito || 0) > 0 && (
+                        <span>📄 Depósito: <b>{formatPYG(payRemForm.monto_deposito)}</b></span>
+                      )}
+                      {(payRemForm.monto_tarjeta_debito || 0) > 0 && (
+                        <span>💳 Débito: <b>{formatPYG(payRemForm.monto_tarjeta_debito)}</b></span>
+                      )}
+                      {(payRemForm.monto_tarjeta_credito || 0) > 0 && (
+                        <span>💳 Crédito: <b>{formatPYG(payRemForm.monto_tarjeta_credito)}</b></span>
+                      )}
+                      {(payRemForm.monto_qr || 0) > 0 && (
+                        <span>📱 QR: <b>{formatPYG(payRemForm.monto_qr)}</b></span>
+                      )}
+                      {(payRemForm.monto_pix || 0) > 0 && (
+                        <span>💠 PIX: <b>{formatPYG(payRemForm.monto_pix)}</b></span>
+                      )}
+                      {(payRemChequesList.length > 0 ? payRemChequesList.reduce((acc, c) => acc + (c.monto || 0), 0) : (payRemForm.monto_cheque || 0)) > 0 && (
+                        <span>📑 Cheques: <b>{formatPYG(payRemChequesList.length > 0 ? payRemChequesList.reduce((acc, c) => acc + (c.monto || 0), 0) : payRemForm.monto_cheque)}</b></span>
+                      )}
+                      {payRemForm.aplica_retencion && (payRemForm.monto_retencion || 0) > 0 && (
+                        <span>🏢 Ret. Tesakã: <b>{formatPYG(payRemForm.monto_retencion)}</b></span>
+                      )}
+                    </div>
                   </div>
-
-                  <div className="text-[11px] text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5 pt-0.5">
-                    <Sparkles className="w-3.5 h-3.5 shrink-0 text-indigo-500" />
-                    <span>
-                      {payRemForm.es_cheque_diferido
-                        ? "El cheque se registrará como Diferido en Gestión de Cheques (En Cartera) con vencimiento programado."
-                        : "El cheque se registrará en Gestión de Cheques (En Cartera) disponible para depósito inmediato."}
+                  <div className="text-right shrink-0">
+                    <span className="text-[10px] uppercase font-bold text-slate-500 block">Total Cargado</span>
+                    <span className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400">
+                      {formatPYG(totalMixtoRemisionCargado)}
                     </span>
                   </div>
                 </div>
-              ) : (
+              )}
+
+              {/* Referencia si no es cheque ni mixto */}
+              {payRemForm.forma_pago !== "cheque" && payRemForm.forma_pago !== "mixto" && (
                 <div>
                   <label className="label-field">N° Boleta / Referencia Bancaria</label>
                   <input
@@ -5707,6 +6936,8 @@ export default function AccountsReceivablePage() {
               <span className="text-xs text-gray-500 font-medium">
                 {payRemForm.forma_pago === "cheque"
                   ? (payRemForm.es_cheque_diferido ? "Cheque Diferido" : "Cheque al Día")
+                  : payRemForm.forma_pago === "mixto"
+                  ? "Pago Mixto / Combinado"
                   : `Medio: ${payRemForm.forma_pago.replace('_', ' ').toUpperCase()}`}
               </span>
               <div className="flex items-center gap-2">
@@ -5724,7 +6955,7 @@ export default function AccountsReceivablePage() {
                   className="btn-primary bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-2 shadow-md transition"
                 >
                   {payingRemission ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                  <span>Confirmar Cobro de Empresa</span>
+                  <span>{payRemForm.forma_pago === "mixto" ? `Cobrar ${formatPYG(totalMixtoRemisionCargado)}` : 'Confirmar Cobro de Empresa'}</span>
                 </button>
               </div>
             </div>

@@ -135,6 +135,16 @@ class ReceivableGlobalPaymentCreate(BaseModel):
     monto_transferencia: Optional[Decimal] = Decimal("0")
     fecha_transferencia: Optional[date] = None
     referencia_transferencia: Optional[str] = None
+    monto_deposito: Optional[Decimal] = Decimal("0")
+    referencia_deposito: Optional[str] = None
+    monto_tarjeta_debito: Optional[Decimal] = Decimal("0")
+    voucher_tarjeta_debito: Optional[str] = None
+    monto_tarjeta_credito: Optional[Decimal] = Decimal("0")
+    voucher_tarjeta_credito: Optional[str] = None
+    monto_qr: Optional[Decimal] = Decimal("0")
+    referencia_qr: Optional[str] = None
+    monto_pix: Optional[Decimal] = Decimal("0")
+    referencia_pix: Optional[str] = None
     monto_cheque: Optional[Decimal] = Decimal("0")
     cheques: Optional[list[dict]] = None
     monto_facturas_canceladas: Optional[Decimal] = None
@@ -173,7 +183,7 @@ class CorporateRemissionUpdate(BaseModel):
 
 
 class CorporateRemissionPayInput(BaseModel):
-    monto: Decimal = Field(gt=0)
+    monto: Optional[Decimal] = Decimal("0")
     forma_pago: str = "transferencia"
     bank_account_id: Optional[UUID] = None
     destino_fondos: Optional[str] = "banco"
@@ -187,6 +197,32 @@ class CorporateRemissionPayInput(BaseModel):
     fecha_cheque_emision: Optional[date] = None
     fecha_cheque_cobro: Optional[date] = None
     titular_cheque: Optional[str] = None
+    # Desglose de cobro combinado / mixto
+    monto_pyg: Optional[Decimal] = Decimal("0")
+    monto_brl: Optional[Decimal] = Decimal("0")
+    monto_usd: Optional[Decimal] = Decimal("0")
+    tasa_brl: Optional[Decimal] = Decimal("1450")
+    tasa_usd: Optional[Decimal] = Decimal("7800")
+    monto_transferencia: Optional[Decimal] = Decimal("0")
+    fecha_transferencia: Optional[date] = None
+    referencia_transferencia: Optional[str] = None
+    monto_deposito: Optional[Decimal] = Decimal("0")
+    referencia_deposito: Optional[str] = None
+    monto_cheque: Optional[Decimal] = Decimal("0")
+    cheques: Optional[list[dict]] = None
+    monto_tarjeta_debito: Optional[Decimal] = Decimal("0")
+    voucher_tarjeta_debito: Optional[str] = None
+    monto_tarjeta_credito: Optional[Decimal] = Decimal("0")
+    voucher_tarjeta_credito: Optional[str] = None
+    monto_qr: Optional[Decimal] = Decimal("0")
+    referencia_qr: Optional[str] = None
+    monto_pix: Optional[Decimal] = Decimal("0")
+    referencia_pix: Optional[str] = None
+    aplica_retencion: Optional[bool] = False
+    monto_retencion: Optional[Decimal] = Decimal("0")
+    retencion_numero_comprobante: Optional[str] = None
+    retencion_fecha: Optional[date] = None
+    retencion_porcentaje: Optional[Decimal] = Decimal("30.00")
 
 
 class CorporateRemissionRevertInput(BaseModel):

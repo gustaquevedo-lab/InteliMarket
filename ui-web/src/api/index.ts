@@ -4117,7 +4117,58 @@ export const api = {
     pendingForCustomer: (customerId: string) => client.get<{ id: string; numero_documento: string; fecha_emision: string; fecha_vencimiento: string | null; moneda: string; monto_original: number; saldo_pendiente: number; dias_mora: number }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/pending`),
     registerPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; monto_transferencia?: number; fecha_transferencia?: string; referencia_transferencia?: string; monto_cheque?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string; allocations: { accounts_receivable_id: string; monto: number }[] }) =>
       client.post<{ id: string; monto_total: number; allocations: { accounts_receivable_id: string; monto: number; nuevo_saldo: number; nuevo_estado: string }[] }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments`, data),
-    applyGlobalPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; accounts_receivable_ids?: string[]; bank_account_id?: string; destino_fondos?: string; caja_session_id?: string; cheque_numero?: string; cheque_banco?: string; cheque_librador?: string; cheque_ruc?: string; cheque_fecha_emision?: string; cheque_fecha_cobro?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; monto_transferencia?: number; fecha_transferencia?: string; referencia_transferencia?: string; monto_cheque?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string; category_id?: string; cost_center_id?: string; requisicion_id?: string; production_area?: string }) =>
+    applyGlobalPayment: (data: {
+      customer_id: string;
+      monto_total: number;
+      moneda?: string;
+      forma_pago?: string;
+      referencia?: string;
+      fecha?: string;
+      observaciones?: string;
+      accounts_receivable_ids?: string[];
+      bank_account_id?: string;
+      destino_fondos?: string;
+      caja_session_id?: string;
+      cheque_numero?: string;
+      cheque_banco?: string;
+      cheque_librador?: string;
+      cheque_ruc?: string;
+      cheque_fecha_emision?: string;
+      cheque_fecha_cobro?: string;
+      aplica_retencion?: boolean;
+      monto_retencion?: number;
+      retencion_numero_comprobante?: string;
+      retencion_fecha?: string;
+      retencion_porcentaje?: number;
+      monto_efectivo_recibido?: number;
+      monto_pyg?: number;
+      monto_brl?: number;
+      monto_usd?: number;
+      monto_transferencia?: number;
+      fecha_transferencia?: string;
+      referencia_transferencia?: string;
+      monto_deposito?: number;
+      referencia_deposito?: string;
+      monto_tarjeta_debito?: number;
+      voucher_tarjeta_debito?: string;
+      monto_tarjeta_credito?: number;
+      voucher_tarjeta_credito?: string;
+      monto_qr?: number;
+      referencia_qr?: string;
+      monto_pix?: number;
+      referencia_pix?: string;
+      monto_cheque?: number;
+      cheques?: Array<{ numero?: string; banco?: string; librador?: string; ruc?: string; monto: number; fecha_emision?: string; fecha_cobro?: string; moneda?: string }>;
+      tasa_brl?: number;
+      tasa_usd?: number;
+      monto_facturas_canceladas?: number;
+      diferencia_monto?: number;
+      tipo_diferencia?: string;
+      category_id?: string;
+      cost_center_id?: string;
+      requisicion_id?: string;
+      production_area?: string;
+    }) =>
       client.post<{ id: string; payment_id: string; numero_recibo: string; monto_total: number; documentos_afectados: number; allocations: any[]; treasury?: any }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/apply-global`, data),
     compensateInternalConsumption: (data: { customer_id: string; accounts_receivable_ids: string[]; category_id: string; cost_center_id?: string; fecha?: string; observaciones?: string }) =>
       client.post<{ success: boolean; payment_id: string; numero_recibo: string; monto_total: number; facturas_canceladas: number; gastos_registrados: number }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/compensate-internal-consumption`, data),
@@ -4151,7 +4202,7 @@ export const api = {
     downloadRemisionExtractosPdf: (id: string, numero?: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/extractos.pdf`, undefined, `extractos_remision_${numero || id.slice(0, 8)}.pdf`),
     downloadRemisionReciboPdf: (id: string, numero?: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/receipt.pdf`, undefined, `recibo_${numero || id.slice(0, 8)}.pdf`),
     payCorporateRemission: (id: string, data: {
-      monto: number;
+      monto?: number;
       forma_pago?: string;
       bank_account_id?: string;
       destino_fondos?: string;
@@ -4164,6 +4215,31 @@ export const api = {
       fecha_cheque_emision?: string;
       fecha_cheque_cobro?: string;
       titular_cheque?: string;
+      monto_pyg?: number;
+      monto_brl?: number;
+      monto_usd?: number;
+      tasa_brl?: number;
+      tasa_usd?: number;
+      monto_transferencia?: number;
+      fecha_transferencia?: string;
+      referencia_transferencia?: string;
+      monto_deposito?: number;
+      referencia_deposito?: string;
+      monto_cheque?: number;
+      cheques?: Array<{ numero?: string; banco?: string; librador?: string; ruc?: string; monto: number; fecha_emision?: string; fecha_cobro?: string; moneda?: string }>;
+      monto_tarjeta_debito?: number;
+      voucher_tarjeta_debito?: string;
+      monto_tarjeta_credito?: number;
+      voucher_tarjeta_credito?: string;
+      monto_qr?: number;
+      referencia_qr?: string;
+      monto_pix?: number;
+      referencia_pix?: string;
+      aplica_retencion?: boolean;
+      monto_retencion?: number;
+      retencion_numero_comprobante?: string;
+      retencion_fecha?: string;
+      retencion_porcentaje?: number;
     }) => client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/pay`, data),
     revertCorporateRemissionPayment: (id: string, data?: { motivo?: string }) =>
       client.post<any>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-remissions/${id}/revert-payment`, data || {}),
