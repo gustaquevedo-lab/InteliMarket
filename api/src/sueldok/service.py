@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy import text
