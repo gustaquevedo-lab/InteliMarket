@@ -1,8 +1,13 @@
 // ── GENERADOR DE TRAMAS ESC/P PARA CHEQUES BANCO CONTINENTAL (PARAGUAY) ──
 // Diseñado para Epson LX-300+ / LX-300+II conectada por USB en formulario continuo.
 // Medida física: 2.75 pulgadas (69.85 mm = 7.0 cm) por 9.5 pulgadas de ancho.
-// A 6 LPI (ESC 2) o 8 LPI (ESC 0), ajustado para que NINGUNA línea supere 72 columnas
-// y evitar terminantemente el auto-wrap del carro de 80 columnas de la LX-300+.
+//
+// FORMATO DUAL INTEGRADO (TALÓN IZQUIERDO + CUERPO DE CHEQUE):
+// En 12 CPI (Elite, ESC M), el carro de 8 pulgadas de la LX-300+ rinde exactamente
+// 96 COLUMNAS FÍSICAS sin hacer retorno de carro automático (auto-wrap).
+// - Columnas 1 a 22: Talón de control izquierdo (Vencimiento, Fecha, Orden, Concepto, Este Cheque)
+// - Columnas 23 a 25: Perforación troquelada divisoria
+// - Columnas 26 a 92: Cuerpo del Cheque Banco Continental (Monto, Fechas, Beneficiario, Letras)
 
 export interface ChequeContinentalData {
   numero: string
@@ -15,16 +20,16 @@ export interface ChequeContinentalData {
   noALaOrden: boolean
   concepto?: string
   plaza?: string // Defecto: "Pedro Juan Caballero"
-  imprimirTalon?: boolean // Si se llena el talón izquierdo de control (default: false para evitar desborde de 80 col)
+  imprimirTalon?: boolean // Si se llena el talón izquierdo de control (default: true)
   // Calibración fina (guardada en localStorage por PC)
   offsetX?: number // Columnas (+ a la derecha, - a la izquierda)
   offsetY?: number // Líneas (+ abajo, - arriba)
-  // Posiciones individuales calibrables (en columnas relativas al cheque)
-  colMonto?: number // Default: 52
-  colFechasEmi?: number // Default: 26
-  colFechasPago?: number // Default: 44
-  colBeneficiario?: number // Default: 4
-  colLetras?: number // Default: 3
+  // Posiciones de columnas calibrables (modo 12 CPI, 96 columnas totales)
+  colTalon?: number // Default: 1
+  colCheque?: number // Default: 26
+  colMonto?: number // Default: 76
+  colFechasEmi?: number // Default: 48
+  colFechasPago?: number // Default: 68
 }
 
 /**
@@ -88,7 +93,7 @@ export function numeroALetrasContinental(monto: number): string {
     if (n < 1000000000000) {
       const millones = Math.floor(n / 1000000)
       const resto = n % 1000000
-      const millStr = millones === 1 ? "UN MILLÓN" : convertir(millones) + " MILLONES";
+      const millStr = millones === 1 ? "UN MILLÓN" : convertir(millones) + " MILLONES"
       return resto > 0 ? millStr + " " + convertir(resto) : millStr
     }
     return n.toString()
@@ -99,9 +104,9 @@ export function numeroALetrasContinental(monto: number): string {
 
 /**
  * Da formato de seguridad al monto en letras con asteriscos y guiones de relleno.
- * Máximo 50 caracteres por línea para NUNCA desbordar el carro de 80 columnas.
+ * Máximo 58 caracteres por línea para encajar con holgura dentro de las 96 columnas a 12 CPI.
  */
-export function formatearLetrasSeguridad(monto: number, maxChars = 50): { linea1: string; linea2: string } {
+export function formatearLetrasSeguridad(monto: number, maxChars = 56): { linea1: string; linea2: string } {
   const letras = numeroALetrasContinental(monto)
   const base = `*${letras}`
   
@@ -155,20 +160,14 @@ const MESES = [
 ]
 
 /**
- * Genera el payload de comandos ESC/P para Epson LX-300+ optimizado y calibrado.
- * 
- * ESTRATEGIA ANTI-DESBORDE Y PRECISIÓN MILIMÉTRICA:
- * 1. Ancho máximo estricto por línea: 72 columnas (el carro de LX-300+ a 10 CPI tiene 80 col).
- *    Esto garantiza CERO auto-wraps no deseados, cero saltos extra y cero letras desparramadas.
- * 2. Si se activa el talón izquierdo (imprimirTalon=true), se activa automáticamente
- *    modo Condensado (17.1 CPI, 136 col) para que ambos sectores quepan sin desbordar.
- * 3. En modo estándar (solo cuerpo del cheque), la impresión arranca directo en las casillas
- *    del cheque con 10 CPI Draft nítido y claro.
+ * Genera el payload ESC/P para Banco Continental imprimiendo TALÓN + CHEQUE simultáneamente.
+ * Utiliza 12 CPI (Elite, 96 columnas) para garantizar que NUNCA desborde el carro de 80 col
+ * y no se produzca retorno de carro automático involuntario.
  */
 export function generarEscpChequeContinental(data: ChequeContinentalData): string {
-  const offX = Math.max(-25, Math.min(25, data.offsetX || 0))
+  const offX = Math.max(-20, Math.min(25, data.offsetX || 0))
   const offY = Math.max(-5, Math.min(5, data.offsetY || 0))
-  const imprimirTalon = data.imprimirTalon ?? false // Por defecto false: enfocado en el cuerpo del cheque
+  const imprimirTalon = data.imprimirTalon ?? true
   const plaza = data.plaza || "Pedro Juan Caballero"
 
   // Fechas parseadas
@@ -179,34 +178,32 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
   // Monto formateado con asteriscos de seguridad
   const montoNumStr = `*${Math.round(data.monto).toLocaleString("es-PY")}*`
   
-  // Monto en letras (máx 50 caracteres para no romper margen)
-  const { linea1: letrasL1, linea2: letrasL2 } = formatearLetrasSeguridad(data.monto, 50)
+  // Monto en letras (máx 56 chars a 12 CPI)
+  const { linea1: letrasL1, linea2: letrasL2 } = formatearLetrasSeguridad(data.monto, 56)
 
   // Beneficiario
   let beneText = data.beneficiario.toUpperCase().trim()
   if (data.noALaOrden) {
     beneText += "   *** NO A LA ORDEN ***"
   }
-  // Truncar beneficiario a máx 48 caracteres para evitar desborde
-  if (beneText.length > 48) {
-    beneText = beneText.slice(0, 48)
+  // En 12 CPI, el beneficiario puede tener hasta 55 caracteres
+  if (beneText.length > 55) {
+    beneText = beneText.slice(0, 55)
   }
 
-  // Matriz de líneas (12 líneas útiles para cubrir la altura del cheque)
-  const TOTAL_LINEAS = 14
+  // Matriz de 12 líneas útiles (cubre exactamente las casillas físicas del cheque)
+  const TOTAL_LINEAS = 12
   const lineas: string[] = Array(TOTAL_LINEAS).fill("")
 
-  // Columnas base calibradas (relativas al cuerpo del cheque)
-  // En la LX-300+, con el tractor en posición normal, el cheque arranca en col 0-4.
-  const COL_BASE = imprimirTalon ? 24 : 0
-  const cMonto = (data.colMonto ?? 52) + COL_BASE
-  const cFechasEmi = (data.colFechasEmi ?? 26) + COL_BASE
-  const cFechasPago = (data.colFechasPago ?? 44) + COL_BASE
-  const cBene = (data.colBeneficiario ?? 4) + COL_BASE
-  const cLetras = (data.colLetras ?? 3) + COL_BASE
+  // Posiciones de columna calibradas (en modo 12 CPI, ancho máximo seguro = 92 cols)
+  const cTalon = Math.max(0, (data.colTalon ?? 1))
+  const cCheque = Math.max(cTalon + (imprimirTalon ? 22 : 0), (data.colCheque ?? (imprimirTalon ? 26 : 4)))
+  const cMonto = Math.min(92 - montoNumStr.length, (data.colMonto ?? 76))
+  const cFechasEmi = data.colFechasEmi ?? (imprimirTalon ? 48 : 28)
+  const cFechasPago = data.colFechasPago ?? (imprimirTalon ? 68 : 48)
 
-  // Helper de escritura seguro con límite estricto de 76 caracteres
-  const MAX_COL = imprimirTalon ? 120 : 75
+  // Helper de escritura seguro con límite estricto de 94 columnas (carro 12 CPI = 96 col)
+  const MAX_COL = 93
   function escribir(lineaIdx: number, col: number, texto: string) {
     const lActual = lineaIdx + offY
     if (lActual < 0 || lActual >= TOTAL_LINEAS) return
@@ -216,51 +213,56 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
       cur = cur.padEnd(cActual, " ")
     }
     const nueva = cur.slice(0, cActual) + texto + cur.slice(cActual + texto.length)
-    lineas[lActual] = nueva.slice(0, MAX_COL) // Nunca excede MAX_COL
+    lineas[lActual] = nueva.slice(0, MAX_COL) // NUNCA excede MAX_COL
   }
 
-  // ── 1. TALÓN IZQUIERDO (Opcional, en columnas 0 a 22) ──
+  // ── 1. TALÓN IZQUIERDO DE CONTROL (COLUMNAS 1 A 22) ──
   if (imprimirTalon) {
+    // Línea 2: Vencimiento (si es diferido)
     if (data.esDiferido) {
-      escribir(1, 1, `Venc:${fPago.dd}/${fPago.mm}/${fPago.aaaa}`)
+      escribir(2, cTalon, `Venc:${fPago.dd}/${fPago.mm}/${fPago.aaaa}`)
     }
-    escribir(2, 1, `Fec:${fEmi.dd}/${fEmi.mm}/${fEmi.aaaa}`)
-    escribir(3, 1, `Ord:${beneText.slice(0, 16)}`)
+    // Línea 3: Fecha de emisión
+    escribir(3, cTalon, `Fec:${fEmi.dd}/${fEmi.mm}/${fEmi.aaaa}`)
+    // Línea 4: Orden (proveedor/beneficiario corto)
+    const beneTalon = data.beneficiario.toUpperCase().trim().slice(0, 16)
+    escribir(4, cTalon, `Ord:${beneTalon}`)
+    // Línea 5: Concepto
     if (data.concepto) {
-      escribir(4, 1, `Cpto:${data.concepto.slice(0, 16)}`)
+      escribir(5, cTalon, `Cpto:${data.concepto.slice(0, 15)}`)
     }
-    escribir(5, 1, `Gs:${montoNumStr.slice(0, 18)}`)
+    // Línea 7 y 8: Este Cheque
+    escribir(7, cTalon, `Este Chq:`)
+    escribir(8, cTalon, montoNumStr.slice(0, 18))
   }
 
   // ── 2. CUERPO DEL CHEQUE BANCO CONTINENTAL ──
-  // A. Renglón 1: Cruzado a la izquierda + Monto numérico en la casilla derecha al lado de ₲
+  // Renglón 1: Cruzado // a la izquierda + Monto numérico en recuadro ₲ a la derecha
   if (data.cruzado) {
-    escribir(1, COL_BASE + 1, "//")
+    escribir(1, cCheque, "//")
   }
   escribir(1, cMonto, montoNumStr)
 
-  // B. Renglón 2: Fechas en casillas superiores
+  // Renglón 2: Fechas en casillas superiores
   // FECHA DE EMISIÓN: DD  MM  AA
   // FECHA DE PAGO (Diferido): DD  MM  AA
+  escribir(2, cFechasEmi, `${fEmi.dd}   ${fEmi.mm}   ${fEmi.aa}`)
   if (data.esDiferido) {
-    escribir(2, cFechasEmi, `${fEmi.dd}   ${fEmi.mm}   ${fEmi.aa}`)
     escribir(2, cFechasPago, `${fPago.dd}   ${fPago.mm}   ${fPago.aa}`)
-  } else {
-    escribir(2, cFechasEmi, `${fEmi.dd}   ${fEmi.mm}   ${fEmi.aa}`)
   }
 
-  // C. Renglón 4: "Páguese a la orden de"
-  escribir(4, cBene, beneText)
+  // Renglón 4: "Páguese a la orden de"
+  escribir(4, cCheque, beneText)
 
-  // D. Renglón 5 y 6: "La suma de Guaraníes" (Sin redundancia "GUARANÍES")
-  escribir(5, cLetras, letrasL1)
+  // Renglón 5 y 6: "La suma de Guaraníes" (Sin redundancia "GUARANÍES")
+  escribir(5, cCheque, letrasL1)
   if (letrasL2) {
-    escribir(6, cLetras, letrasL2)
+    escribir(6, cCheque, letrasL2)
   }
 
-  // E. Renglón 8: Plaza y fecha (solo si es a la vista)
+  // Renglón 8: Plaza y fecha (solo si es a la vista)
   if (!data.esDiferido) {
-    escribir(8, cBene + 6, `${plaza}, ${fEmi.dd} de ${mesEmiNombre} de ${fEmi.aaaa}`)
+    escribir(8, cCheque + 8, `${plaza}, ${fEmi.dd} de ${mesEmiNombre} de ${fEmi.aaaa}`)
   }
 
   // ── 3. COMPILACIÓN DE COMANDOS ESC/P ──
@@ -270,17 +272,12 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
   let escp = ""
   // Inicializar impresora
   escp += `${ESC}@`
-  // Longitud de página a 2.75 pulgadas (22 líneas a 8 LPI o 16.5 a 6 LPI) -> fijamos 17 líneas
+  // Fijar longitud de página en 17 líneas a 6 LPI (2.75 pulgadas exactas)
   escp += `${ESC}C\x11`
-  // Interlineado 1/6 pulgada (6 LPI) -> estándar de formularios
+  // Interlineado 1/6 pulgada (6 LPI) estándar
   escp += `${ESC}2`
-
-  // Si incluye talón, activamos condensado para soportar más de 80 col sin wrap
-  if (imprimirTalon) {
-    escp += "\x0F" // SI = Condensed on (17.1 CPI)
-  } else {
-    escp += `${ESC}P` // 10 CPI Pica estándar
-  }
+  // MODO 12 CPI (ELITE): Habilita 96 columnas físicas en el carro de 8 pulgadas
+  escp += `${ESC}M`
 
   // Imprimir renglones
   for (let i = 0; i < TOTAL_LINEAS; i++) {
@@ -288,6 +285,7 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
     if (linea.trim().length > 0) {
       if (linea.includes(montoNumStr)) {
         const partes = linea.split(montoNumStr)
+        // Negrita en el monto
         escp += partes[0] + `${ESC}E${montoNumStr}${ESC}F` + (partes[1] || "")
       } else {
         escp += linea
@@ -296,17 +294,16 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
     escp += "\r\n"
   }
 
-  // Avanzar al siguiente cheque
+  // Form Feed: avanza al siguiente cheque exacto
   escp += FF
 
   return escp
 }
 
 /**
- * Genera una REGLA / GRID DE CALIBRACIÓN física con numeración de líneas y columnas.
- * Al imprimir esto sobre papel continuo y superponer el cheque Continental a trasluz,
- * el usuario puede leer con total exactitud la línea (L1..L9) y columna (0..70)
- * de cada una de las casillas físicas de su talonario.
+ * Genera la REGLA / GRID DE CALIBRACIÓN física completa a 12 CPI (96 columnas).
+ * Imprime líneas numeradas L1..L9 con reglas horizontales de 90 columnas
+ * para que el usuario pueda cotejar a trasluz con el cheque Continental.
  */
 export function generarEscpReglaCalibracion(): string {
   const ESC = "\x1B"
@@ -315,17 +312,14 @@ export function generarEscpReglaCalibracion(): string {
   let escp = ""
   escp += `${ESC}@`
   escp += `${ESC}2` // 6 LPI
-  escp += `${ESC}C\x11` // 17 líneas
-  escp += `${ESC}P` // 10 CPI
+  escp += `${ESC}C\x11` // 17 líneas (2.75 pulgadas)
+  escp += `${ESC}M` // 12 CPI (96 columnas)
 
-  // Encabezado de regla
-  escp += "REGLA DE CALIBRACION CHEQUE CONTINENTAL (EPSON LX-300+)\r\n"
-  escp += "    ....+....1....+....2....+....3....+....4....+....5....+....6....+....7\r\n"
+  escp += "REGLA 12 CPI (TALON + CHEQUE CONTINENTAL)\r\n"
+  escp += "   ...+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8....+....9\r\n"
   
-  for (let i = 1; i <= 9; i++) {
-    const lnum = `L${i}:`
-    // Marcador cada 10 columnas
-    escp += `${lnum} ....+....1....+....2....+....3....+....4....+....5....+....6....+....7\r\n`
+  for (let i = 1; i <= 8; i++) {
+    escp += `L${i}: ...+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8....+....9\r\n`
   }
 
   escp += FF
@@ -333,7 +327,7 @@ export function generarEscpReglaCalibracion(): string {
 }
 
 /**
- * Genera cheque de prueba en borrador con las posiciones canónicas compactas.
+ * Genera cheque de prueba en borrador con TALÓN + CHEQUE simultáneos a 12 CPI.
  */
 export function generarEscpPruebaAlineacion(offsetX = 0, offsetY = 0): string {
   return generarEscpChequeContinental({
@@ -347,7 +341,7 @@ export function generarEscpPruebaAlineacion(offsetX = 0, offsetY = 0): string {
     noALaOrden: true,
     concepto: "CALIBRACION CONTINENTAL",
     plaza: "Pedro Juan Caballero",
-    imprimirTalon: false, // Desactivado por defecto para garantizar cero desborde
+    imprimirTalon: true, // ¡Talón activado con 12 CPI!
     offsetX,
     offsetY,
   })

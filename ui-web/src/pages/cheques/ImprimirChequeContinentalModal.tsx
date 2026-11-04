@@ -44,11 +44,11 @@ const STORAGE_KEYS = {
   OFFSET_Y: "intelimarket_cheque_offset_y",
   IMPRIMIR_TALON: "intelimarket_cheque_imprimir_talon",
   PLAZA: "intelimarket_cheque_plaza",
+  COL_TALON: "intelimarket_cheque_col_talon",
+  COL_CHEQUE: "intelimarket_cheque_col_cheque",
   COL_MONTO: "intelimarket_cheque_col_monto",
   COL_FECHAS_EMI: "intelimarket_cheque_col_fechas_emi",
   COL_FECHAS_PAGO: "intelimarket_cheque_col_fechas_pago",
-  COL_BENE: "intelimarket_cheque_col_bene",
-  COL_LETRAS: "intelimarket_cheque_col_letras",
 }
 
 export default function ImprimirChequeContinentalModal({
@@ -70,7 +70,7 @@ export default function ImprimirChequeContinentalModal({
   const [noALaOrden, setNoALaOrden] = useState(true)
   const [concepto, setConcepto] = useState("")
   const [plaza, setPlaza] = useState("Pedro Juan Caballero")
-  const [imprimirTalon, setImprimirTalon] = useState(false)
+  const [imprimirTalon, setImprimirTalon] = useState(true)
 
   // ── CALIBRACIÓN Y DISPOSITIVOS ──
   const [printers, setPrinters] = useState<string[]>([])
@@ -79,12 +79,12 @@ export default function ImprimirChequeContinentalModal({
   const [showConfig, setShowConfig] = useState(false)
   const [offsetX, setOffsetX] = useState<number>(0)
   const [offsetY, setOffsetY] = useState<number>(0)
-  // Columnas calibradas individuales (defecto optimizado para Banco Continental)
-  const [colMonto, setColMonto] = useState<number>(52)
-  const [colFechasEmi, setColFechasEmi] = useState<number>(26)
-  const [colFechasPago, setColFechasPago] = useState<number>(44)
-  const [colBeneficiario, setColBeneficiario] = useState<number>(4)
-  const [colLetras, setColLetras] = useState<number>(3)
+  // Columnas calibradas individuales (defecto 12 CPI para Banco Continental con Talón + Cheque)
+  const [colTalon, setColTalon] = useState<number>(1)
+  const [colCheque, setColCheque] = useState<number>(26)
+  const [colMonto, setColMonto] = useState<number>(76)
+  const [colFechasEmi, setColFechasEmi] = useState<number>(48)
+  const [colFechasPago, setColFechasPago] = useState<number>(68)
   const [imprimiendo, setImprimiendo] = useState(false)
 
   // Cargar preferencias guardadas en localStorage
@@ -94,22 +94,22 @@ export default function ImprimirChequeContinentalModal({
     const savedOffY = parseInt(localStorage.getItem(STORAGE_KEYS.OFFSET_Y) || "0", 10)
     const savedTalon = localStorage.getItem(STORAGE_KEYS.IMPRIMIR_TALON)
     const savedPlaza = localStorage.getItem(STORAGE_KEYS.PLAZA) || "Pedro Juan Caballero"
-    const savedColMonto = parseInt(localStorage.getItem(STORAGE_KEYS.COL_MONTO) || "52", 10)
-    const savedColFEmi = parseInt(localStorage.getItem(STORAGE_KEYS.COL_FECHAS_EMI) || "26", 10)
-    const savedColFPago = parseInt(localStorage.getItem(STORAGE_KEYS.COL_FECHAS_PAGO) || "44", 10)
-    const savedColBene = parseInt(localStorage.getItem(STORAGE_KEYS.COL_BENE) || "4", 10)
-    const savedColLetras = parseInt(localStorage.getItem(STORAGE_KEYS.COL_LETRAS) || "3", 10)
+    const savedColTalon = parseInt(localStorage.getItem(STORAGE_KEYS.COL_TALON) || "1", 10)
+    const savedColCheque = parseInt(localStorage.getItem(STORAGE_KEYS.COL_CHEQUE) || "26", 10)
+    const savedColMonto = parseInt(localStorage.getItem(STORAGE_KEYS.COL_MONTO) || "76", 10)
+    const savedColFEmi = parseInt(localStorage.getItem(STORAGE_KEYS.COL_FECHAS_EMI) || "48", 10)
+    const savedColFPago = parseInt(localStorage.getItem(STORAGE_KEYS.COL_FECHAS_PAGO) || "68", 10)
 
     if (savedPrinter) setSelectedPrinter(savedPrinter)
     if (!isNaN(savedOffX)) setOffsetX(savedOffX)
     if (!isNaN(savedOffY)) setOffsetY(savedOffY)
     if (savedTalon !== null) setImprimirTalon(savedTalon === "true")
     if (savedPlaza) setPlaza(savedPlaza)
+    if (!isNaN(savedColTalon)) setColTalon(savedColTalon)
+    if (!isNaN(savedColCheque)) setColCheque(savedColCheque)
     if (!isNaN(savedColMonto)) setColMonto(savedColMonto)
     if (!isNaN(savedColFEmi)) setColFechasEmi(savedColFEmi)
     if (!isNaN(savedColFPago)) setColFechasPago(savedColFPago)
-    if (!isNaN(savedColBene)) setColBeneficiario(savedColBene)
-    if (!isNaN(savedColLetras)) setColLetras(savedColLetras)
   }, [])
 
   // Precargar datos del cheque cuando se abre el modal
@@ -168,32 +168,32 @@ export default function ImprimirChequeContinentalModal({
     newOffY: number,
     newTalon: boolean,
     newPlaza: string,
+    newColTalon = colTalon,
+    newColCheque = colCheque,
     newColMonto = colMonto,
     newColFEmi = colFechasEmi,
-    newColFPago = colFechasPago,
-    newColBene = colBeneficiario,
-    newColLetras = colLetras
+    newColFPago = colFechasPago
   ) => {
     setSelectedPrinter(newPrinter)
     setOffsetX(newOffX)
     setOffsetY(newOffY)
     setImprimirTalon(newTalon)
     setPlaza(newPlaza)
+    setColTalon(newColTalon)
+    setColCheque(newColCheque)
     setColMonto(newColMonto)
     setColFechasEmi(newColFEmi)
     setColFechasPago(newColFPago)
-    setColBeneficiario(newColBene)
-    setColLetras(newColLetras)
     localStorage.setItem(STORAGE_KEYS.PRINTER, newPrinter)
     localStorage.setItem(STORAGE_KEYS.OFFSET_X, String(newOffX))
     localStorage.setItem(STORAGE_KEYS.OFFSET_Y, String(newOffY))
     localStorage.setItem(STORAGE_KEYS.IMPRIMIR_TALON, String(newTalon))
     localStorage.setItem(STORAGE_KEYS.PLAZA, newPlaza)
+    localStorage.setItem(STORAGE_KEYS.COL_TALON, String(newColTalon))
+    localStorage.setItem(STORAGE_KEYS.COL_CHEQUE, String(newColCheque))
     localStorage.setItem(STORAGE_KEYS.COL_MONTO, String(newColMonto))
     localStorage.setItem(STORAGE_KEYS.COL_FECHAS_EMI, String(newColFEmi))
     localStorage.setItem(STORAGE_KEYS.COL_FECHAS_PAGO, String(newColFPago))
-    localStorage.setItem(STORAGE_KEYS.COL_BENE, String(newColBene))
-    localStorage.setItem(STORAGE_KEYS.COL_LETRAS, String(newColLetras))
   }
 
   // Desglose del monto en letras y seguridad
@@ -202,7 +202,7 @@ export default function ImprimirChequeContinentalModal({
   }, [monto])
 
   const letrasConSeguridad = useMemo(() => {
-    return formatearLetrasSeguridad(monto, 50)
+    return formatearLetrasSeguridad(monto, 56)
   }, [monto])
 
   // Partición de fechas para la vista previa
@@ -247,11 +247,11 @@ export default function ImprimirChequeContinentalModal({
         imprimirTalon,
         offsetX,
         offsetY,
+        colTalon,
+        colCheque,
         colMonto,
         colFechasEmi,
         colFechasPago,
-        colBeneficiario,
-        colLetras,
       }
 
       const comandos = generarEscpChequeContinental(payload)
@@ -259,7 +259,7 @@ export default function ImprimirChequeContinentalModal({
 
       toast.success(
         "Cheque Enviado a la Epson LX-300+",
-        `Cheque N° ${numero || "S/N"} por ${formatPYG(monto)} impreso correctamente.`
+        `Cheque N° ${numero || "S/N"} por ${formatPYG(monto)} impreso correctamente (Talón + Cheque).`
       )
       if (onChequeImpreso) onChequeImpreso(chequeData?.id)
       onClose()
@@ -377,10 +377,10 @@ export default function ImprimirChequeContinentalModal({
                 </div>
                 <button
                   type="button"
-                  onClick={() => guardarConfiguracion(selectedPrinter, 0, 0, true, "Pedro Juan Caballero")}
+                  onClick={() => guardarConfiguracion(selectedPrinter, 0, 0, true, "Pedro Juan Caballero", 1, 26, 76, 48, 68)}
                   className="text-[11px] text-purple-300 hover:text-purple-200 flex items-center gap-1 font-bold underline"
                 >
-                  <RotateCcw className="w-3 h-3" /> Restablecer a 0
+                  <RotateCcw className="w-3 h-3" /> Restablecer Valores Canónicos
                 </button>
               </div>
 
@@ -394,7 +394,7 @@ export default function ImprimirChequeContinentalModal({
                     <select
                       className="input text-xs w-full font-mono bg-slate-800 border-slate-700 text-white"
                       value={selectedPrinter}
-                      onChange={e => guardarConfiguracion(e.target.value, offsetX, offsetY, imprimirTalon, plaza)}
+                      onChange={e => guardarConfiguracion(e.target.value, offsetX, offsetY, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                     >
                       {printers.length === 0 && <option value="">— Sin impresoras detectadas (abrir QZ Tray) —</option>}
                       {printers.map(p => (
@@ -421,7 +421,7 @@ export default function ImprimirChequeContinentalModal({
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX - 1, offsetY, imprimirTalon, plaza)}
+                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX - 1, offsetY, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                       className="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-white font-black"
                     >
                       -
@@ -430,11 +430,11 @@ export default function ImprimirChequeContinentalModal({
                       type="number"
                       className="input text-xs text-center font-bold font-mono bg-slate-800 border-slate-700 text-white w-16"
                       value={offsetX}
-                      onChange={e => guardarConfiguracion(selectedPrinter, parseInt(e.target.value) || 0, offsetY, imprimirTalon, plaza)}
+                      onChange={e => guardarConfiguracion(selectedPrinter, parseInt(e.target.value) || 0, offsetY, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                     />
                     <button
                       type="button"
-                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX + 1, offsetY, imprimirTalon, plaza)}
+                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX + 1, offsetY, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                       className="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-white font-black"
                     >
                       +
@@ -450,7 +450,7 @@ export default function ImprimirChequeContinentalModal({
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX, offsetY - 1, imprimirTalon, plaza, colMonto, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
+                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX, offsetY - 1, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                       className="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-white font-black"
                     >
                       -
@@ -459,11 +459,11 @@ export default function ImprimirChequeContinentalModal({
                       type="number"
                       className="input text-xs text-center font-bold font-mono bg-slate-800 border-slate-700 text-white w-16"
                       value={offsetY}
-                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, parseInt(e.target.value) || 0, imprimirTalon, plaza, colMonto, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, parseInt(e.target.value) || 0, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                     />
                     <button
                       type="button"
-                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX, offsetY + 1, imprimirTalon, plaza, colMonto, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
+                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX, offsetY + 1, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                       className="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-white font-black"
                     >
                       +
@@ -476,23 +476,32 @@ export default function ImprimirChequeContinentalModal({
               <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-700/60 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-200">
-                    Posiciones de Columnas en el Cheque (Use la Regla L1..L9 para ajustar al milímetro):
+                    Posiciones de Columnas a 12 CPI (96 columnas máx. para Talón + Cheque):
                   </span>
                   <button
                     type="button"
-                    onClick={() => guardarConfiguracion(selectedPrinter, 0, 0, false, "Pedro Juan Caballero", 52, 26, 44, 4, 3)}
+                    onClick={() => guardarConfiguracion(selectedPrinter, 0, 0, true, "Pedro Juan Caballero", 1, 26, 76, 48, 68)}
                     className="text-[10px] text-purple-400 hover:text-purple-300 underline font-semibold"
                   >
-                    Valores Canónicos Continental
+                    Valores Canónicos Continental (12 CPI)
                   </button>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
                   <div>
-                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. Monto (₲)</label>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. Talón (Inicio)</label>
                     <input
                       type="number"
-                      value={colMonto}
-                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, parseInt(e.target.value) || 0, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
+                      value={colTalon}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, parseInt(e.target.value) || 0, colCheque, colMonto, colFechasEmi, colFechasPago)}
+                      className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. Cheque (Inicio)</label>
+                    <input
+                      type="number"
+                      value={colCheque}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colTalon, parseInt(e.target.value) || 0, colMonto, colFechasEmi, colFechasPago)}
                       className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
                     />
                   </div>
@@ -501,7 +510,7 @@ export default function ImprimirChequeContinentalModal({
                     <input
                       type="number"
                       value={colFechasEmi}
-                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colMonto, parseInt(e.target.value) || 0, colFechasPago, colBeneficiario, colLetras)}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colTalon, colCheque, colMonto, parseInt(e.target.value) || 0, colFechasPago)}
                       className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
                     />
                   </div>
@@ -510,25 +519,16 @@ export default function ImprimirChequeContinentalModal({
                     <input
                       type="number"
                       value={colFechasPago}
-                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colMonto, colFechasEmi, parseInt(e.target.value) || 0, colBeneficiario, colLetras)}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, parseInt(e.target.value) || 0)}
                       className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. Beneficiario</label>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. Monto (₲)</label>
                     <input
                       type="number"
-                      value={colBeneficiario}
-                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colMonto, colFechasEmi, colFechasPago, parseInt(e.target.value) || 0, colLetras)}
-                      className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. En Letras</label>
-                    <input
-                      type="number"
-                      value={colLetras}
-                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colMonto, colFechasEmi, colFechasPago, colBeneficiario, parseInt(e.target.value) || 0)}
+                      value={colMonto}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colTalon, colCheque, parseInt(e.target.value) || 0, colFechasEmi, colFechasPago)}
                       className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
                     />
                   </div>
@@ -558,13 +558,13 @@ export default function ImprimirChequeContinentalModal({
                     <input
                       type="checkbox"
                       checked={imprimirTalon}
-                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, e.target.checked, plaza, colMonto, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, e.target.checked, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                       className="rounded border-slate-700 text-purple-600 focus:ring-purple-500 bg-slate-800"
                     />
                     <span>Imprimir también el <strong>Talón de Control Izquierdo</strong> (stub)</span>
                   </label>
-                  <span className="text-[10px] text-slate-500 italic">
-                    (Recomendado: Desmarcado para evitar desborde del carro de 80 columnas)
+                  <span className="text-[10px] text-emerald-400 font-medium">
+                    (12 CPI Elite activado: 96 columnas físicas, sin desborde de carro)
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -572,7 +572,7 @@ export default function ImprimirChequeContinentalModal({
                   <input
                     type="text"
                     value={plaza}
-                    onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, e.target.value, colMonto, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
+                    onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, e.target.value, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                     className="input text-xs font-medium py-1 px-2 w-48 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
