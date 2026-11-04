@@ -123,7 +123,9 @@ export default function PayrollDossierView({
   const [ipsMotivos, setIpsMotivos] = useState<Record<string, string>>({})
   const [savingIpsAdjustment, setSavingIpsAdjustment] = useState<string | null>(null)
 
-  const handleSyncFromSueldok = useCallback(async (targetPeriodo = initialPeriodo || "2026-09", force = false) => {
+  const defaultActivePeriodo = initialPeriodo || "2026-10"
+
+  const handleSyncFromSueldok = useCallback(async (targetPeriodo = defaultActivePeriodo, force = false) => {
     try {
       setActionLoading("sync")
       const res = await api.sueldok.syncFromSueldok(targetPeriodo, undefined, force)
@@ -141,7 +143,7 @@ export default function PayrollDossierView({
     } finally {
       setActionLoading(null)
     }
-  }, [initialPeriodo, toast])
+  }, [defaultActivePeriodo, toast])
 
   const loadDossiers = useCallback(async () => {
     try {
@@ -149,18 +151,26 @@ export default function PayrollDossierView({
       const list = await api.sueldok.listDossiers()
       setDossiers(list || [])
       if (list && list.length > 0) {
+        let active = list[0]
         if (id) {
-          const match = list.find((d: Dossier) => d.id === id)
-          setSelectedDossier(match || list[0])
+          active = list.find((d: Dossier) => d.id === id) || list[0]
         } else if (initialPeriodo) {
-          const match = list.find((d: Dossier) => d.periodo === initialPeriodo)
-          setSelectedDossier(match || list[0])
-        } else {
-          setSelectedDossier(list[0])
+          active = list.find((d: Dossier) => d.periodo === initialPeriodo) || list[0]
+        }
+        setSelectedDossier(active)
+
+        // Si el expediente activo está en borrador, auto-sincronizar de forma transparente con SueldOK
+        if (active && active.estado === "borrador") {
+          api.sueldok.syncFromSueldok(active.periodo, undefined, false).then((synced) => {
+            if (synced && (Number(synced.total_neto) !== Number(active.total_neto) || synced.sueldok_run_id !== active.sueldok_run_id)) {
+              setSelectedDossier(synced)
+              api.sueldok.listDossiers().then(l => setDossiers(l || []))
+            }
+          }).catch(() => {})
         }
       } else {
         // Si no hay expedientes, auto-sincronizar el período activo desde SueldOK
-        await handleSyncFromSueldok(initialPeriodo || "2026-09", false)
+        await handleSyncFromSueldok(initialPeriodo || "2026-10", false)
       }
     } catch (err: any) {
       toast.error("Error al cargar expedientes de nómina")
@@ -485,13 +495,13 @@ export default function PayrollDossierView({
           </select>
 
           <button
-            onClick={() => handleSyncFromSueldok(selectedDossier?.periodo || initialPeriodo || "2026-09", true)}
+            onClick={() => handleSyncFromSueldok(selectedDossier?.periodo || defaultActivePeriodo, true)}
             disabled={actionLoading === "sync" || loading}
             className="px-3.5 py-2 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center gap-1.5 shadow-sm shadow-indigo-600/20 disabled:opacity-50"
             title="Importar corrida de nómina aprobada desde SueldOK"
           >
             <Download className={`w-3.5 h-3.5 ${actionLoading === "sync" ? "animate-bounce" : ""}`} />
-            <span>{actionLoading === "sync" ? "Sincronizando..." : "Sincronizar SueldOK"}</span>
+            <span>{actionLoading === "sync" ? "Sincronizando..." : "Actualizar desde SueldOK"}</span>
           </button>
 
           <button
@@ -510,15 +520,15 @@ export default function PayrollDossierView({
           <Briefcase className="w-12 h-12 text-indigo-500 mx-auto mb-3 opacity-80" />
           <h3 className="text-lg font-bold text-gray-900 dark:text-white">Expediente Listo para Sincronizar</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mt-1 mb-5">
-            Detectamos la corrida salarial aprobada del período <strong className="text-indigo-600 dark:text-indigo-400">{initialPeriodo || "2026-09"}</strong> en SueldOK. Haz clic abajo para importarla y generar las fases de desembolso bancario, compensaciones y previsión IPS.
+            Detectamos la corrida salarial aprobada del período <strong className="text-indigo-600 dark:text-indigo-400">{defaultActivePeriodo}</strong> en SueldOK. Haz clic abajo para importarla y generar las fases de desembolso bancario, compensaciones y previsión IPS.
           </p>
           <button
-            onClick={() => handleSyncFromSueldok(initialPeriodo || "2026-09", true)}
+            onClick={() => handleSyncFromSueldok(defaultActivePeriodo, true)}
             disabled={actionLoading === "sync"}
             className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-black shadow-lg shadow-indigo-600/30 transition flex items-center gap-2 mx-auto disabled:opacity-50 cursor-pointer"
           >
             <Download className={`w-4 h-4 ${actionLoading === "sync" ? "animate-bounce" : ""}`} />
-            <span>{actionLoading === "sync" ? "Importando nómina desde SueldOK..." : "Importar Nómina Setiembre 2026 desde SueldOK"}</span>
+            <span>{actionLoading === "sync" ? "Importando nómina desde SueldOK..." : `Importar Nómina ${defaultActivePeriodo} desde SueldOK`}</span>
           </button>
         </div>
       )}

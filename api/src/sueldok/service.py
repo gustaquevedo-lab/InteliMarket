@@ -1200,7 +1200,7 @@ async def sync_payroll_dossier_from_sueldok(
         .where(PayrollDossier.company_id == cid, PayrollDossier.periodo == periodo)
     )
     existing = res.scalars().first()
-    if existing and not force:
+    if existing and not force and existing.estado != "borrador":
         return format_dossier(existing)
 
     # 2. Consultar a SueldOK Overview
@@ -1214,12 +1214,26 @@ async def sync_payroll_dossier_from_sueldok(
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(url, headers=headers)
         if resp.status_code != 200:
+            if existing:
+                return format_dossier(existing)
             raise ValueError(f"SueldOK retornó error {resp.status_code}: {resp.text}")
         data = resp.json()
 
     approved = data.get("approvedPayroll")
     if not approved:
+        if existing:
+            return format_dossier(existing)
         raise ValueError(f"No se encontró corrida salarial aprobada en SueldOK para el período {periodo}")
+
+    # Si ya existe en borrador y no se forzó explícitamente, comparar si SueldOK cambió
+    sueldok_run_id = str(approved.get("id"))
+    sueldok_neto = float(approved.get("totalNet", 0))
+    if existing and not force:
+        # Si la corrida y el neto coinciden con lo guardado en borrador, devolverlo directamente
+        if existing.sueldok_run_id == sueldok_run_id and abs(float(existing.total_neto) - sueldok_neto) < 1.0:
+            return format_dossier(existing)
+        # Si la nómina en SueldOK fue recalculada o modificada, auto-actualizar el borrador!
+        force = True
 
     items = approved.get("items", [])
     deductions = data.get("deductions", [])
@@ -1232,6 +1246,8 @@ async def sync_payroll_dossier_from_sueldok(
 
     for it in items:
         banco = (it.get("bank") or "").strip().upper()
+        if "INTARFISA" in banco or banco.isdigit():
+            banco = "INTERFISA"
         cuenta = (it.get("bankAccount") or "").strip()
         method = (it.get("paymentMethod") or "Transferencia").strip().lower()
         net_sal = float(it.get("totalNet", 0))
@@ -1302,85 +1318,159 @@ async def sync_payroll_dossier_from_sueldok(
                     amount=comm
                 ))
 
-    # 4b. Consolidar préstamos y adelantos (Malou, Credi Porá, Uniformes, Judiciales, Anticipos)
-    raw_deductions = []
-    for d in deductions:
-        desc = (d.get("descripcion") or "").upper()
-        com = (d.get("comentarios") or "").upper()
-        raw_deductions.append({
-            "employeeId": d.get("employeeId", ""),
-            "nombre": d.get("nombre", "Funcionario"),
-            "ci": d.get("ci", "—"),
-            "id": d.get("id", ""),
-            "monto": float(d.get("monto", 0)),
-            "full_desc": f"{desc} {com}",
-            "descripcion": d.get("descripcion", "")
-        })
+    # 4b. Consolidar deducciones reales directamente de los ítems de nómina aprobados
+    adv_map = {str(a.get("id")): a for a in data.get("advances", [])}
+    ded_map = {str(d.get("id")): d for d in data.get("deductions", [])}
 
-    for a in data.get("advances", []):
-        mot = (a.get("motivo") or "").upper()
-        raw_deductions.append({
-            "employeeId": a.get("employeeId", ""),
-            "nombre": a.get("nombre", "Funcionario"),
-            "ci": a.get("ci", "—"),
-            "id": a.get("id", ""),
-            "monto": float(a.get("monto", 0)),
-            "full_desc": mot,
-            "descripcion": a.get("motivo", "")
-        })
+    has_item_loan_deductions = any(it.get("loanDeductions") for it in items)
 
-    for r in raw_deductions:
-        full = r["full_desc"]
-        monto = r["monto"]
-        if monto <= 0:
-            continue
+    if has_item_loan_deductions:
+        for it in items:
+            emp_name = it.get("nombre", "Funcionario")
+            emp_ci = str(it.get("ci", "—"))
+            emp_id = str(it.get("employeeId") or it.get("id"))
+            for ld in (it.get("loanDeductions") or []):
+                lid = str(ld.get("loanId", ""))
+                monto = float(ld.get("amount", 0))
+                if monto <= 0:
+                    continue
+                info = adv_map.get(lid) or ded_map.get(lid) or {}
+                mot = (info.get("motivo") or info.get("descripcion") or info.get("comentarios") or "").upper()
+                desc = info.get("descripcion") or info.get("motivo") or "Deducción de nómina"
 
-        if "UNIFORME" in full:
-            uniformes.append(ExtraClubTicket(
-                employee_id=str(r["employeeId"]),
-                employee_name=r["nombre"],
-                employee_ci=str(r["ci"]),
-                ticket_ref=str(r["id"]),
-                amount=monto
-            ))
-        elif "MALOU" in full or "CAFETERIA" in full or "CAFFE" in full:
-            t_name = "CAFETERIA MALOU"
-            if t_name not in terceros_dict:
-                terceros_dict[t_name] = []
-            terceros_dict[t_name].append({
-                "employee_id": str(r["employeeId"]),
-                "name": r["nombre"],
-                "ci": str(r["ci"]),
-                "amount": monto,
-                "invoice_reference": r["descripcion"]
+                if "UNIFORME" in mot:
+                    uniformes.append(ExtraClubTicket(
+                        employee_id=emp_id,
+                        employee_name=emp_name,
+                        employee_ci=emp_ci,
+                        ticket_ref=lid,
+                        amount=monto
+                    ))
+                elif "MALOU" in mot or "CAFETERIA" in mot or "CAFFE" in mot:
+                    t_name = "CAFETERIA MALOU"
+                    if t_name not in terceros_dict:
+                        terceros_dict[t_name] = []
+                    terceros_dict[t_name].append({
+                        "employee_id": emp_id,
+                        "name": emp_name,
+                        "ci": emp_ci,
+                        "amount": monto,
+                        "invoice_reference": desc
+                    })
+                elif "CREDI" in mot or "PORA" in mot:
+                    t_name = "CREDI PORA"
+                    if t_name not in terceros_dict:
+                        terceros_dict[t_name] = []
+                    terceros_dict[t_name].append({
+                        "employee_id": emp_id,
+                        "name": emp_name,
+                        "ci": emp_ci,
+                        "amount": monto,
+                        "invoice_reference": desc
+                    })
+                elif "JUDICIAL" in mot or "EMBARGO" in mot:
+                    tot_judicial += monto
+                    t_name = "JUZGADO / RETENCION JUDICIAL"
+                    if t_name not in terceros_dict:
+                        terceros_dict[t_name] = []
+                    terceros_dict[t_name].append({
+                        "employee_id": emp_id,
+                        "name": emp_name,
+                        "ci": emp_ci,
+                        "amount": monto,
+                        "invoice_reference": desc
+                    })
+                elif "ANTICIPO" in mot or "ADELANTO" in mot:
+                    tot_anticipos += monto
+                else:
+                    tot_anticipos += monto
+    else:
+        raw_deductions = []
+        for d in deductions:
+            f_d = d.get("fecha") or d.get("startDate") or ""
+            p_d = d.get("periodo") or f_d[:7]
+            if p_d and p_d != periodo:
+                continue
+            desc = (d.get("descripcion") or "").upper()
+            com = (d.get("comentarios") or "").upper()
+            raw_deductions.append({
+                "employeeId": d.get("employeeId", ""),
+                "nombre": d.get("nombre", "Funcionario"),
+                "ci": d.get("ci", "—"),
+                "id": d.get("id", ""),
+                "monto": float(d.get("monto", 0)),
+                "full_desc": f"{desc} {com}",
+                "descripcion": d.get("descripcion", "")
             })
-        elif "CREDI" in full or "PORA" in full:
-            t_name = "CREDI PORA"
-            if t_name not in terceros_dict:
-                terceros_dict[t_name] = []
-            terceros_dict[t_name].append({
-                "employee_id": str(r["employeeId"]),
-                "name": r["nombre"],
-                "ci": str(r["ci"]),
-                "amount": monto,
-                "invoice_reference": r["descripcion"]
+
+        for a in data.get("advances", []):
+            f_a = a.get("fecha") or a.get("startDate") or ""
+            p_a = f_a[:7]
+            if p_a and p_a != periodo:
+                continue
+            mot = (a.get("motivo") or "").upper()
+            raw_deductions.append({
+                "employeeId": a.get("employeeId", ""),
+                "nombre": a.get("nombre", "Funcionario"),
+                "ci": a.get("ci", "—"),
+                "id": a.get("id", ""),
+                "monto": float(a.get("monto", 0)),
+                "full_desc": mot,
+                "descripcion": a.get("motivo", "")
             })
-        elif "JUDICIAL" in full or "EMBARGO" in full:
-            tot_judicial += monto
-            t_name = "JUZGADO / RETENCION JUDICIAL"
-            if t_name not in terceros_dict:
-                terceros_dict[t_name] = []
-            terceros_dict[t_name].append({
-                "employee_id": str(r["employeeId"]),
-                "name": r["nombre"],
-                "ci": str(r["ci"]),
-                "amount": monto,
-                "invoice_reference": r["descripcion"]
-            })
-        elif "ANTICIPO" in full or "ADELANTO" in full:
-            tot_anticipos += monto
-        else:
-            tot_anticipos += monto
+
+        for r in raw_deductions:
+            full = r["full_desc"]
+            monto = r["monto"]
+            if monto <= 0:
+                continue
+
+            if "UNIFORME" in full:
+                uniformes.append(ExtraClubTicket(
+                    employee_id=str(r["employeeId"]),
+                    employee_name=r["nombre"],
+                    employee_ci=str(r["ci"]),
+                    ticket_ref=str(r["id"]),
+                    amount=monto
+                ))
+            elif "MALOU" in full or "CAFETERIA" in full or "CAFFE" in full:
+                t_name = "CAFETERIA MALOU"
+                if t_name not in terceros_dict:
+                    terceros_dict[t_name] = []
+                terceros_dict[t_name].append({
+                    "employee_id": str(r["employeeId"]),
+                    "name": r["nombre"],
+                    "ci": str(r["ci"]),
+                    "amount": monto,
+                    "invoice_reference": r["descripcion"]
+                })
+            elif "CREDI" in full or "PORA" in full:
+                t_name = "CREDI PORA"
+                if t_name not in terceros_dict:
+                    terceros_dict[t_name] = []
+                terceros_dict[t_name].append({
+                    "employee_id": str(r["employeeId"]),
+                    "name": r["nombre"],
+                    "ci": str(r["ci"]),
+                    "amount": monto,
+                    "invoice_reference": r["descripcion"]
+                })
+            elif "JUDICIAL" in full or "EMBARGO" in full:
+                tot_judicial += monto
+                t_name = "JUZGADO / RETENCION JUDICIAL"
+                if t_name not in terceros_dict:
+                    terceros_dict[t_name] = []
+                terceros_dict[t_name].append({
+                    "employee_id": str(r["employeeId"]),
+                    "name": r["nombre"],
+                    "ci": str(r["ci"]),
+                    "amount": monto,
+                    "invoice_reference": r["descripcion"]
+                })
+            elif "ANTICIPO" in full or "ADELANTO" in full:
+                tot_anticipos += monto
+            else:
+                tot_anticipos += monto
 
     terceros_desglose = [
         ThirdPartyDeduction(
