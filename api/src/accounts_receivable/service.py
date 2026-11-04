@@ -615,6 +615,10 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
         return {"error": f"El reparto ({total_allocado}) no coincide con el monto total del pago ({data.monto_total})"}
 
     ids = [str(a.accounts_receivable_id) for a in data.allocations]
+    if len(set(ids)) != len(ids):
+        return {"error": "Un mismo documento aparece dos veces en el reparto del pago"}
+    if any(a.monto <= 0 for a in data.allocations):
+        return {"error": "Cada monto del reparto tiene que ser mayor a cero"}
     result = await db.execute(
         text("""
             SELECT id, saldo_pendiente, customer_id FROM accounts_receivable
@@ -647,6 +651,10 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
     payment_id = uuid.uuid4()
     p_date = data.fecha or date.today()
     p_date_str = p_date.strftime("%Y%m%d")
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext('recibo:' || :cid || ':' || :fec))"),
+        {"cid": str(company_id), "fec": str(p_date)},
+    )
     seq_res = await db.execute(
         text("SELECT count(*) FROM receivable_payments WHERE company_id = :cid AND fecha = :fec"),
         {"cid": company_id, "fec": p_date}
@@ -985,6 +993,10 @@ async def apply_global_payment(
     payment_id = uuid.uuid4()
     fecha_pago = data.fecha or date.today()
     p_date_str = fecha_pago.strftime("%Y%m%d")
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext('recibo:' || :cid || ':' || :fec))"),
+        {"cid": str(company_id), "fec": str(fecha_pago)},
+    )
     seq_res = await db.execute(
         text("SELECT count(*) FROM receivable_payments WHERE company_id = :cid AND fecha = :fec"),
         {"cid": company_id, "fec": fecha_pago}

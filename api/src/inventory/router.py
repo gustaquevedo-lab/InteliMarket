@@ -241,7 +241,10 @@ async def create_transfer(body: TransferCreate, db: AsyncSession = Depends(get_d
 
 @router.post("/inventory/transfers/{transfer_id}/complete", response_model=TransferResponse)
 async def complete_transfer(transfer_id: str, db: AsyncSession = Depends(get_db), _=Depends(require_permission("inventory:transfer"))):
-    result = await service.complete_transfer(db, transfer_id)
+    try:
+        result = await service.complete_transfer(db, transfer_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not result:
         raise HTTPException(status_code=400, detail="No se pudo completar la transferencia")
     return result

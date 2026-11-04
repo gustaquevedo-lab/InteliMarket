@@ -643,7 +643,12 @@ async def resolver_aprobacion_actividades(
 
 
 async def process_payment(db: AsyncSession, company_id: str, customer_id: str, data: CreditPayment) -> dict:
-    account = await get_credit_account_by_customer(db, company_id, customer_id)
+    account = (await db.execute(
+        select(CreditAccount)
+        .where(CreditAccount.company_id == company_id, CreditAccount.customer_id == uuid.UUID(customer_id))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )).scalar_one_or_none()
     if not account:
         return {"error": "No credit account for customer"}
 
@@ -673,6 +678,7 @@ async def process_payment(db: AsyncSession, company_id: str, customer_id: str, d
             SELECT id, saldo_pendiente FROM accounts_receivable
             WHERE company_id = :company_id AND customer_id = :customer_id AND estado = 'pendiente'
             ORDER BY fecha_vencimiento ASC
+            FOR UPDATE
         """),
         {"company_id": str(company_id), "customer_id": str(customer_id)},
     )
@@ -1286,7 +1292,10 @@ async def get_customer_advance_balance(db: AsyncSession, company_id: str, custom
 
 async def apply_advance(db: AsyncSession, company_id: str, advance_id: str, accounts_receivable_id: str, monto: Decimal, user_id: str | None) -> dict:
     advance_result = await db.execute(
-        select(CustomerAdvance).where(CustomerAdvance.id == uuid.UUID(advance_id), CustomerAdvance.company_id == company_id)
+        select(CustomerAdvance)
+        .where(CustomerAdvance.id == uuid.UUID(advance_id), CustomerAdvance.company_id == company_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     advance = advance_result.scalar_one_or_none()
     if not advance:
@@ -1295,7 +1304,7 @@ async def apply_advance(db: AsyncSession, company_id: str, advance_id: str, acco
         return {"error": f"El anticipo solo tiene {advance.monto_disponible} disponibles"}
 
     ar_result = await db.execute(
-        text("SELECT id, saldo_pendiente, estado, customer_id FROM accounts_receivable WHERE id = :id AND company_id = :cid"),
+        text("SELECT id, saldo_pendiente, estado, customer_id FROM accounts_receivable WHERE id = :id AND company_id = :cid FOR UPDATE"),
         {"id": accounts_receivable_id, "cid": company_id},
     )
     ar = ar_result.fetchone()

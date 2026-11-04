@@ -367,7 +367,10 @@ async def approve_approval_request(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    result = await service.approve_credit_request(db, request_id, user["id"], user["tenant_id"])
+    try:
+        result = await service.approve_credit_request(db, request_id, user["id"], user["tenant_id"])
+    except ValueError as e:  # p. ej. stock insuficiente al confirmar la venta
+        raise HTTPException(status_code=400, detail=str(e))
     if "error" in result:
         raise HTTPException(status_code=403 if "No autorizado" in result["error"] else 400, detail=result["error"])
 
@@ -406,7 +409,10 @@ async def resolver_actividades(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    result = await service.resolver_aprobacion_actividades(db, request_id, body.accion, user["id"])
+    try:
+        result = await service.resolver_aprobacion_actividades(db, request_id, body.accion, user["id"])
+    except ValueError as e:  # p. ej. stock insuficiente al confirmar la venta
+        raise HTTPException(status_code=400, detail=str(e))
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result

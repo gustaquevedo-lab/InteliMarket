@@ -455,10 +455,30 @@ async def complete_transfer(db: AsyncSession, transfer_id: str, user_id: uuid.UU
     items_result = await db.execute(select(StockTransferItem).where(StockTransferItem.transfer_id == transfer_obj.id))
     items = items_result.scalars().all()
 
+    # Valida todo el origen antes de mover nada (orden fijo de bloqueo).
+    origen = {}
+    for item in sorted(items, key=lambda i: str(i.product_id)):
+        origen[item.product_id] = await get_stock(db, str(transfer_obj.warehouse_origen_id), str(item.product_id))
+    pedido: dict = {}
     for item in items:
-        src_stock = await get_stock(db, str(transfer_obj.warehouse_origen_id), str(item.product_id))
-        if src_stock:
-            src_stock.cantidad -= item.cantidad_enviada
+        pedido[item.product_id] = pedido.get(item.product_id, 0) + item.cantidad_enviada
+    faltan = [pid for pid, n in pedido.items() if not origen[pid] or origen[pid].cantidad < n]
+    if faltan:
+        nombres = dict((await db.execute(select(Product.id, Product.nombre).where(Product.id.in_(faltan)))).all())
+        raise ValueError("Stock insuficiente en el depósito de origen: " + ", ".join(
+            f"{nombres.get(pid, pid)} (pide {pedido[pid]}, hay {origen[pid].cantidad if origen[pid] else 0})" for pid in faltan))
+
+    for item in items:
+        src_stock = origen[item.product_id]
+        src_stock.cantidad -= item.cantidad_enviada
+        for wh, signo, tipo in ((transfer_obj.warehouse_origen_id, -1, "transferencia"),
+                                (transfer_obj.warehouse_destino_id, 1, "transferencia")):
+            db.add(InventoryMovement(
+                company_id=transfer_obj.company_id, warehouse_id=wh, product_id=item.product_id,
+                variant_id=item.variant_id, tipo=tipo, cantidad=signo * item.cantidad_enviada,
+                costo_unitario=src_stock.costo_unitario, referencia_type="transfer",
+                referencia_id=transfer_obj.id, motivo=f"Traspaso {transfer_obj.codigo}", user_id=user_id,
+            ))
 
         dest_stock = await get_stock(db, str(transfer_obj.warehouse_destino_id), str(item.product_id))
         if not dest_stock:
@@ -735,14 +755,15 @@ async def approve_adjustment_administracion(
 
             stock = await get_stock(db, str(adjustment.warehouse_id), str(item.product_id))
             if stock:
-                stock.cantidad = int(item.cantidad_fisica)
+                # Suma la diferencia contada: lo vendido entre el conteo y la aprobacion no se pierde.
+                stock.cantidad = stock.cantidad + int(item.diferencia)
                 stock.updated_at = datetime.now(timezone.utc)
             else:
                 stock = Stock(
                     warehouse_id=adjustment.warehouse_id,
                     product_id=item.product_id,
                     variant_id=item.variant_id,
-                    cantidad=int(item.cantidad_fisica),
+                    cantidad=int(item.diferencia),
                     costo_unitario=item.costo_unitario,
                 )
                 db.add(stock)
@@ -888,7 +909,8 @@ async def approve_adjustment(db: AsyncSession, adjustment_id: str, user_id: uuid
 
             stock = await get_stock(db, str(adjustment.warehouse_id), str(item.product_id))
             if stock:
-                stock.cantidad = int(item.cantidad_fisica)
+                # Suma la diferencia contada: lo vendido entre el conteo y la aprobacion no se pierde.
+                stock.cantidad = stock.cantidad + int(item.diferencia)
                 stock.updated_at = datetime.now(timezone.utc)
 
     adjustment.estado = "aprobado"

@@ -724,18 +724,42 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
 
 
 async def _deduct_stock_for_sale(db: AsyncSession, sale: Sale, data: SaleCreate) -> None:
+    """Descuenta el stock del deposito de la venta. Si no alcanza, ValueError:
+    la venta entera se deshace (nunca queda stock negativo). Los servicios no
+    llevan stock."""
+    ids = list({i.product_id for i in data.items})
+    servicios = set((await db.execute(
+        select(Product.id).where(Product.id.in_(ids), Product.tipo == "servicio")
+    )).scalars().all())
+    pedido: dict = {}
     for item_data in data.items:
-        qty_to_deduct = int(item_data.cantidad)
-        warehouse_id = None
+        if item_data.product_id not in servicios:
+            pedido[item_data.product_id] = pedido.get(item_data.product_id, 0) + int(item_data.cantidad)
 
-        stock_q = select(Stock).where(Stock.product_id == item_data.product_id)
+    # Bloquea las filas en orden fijo (evita deadlocks entre ventas) y valida todo antes de tocar nada.
+    filas = {}
+    for pid in sorted(pedido, key=str):
+        stock_q = select(Stock).where(Stock.product_id == pid)
         if data.warehouse_id:
             stock_q = stock_q.where(Stock.warehouse_id == data.warehouse_id)
-        stock = (await db.execute(stock_q.limit(1))).scalar_one_or_none()
-        if not stock and data.warehouse_id:
-            # Sin fila en el depósito: se crea y queda en negativo para que el faltante se vea.
-            stock = Stock(warehouse_id=data.warehouse_id, product_id=item_data.product_id, cantidad=0, cantidad_reservada=0)
-            db.add(stock)
+        filas[pid] = (await db.execute(
+            stock_q.order_by(Stock.id).limit(1).with_for_update().execution_options(populate_existing=True)
+        )).scalar_one_or_none()
+    faltan = [(pid, n, filas[pid].cantidad if filas[pid] else 0) for pid, n in pedido.items()
+              if not filas[pid] or filas[pid].cantidad < n]
+    if faltan:
+        nombres = dict((await db.execute(
+            select(Product.id, Product.nombre).where(Product.id.in_([f[0] for f in faltan]))
+        )).all())
+        detalle = "; ".join(f"{nombres.get(pid, pid)}: pide {n}, hay {max(hay, 0)}" for pid, n, hay in faltan)
+        raise ValueError(f"Stock insuficiente en el depósito. {detalle}")
+
+    for item_data in data.items:
+        if item_data.product_id in servicios:
+            continue
+        qty_to_deduct = int(item_data.cantidad)
+        warehouse_id = None
+        stock = filas[item_data.product_id]
         if stock:
             stock.cantidad -= qty_to_deduct
             stock.updated_at = datetime.now(timezone.utc)
@@ -1803,7 +1827,12 @@ async def update_sale(db: AsyncSession, sale_id: str, data: SaleUpdate) -> Sale 
 
 
 async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> dict:
-    sale = await get_sale(db, sale_id)
+    # FOR UPDATE: dos cajas cobrando la misma factura a la vez leian el mismo
+    # total_pagado y la segunda pisaba a la primera (cobro registrado dos
+    # veces, saldo descontado una sola).
+    sale = (await db.execute(
+        select(Sale).where(Sale.id == uuid.UUID(str(sale_id))).with_for_update().execution_options(populate_existing=True)
+    )).scalar_one_or_none()
     if not sale:
         return {"error": "Venta no encontrada"}
     if sale.estado in ("cancelado", "devuelto"):
@@ -1816,7 +1845,10 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
     # la venta) -- si el pago manual viene en una moneda extranjera
     # (BRL/USD), hay que sumar el monto ya convertido, no el monto crudo,
     # o el saldo/estado de la venta quedan mal calculados.
-    monto_pyg = data.monto if sale.moneda == "PYG" else data.monto * sale.tipo_cambio
+    monto_pyg = data.monto if sale.moneda == "PYG" else gs(data.monto * sale.tipo_cambio)
+    saldo_actual = Decimal(str(sale.total)) - Decimal(str(sale.total_pagado or 0))
+    if monto_pyg > saldo_actual:
+        return {"error": f"El cobro (Gs. {int(monto_pyg):,}) supera el saldo de la factura (Gs. {int(saldo_actual):,})"}
 
     payment = Payment(
         company_id=sale.company_id,
@@ -1854,7 +1886,7 @@ async def add_payment(db: AsyncSession, sale_id: str, data: SaleAddPayment) -> d
     sale.updated_at = datetime.now(timezone.utc)
 
     from api.src.accounts_receivable.service import apply_payment_to_receivable
-    await apply_payment_to_receivable(db, str(sale.company_id), str(sale.id), data.monto)
+    await apply_payment_to_receivable(db, str(sale.company_id), str(sale.id), monto_pyg)
 
     await db.flush()
     await db.refresh(sale)
