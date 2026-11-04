@@ -1404,10 +1404,10 @@ export default function PurchasesPage() {
       return
     }
 
-    if (receiptForm.total_factura_impreso && Math.abs(diffRedondeoRecepcion) > 5000) {
+    if (receiptForm.total_factura_impreso && Math.abs(diffRedondeoRecepcion) > 20000) {
       toast.error(
         "Tolerancia de redondeo excedida",
-        `La diferencia entre la factura impresa y los ítems (${diffRedondeoRecepcion > 0 ? "+" : ""}${formatPYG(diffRedondeoRecepcion)}) excede el límite permitido de ₲ 5.000.`
+        `La diferencia entre la factura impresa y los ítems (${diffRedondeoRecepcion > 0 ? "+" : ""}${formatPYG(diffRedondeoRecepcion)}) excede el límite permitido de ₲ 20.000.`
       )
       return
     }
@@ -8168,12 +8168,12 @@ export default function PurchasesPage() {
                       Total Impreso en Factura Física (Opcional - Ajuste de Centavos)
                     </span>
                     <span className="text-[10px] text-slate-500">
-                      Si la factura en papel difiere por centavos respecto al total calculado de ítems (tolerancia máx. ± ₲ 5.000).
+                      Si la factura en papel difiere por centavos respecto al total calculado de ítems (tolerancia máx. ± ₲ 20.000).
                     </span>
                   </div>
                   {diffRedondeoRecepcion !== 0 && (
                     <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-lg ${
-                      Math.abs(diffRedondeoRecepcion) <= 5000
+                      Math.abs(diffRedondeoRecepcion) <= 20000
                         ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
                         : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
                     }`}>

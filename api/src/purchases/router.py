@@ -1213,7 +1213,7 @@ async def receive_invoice_for_order(
                     inv_obj.comprobante_url = saved_scan_url
                 if total_factura_impreso and total_factura_impreso > 0:
                     diff_redondeo = (total_factura_impreso - (inv_obj.total or Decimal("0"))).quantize(Decimal("1"))
-                    if abs(diff_redondeo) <= Decimal("5000"):
+                    if abs(diff_redondeo) <= Decimal("20000"):
                         diff_redondeo_aplicado = diff_redondeo
                         inv_obj.total = total_factura_impreso.quantize(Decimal("1"))
                         inv_obj.saldo_pendiente = total_factura_impreso.quantize(Decimal("1"))
@@ -1242,7 +1242,7 @@ async def receive_invoice_for_order(
                 invoice.comprobante_url = saved_scan_url
             if total_factura_impreso and total_factura_impreso > 0:
                 diff_redondeo = (total_factura_impreso - (invoice.total or Decimal("0"))).quantize(Decimal("1"))
-                if abs(diff_redondeo) <= Decimal("5000"):
+                if abs(diff_redondeo) <= Decimal("20000"):
                     diff_redondeo_aplicado = diff_redondeo
                     invoice.total = total_factura_impreso.quantize(Decimal("1"))
                     invoice.saldo_pendiente = total_factura_impreso.quantize(Decimal("1"))
@@ -1280,7 +1280,7 @@ async def receive_invoice_for_order(
                     invoice.comprobante_url = saved_scan_url
                 if total_factura_impreso and total_factura_impreso > 0:
                     diff_redondeo = (total_factura_impreso - (invoice.total or Decimal("0"))).quantize(Decimal("1"))
-                    if abs(diff_redondeo) <= Decimal("5000"):
+                    if abs(diff_redondeo) <= Decimal("20000"):
                         diff_redondeo_aplicado = diff_redondeo
                         invoice.total = total_factura_impreso.quantize(Decimal("1"))
                         invoice.saldo_pendiente = total_factura_impreso.quantize(Decimal("1"))

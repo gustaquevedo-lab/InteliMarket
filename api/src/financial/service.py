@@ -5102,7 +5102,7 @@ async def create_supplier_payment_order(
 
             if total_amortizar > inv.saldo_pendiente:
                 diff_exceso = total_amortizar - inv.saldo_pendiente
-                if diff_exceso <= Decimal("5000") and Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) == Decimal("0"):
+                if diff_exceso <= Decimal("20000") and Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) == Decimal("0"):
                     auto_redondeo_exceso += diff_exceso
                     total_amortizar = inv.saldo_pendiente
                     aplicado = inv.saldo_pendiente
@@ -5131,10 +5131,10 @@ async def create_supplier_payment_order(
             raise HTTPException(status_code=400, detail="El monto retenido no puede superar el monto total.")
 
         diff_redondeo = Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) + auto_redondeo_exceso
-        if diff_redondeo > Decimal("5000"):
+        if diff_redondeo > Decimal("20000"):
             raise HTTPException(
                 status_code=400,
-                detail=f"El recargo por redondeo a pagar (₲ {diff_redondeo:+,.0f}) supera la tolerancia máxima permitida de +₲ 5.000."
+                detail=f"El recargo por redondeo a pagar (₲ {diff_redondeo:+,.0f}) supera la tolerancia máxima permitida de +₲ 20.000."
             )
 
         monto_neto_efectivo = monto_neto + diff_redondeo
@@ -5430,10 +5430,10 @@ async def _execute_disbursements_internal(
     # 1. Ajustar por diferencia_redondeo si vino en payload
     diff_redondeo_payload = Decimal(str(getattr(payload, "diferencia_redondeo", 0) or 0))
     if diff_redondeo_payload != Decimal("0"):
-        if diff_redondeo_payload > Decimal("5000"):
+        if diff_redondeo_payload > Decimal("20000"):
             raise HTTPException(
                 status_code=400,
-                detail=f"El recargo por redondeo a pagar (₲ {diff_redondeo_payload:+,.0f}) supera la tolerancia máxima permitida de +₲ 5.000."
+                detail=f"El recargo por redondeo a pagar (₲ {diff_redondeo_payload:+,.0f}) supera la tolerancia máxima permitida de +₲ 20.000."
             )
         current_diff = order.diferencia_cambio or Decimal("0")
         if current_diff != diff_redondeo_payload:
@@ -6021,9 +6021,9 @@ async def _execute_disbursements_internal(
             total_amort = alloc.monto_aplicado
             inv.saldo_pendiente = max(Decimal("0"), inv.saldo_pendiente - total_amort)
 
-            # Tolerancia de diferencia de cambio / redondeo: si el saldo restante es un micro-remanente (<= 5.000 Gs)
+            # Tolerancia de diferencia de cambio / redondeo: si el saldo restante es un micro-remanente (<= 20.000 Gs)
             # se absorbe como Diferencia de Cambio para cerrar la factura como 'pagada' y registrar el ajuste contable.
-            if Decimal("0") < inv.saldo_pendiente <= Decimal("5000"):
+            if Decimal("0") < inv.saldo_pendiente <= Decimal("20000"):
                 diff_centavos = inv.saldo_pendiente
                 inv.saldo_pendiente = Decimal("0")
                 if inv.saldo_pendiente_brl is not None:
@@ -6242,7 +6242,7 @@ async def disburse_supplier_payment_order(
             total_amortizar = aplicado
             if total_amortizar > inv.saldo_pendiente:
                 diff_exceso = total_amortizar - inv.saldo_pendiente
-                if diff_exceso <= Decimal("5000") and Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) == Decimal("0"):
+                if diff_exceso <= Decimal("20000") and Decimal(str(getattr(data, "diferencia_redondeo", 0) or 0)) == Decimal("0"):
                     auto_redondeo_exceso += diff_exceso
                     total_amortizar = inv.saldo_pendiente
                     aplicado = inv.saldo_pendiente
@@ -7374,10 +7374,10 @@ async def create_multi_supplier_payment_batch(
             total_amort = m_aplicado
             saldo_rest = max(Decimal("0"), saldo_ant - total_amort)
 
-            # Tolerancia de diferencia de cambio / centavos: si el saldo restante es un micro-remanente (<= 5.000 Gs)
+            # Tolerancia de diferencia de cambio / centavos: si el saldo restante es un micro-remanente (<= 20.000 Gs)
             # se absorbe como Diferencia de Cambio para cerrar la factura como 'pagada'.
             diff_centavos = Decimal("0")
-            if (item.moneda == "BRL" or payload.moneda_desembolso == "BRL") and Decimal("0") < saldo_rest <= Decimal("5000"):
+            if (item.moneda == "BRL" or payload.moneda_desembolso == "BRL") and Decimal("0") < saldo_rest <= Decimal("20000"):
                 diff_centavos = saldo_rest
                 saldo_rest = Decimal("0")
                 op.diferencia_cambio = (op.diferencia_cambio or Decimal("0")) + diff_centavos

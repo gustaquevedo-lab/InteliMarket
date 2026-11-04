@@ -538,7 +538,7 @@ def generate_purchase_3way_receipt_pdf(company: dict, data: dict, generated_by: 
     tot_oc_val = Decimal(str(order.get("total") or 0))
     tot_rec_val = Decimal(str(receipt.get("total") or matching.get("total_recibido") or 0))
     tot_inv_val = Decimal(str(invoice.get("total") or matching.get("total_factura") or tot_rec_val))
-    diff_redondeo = Decimal(str(matching.get("diferencia_redondeo") or (tot_inv_val - tot_rec_val) if abs(tot_inv_val - tot_rec_val) <= Decimal("5000") else 0))
+    diff_redondeo = Decimal(str(matching.get("diferencia_redondeo") or (tot_inv_val - tot_rec_val) if abs(tot_inv_val - tot_rec_val) <= Decimal("20000") else 0))
 
     is_bloqueada = bool(matching.get("bloqueada_para_pago") or invoice.get("bloqueada_para_pago"))
     snc_num = matching.get("snc_numero") or (matching.get("nc_request_generada", {}).get("numero_solicitud") if isinstance(matching.get("nc_request_generada"), dict) else None)

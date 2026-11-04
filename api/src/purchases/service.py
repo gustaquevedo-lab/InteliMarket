@@ -747,9 +747,9 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
 
     if data.total_factura_impreso is not None and data.total_factura_impreso > 0:
         diff_redondeo = (data.total_factura_impreso - total).quantize(Decimal("1"))
-        if abs(diff_redondeo) > Decimal("5000"):
+        if abs(diff_redondeo) > Decimal("20000"):
             raise ValueError(
-                f"La diferencia de redondeo ({diff_redondeo:+,} ₲) excede la tolerancia permitida de ₲ 5.000 entre la factura impresa y el total recibido"
+                f"La diferencia de redondeo ({diff_redondeo:+,} ₲) excede la tolerancia permitida de ₲ 20.000 entre la factura impresa y el total recibido"
             )
 
     po_price_map: dict[str, Decimal] = {}

@@ -471,7 +471,7 @@ async def ingest_parsed_dte(
         
         # Intentar match por monto similar o primer orden abierta
         for po in pos:
-            if abs((po.total or 0) - dte_data["total"]) < Decimal("5000"):  # Diferencia de menos de 5.000 Gs
+            if abs((po.total or 0) - dte_data["total"]) < Decimal("20000"):  # Diferencia de menos de 20.000 Gs
                 po_candidata = po
                 break
         if not po_candidata and pos:

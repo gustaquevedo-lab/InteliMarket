@@ -369,10 +369,10 @@ export default function MultiSupplierPaymentModal({
         const totalCheques = multiCheques.reduce((sum, c) => sum + c.monto, 0)
         const diffCheques = Math.abs(totalCheques - effectiveMontoDesembolso)
 
-        // Si la diferencia es menor o igual a 5.000 Gs (típico redondeo de centavos o retenciones de facturas),
+        // Si la diferencia es menor o igual a 20.000 Gs (típico redondeo de centavos o retenciones de facturas),
         // o si no se había fijado un desembolso manual, calzamos automáticamente el desembolso a la suma de los cheques
         // para que contable y bancariamente sea 100% exacto al papel físico.
-        if (diffCheques > 0 && diffCheques <= 5000) {
+        if (diffCheques > 0 && diffCheques <= 20000) {
           effectiveMontoDesembolso = totalCheques
           setCustomMontoDesembolso(totalCheques)
         } else if (diffCheques > 50) {
