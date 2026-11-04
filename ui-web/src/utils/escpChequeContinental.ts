@@ -327,6 +327,15 @@ export function generarEscpReglaCalibracion(): string {
 }
 
 /**
+ * Emite un bip sonoro físico (\x07) y una línea de verificación corta en la Epson LX-300+
+ * sin expulsar toda la página. Sirve para validar comunicación USB y spooler al instante.
+ */
+export function generarEscpTestRapido(): string {
+  const ESC = "\x1B"
+  return `${ESC}@\x07=== INTELIMARKET: EPSON LX-300+ CONECTADA Y RESPONDIENDO ===\r\n`
+}
+
+/**
  * Genera cheque de prueba en borrador con TALÓN + CHEQUE simultáneos a 12 CPI.
  */
 export function generarEscpPruebaAlineacion(offsetX = 0, offsetY = 0): string {

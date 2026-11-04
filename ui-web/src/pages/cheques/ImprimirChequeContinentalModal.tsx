@@ -11,6 +11,7 @@ import {
   generarEscpChequeContinental,
   generarEscpPruebaAlineacion,
   generarEscpReglaCalibracion,
+  generarEscpTestRapido,
   numeroALetrasContinental,
   formatearLetrasSeguridad,
   type ChequeContinentalData
@@ -313,6 +314,27 @@ export default function ImprimirChequeContinentalModal({
     }
   }
 
+  // Test rápido de conexión física (bip + 1 renglón)
+  const handleTestConexion = async () => {
+    if (!selectedPrinter) {
+      toast.error("Seleccione una impresora", "Elija la Epson LX-300+ de la lista de impresoras.")
+      return
+    }
+    setImprimiendo(true)
+    try {
+      const comandos = generarEscpTestRapido()
+      await printRawViaQz(selectedPrinter, comandos)
+      toast.success(
+        "Señal de Test Enviada a la Impresora",
+        "Si la impresora está conectada y lista, emitirá un bip sonoro e imprimirá una línea de diagnóstico."
+      )
+    } catch (e: any) {
+      toast.error("Error al enviar señal de prueba", qzErrorLegible(e))
+    } finally {
+      setImprimiendo(false)
+    }
+  }
+
   if (!isOpen) return null
 
   return (
@@ -368,20 +390,77 @@ export default function ImprimirChequeContinentalModal({
           {/* PANEL DE CALIBRACIÓN COLAPSABLE */}
           {showConfig && (
             <div className="p-4 bg-slate-900 text-white rounded-2xl border border-slate-800 space-y-4 animate-fade-in shadow-inner">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
-                  <Settings2 className="w-4 h-4 text-purple-400" />
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-200">
-                    Calibrador de Márgenes y Dispositivo (Epson LX-300+)
-                  </h3>
+                  <Settings2 className="w-5 h-5 text-purple-400" />
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider text-slate-100">
+                      Calibrador de Márgenes y Dispositivo (Epson LX-300+)
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Imprime la regla milimétrica o prueba en borrador para ajustar el calce exacto de las casillas.
+                    </p>
+                  </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => guardarConfiguracion(selectedPrinter, 0, 0, true, "Pedro Juan Caballero", 1, 26, 76, 48, 68)}
                   className="text-[11px] text-purple-300 hover:text-purple-200 flex items-center gap-1 font-bold underline"
                 >
-                  <RotateCcw className="w-3 h-3" /> Restablecer Valores Canónicos
+                  <RotateCcw className="w-3.5 h-3.5" /> Restablecer Valores Canónicos
                 </button>
+              </div>
+
+              {/* BOTONERA PRINCIPAL DE CALIBRACIÓN DIRECTA */}
+              <div className="p-3.5 bg-purple-950/60 border border-purple-500/40 rounded-xl space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-black text-purple-200 uppercase tracking-wide flex items-center gap-1.5">
+                    <Sliders className="w-4 h-4 text-purple-400" />
+                    Acciones Inmediatas en Impresora:
+                  </span>
+                  <span className="text-[11px] text-purple-300/80 font-mono">
+                    Carro: 12 CPI Elite · 96 Columnas · 6 LPI
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleImprimirRegla}
+                    disabled={imprimiendo || !selectedPrinter}
+                    className="px-3.5 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-950/50 disabled:opacity-50 transition flex items-center justify-center gap-2 border border-purple-400/40"
+                    title="Imprime la regla milimétrica de 96 columnas numeradas L1..L9"
+                  >
+                    <Sliders className="w-4 h-4" />
+                    <span>📐 Imprimir Regla L1..L9 (Grid)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleImprimirPrueba}
+                    disabled={imprimiendo || !selectedPrinter}
+                    className="px-3.5 py-2.5 rounded-xl text-xs font-black bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 disabled:opacity-50 transition flex items-center justify-center gap-2"
+                    title="Imprime un cheque con marcas completas (talón + cheque) en papel borrador"
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>📄 Imprimir Cheque de Prueba</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleTestConexion}
+                    disabled={imprimiendo || !selectedPrinter}
+                    className="px-3.5 py-2.5 rounded-xl text-xs font-black bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50 transition flex items-center justify-center gap-2"
+                    title="Emite un bip sonoro en el parlante de la Epson y 1 renglón de prueba"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>🔔 Test Conexión (Bip + Línea)</span>
+                  </button>
+                </div>
+
+                <p className="text-[10px] text-purple-200/70 pt-1 leading-relaxed">
+                  💡 <strong>¿Cómo calibrar?</strong> Presiona <em>&quot;Imprimir Regla L1..L9&quot;</em> sobre papel continuo borrador. Superpón tu cheque Continental a trasluz y observa en qué línea (L1..L8) y columna (0..90) cae cada recuadro para ajustar los casilleros de abajo.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -535,20 +614,48 @@ export default function ImprimirChequeContinentalModal({
                 </div>
               </div>
 
+              {/* DIAGNÓSTICO RÁPIDO: SI FINGE QUE IMPRIME PERO NO SE MUEVE LA EPSON */}
+              <div className="p-3 bg-slate-800/90 border border-slate-700 rounded-xl text-xs space-y-2 text-slate-300">
+                <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>¿El sistema dice &quot;Enviado&quot; pero la Epson LX-300+ no se mueve ni imprime?</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[11px] text-slate-300">
+                  <div className="p-2 bg-slate-900/80 rounded-lg border border-slate-800">
+                    <p className="font-bold text-amber-300 mb-1">1. Botón PAUSE en la Epson</p>
+                    <p className="text-slate-400 leading-normal">
+                      Si la luz ámbar <strong>PAUSE</strong> en la impresora está encendida, el trabajo queda guardado en la memoria de la impresora y no avanza. <strong>Presiona el botón PAUSE</strong> una vez en el panel de la Epson.
+                    </p>
+                  </div>
+                  <div className="p-2 bg-slate-900/80 rounded-lg border border-slate-800">
+                    <p className="font-bold text-amber-300 mb-1">2. Cola Trabada en Windows</p>
+                    <p className="text-slate-400 leading-normal">
+                      Si hubo un error anterior, Windows retiene la cola en pausa. En Windows: <em>Impresoras ➔ Epson LX-300+ ➔ Abrir cola de impresión ➔ Impresora ➔ <strong>Cancelar todos los documentos</strong></em>.
+                    </p>
+                  </div>
+                  <div className="p-2 bg-slate-900/80 rounded-lg border border-slate-800">
+                    <p className="font-bold text-amber-300 mb-1">3. Palanca de Papel Continuo</p>
+                    <p className="text-slate-400 leading-normal">
+                      Verifica que la palanca de selección de papel (a la derecha) esté apuntando hacia <strong>Tractor continuo</strong> (hacia atrás) y no en fricción de hojas sueltas, para que no prenda <strong>PAPER OUT</strong>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* AYUDA QZ TRAY PERMISOS PERMANENTES */}
               <div className="p-3 bg-amber-950/40 border border-amber-500/30 rounded-xl text-xs space-y-1 text-amber-200">
                 <div className="flex items-center gap-1.5 font-bold text-amber-300">
-                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
                   <span>¿QZ Tray te pide confirmación en cada cheque o sale con candado amarillo?</span>
                 </div>
                 <p className="text-[11px] text-amber-300/80 leading-relaxed">
                   Para que Windows no vuelva a interrumpir con el cartel de permiso:
                   <br />
-                  1. Clic derecho en el ícono de <strong>QZ Tray</strong> junto al reloj de Windows ➔ <strong>Advanced</strong> ➔ <strong>Site Manager</strong>.
+                  1. Clic derecho en el ícono verde de <strong>QZ Tray</strong> (junto al reloj de Windows) ➔ <strong>Advanced</strong> ➔ <strong>Site Manager</strong>.
                   <br />
-                  2. En la pestaña <strong>Allowed</strong>, haz clic en el botón <strong>+</strong> y escribe la dirección de este ERP (ej: <code>192.168.0.10</code>).
+                  2. En la pestaña <strong>Allowed</strong>, haz clic en el botón <strong>+</strong> y escribe la dirección de este ERP: <code>192.168.0.10:5173</code> (o <code>192.168.0.10</code>).
                   <br />
-                  3. ¡Listo! QZ Tray recordará la autorización de forma permanente.
+                  3. ¡Listo! QZ Tray recordará la autorización de forma permanente sin volver a preguntar.
                 </p>
               </div>
 
@@ -576,6 +683,63 @@ export default function ImprimirChequeContinentalModal({
                     className="input text-xs font-medium py-1 px-2 w-48 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* BARRA SUPERIOR: IMPRESORA ACTIVA Y TEST RÁPIDO */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-2 flex-1 min-w-[280px]">
+              <Printer className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span className="text-xs font-black text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                Impresora en Windows:
+              </span>
+              <select
+                className="input text-xs font-mono font-bold py-1 px-2.5 flex-1 bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+                value={selectedPrinter}
+                onChange={e => guardarConfiguracion(e.target.value, offsetX, offsetY, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
+              >
+                {printers.length === 0 && <option value="">— Sin impresoras detectadas (abrir QZ Tray) —</option>}
+                {printers.map(p => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={cargarImpresoras}
+                disabled={loadingPrinters}
+                className="p-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-600 dark:text-slate-300 hover:text-emerald-600"
+                title="Refrescar impresoras de Windows"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingPrinters ? "animate-spin" : ""}`} />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleTestConexion}
+                disabled={imprimiendo || !selectedPrinter}
+                className="px-3 py-1.5 text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg shadow-sm disabled:opacity-50 transition flex items-center gap-1.5"
+                title="Emite un bip sonoro en la Epson LX-300+ e imprime 1 renglón para verificar respuesta instantánea"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Probar Conexión (Bip)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ALERTA SI LA IMPRESORA SELECCIONADA NO ES LA EPSON */}
+          {selectedPrinter && !/lx-?300|epson|generic|matriz|matrix/i.test(selectedPrinter) && (
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5 animate-fade-in">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">
+                  Atención: La impresora seleccionada es &quot;{selectedPrinter}&quot;
+                </p>
+                <p className="text-[11px] text-amber-800 dark:text-amber-300/90 leading-normal">
+                  Si estás en la PC de Administración con la <strong>Epson LX-300+</strong> conectada por USB, asegúrate de seleccionarla en el desplegable superior. De lo contrario, los comandos ESC/P se enviarán a un archivo PDF o a otra impresora física.
+                </p>
               </div>
             </div>
           )}
