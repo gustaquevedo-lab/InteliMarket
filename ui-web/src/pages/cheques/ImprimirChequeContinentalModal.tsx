@@ -10,6 +10,7 @@ import CurrencyInput from "../../components/CurrencyInput"
 import {
   generarEscpChequeContinental,
   generarEscpPruebaAlineacion,
+  generarEscpReglaCalibracion,
   numeroALetrasContinental,
   formatearLetrasSeguridad,
   type ChequeContinentalData
@@ -43,6 +44,11 @@ const STORAGE_KEYS = {
   OFFSET_Y: "intelimarket_cheque_offset_y",
   IMPRIMIR_TALON: "intelimarket_cheque_imprimir_talon",
   PLAZA: "intelimarket_cheque_plaza",
+  COL_MONTO: "intelimarket_cheque_col_monto",
+  COL_FECHAS_EMI: "intelimarket_cheque_col_fechas_emi",
+  COL_FECHAS_PAGO: "intelimarket_cheque_col_fechas_pago",
+  COL_BENE: "intelimarket_cheque_col_bene",
+  COL_LETRAS: "intelimarket_cheque_col_letras",
 }
 
 export default function ImprimirChequeContinentalModal({
@@ -64,7 +70,7 @@ export default function ImprimirChequeContinentalModal({
   const [noALaOrden, setNoALaOrden] = useState(true)
   const [concepto, setConcepto] = useState("")
   const [plaza, setPlaza] = useState("Pedro Juan Caballero")
-  const [imprimirTalon, setImprimirTalon] = useState(true)
+  const [imprimirTalon, setImprimirTalon] = useState(false)
 
   // ── CALIBRACIÓN Y DISPOSITIVOS ──
   const [printers, setPrinters] = useState<string[]>([])
@@ -73,6 +79,12 @@ export default function ImprimirChequeContinentalModal({
   const [showConfig, setShowConfig] = useState(false)
   const [offsetX, setOffsetX] = useState<number>(0)
   const [offsetY, setOffsetY] = useState<number>(0)
+  // Columnas calibradas individuales (defecto optimizado para Banco Continental)
+  const [colMonto, setColMonto] = useState<number>(52)
+  const [colFechasEmi, setColFechasEmi] = useState<number>(26)
+  const [colFechasPago, setColFechasPago] = useState<number>(44)
+  const [colBeneficiario, setColBeneficiario] = useState<number>(4)
+  const [colLetras, setColLetras] = useState<number>(3)
   const [imprimiendo, setImprimiendo] = useState(false)
 
   // Cargar preferencias guardadas en localStorage
@@ -82,12 +94,22 @@ export default function ImprimirChequeContinentalModal({
     const savedOffY = parseInt(localStorage.getItem(STORAGE_KEYS.OFFSET_Y) || "0", 10)
     const savedTalon = localStorage.getItem(STORAGE_KEYS.IMPRIMIR_TALON)
     const savedPlaza = localStorage.getItem(STORAGE_KEYS.PLAZA) || "Pedro Juan Caballero"
+    const savedColMonto = parseInt(localStorage.getItem(STORAGE_KEYS.COL_MONTO) || "52", 10)
+    const savedColFEmi = parseInt(localStorage.getItem(STORAGE_KEYS.COL_FECHAS_EMI) || "26", 10)
+    const savedColFPago = parseInt(localStorage.getItem(STORAGE_KEYS.COL_FECHAS_PAGO) || "44", 10)
+    const savedColBene = parseInt(localStorage.getItem(STORAGE_KEYS.COL_BENE) || "4", 10)
+    const savedColLetras = parseInt(localStorage.getItem(STORAGE_KEYS.COL_LETRAS) || "3", 10)
 
     if (savedPrinter) setSelectedPrinter(savedPrinter)
     if (!isNaN(savedOffX)) setOffsetX(savedOffX)
     if (!isNaN(savedOffY)) setOffsetY(savedOffY)
     if (savedTalon !== null) setImprimirTalon(savedTalon === "true")
     if (savedPlaza) setPlaza(savedPlaza)
+    if (!isNaN(savedColMonto)) setColMonto(savedColMonto)
+    if (!isNaN(savedColFEmi)) setColFechasEmi(savedColFEmi)
+    if (!isNaN(savedColFPago)) setColFechasPago(savedColFPago)
+    if (!isNaN(savedColBene)) setColBeneficiario(savedColBene)
+    if (!isNaN(savedColLetras)) setColLetras(savedColLetras)
   }, [])
 
   // Precargar datos del cheque cuando se abre el modal
@@ -140,17 +162,38 @@ export default function ImprimirChequeContinentalModal({
   }
 
   // Guardar configuración de offset y dispositivo
-  const guardarConfiguracion = (newPrinter: string, newOffX: number, newOffY: number, newTalon: boolean, newPlaza: string) => {
+  const guardarConfiguracion = (
+    newPrinter: string,
+    newOffX: number,
+    newOffY: number,
+    newTalon: boolean,
+    newPlaza: string,
+    newColMonto = colMonto,
+    newColFEmi = colFechasEmi,
+    newColFPago = colFechasPago,
+    newColBene = colBeneficiario,
+    newColLetras = colLetras
+  ) => {
     setSelectedPrinter(newPrinter)
     setOffsetX(newOffX)
     setOffsetY(newOffY)
     setImprimirTalon(newTalon)
     setPlaza(newPlaza)
+    setColMonto(newColMonto)
+    setColFechasEmi(newColFEmi)
+    setColFechasPago(newColFPago)
+    setColBeneficiario(newColBene)
+    setColLetras(newColLetras)
     localStorage.setItem(STORAGE_KEYS.PRINTER, newPrinter)
     localStorage.setItem(STORAGE_KEYS.OFFSET_X, String(newOffX))
     localStorage.setItem(STORAGE_KEYS.OFFSET_Y, String(newOffY))
     localStorage.setItem(STORAGE_KEYS.IMPRIMIR_TALON, String(newTalon))
     localStorage.setItem(STORAGE_KEYS.PLAZA, newPlaza)
+    localStorage.setItem(STORAGE_KEYS.COL_MONTO, String(newColMonto))
+    localStorage.setItem(STORAGE_KEYS.COL_FECHAS_EMI, String(newColFEmi))
+    localStorage.setItem(STORAGE_KEYS.COL_FECHAS_PAGO, String(newColFPago))
+    localStorage.setItem(STORAGE_KEYS.COL_BENE, String(newColBene))
+    localStorage.setItem(STORAGE_KEYS.COL_LETRAS, String(newColLetras))
   }
 
   // Desglose del monto en letras y seguridad
@@ -159,7 +202,7 @@ export default function ImprimirChequeContinentalModal({
   }, [monto])
 
   const letrasConSeguridad = useMemo(() => {
-    return formatearLetrasSeguridad(monto, 54)
+    return formatearLetrasSeguridad(monto, 50)
   }, [monto])
 
   // Partición de fechas para la vista previa
@@ -204,6 +247,11 @@ export default function ImprimirChequeContinentalModal({
         imprimirTalon,
         offsetX,
         offsetY,
+        colMonto,
+        colFechasEmi,
+        colFechasPago,
+        colBeneficiario,
+        colLetras,
       }
 
       const comandos = generarEscpChequeContinental(payload)
@@ -235,10 +283,31 @@ export default function ImprimirChequeContinentalModal({
       await printRawViaQz(selectedPrinter, comandos)
       toast.success(
         "Prueba de Calibración Enviada",
-        "Se imprimió una plantilla en papel borrador. Superpóngala a trasluz con su cheque para verificar el calce."
+        "Se imprimió una plantilla compacta en papel borrador. Superpóngala a trasluz con su cheque para verificar el calce."
       )
     } catch (e: any) {
       toast.error("Error de prueba", qzErrorLegible(e))
+    } finally {
+      setImprimiendo(false)
+    }
+  }
+
+  // Impresión de regla física milimétrica (Grid L1..L9)
+  const handleImprimirRegla = async () => {
+    if (!selectedPrinter) {
+      toast.error("Seleccione una impresora", "Elija la Epson LX-300+ de la lista.")
+      return
+    }
+    setImprimiendo(true)
+    try {
+      const comandos = generarEscpReglaCalibracion()
+      await printRawViaQz(selectedPrinter, comandos)
+      toast.success(
+        "Regla de Calibración Enviada a la LX-300+",
+        "Se imprimió la regla L1..L9 con columnas numeradas. Colóquela sobre su cheque a trasluz para verificar exactamente en qué línea y columna cae cada casillero."
+      )
+    } catch (e: any) {
+      toast.error("Error al imprimir regla", qzErrorLegible(e))
     } finally {
       setImprimiendo(false)
     }
@@ -376,12 +445,12 @@ export default function ImprimirChequeContinentalModal({
                 {/* Offset Vertical Y */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                    Offset Y (Líneas a 8 LPI)
+                    Offset Y (Líneas a 6 LPI)
                   </label>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX, offsetY - 1, imprimirTalon, plaza)}
+                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX, offsetY - 1, imprimirTalon, plaza, colMonto, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
                       className="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-white font-black"
                     >
                       -
@@ -390,11 +459,11 @@ export default function ImprimirChequeContinentalModal({
                       type="number"
                       className="input text-xs text-center font-bold font-mono bg-slate-800 border-slate-700 text-white w-16"
                       value={offsetY}
-                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, parseInt(e.target.value) || 0, imprimirTalon, plaza)}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, parseInt(e.target.value) || 0, imprimirTalon, plaza, colMonto, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
                     />
                     <button
                       type="button"
-                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX, offsetY + 1, imprimirTalon, plaza)}
+                      onClick={() => guardarConfiguracion(selectedPrinter, offsetX, offsetY + 1, imprimirTalon, plaza, colMonto, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
                       className="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-white font-black"
                     >
                       +
@@ -403,24 +472,107 @@ export default function ImprimirChequeContinentalModal({
                 </div>
               </div>
 
+              {/* CALIBRACIÓN INDIVIDUAL DE COLUMNAS (POR CAMPO) */}
+              <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-700/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-200">
+                    Posiciones de Columnas en el Cheque (Use la Regla L1..L9 para ajustar al milímetro):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => guardarConfiguracion(selectedPrinter, 0, 0, false, "Pedro Juan Caballero", 52, 26, 44, 4, 3)}
+                    className="text-[10px] text-purple-400 hover:text-purple-300 underline font-semibold"
+                  >
+                    Valores Canónicos Continental
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. Monto (₲)</label>
+                    <input
+                      type="number"
+                      value={colMonto}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, parseInt(e.target.value) || 0, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
+                      className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. Fec. Emisión</label>
+                    <input
+                      type="number"
+                      value={colFechasEmi}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colMonto, parseInt(e.target.value) || 0, colFechasPago, colBeneficiario, colLetras)}
+                      className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. Fec. Pago</label>
+                    <input
+                      type="number"
+                      value={colFechasPago}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colMonto, colFechasEmi, parseInt(e.target.value) || 0, colBeneficiario, colLetras)}
+                      className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. Beneficiario</label>
+                    <input
+                      type="number"
+                      value={colBeneficiario}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colMonto, colFechasEmi, colFechasPago, parseInt(e.target.value) || 0, colLetras)}
+                      className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-0.5">Col. En Letras</label>
+                    <input
+                      type="number"
+                      value={colLetras}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, plaza, colMonto, colFechasEmi, colFechasPago, colBeneficiario, parseInt(e.target.value) || 0)}
+                      className="input text-xs font-mono font-bold w-full bg-slate-900 border-slate-700 text-white py-1"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* AYUDA QZ TRAY PERMISOS PERMANENTES */}
+              <div className="p-3 bg-amber-950/40 border border-amber-500/30 rounded-xl text-xs space-y-1 text-amber-200">
+                <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>¿QZ Tray te pide confirmación en cada cheque o sale con candado amarillo?</span>
+                </div>
+                <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                  Para que Windows no vuelva a interrumpir con el cartel de permiso:
+                  <br />
+                  1. Clic derecho en el ícono de <strong>QZ Tray</strong> junto al reloj de Windows ➔ <strong>Advanced</strong> ➔ <strong>Site Manager</strong>.
+                  <br />
+                  2. En la pestaña <strong>Allowed</strong>, haz clic en el botón <strong>+</strong> y escribe la dirección de este ERP (ej: <code>192.168.0.10</code>).
+                  <br />
+                  3. ¡Listo! QZ Tray recordará la autorización de forma permanente.
+                </p>
+              </div>
+
               <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-800/80 text-xs text-slate-400">
                 <div className="flex items-center gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={imprimirTalon}
-                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, e.target.checked, plaza)}
+                      onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, e.target.checked, plaza, colMonto, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
                       className="rounded border-slate-700 text-purple-600 focus:ring-purple-500 bg-slate-800"
                     />
                     <span>Imprimir también el <strong>Talón de Control Izquierdo</strong> (stub)</span>
                   </label>
+                  <span className="text-[10px] text-slate-500 italic">
+                    (Recomendado: Desmarcado para evitar desborde del carro de 80 columnas)
+                  </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span>Plaza de emisión:</span>
                   <input
                     type="text"
                     value={plaza}
-                    onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, e.target.value)}
+                    onChange={e => guardarConfiguracion(selectedPrinter, offsetX, offsetY, imprimirTalon, e.target.value, colMonto, colFechasEmi, colFechasPago, colBeneficiario, colLetras)}
                     className="input text-xs font-medium py-1 px-2 w-48 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
@@ -774,6 +926,16 @@ export default function ImprimirChequeContinentalModal({
               className="px-4 py-2 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 transition"
             >
               Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleImprimirRegla}
+              disabled={imprimiendo || !selectedPrinter}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-800 hover:bg-purple-100 dark:hover:bg-purple-900/60 transition flex items-center gap-1.5"
+              title="Imprime la regla milimétrica de coordenadas L1..L9 en papel continuo para superponer al cheque Continental"
+            >
+              <Sliders className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+              <span>Imprimir Regla L1..L9 (Grid)</span>
             </button>
             <button
               type="button"

@@ -1,7 +1,8 @@
 // ── GENERADOR DE TRAMAS ESC/P PARA CHEQUES BANCO CONTINENTAL (PARAGUAY) ──
 // Diseñado para Epson LX-300+ / LX-300+II conectada por USB en formulario continuo.
 // Medida física: 2.75 pulgadas (69.85 mm = 7.0 cm) por 9.5 pulgadas de ancho.
-// A 8 LPI (ESC 0), 2.75 pulgadas son exactamente 22 líneas (cero desfasaje en continuo).
+// A 6 LPI (ESC 2) o 8 LPI (ESC 0), ajustado para que NINGUNA línea supere 72 columnas
+// y evitar terminantemente el auto-wrap del carro de 80 columnas de la LX-300+.
 
 export interface ChequeContinentalData {
   numero: string
@@ -14,10 +15,16 @@ export interface ChequeContinentalData {
   noALaOrden: boolean
   concepto?: string
   plaza?: string // Defecto: "Pedro Juan Caballero"
-  imprimirTalon?: boolean // Si se llena el talón izquierdo de control
+  imprimirTalon?: boolean // Si se llena el talón izquierdo de control (default: false para evitar desborde de 80 col)
   // Calibración fina (guardada en localStorage por PC)
   offsetX?: number // Columnas (+ a la derecha, - a la izquierda)
   offsetY?: number // Líneas (+ abajo, - arriba)
+  // Posiciones individuales calibrables (en columnas relativas al cheque)
+  colMonto?: number // Default: 52
+  colFechasEmi?: number // Default: 26
+  colFechasPago?: number // Default: 44
+  colBeneficiario?: number // Default: 4
+  colLetras?: number // Default: 3
 }
 
 /**
@@ -81,7 +88,7 @@ export function numeroALetrasContinental(monto: number): string {
     if (n < 1000000000000) {
       const millones = Math.floor(n / 1000000)
       const resto = n % 1000000
-      const millStr = millones === 1 ? "UN MILLÓN" : convertir(millones) + " MILLONES"
+      const millStr = millones === 1 ? "UN MILLÓN" : convertir(millones) + " MILLONES";
       return resto > 0 ? millStr + " " + convertir(resto) : millStr
     }
     return n.toString()
@@ -91,15 +98,15 @@ export function numeroALetrasContinental(monto: number): string {
 }
 
 /**
- * Da formato de seguridad al monto en letras con asteriscos y guiones de relleno:
- * Ej: *QUINCE MILLONES QUINIENTOS MIL-------------------------------------*
+ * Da formato de seguridad al monto en letras con asteriscos y guiones de relleno.
+ * Máximo 50 caracteres por línea para NUNCA desbordar el carro de 80 columnas.
  */
-export function formatearLetrasSeguridad(monto: number, maxChars = 58): { linea1: string; linea2: string } {
+export function formatearLetrasSeguridad(monto: number, maxChars = 50): { linea1: string; linea2: string } {
   const letras = numeroALetrasContinental(monto)
   const base = `*${letras}`
   
-  if (base.length <= maxChars - 1) {
-    const relleno = "-".repeat(Math.max(3, maxChars - base.length - 1))
+  if (base.length <= maxChars - 2) {
+    const relleno = "-".repeat(Math.max(2, maxChars - base.length - 1))
     return { linea1: `${base}${relleno}*`, linea2: "" }
   }
 
@@ -116,15 +123,12 @@ export function formatearLetrasSeguridad(monto: number, maxChars = 58): { linea1
   }
   l1 += "*"
   if (l2) {
-    const relleno2 = "-".repeat(Math.max(3, maxChars - l2.length - 3))
+    const relleno2 = "-".repeat(Math.max(2, maxChars - l2.length - 2))
     l2 = `*${l2}${relleno2}*`
   }
   return { linea1: l1, linea2: l2 }
 }
 
-/**
- * Parsea YYYY-MM-DD y devuelve objeto { dd, mm, aaaa, aa }
- */
 function parsearFecha(fechaStr?: string) {
   if (!fechaStr) {
     const hoy = new Date()
@@ -151,13 +155,20 @@ const MESES = [
 ]
 
 /**
- * Genera el payload de comandos ESC/P para Epson LX-300+ / matricial de 9 pines.
- * Retorna string con secuencias binarias para ser enviadas por QZ Tray RAW.
+ * Genera el payload de comandos ESC/P para Epson LX-300+ optimizado y calibrado.
+ * 
+ * ESTRATEGIA ANTI-DESBORDE Y PRECISIÓN MILIMÉTRICA:
+ * 1. Ancho máximo estricto por línea: 72 columnas (el carro de LX-300+ a 10 CPI tiene 80 col).
+ *    Esto garantiza CERO auto-wraps no deseados, cero saltos extra y cero letras desparramadas.
+ * 2. Si se activa el talón izquierdo (imprimirTalon=true), se activa automáticamente
+ *    modo Condensado (17.1 CPI, 136 col) para que ambos sectores quepan sin desbordar.
+ * 3. En modo estándar (solo cuerpo del cheque), la impresión arranca directo en las casillas
+ *    del cheque con 10 CPI Draft nítido y claro.
  */
 export function generarEscpChequeContinental(data: ChequeContinentalData): string {
-  const offX = Math.max(-15, Math.min(25, data.offsetX || 0))
+  const offX = Math.max(-25, Math.min(25, data.offsetX || 0))
   const offY = Math.max(-5, Math.min(5, data.offsetY || 0))
-  const imprimirTalon = data.imprimirTalon ?? true
+  const imprimirTalon = data.imprimirTalon ?? false // Por defecto false: enfocado en el cuerpo del cheque
   const plaza = data.plaza || "Pedro Juan Caballero"
 
   // Fechas parseadas
@@ -165,111 +176,116 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
   const fPago = parsearFecha(data.fechaPago || data.fechaEmision)
   const mesEmiNombre = MESES[parseInt(fEmi.mm, 10)] || "Noviembre"
 
-  // Monto formateado con asteriscos de seguridad: *15.500.000*
+  // Monto formateado con asteriscos de seguridad
   const montoNumStr = `*${Math.round(data.monto).toLocaleString("es-PY")}*`
   
-  // Monto en letras
-  const { linea1: letrasL1, linea2: letrasL2 } = formatearLetrasSeguridad(data.monto, 56)
+  // Monto en letras (máx 50 caracteres para no romper margen)
+  const { linea1: letrasL1, linea2: letrasL2 } = formatearLetrasSeguridad(data.monto, 50)
 
   // Beneficiario
   let beneText = data.beneficiario.toUpperCase().trim()
   if (data.noALaOrden) {
     beneText += "   *** NO A LA ORDEN ***"
   }
+  // Truncar beneficiario a máx 48 caracteres para evitar desborde
+  if (beneText.length > 48) {
+    beneText = beneText.slice(0, 48)
+  }
 
-  // Matriz de 22 líneas (a 8 LPI, 2.75 pulgadas = 22 líneas exactas)
-  // Cada línea contendrá hasta 88 caracteres.
-  const lineas: string[] = Array(22).fill("")
+  // Matriz de líneas (12 líneas útiles para cubrir la altura del cheque)
+  const TOTAL_LINEAS = 14
+  const lineas: string[] = Array(TOTAL_LINEAS).fill("")
 
-  // Helper para escribir en una posición específica de una línea
+  // Columnas base calibradas (relativas al cuerpo del cheque)
+  // En la LX-300+, con el tractor en posición normal, el cheque arranca en col 0-4.
+  const COL_BASE = imprimirTalon ? 24 : 0
+  const cMonto = (data.colMonto ?? 52) + COL_BASE
+  const cFechasEmi = (data.colFechasEmi ?? 26) + COL_BASE
+  const cFechasPago = (data.colFechasPago ?? 44) + COL_BASE
+  const cBene = (data.colBeneficiario ?? 4) + COL_BASE
+  const cLetras = (data.colLetras ?? 3) + COL_BASE
+
+  // Helper de escritura seguro con límite estricto de 76 caracteres
+  const MAX_COL = imprimirTalon ? 120 : 75
   function escribir(lineaIdx: number, col: number, texto: string) {
     const lActual = lineaIdx + offY
-    if (lActual < 0 || lActual >= 22) return
-    const cActual = Math.max(0, col + offX)
+    if (lActual < 0 || lActual >= TOTAL_LINEAS) return
+    const cActual = Math.max(0, Math.min(MAX_COL - texto.length, col + offX))
     let cur = lineas[lActual]
     if (cur.length < cActual) {
       cur = cur.padEnd(cActual, " ")
     }
-    lineas[lActual] = cur.slice(0, cActual) + texto + cur.slice(cActual + texto.length)
+    const nueva = cur.slice(0, cActual) + texto + cur.slice(cActual + texto.length)
+    lineas[lActual] = nueva.slice(0, MAX_COL) // Nunca excede MAX_COL
   }
 
-  // ── 1. TALÓN IZQUIERDO (COLUMNAS 0 A 24) ──
+  // ── 1. TALÓN IZQUIERDO (Opcional, en columnas 0 a 22) ──
   if (imprimirTalon) {
     if (data.esDiferido) {
-      escribir(2, 1, `Venc:${fPago.dd}/${fPago.mm}/${fPago.aaaa}`)
+      escribir(1, 1, `Venc:${fPago.dd}/${fPago.mm}/${fPago.aaaa}`)
     }
-    escribir(4, 1, `Fec:${fEmi.dd}/${fEmi.mm}/${fEmi.aaaa}`)
-    escribir(6, 1, `Ord:${beneText.slice(0, 19)}`)
+    escribir(2, 1, `Fec:${fEmi.dd}/${fEmi.mm}/${fEmi.aaaa}`)
+    escribir(3, 1, `Ord:${beneText.slice(0, 16)}`)
     if (data.concepto) {
-      escribir(8, 1, `Cpto:${data.concepto.slice(0, 18)}`)
+      escribir(4, 1, `Cpto:${data.concepto.slice(0, 16)}`)
     }
-    escribir(10, 1, `Este Chq:`)
-    escribir(11, 1, montoNumStr.slice(0, 20))
+    escribir(5, 1, `Gs:${montoNumStr.slice(0, 18)}`)
   }
 
-  // ── 2. CUERPO DEL CHEQUE BANCO CONTINENTAL (COLUMNAS 26 EN ADELANTE) ──
-  // Perforación vertical divisoria está en col 24-25 aprox.
-  const COL_INICIO = 26
-
-  // A. Cheque Cruzado (//)
+  // ── 2. CUERPO DEL CHEQUE BANCO CONTINENTAL ──
+  // A. Renglón 1: Cruzado a la izquierda + Monto numérico en la casilla derecha al lado de ₲
   if (data.cruzado) {
-    escribir(1, COL_INICIO + 2, "//")
-    escribir(2, COL_INICIO + 2, "//")
+    escribir(1, COL_BASE + 1, "//")
   }
+  escribir(1, cMonto, montoNumStr)
 
-  // B. Importe Numérico en Guaraníes (esquina superior derecha, junto al símbolo ₲)
-  // Columna ~66-70 a 10 CPI. Usamos negrita en ESC/P
-  escribir(2, COL_INICIO + 43, montoNumStr)
-
-  // C. Fechas en Casillas Superiores (Diferido)
-  // Casilla FECHA DE EMISIÓN: col ~42 (DD MM AA)
-  // Casilla FECHA DE PAGO: col ~59 (DD MM AA)
+  // B. Renglón 2: Fechas en casillas superiores
+  // FECHA DE EMISIÓN: DD  MM  AA
+  // FECHA DE PAGO (Diferido): DD  MM  AA
   if (data.esDiferido) {
-    // Los campos preimpresos tienen guiones y el "20"
-    escribir(4, COL_INICIO + 21, `${fEmi.dd}   ${fEmi.mm}    ${fEmi.aa}`)
-    escribir(4, COL_INICIO + 38, `${fPago.dd}   ${fPago.mm}    ${fPago.aa}`)
+    escribir(2, cFechasEmi, `${fEmi.dd}   ${fEmi.mm}   ${fEmi.aa}`)
+    escribir(2, cFechasPago, `${fPago.dd}   ${fPago.mm}   ${fPago.aa}`)
   } else {
-    // A la vista: solo fecha de emisión en la casilla
-    escribir(4, COL_INICIO + 21, `${fEmi.dd}   ${fEmi.mm}    ${fEmi.aa}`)
+    escribir(2, cFechasEmi, `${fEmi.dd}   ${fEmi.mm}   ${fEmi.aa}`)
   }
 
-  // D. "Páguese a la orden de"
-  // Renglón 7 del cheque
-  escribir(7, COL_INICIO + 7, beneText)
+  // C. Renglón 4: "Páguese a la orden de"
+  escribir(4, cBene, beneText)
 
-  // E. "La suma de Guaraníes"
-  // Renglón 9: La línea comienza después del texto preimpreso
-  escribir(9, COL_INICIO + 6, letrasL1)
+  // D. Renglón 5 y 6: "La suma de Guaraníes" (Sin redundancia "GUARANÍES")
+  escribir(5, cLetras, letrasL1)
   if (letrasL2) {
-    escribir(10, COL_INICIO + 6, letrasL2)
+    escribir(6, cLetras, letrasL2)
   }
 
-  // F. Plaza y Fecha (Pie del cheque)
-  // Para cheques a la vista o confirmación de emisión en plaza
-  const pieFecha = `${plaza}, ${fEmi.dd} de ${mesEmiNombre} de ${fEmi.aaaa}`
+  // E. Renglón 8: Plaza y fecha (solo si es a la vista)
   if (!data.esDiferido) {
-    escribir(12, COL_INICIO + 12, pieFecha)
+    escribir(8, cBene + 6, `${plaza}, ${fEmi.dd} de ${mesEmiNombre} de ${fEmi.aaaa}`)
   }
 
   // ── 3. COMPILACIÓN DE COMANDOS ESC/P ──
   const ESC = "\x1B"
-  const FF = "\x0C" // Form Feed: avanza al siguiente cheque exacto
+  const FF = "\x0C"
 
   let escp = ""
-  // Inicialización (ESC @)
+  // Inicializar impresora
   escp += `${ESC}@`
-  // Fijar interlineado a 1/8 pulgada (8 LPI) -> ESC 0
-  escp += `${ESC}0`
-  // Fijar longitud de página en 22 líneas (2.75 pulgadas) -> ESC C \x16
-  escp += `${ESC}C\x16`
-  // Fuente Draft 10 CPI (Pica) -> ESC P
-  escp += `${ESC}P`
+  // Longitud de página a 2.75 pulgadas (22 líneas a 8 LPI o 16.5 a 6 LPI) -> fijamos 17 líneas
+  escp += `${ESC}C\x11`
+  // Interlineado 1/6 pulgada (6 LPI) -> estándar de formularios
+  escp += `${ESC}2`
 
-  // Imprimir cada renglón
-  for (let i = 0; i < 22; i++) {
+  // Si incluye talón, activamos condensado para soportar más de 80 col sin wrap
+  if (imprimirTalon) {
+    escp += "\x0F" // SI = Condensed on (17.1 CPI)
+  } else {
+    escp += `${ESC}P` // 10 CPI Pica estándar
+  }
+
+  // Imprimir renglones
+  for (let i = 0; i < TOTAL_LINEAS; i++) {
     const linea = lineas[i]
     if (linea.trim().length > 0) {
-      // Si la línea contiene el monto numérico en la casilla, le aplicamos Negrita (ESC E / ESC F)
       if (linea.includes(montoNumStr)) {
         const partes = linea.split(montoNumStr)
         escp += partes[0] + `${ESC}E${montoNumStr}${ESC}F` + (partes[1] || "")
@@ -277,23 +293,51 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
         escp += linea
       }
     }
-    // Salto de línea
     escp += "\r\n"
   }
 
-  // Form Feed: avanza al siguiente cheque exacto del tractor
+  // Avanzar al siguiente cheque
   escp += FF
 
   return escp
 }
 
 /**
- * Genera un cheque de prueba con caracteres de alineación (#, +, -)
- * para imprimir sobre papel continuo borrador y cotejar a trasluz.
+ * Genera una REGLA / GRID DE CALIBRACIÓN física con numeración de líneas y columnas.
+ * Al imprimir esto sobre papel continuo y superponer el cheque Continental a trasluz,
+ * el usuario puede leer con total exactitud la línea (L1..L9) y columna (0..70)
+ * de cada una de las casillas físicas de su talonario.
+ */
+export function generarEscpReglaCalibracion(): string {
+  const ESC = "\x1B"
+  const FF = "\x0C"
+
+  let escp = ""
+  escp += `${ESC}@`
+  escp += `${ESC}2` // 6 LPI
+  escp += `${ESC}C\x11` // 17 líneas
+  escp += `${ESC}P` // 10 CPI
+
+  // Encabezado de regla
+  escp += "REGLA DE CALIBRACION CHEQUE CONTINENTAL (EPSON LX-300+)\r\n"
+  escp += "    ....+....1....+....2....+....3....+....4....+....5....+....6....+....7\r\n"
+  
+  for (let i = 1; i <= 9; i++) {
+    const lnum = `L${i}:`
+    // Marcador cada 10 columnas
+    escp += `${lnum} ....+....1....+....2....+....3....+....4....+....5....+....6....+....7\r\n`
+  }
+
+  escp += FF
+  return escp
+}
+
+/**
+ * Genera cheque de prueba en borrador con las posiciones canónicas compactas.
  */
 export function generarEscpPruebaAlineacion(offsetX = 0, offsetY = 0): string {
   return generarEscpChequeContinental({
-    numero: "999999",
+    numero: "935451",
     monto: 12345678,
     beneficiario: "EMPRESA DE PRUEBA S.A.",
     esDiferido: true,
@@ -303,7 +347,7 @@ export function generarEscpPruebaAlineacion(offsetX = 0, offsetY = 0): string {
     noALaOrden: true,
     concepto: "CALIBRACION CONTINENTAL",
     plaza: "Pedro Juan Caballero",
-    imprimirTalon: true,
+    imprimirTalon: false, // Desactivado por defecto para garantizar cero desborde
     offsetX,
     offsetY,
   })
