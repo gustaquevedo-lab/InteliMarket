@@ -579,6 +579,10 @@ async def create_sale(db: AsyncSession, data: SaleCreate) -> Sale:
             prod_res = await db.execute(prod_stmt)
             prod_row = prod_res.scalar_one_or_none()
             if prod_row:
+                if not prod_row.activo:
+                    raise ValueError(
+                        f"El producto '{prod_row.nombre}' (SKU {prod_row.sku}) está inactivo y no puede ser facturado en caja."
+                    )
                 um_u = (prod_row.unidad_medida or "UN").upper()
                 tv_l = (prod_row.tipo_venta or "unidad").lower()
                 is_unit = (um_u == "UN" or tv_l == "unidad") and um_u not in ("KG", "KILO", "KILOS", "L", "LT", "LITRO", "M", "MT", "METRO") and tv_l != "peso"

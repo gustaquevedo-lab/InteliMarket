@@ -2699,7 +2699,9 @@ export default function POSPage() {
         try {
           const cached = await loadCachedPOSData()
           if (isMounted) {
-            if (cached.cachedProducts.length > 0) setProducts(cached.cachedProducts)
+            if (cached.cachedProducts.length > 0) {
+              setProducts(cached.cachedProducts.filter((p: any) => p && p.activo !== false))
+            }
             if (cached.cachedStaff.length > 0) setSupervisorStaffOptions(cached.cachedStaff)
           }
         } catch (e) {
@@ -2765,7 +2767,7 @@ export default function POSPage() {
         if (syncRes && syncRes.products > 0 && isMounted) {
           const freshProds = await offlineDB.products.getAll()
           if (freshProds && freshProds.length > 0 && isMounted) {
-            setProducts(freshProds as Product[])
+            setProducts((freshProds as Product[]).filter((p: any) => p && p.activo !== false))
           }
         }
       } catch (err: any) {
@@ -2806,9 +2808,13 @@ export default function POSPage() {
         if (changed.length > 0) {
           const byId = new Map(changed.map((c: any) => [c.id, c]))
           setProducts((prev) => {
-            const merged = prev.map((p: any) => (byId.has(p.id) ? { ...p, ...byId.get(p.id) } : p))
+            const merged = prev
+              .map((p: any) => (byId.has(p.id) ? { ...p, ...byId.get(p.id) } : p))
+              .filter((p: any) => p && p.activo !== false)
             const known = new Set(prev.map((p: any) => p.id))
-            for (const c of changed) if (!known.has(c.id)) merged.push(c as any)
+            for (const c of changed) {
+              if (!known.has(c.id) && (c as any).activo !== false) merged.push(c as any)
+            }
             return merged as Product[]
           })
         }
@@ -3330,6 +3336,14 @@ export default function POSPage() {
     if (!cajaAbiertaRef.current || !cashSessionIdRef.current) {
       toast.warning("Caja Cerrada", "Debe ingresar el fondo inicial de apertura para operar.")
       setShowAperturaModal(true)
+      return
+    }
+
+    if (product.activo === false) {
+      toast.error(
+        "Producto Inactivo",
+        `El producto ${product.nombre} (SKU ${product.sku}) está inactivo en el catálogo y no puede ser facturado.`
+      )
       return
     }
 
@@ -5500,6 +5514,7 @@ export default function POSPage() {
       }
 
       return Array.from(pool.values()).filter((p) => {
+        if (p.activo === false) return false
         const target = `${p.nombre || ""} ${p.codigo_barra || ""} ${p.sku || ""}`.toLowerCase()
         return tokens.every((token) => target.includes(token))
       }).slice(0, 45)
@@ -5508,14 +5523,14 @@ export default function POSPage() {
     if (selectedCategoryTab === "TOP") {
       if (topProductSkus.length > 0 && products.length > 0) {
         const bySku = new Map(products.map((p) => [p.sku, p]))
-        const ranked = topProductSkus.map((sku) => bySku.get(sku)).filter(Boolean) as Product[]
+        const ranked = topProductSkus.map((sku) => bySku.get(sku)).filter((p): p is Product => Boolean(p && p.activo !== false))
         if (ranked.length > 0) return ranked.slice(0, 30)
       }
-      return (products.length > 0 ? products : TOP_CATALOG_SEED as Product[]).slice(0, 30)
+      return (products.length > 0 ? products.filter((p) => p.activo !== false) : (TOP_CATALOG_SEED as Product[]).filter((p) => p.activo !== false)).slice(0, 30)
     }
 
     if (selectedCategoryTab === "PESABLES") {
-      return products.filter((p: any) => isPesableProduct(p)).slice(0, 35)
+      return products.filter((p: any) => p && p.activo !== false && isPesableProduct(p)).slice(0, 35)
     }
 
 
@@ -5889,6 +5904,7 @@ export default function POSPage() {
       return
     }
     const localMatch = products.find((p) => {
+      if (p.activo === false) return false
       if (p.codigo_barra === cleanCode || p.sku === cleanCode) return true
       const pCode = p.codigo_barra?.trim()
       if (pCode && pCode.length >= 8 && cleanCode.length >= 8) {
@@ -5930,6 +5946,7 @@ export default function POSPage() {
       const serverRes = await api.products.list({ search: cleanCode, limit: 10 })
       if (serverRes && serverRes.length > 0) {
         const best = serverRes.find((p) => {
+          if (p.activo === false) return false
           if (p.codigo_barra === cleanCode || p.sku === cleanCode) return true
           const pCode = p.codigo_barra?.trim()
           if (pCode && pCode.length >= 8 && cleanCode.length >= 8) {
@@ -5962,6 +5979,10 @@ export default function POSPage() {
       const dbByBar = await offlineDB.products.getByBarcode(cleanCode)
       const dbMatch = (dbByBar && dbByBar.length > 0) ? dbByBar[0] : (await offlineDB.products.getBySku(cleanCode))?.[0]
       if (dbMatch) {
+        if (dbMatch.activo === false) {
+          toast.error("Producto inactivo", `El producto ${dbMatch.nombre} (SKU ${dbMatch.sku}) está inactivo en el catálogo y no puede ser facturado.`)
+          return
+        }
         addToCart(dbMatch, qtyPrefix ?? undefined)
         setSearch("")
         searchInputRef.current?.focus()
