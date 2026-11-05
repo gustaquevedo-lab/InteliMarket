@@ -475,7 +475,9 @@ async def _record_treasury_ingress(
         else:
             monto_pyg = monto
 
-    if (monto_pyg > 0 or monto_brl > 0 or monto_usd > 0) and not (destino_fondos == "caja" and caja_session_id):
+    # Solo ingresa a Bóveda Central si el destino configurado es efectivamente 'boveda'
+    # Si el destino es 'caja' va a la sesión de caja; si es 'banco' va a la cuenta bancaria.
+    if (monto_pyg > 0 or monto_brl > 0 or monto_usd > 0) and destino_fondos == "boveda" and not (destino_fondos == "caja" and caja_session_id):
         det_monedas = []
         if monto_pyg > 0:
             det_monedas.append(f"Gs. {int(monto_pyg):,}")
@@ -517,6 +519,8 @@ async def _record_treasury_ingress(
         if forma_pago == "transferencia" and m_transf == 0:
             m_transf = monto
         elif forma_pago in ("deposito", "deposito_bancario") and m_deposito == 0:
+            m_deposito = monto
+        elif forma_pago == "efectivo" and destino_fondos == "banco" and m_deposito == 0:
             m_deposito = monto
         elif forma_pago == "tarjeta_debito" and m_debito == 0:
             m_debito = monto
