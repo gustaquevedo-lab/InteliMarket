@@ -161,8 +161,8 @@ export default function PayrollDossierView({
 
         // Si el expediente activo está en borrador, auto-sincronizar de forma transparente con SueldOK
         if (active && active.estado === "borrador") {
-          api.sueldok.syncFromSueldok(active.periodo, undefined, false).then((synced) => {
-            if (synced && (Number(synced.total_neto) !== Number(active.total_neto) || synced.sueldok_run_id !== active.sueldok_run_id)) {
+          api.sueldok.syncFromSueldok(active.periodo, undefined, true).then((synced) => {
+            if (synced) {
               setSelectedDossier(synced)
               api.sueldok.listDossiers().then(l => setDossiers(l || []))
             }

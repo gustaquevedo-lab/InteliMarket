@@ -1237,15 +1237,12 @@ async def sync_payroll_dossier_from_sueldok(
             return format_dossier(existing)
         raise ValueError(f"No se encontró corrida salarial aprobada en SueldOK para el período {periodo}")
 
-    # Si ya existe en borrador y no se forzó explícitamente, comparar si SueldOK cambió
-    sueldok_run_id = str(approved.get("id"))
-    sueldok_neto = float(approved.get("totalNet", 0))
-    if existing and not force:
-        # Si la corrida y el neto coinciden con lo guardado en borrador, devolverlo directamente
-        if existing.sueldok_run_id == sueldok_run_id and abs(float(existing.total_neto) - sueldok_neto) < 1.0:
-            return format_dossier(existing)
-        # Si la nómina en SueldOK fue recalculada o modificada, auto-actualizar el borrador!
+    # Si el expediente existente está en borrador, SIEMPRE recalculamos y actualizamos
+    # para reflejar cualquier cambio en deducciones, convenios de terceros o uniformes de SueldOK.
+    if existing and existing.estado == "borrador":
         force = True
+    elif existing and not force:
+        return format_dossier(existing)
 
     items = approved.get("items", [])
     deductions = data.get("deductions", [])
