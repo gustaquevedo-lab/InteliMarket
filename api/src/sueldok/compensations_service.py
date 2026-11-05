@@ -170,7 +170,7 @@ async def process_payroll_compensations(
         elif "uniforme" in p_type:
             # Indumentaria laboral: amortización interna de nómina sin afectación comercial
             raw_uni = meta.get("uniformes", [])
-            target_uni = Decimal(str(int(p.monto))) if p.monto else Decimal("1791900")
+            target_uni = Decimal(str(int(p.monto))) if p.monto else Decimal(str(int(dossier.total_uniformes or 0)))
             sum_raw_uni = sum(Decimal(str(int(it.get("amount", 0)))) for it in raw_uni)
             ratio_uni = (target_uni / sum_raw_uni) if sum_raw_uni > 0 else Decimal("1")
 
@@ -404,10 +404,10 @@ async def get_dossier_compensations_pdf(
 
     # Identificar montos oficiales de fase
     uni_ph = next((p for p in comp_phases if "uniforme" in p.phase_type), None)
-    target_uni = Decimal(str(int(uni_ph.monto))) if (uni_ph and uni_ph.monto) else Decimal("1791900")
+    target_uni = Decimal(str(int(uni_ph.monto))) if (uni_ph and uni_ph.monto) else Decimal(str(int(dossier.total_uniformes or 0)))
 
     ec_ph = next((p for p in comp_phases if "extra_club" in p.phase_type), None)
-    target_ec = Decimal(str(int(ec_ph.monto))) if (ec_ph and ec_ph.monto) else Decimal("40243413")
+    target_ec = Decimal(str(int(ec_ph.monto))) if (ec_ph and ec_ph.monto) else Decimal(str(int(dossier.total_extra_club or 0)))
 
     # Escalar uniformes para coincidencia al guaraní exacto
     items_uniformes = []

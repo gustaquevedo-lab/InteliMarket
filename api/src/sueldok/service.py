@@ -1015,21 +1015,32 @@ async def create_payroll_dossier(
         )
         db.add(phase)
 
-    # 4. Compensaciones no-cash (Extra Club + Uniformes)
-    total_nocash = (data.total_extra_club or 0) + (data.total_uniformes or 0)
-    if total_nocash > 0 or data.extra_club_tickets or data.uniformes_items:
-        phase = PayrollDossierPhase(
+    # 4. Compensaciones no-cash: Extra Club (Vales) y Uniformes (Amortización)
+    if data.extra_club_tickets or (data.total_extra_club or 0) > 0:
+        phase_ec = PayrollDossierPhase(
             dossier_id=dossier.id,
-            phase_type="compensacion_no_cash",
-            phase_label="Compensaciones Internas (Extra Club + Uniformes)",
-            monto=Decimal(str(int(total_nocash))),
+            phase_type="compensacion_extra_club",
+            phase_label=f"Compensación Interna Extra Club (Vales de Compra) ({len(data.extra_club_tickets)} pers.)",
+            monto=Decimal(str(int(data.total_extra_club or 0))),
             estado="pendiente",
             phase_metadata={
-                "extra_club": [t.model_dump() for t in data.extra_club_tickets],
+                "extra_club": [t.model_dump() for t in data.extra_club_tickets]
+            }
+        )
+        db.add(phase_ec)
+
+    if data.uniformes_items or (data.total_uniformes or 0) > 0:
+        phase_uni = PayrollDossierPhase(
+            dossier_id=dossier.id,
+            phase_type="compensacion_uniformes",
+            phase_label=f"Amortización Descuentos Uniformes ({len(data.uniformes_items)} pers.)",
+            monto=Decimal(str(int(data.total_uniformes or 0))),
+            estado="pendiente",
+            phase_metadata={
                 "uniformes": [u.model_dump() for u in data.uniformes_items]
             }
         )
-        db.add(phase)
+        db.add(phase_uni)
 
     # 5. Convenios con Terceros (Comercial Malou, etc.)
     for t in (data.terceros_desglose or []):
@@ -1324,6 +1335,7 @@ async def sync_payroll_dossier_from_sueldok(
     ded_map = {str(d.get("id")): d for d in data.get("deductions", [])}
 
     has_item_loan_deductions = any(it.get("loanDeductions") for it in items)
+    processed_loan_ids = set()
 
     if has_item_loan_deductions:
         for it in items:
@@ -1335,9 +1347,12 @@ async def sync_payroll_dossier_from_sueldok(
                 monto = float(ld.get("amount", 0))
                 if monto <= 0:
                     continue
+                processed_loan_ids.add(lid)
                 info = adv_map.get(lid) or ded_map.get(lid) or {}
-                mot = (info.get("motivo") or info.get("descripcion") or info.get("comentarios") or "").upper()
-                desc = info.get("descripcion") or info.get("motivo") or "Deducción de nómina"
+                mot = f"{info.get('motivo') or ''} {info.get('descripcion') or ''} {info.get('comentarios') or ''}".upper().strip()
+                desc = info.get("descripcion") or info.get("motivo") or info.get("comentarios") or "Deducción de nómina"
+
+                is_ajuste = any(k in mot for k in ("AJUSTE", "REINTEGRO", "DEVOLUCION"))
 
                 if "UNIFORME" in mot:
                     uniformes.append(ExtraClubTicket(
@@ -1347,7 +1362,7 @@ async def sync_payroll_dossier_from_sueldok(
                         ticket_ref=lid,
                         amount=monto
                     ))
-                elif "MALOU" in mot or "CAFETERIA" in mot or "CAFFE" in mot:
+                elif ("MALOU" in mot or "CAFETERIA" in mot or "CAFFE" in mot) and not is_ajuste:
                     t_name = "CAFETERIA MALOU"
                     if t_name not in terceros_dict:
                         terceros_dict[t_name] = []
@@ -1358,7 +1373,7 @@ async def sync_payroll_dossier_from_sueldok(
                         "amount": monto,
                         "invoice_reference": desc
                     })
-                elif "CREDI" in mot or "PORA" in mot:
+                elif ("CREDI" in mot or "PORA" in mot) and not is_ajuste:
                     t_name = "CREDI PORA"
                     if t_name not in terceros_dict:
                         terceros_dict[t_name] = []
@@ -1369,7 +1384,7 @@ async def sync_payroll_dossier_from_sueldok(
                         "amount": monto,
                         "invoice_reference": desc
                     })
-                elif "JUDICIAL" in mot or "EMBARGO" in mot:
+                elif ("JUDICIAL" in mot or "EMBARGO" in mot) and not is_ajuste:
                     tot_judicial += monto
                     t_name = "JUZGADO / RETENCION JUDICIAL"
                     if t_name not in terceros_dict:
@@ -1381,10 +1396,77 @@ async def sync_payroll_dossier_from_sueldok(
                         "amount": monto,
                         "invoice_reference": desc
                     })
-                elif "ANTICIPO" in mot or "ADELANTO" in mot:
+                elif "ANTICIPO" in mot or "ADELANTO" in mot or is_ajuste:
                     tot_anticipos += monto
                 else:
                     tot_anticipos += monto
+
+        # 4c. Escanear deducciones/anticipos de terceros de funcionarios no liquidados en la nómina mensual (ej. personal a liquidar)
+        all_raw_candidates = []
+        for d in data.get("deductions", []):
+            did = str(d.get("id"))
+            if did in processed_loan_ids:
+                continue
+            f_d = d.get("fecha") or d.get("startDate") or ""
+            p_d = d.get("periodo") or f_d[:7]
+            if p_d and p_d != periodo:
+                continue
+            all_raw_candidates.append(d)
+
+        for a in data.get("advances", []):
+            aid = str(a.get("id"))
+            if aid in processed_loan_ids:
+                continue
+            f_a = a.get("fecha") or a.get("startDate") or ""
+            p_a = f_a[:7]
+            if p_a and p_a != periodo:
+                continue
+            all_raw_candidates.append(a)
+
+        for c in all_raw_candidates:
+            cid_entry = str(c.get("id"))
+            monto = float(c.get("monto", 0))
+            if monto <= 0:
+                continue
+            mot = f"{c.get('motivo') or ''} {c.get('descripcion') or ''} {c.get('comentarios') or ''}".upper().strip()
+            desc = c.get("descripcion") or c.get("motivo") or c.get("comentarios") or "Deducción de nómina"
+            is_ajuste = any(k in mot for k in ("AJUSTE", "REINTEGRO", "DEVOLUCION"))
+            if is_ajuste:
+                continue
+
+            emp_id = str(c.get("employeeId") or cid_entry)
+            emp_name = c.get("nombre", "Funcionario")
+            emp_ci = str(c.get("ci", "—"))
+            fecha_str = c.get("fecha") or ""
+
+            if "MALOU" in mot or "CAFETERIA" in mot or "CAFFE" in mot:
+                if fecha_str.startswith(f"{periodo}-01") or fecha_str.startswith(f"{periodo}-02"):
+                    continue
+                t_name = "CAFETERIA MALOU"
+                if t_name not in terceros_dict:
+                    terceros_dict[t_name] = []
+                terceros_dict[t_name].append({
+                    "employee_id": emp_id,
+                    "name": f"{emp_name} (Personal a Liquidar)",
+                    "ci": emp_ci,
+                    "amount": monto,
+                    "invoice_reference": f"{desc} [Liquidación Pendiente]"
+                })
+                processed_loan_ids.add(cid_entry)
+            elif "CREDI" in mot or "PORA" in mot:
+                if fecha_str.startswith(f"{periodo}-01") or fecha_str.startswith(f"{periodo}-02"):
+                    continue
+                t_name = "CREDI PORA"
+                if t_name not in terceros_dict:
+                    terceros_dict[t_name] = []
+                terceros_dict[t_name].append({
+                    "employee_id": emp_id,
+                    "name": f"{emp_name} (Personal a Liquidar)",
+                    "ci": emp_ci,
+                    "amount": monto,
+                    "invoice_reference": f"{desc} [Liquidación Pendiente]"
+                })
+                processed_loan_ids.add(cid_entry)
     else:
         raw_deductions = []
         for d in deductions:
