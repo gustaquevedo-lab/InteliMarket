@@ -71,7 +71,7 @@ class ReceivablePaymentCreate(BaseModel):
     fecha: Optional[date] = None
     observaciones: Optional[str] = None
     bank_account_id: Optional[UUID] = None
-    destino_fondos: Optional[str] = "boveda"
+    destino_fondos: Optional[str] = None
     caja_session_id: Optional[UUID] = None
     cheque_numero: Optional[str] = None
     cheque_banco: Optional[str] = None
@@ -113,7 +113,7 @@ class ReceivableGlobalPaymentCreate(BaseModel):
     fecha: Optional[date] = None
     observaciones: Optional[str] = None
     bank_account_id: Optional[UUID] = None
-    destino_fondos: Optional[str] = "boveda"
+    destino_fondos: Optional[str] = None
     caja_session_id: Optional[UUID] = None
     cheque_numero: Optional[str] = None
     cheque_banco: Optional[str] = None
@@ -186,7 +186,7 @@ class CorporateRemissionPayInput(BaseModel):
     monto: Optional[Decimal] = Decimal("0")
     forma_pago: str = "transferencia"
     bank_account_id: Optional[UUID] = None
-    destino_fondos: Optional[str] = "banco"
+    destino_fondos: Optional[str] = None
     referencia: Optional[str] = None
     fecha_pago: Optional[date] = None
     notas: Optional[str] = None

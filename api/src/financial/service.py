@@ -2073,6 +2073,9 @@ async def delete_bank_transaction(db: AsyncSession, company_id: str, transaction
     if bt.invoice_id:
         raise ValueError("Este movimiento está vinculado al pago de una factura de proveedor. Anule el pago desde Cuentas por Pagar.")
 
+    if bt.categoria == "cobranzas" or (bt.descripcion and "Cobro AR" in bt.descripcion):
+        raise ValueError("Este movimiento bancario proviene de un cobro registrado en Cuentas por Cobrar. Para anularlo, anule el recibo desde Cuentas por Cobrar.")
+
     acc_res = await db.execute(select(BankAccount).where(BankAccount.id == bt.bank_account_id))
     acc = acc_res.scalar_one_or_none()
     if acc:

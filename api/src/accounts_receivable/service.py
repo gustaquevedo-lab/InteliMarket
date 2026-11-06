@@ -455,7 +455,18 @@ async def _record_treasury_ingress(
         "transferencia", "deposito_bancario", "deposito", "pix", "qr",
         "tarjeta_debito", "tarjeta_credito", "tarjeta", "banco"
     )
-    destino_fondos = getattr(data, "destino_fondos", None) or ("banco" if es_bancario else "boveda")
+
+    # REGLA CANÓNICA DE TESORERÍA (SUPERMERCADO):
+    # 1. El EFECTIVO NUNCA entra directo a una cuenta bancaria.
+    #    Todo cobro en efectivo ingresa a Bóveda Central (o sesión de caja abierta en punto de venta).
+    #    El dinero físico solo entra al banco cuando Tesorería lo deposita físicamente con una Boleta de Depósito ("Depósito Bóveda a Cuenta").
+    #    Por lo tanto, si forma_pago == "efectivo", neutralizamos cualquier bank_account_id y forzamos destino_fondos = 'boveda' (o 'caja').
+    if forma_pago == "efectivo":
+        destino_fondos = "caja" if (getattr(data, "destino_fondos", None) == "caja" and caja_session_id) else "boveda"
+        bank_account_id = None
+    else:
+        destino_fondos = "banco" if es_bancario else (getattr(data, "destino_fondos", None) or "boveda")
+
     uid = uuid.UUID(str(registrado_por)) if registrado_por else None
 
     vault_entry_id = None
@@ -519,8 +530,6 @@ async def _record_treasury_ingress(
         if forma_pago == "transferencia" and m_transf == 0:
             m_transf = monto
         elif forma_pago in ("deposito", "deposito_bancario") and m_deposito == 0:
-            m_deposito = monto
-        elif forma_pago == "efectivo" and destino_fondos == "banco" and m_deposito == 0:
             m_deposito = monto
         elif forma_pago == "tarjeta_debito" and m_debito == 0:
             m_debito = monto
@@ -2561,7 +2570,7 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
                 "tasa_brl": float(tasa_brl),
                 "tasa_usd": float(tasa_usd),
                 "monto_facturas_canceladas": float(monto_pago),
-                "bank_account_id": getattr(data, "bank_account_id", None),
+                "bank_account_id": None if forma_pago == "efectivo" else getattr(data, "bank_account_id", None),
                 "fecha_transferencia": getattr(data, "fecha_transferencia", None),
                 "monto_transferencia": float(monto_transf) if monto_transf > 0 else (float(monto_pago) if forma_pago in ("transferencia", "deposito_bancario", "deposito", "pix", "qr") else None),
                 "monto_cheque": float(monto_cheque) if monto_cheque > 0 else (float(monto_pago) if forma_pago == "cheque" else None),

@@ -939,7 +939,7 @@ export default function AccountsReceivablePage() {
       const res = await api.accountsReceivable.payCorporateRemission(showPayRemissionModal.id, {
         monto,
         forma_pago: payRemForm.forma_pago,
-        bank_account_id: payRemForm.bank_account_id || undefined,
+        bank_account_id: (payRemForm.forma_pago === "transferencia" || payRemForm.forma_pago === "deposito_bancario" || payRemForm.forma_pago === "mixto") ? (payRemForm.bank_account_id || undefined) : undefined,
         referencia: payRemForm.referencia || undefined,
         fecha_pago: payRemForm.fecha_pago || undefined,
         notas: payRemForm.notas || undefined,
@@ -6907,13 +6907,28 @@ export default function AccountsReceivablePage() {
                 </div>
               )}
 
+              {/* 💵 PANEL INFORMATIVO DE EFECTIVO EN BÓVEDA */}
+              {payRemForm.forma_pago === "efectivo" && (
+                <div className="p-3.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 space-y-1">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-900 dark:text-emerald-300">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>Custodia Física en Bóveda Central</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                    El dinero físico recaudado ingresa a la custodia de Bóveda Central. Para acreditarlo en una cuenta bancaria, se registra posteriormente desde el módulo de Bóveda como <strong>Depósito Bóveda a Cuenta</strong> con su correspondiente Boleta de Depósito.
+                  </p>
+                </div>
+              )}
+
               {/* Referencia si no es cheque ni mixto */}
               {payRemForm.forma_pago !== "cheque" && payRemForm.forma_pago !== "mixto" && (
                 <div>
-                  <label className="label-field">N° Boleta / Referencia Bancaria</label>
+                  <label className="label-field">
+                    {payRemForm.forma_pago === "efectivo" ? "Referencia / N° Recibo Físico (Opcional)" : "N° Boleta / Referencia Bancaria"}
+                  </label>
                   <input
                     type="text"
-                    placeholder="Ej: SIPAP 4589201"
+                    placeholder={payRemForm.forma_pago === "efectivo" ? "Ej: Recibo manual 001-002" : "Ej: SIPAP 4589201"}
                     className="input-field text-xs"
                     value={payRemForm.referencia}
                     onChange={e => setPayRemForm({ ...payRemForm, referencia: e.target.value })}
