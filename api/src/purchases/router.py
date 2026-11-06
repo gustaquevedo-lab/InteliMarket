@@ -1328,14 +1328,26 @@ async def receive_invoice_for_order(
 
             po_items_q = select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == po.id)
             po_items_res = await db.execute(po_items_q)
-            for poi in po_items_res.scalars().all():
+            po_items = po_items_res.scalars().all()
+
+            prod_ids = [poi.product_id for poi in po_items if poi.product_id]
+            prod_codes = {}
+            if prod_ids:
+                from api.src.products.models import Product
+                prods_res = await db.execute(select(Product.id, Product.codigo_barra, Product.sku).where(Product.id.in_(prod_ids)))
+                for p_id, p_barcode, p_sku in prods_res.all():
+                    prod_codes[p_id] = p_barcode or p_sku
+
+            for poi in po_items:
                 inv_item = SupplierInvoiceItem(
                     invoice_id=new_inv.id,
                     product_id=poi.product_id,
-                    codigo_proveedor=poi.codigo_proveedor,
+                    codigo_proveedor=prod_codes.get(poi.product_id),
                     descripcion=poi.descripcion or "Item",
                     cantidad=poi.cantidad,
                     precio_unitario=poi.precio_unitario,
+                    descuento=poi.descuento_pct or Decimal("0"),
+                    iva_tasa=poi.iva_tasa or Decimal("10"),
                     total=poi.total,
                 )
                 db.add(inv_item)
