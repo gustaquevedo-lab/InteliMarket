@@ -12,11 +12,20 @@ test.describe('Política Canónica Universal: Textos en MAYÚSCULAS', () => {
     const emailVal = await emailInput.inputValue();
     expect(emailVal).toBe('usuario.test@superextra.com.py');
 
-    const passInput = page.locator('input[type="password"]').first();
+    const passInput = page.locator('input[type="password"], input[name="password"]').first();
     await expect(passInput).toBeVisible({ timeout: 10000 });
     await passInput.fill('MiClaveSecreta123!');
     const passVal = await passInput.inputValue();
     expect(passVal).toBe('MiClaveSecreta123!');
+
+    // Tocar el botón del ojo para revelar la contraseña (type pasa a 'text')
+    const eyeBtn = page.locator('button:has(svg)').filter({ has: page.locator('svg.lucide-eye, svg.lucide-eye-off') }).first();
+    if (await eyeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await eyeBtn.click();
+      await page.waitForTimeout(300);
+      const revealedVal = await page.locator('input[name="password"], input[placeholder*="caracteres"]').first().inputValue();
+      expect(revealedVal).toBe('MiClaveSecreta123!');
+    }
   });
 
   test('Inputs de texto y búsqueda en el ERP administrativo se convierten automáticamente a MAYÚSCULAS', async ({ page }) => {

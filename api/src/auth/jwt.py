@@ -16,7 +16,20 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    if not plain_password or not hashed_password:
+        return False
+    if pwd_context.verify(plain_password, hashed_password):
+        return True
+    # Tolerancia canónica bicaso a Bloq Mayús / mayúsculas en terminales POS (Electron)
+    # Permite acceso transparente tanto si la clave se creó en minúsculas y se tipea en mayúsculas
+    # (por Caps Lock en caja) como si se tipeó en minúsculas sobre una clave en mayúsculas.
+    lower_pass = plain_password.lower()
+    if lower_pass != plain_password and pwd_context.verify(lower_pass, hashed_password):
+        return True
+    upper_pass = plain_password.upper()
+    if upper_pass != plain_password and pwd_context.verify(upper_pass, hashed_password):
+        return True
+    return False
 
 
 def create_access_token(subject: dict[str, Any], expires_delta: timedelta | None = None) -> str:

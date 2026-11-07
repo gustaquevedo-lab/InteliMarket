@@ -209,6 +209,7 @@ export default function Login() {
   const [posShowPassword, setPosShowPassword] = useState(false)
   const [posError, setPosError] = useState("")
   const [posLoading, setPosLoading] = useState(false)
+  const [capsLockOn, setCapsLockOn] = useState(false)
 
   const loadStaff = useCallback(() => {
     setPosStaffLoading(true)
@@ -403,13 +404,25 @@ export default function Login() {
 
                 <form onSubmit={handlePosLogin} className="space-y-4">
                   <div>
-                    <label className="label-glass block mb-1.5">Contraseña</label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="label-glass">Contraseña</label>
+                      {capsLockOn && (
+                        <span className="text-[10px] text-amber-300 font-bold bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 animate-pulse">
+                          ⚠️ Bloq Mayús activado
+                        </span>
+                      )}
+                    </div>
                     <div className="relative">
                       <input
                         type={posShowPassword ? "text" : "password"}
-                        className="glass-input w-full rounded-xl px-4 py-3 pr-11 text-sm font-medium"
+                        className="glass-input keep-case w-full rounded-xl px-4 py-3 pr-11 text-sm font-medium"
                         value={posPassword}
                         onChange={(e) => setPosPassword(e.target.value)}
+                        onKeyDown={(e) => setCapsLockOn(e.getModifierState("CapsLock"))}
+                        onKeyUp={(e) => setCapsLockOn(e.getModifierState("CapsLock"))}
+                        name="password"
+                        autoComplete="current-password"
+                        data-keep-case="true"
                         autoFocus
                         required
                       />
@@ -512,15 +525,26 @@ export default function Login() {
             </div>
 
             <div>
-              <label className="label-glass block mb-1.5">Contraseña</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="label-glass">Contraseña</label>
+                {capsLockOn && (
+                  <span className="text-[10px] text-amber-300 font-bold bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 animate-pulse">
+                    ⚠️ Bloq Mayús activado
+                  </span>
+                )}
+              </div>
               <div className="relative">
                 <input
                   type={showPassword ? "text" : "password"}
-                  className="glass-input w-full rounded-xl px-4 py-3 pr-11 text-sm font-medium"
+                  className="glass-input keep-case w-full rounded-xl px-4 py-3 pr-11 text-sm font-medium"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => setCapsLockOn(e.getModifierState("CapsLock"))}
+                  onKeyUp={(e) => setCapsLockOn(e.getModifierState("CapsLock"))}
                   placeholder="Mínimo 6 caracteres"
                   minLength={6}
+                  name="password"
+                  data-keep-case="true"
                   required
                   autoComplete={mode === "login" ? "current-password" : "new-password"}
                 />

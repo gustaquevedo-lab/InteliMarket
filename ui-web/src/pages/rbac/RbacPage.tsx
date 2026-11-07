@@ -1163,10 +1163,12 @@ export default function RbacPage() {
                   <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">Contraseña Inicial</label>
                   <input
                     type="password"
+                    name="password"
+                    data-keep-case="true"
                     placeholder="Extra2026*"
                     value={form.password}
                     onChange={e => setForm({ ...form, password: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white outline-none focus:border-emerald-500"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-gray-50 dark:bg-slate-900 text-gray-900 dark:text-white outline-none focus:border-emerald-500 keep-case"
                   />
                 </div>
 

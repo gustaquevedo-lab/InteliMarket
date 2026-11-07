@@ -729,8 +729,10 @@ function UserModal({ user, roles, onClose, onSubmit, submitting }: UserModalProp
               Contraseña Inicial
             </label>
             <input
-              className="w-full p-2.5 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:border-blue-500"
+              className="w-full p-2.5 text-xs font-mono rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none focus:border-blue-500 keep-case"
               type="text"
+              name="password"
+              data-keep-case="true"
               placeholder="Dejar vacío para generar clave aleatoria..."
               value={password}
               onChange={(e) => setPassword(e.target.value)}

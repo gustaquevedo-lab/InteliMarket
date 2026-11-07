@@ -23,9 +23,9 @@
   .dark select, .dark input, .dark textarea { color-scheme: dark; }
   .dark select option { background-color: #0f172a; color: #f8fafc; }
 
-  /* Política Canónica: Textos en Mayúsculas (Excluye contraseñas y correos) */
-  input:not([type="password"]):not([type="email"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(.keep-case),
-  textarea:not(.keep-case) {
+  /* Política Canónica: Textos en Mayúsculas (Excluye contraseñas, correos y campos técnicos) */
+  input:not([type="password"]):not([type="email"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not(.keep-case):not([data-keep-case="true"]):not([name*="password"]):not([name*="pin"]):not([name*="clave"]),
+  textarea:not(.keep-case):not([data-keep-case="true"]) {
     text-transform: uppercase;
   }
 

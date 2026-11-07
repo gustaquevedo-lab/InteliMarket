@@ -432,15 +432,30 @@ export default function App() {
       const target = e.target as HTMLInputElement | HTMLTextAreaElement;
       if (!target || !(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
 
-      if (
+      const isPasswordInput =
         target.type === "password" ||
+        target.name === "password" ||
+        target.name?.toLowerCase().includes("password") ||
+        target.name?.toLowerCase().includes("pin") ||
+        target.name?.toLowerCase().includes("clave") ||
+        target.getAttribute("data-keep-case") === "true" ||
+        target.classList.contains("keep-case") ||
+        target.getAttribute("autocomplete") === "current-password" ||
+        target.getAttribute("autocomplete") === "new-password" ||
+        target.placeholder?.toLowerCase().includes("contraseña") ||
+        target.placeholder?.toLowerCase().includes("clave") ||
+        target.placeholder?.toLowerCase().includes("pin");
+
+      if (
+        isPasswordInput ||
         target.type === "email" ||
         target.type === "file" ||
         target.type === "checkbox" ||
         target.type === "radio" ||
         target.type === "range" ||
         target.type === "color" ||
-        target.classList.contains("keep-case")
+        target.classList.contains("keep-case") ||
+        target.getAttribute("data-keep-case") === "true"
       ) {
         return;
       }
