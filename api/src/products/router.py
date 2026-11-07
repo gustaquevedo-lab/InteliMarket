@@ -383,11 +383,21 @@ async def create_product(body: ProductCreate, db: AsyncSession = Depends(get_db)
         clean_bc = body.codigo_barra.strip()
         existing_bc = await service.get_product_by_barcode(db, str(body.company_id), clean_bc)
         if existing_bc:
-            estado_txt = "Activo" if existing_bc.activo else "Inactivo"
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Ya existe un producto con el código de barras '{clean_bc}': SKU {existing_bc.sku} - \"{existing_bc.nombre}\" ({estado_txt}). No está permitido crear productos con códigos de barra duplicados."
-            )
+            if existing_bc.activo:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Ya existe un producto con el código de barras '{clean_bc}': SKU {existing_bc.sku} - \"{existing_bc.nombre}\" (Activo). No está permitido crear productos con códigos de barra duplicados."
+                )
+            else:
+                logger.info(
+                    "Liberando código '%s' del producto inactivo '%s' (SKU %s) para nuevo producto.",
+                    clean_bc, existing_bc.nombre, existing_bc.sku
+                )
+                await db.execute(
+                    update(Product)
+                    .where(Product.id == existing_bc.id)
+                    .values(codigo_barra=None, updated_at=func.now())
+                )
 
     return await service.create_product(db, body)
 

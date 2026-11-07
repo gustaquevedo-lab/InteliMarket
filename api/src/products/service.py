@@ -696,11 +696,21 @@ async def update_product(db: AsyncSession, product_id: str, data: ProductUpdate)
         if clean_cb and clean_cb != product.codigo_barra:
             existing_cb = await get_product_by_barcode(db, str(product.company_id), clean_cb)
             if existing_cb and existing_cb.id != product.id:
-                estado_txt = "Activo" if existing_cb.activo else "Inactivo"
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Ya existe otro producto con el código de barras '{clean_cb}': SKU {existing_cb.sku} - \"{existing_cb.nombre}\" ({estado_txt}). No está permitido duplicar códigos de barra."
-                )
+                if existing_cb.activo:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Ya existe otro producto con el código de barras '{clean_cb}': SKU {existing_cb.sku} - \"{existing_cb.nombre}\" (Activo). No está permitido duplicar códigos de barra."
+                    )
+                else:
+                    logger.info(
+                        "Liberando código '%s' del producto inactivo '%s' (SKU %s) para actualizar producto activo '%s' (SKU %s).",
+                        clean_cb, existing_cb.nombre, existing_cb.sku, product.nombre, product.sku
+                    )
+                    await db.execute(
+                        update(Product)
+                        .where(Product.id == existing_cb.id)
+                        .values(codigo_barra=None, updated_at=func.now())
+                    )
 
     for f in ("precio_venta", "costo_promedio", "ultimo_costo"):
         if f in update_dict and update_dict[f] is not None:

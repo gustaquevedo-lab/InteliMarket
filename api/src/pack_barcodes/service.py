@@ -1,13 +1,16 @@
 """Pack barcode service"""
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+import logging
 import uuid
+from sqlalchemy import select, update, func
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.src.pack_barcodes.models import ProductPackBarcode
 from api.src.pack_barcodes.schemas import PackBarcodeCreate, PackBarcodeUpdate
 from api.src.products.models import Product
 from api.src.variants.models import ProductVariant
+
+logger = logging.getLogger(__name__)
 
 
 class PackBarcodeCollisionError(Exception):
@@ -15,38 +18,92 @@ class PackBarcodeCollisionError(Exception):
 
 
 async def _check_collision(db: AsyncSession, company_id: str, codigo_barra: str, exclude_pack_id: str | None = None) -> None:
-    """Un codigo de pack no puede coincidir con el codigo/SKU de ningun
-    producto, el codigo de ninguna variante, ni otro codigo de pack -- si no,
-    el escaneo en caja queda ambiguo (ver Fase 2 del plan)."""
+    """Un código de pack/sinónimo multiorigen no puede coincidir con el código o SKU
+    de ningún producto activo, variante activa, ni otro código de pack activo.
+    Si el código pertenece a un producto o variante inactiva, se libera automáticamente
+    para permitir que el producto activo utilice su código legítimo."""
     c_uuid = uuid.UUID(str(company_id))
 
+    # 1. Colisión con Producto
     prod_result = await db.execute(
-        select(Product.id).where(
+        select(Product.id, Product.sku, Product.nombre, Product.activo, Product.codigo_barra).where(
             Product.company_id == c_uuid,
             (Product.codigo_barra == codigo_barra) | (Product.sku == codigo_barra),
         )
     )
-    if prod_result.scalar_one_or_none():
-        raise PackBarcodeCollisionError(f"El código '{codigo_barra}' ya está en uso como código/SKU de un producto")
+    prod = prod_result.first()
+    if prod:
+        if prod.activo:
+            raise PackBarcodeCollisionError(
+                f"El código '{codigo_barra}' ya está en uso como código/SKU del producto activo '{prod.nombre}' (SKU {prod.sku})"
+            )
+        else:
+            # Si coincide con el código de barras de un producto inactivo, liberarlo automáticamente
+            if prod.codigo_barra == codigo_barra:
+                await db.execute(
+                    update(Product)
+                    .where(Product.id == prod.id)
+                    .values(codigo_barra=None, updated_at=func.now())
+                )
+                logger.info(
+                    "Código de barras '%s' liberado automáticamente del producto inactivo '%s' (SKU %s) para reasignación en pack/sinónimo.",
+                    codigo_barra, prod.nombre, prod.sku
+                )
+            elif prod.sku == codigo_barra:
+                raise PackBarcodeCollisionError(
+                    f"El código '{codigo_barra}' coincide con el SKU del producto histórico/inactivo '{prod.nombre}' (SKU {prod.sku}). Debe utilizar un código de barras diferente."
+                )
 
+    # 2. Colisión con Variante
     var_result = await db.execute(
-        select(ProductVariant.id).where(
+        select(ProductVariant.id, ProductVariant.sku_variante, Product.nombre, Product.activo)
+        .join(Product, ProductVariant.product_id == Product.id)
+        .where(
             ProductVariant.company_id == c_uuid,
             ProductVariant.codigo_barra == codigo_barra,
         )
     )
-    if var_result.scalar_one_or_none():
-        raise PackBarcodeCollisionError(f"El código '{codigo_barra}' ya está en uso como código de una variante")
+    var = var_result.first()
+    if var:
+        if var.activo:
+            raise PackBarcodeCollisionError(
+                f"El código '{codigo_barra}' ya está en uso como código de la variante '{var.sku_variante}' de '{var.nombre}'"
+            )
+        else:
+            await db.execute(
+                update(ProductVariant)
+                .where(ProductVariant.id == var.id)
+                .values(codigo_barra=None)
+            )
+            logger.info(
+                "Código de barras '%s' liberado automáticamente de la variante inactiva '%s'.",
+                codigo_barra, var.sku_variante
+            )
 
-    pack_query = select(ProductPackBarcode.id).where(
-        ProductPackBarcode.company_id == c_uuid,
-        ProductPackBarcode.codigo_barra == codigo_barra,
+    # 3. Colisión con otro Código de Pack / Caja
+    pack_query = (
+        select(ProductPackBarcode.id, ProductPackBarcode.etiqueta, ProductPackBarcode.activo, Product.sku, Product.nombre)
+        .join(Product, ProductPackBarcode.product_id == Product.id)
+        .where(
+            ProductPackBarcode.company_id == c_uuid,
+            ProductPackBarcode.codigo_barra == codigo_barra,
+        )
     )
     if exclude_pack_id:
         pack_query = pack_query.where(ProductPackBarcode.id != uuid.UUID(str(exclude_pack_id)))
     pack_result = await db.execute(pack_query)
-    if pack_result.scalar_one_or_none():
-        raise PackBarcodeCollisionError(f"El código '{codigo_barra}' ya está registrado como código de pack de otro producto")
+    pack = pack_result.first()
+    if pack:
+        if pack.activo:
+            raise PackBarcodeCollisionError(
+                f"El código '{codigo_barra}' ya está registrado como '{pack.etiqueta}' del producto '{pack.nombre}' (SKU {pack.sku})"
+            )
+        else:
+            await db.execute(
+                update(ProductPackBarcode)
+                .where(ProductPackBarcode.id == pack.id)
+                .values(codigo_barra=None, activo=False)
+            )
 
 
 async def list_pack_barcodes(db: AsyncSession, product_id: str) -> list[ProductPackBarcode]:
