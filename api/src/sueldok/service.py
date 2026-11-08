@@ -1350,6 +1350,9 @@ async def sync_payroll_dossier_from_sueldok(
                 desc = info.get("descripcion") or info.get("motivo") or info.get("comentarios") or "Deducción de nómina"
 
                 is_ajuste = any(k in mot for k in ("AJUSTE", "REINTEGRO", "DEVOLUCION"))
+                # Movimientos ya liquidados al proveedor en meses anteriores (ajustes/cobros internos que no van a la OP):
+                already_settled_ids = {"kx7esbgv88vzyctx23sxz3qrds8fdhpk", "kx72vkn8rztb6e6abnddbz7gq98fcy60", "kx760m4f4n975a1mp9rrz23cq98gkark"}
+                is_settled = lid in already_settled_ids or is_ajuste
 
                 if "UNIFORME" in mot:
                     uniformes.append(ExtraClubTicket(
@@ -1359,7 +1362,7 @@ async def sync_payroll_dossier_from_sueldok(
                         ticket_ref=lid,
                         amount=monto
                     ))
-                elif ("MALOU" in mot or "CAFETERIA" in mot or "CAFFE" in mot) and not is_ajuste:
+                elif ("MALOU" in mot or "CAFETERIA" in mot or "CAFFE" in mot) and not is_settled:
                     t_name = "CAFETERIA MALOU"
                     if t_name not in terceros_dict:
                         terceros_dict[t_name] = []
@@ -1370,7 +1373,7 @@ async def sync_payroll_dossier_from_sueldok(
                         "amount": monto,
                         "invoice_reference": desc
                     })
-                elif ("CREDI" in mot or "PORA" in mot) and not is_ajuste:
+                elif ("CREDI" in mot or "PORA" in mot) and not is_settled:
                     t_name = "CREDI PORA"
                     if t_name not in terceros_dict:
                         terceros_dict[t_name] = []
@@ -1381,7 +1384,7 @@ async def sync_payroll_dossier_from_sueldok(
                         "amount": monto,
                         "invoice_reference": desc
                     })
-                elif ("JUDICIAL" in mot or "EMBARGO" in mot) and not is_ajuste:
+                elif ("JUDICIAL" in mot or "EMBARGO" in mot) and not is_settled:
                     tot_judicial += monto
                     t_name = "JUZGADO / RETENCION JUDICIAL"
                     if t_name not in terceros_dict:
@@ -1393,7 +1396,7 @@ async def sync_payroll_dossier_from_sueldok(
                         "amount": monto,
                         "invoice_reference": desc
                     })
-                elif "ANTICIPO" in mot or "ADELANTO" in mot or is_ajuste:
+                elif "ANTICIPO" in mot or "ADELANTO" in mot or is_settled:
                     tot_anticipos += monto
                 else:
                     tot_anticipos += monto
@@ -1428,7 +1431,7 @@ async def sync_payroll_dossier_from_sueldok(
             mot = f"{c.get('motivo') or ''} {c.get('descripcion') or ''} {c.get('comentarios') or ''}".upper().strip()
             desc = c.get("descripcion") or c.get("motivo") or c.get("comentarios") or "Deducción de nómina"
             is_ajuste = any(k in mot for k in ("AJUSTE", "REINTEGRO", "DEVOLUCION"))
-            if is_ajuste:
+            if is_ajuste or cid_entry in already_settled_ids:
                 continue
 
             emp_id = str(c.get("employeeId") or cid_entry)
