@@ -1092,7 +1092,7 @@ async def create_payroll_dossier(
 
 async def enrich_dossier_with_payment_orders(db: AsyncSession, dossier) -> dict:
     import uuid
-    from sqlalchemy import select, or_
+    from sqlalchemy import select, or_, and_
     from api.src.financial.models import SupplierPaymentOrder
     from api.src.accounts_receivable.models import ReceivablePayment
 
@@ -1151,7 +1151,14 @@ async def enrich_dossier_with_payment_orders(db: AsyncSession, dossier) -> dict:
                     stmt = stmt.where(
                         or_(
                             SupplierPaymentOrder.periodo_nomina == dossier.periodo,
-                            SupplierPaymentOrder.observaciones.ilike(f"%{dossier.periodo}%")
+                            and_(
+                                SupplierPaymentOrder.periodo_nomina.is_(None),
+                                or_(
+                                    SupplierPaymentOrder.observaciones.ilike(f"%Nómina Salarial {dossier.periodo}%"),
+                                    SupplierPaymentOrder.observaciones.ilike(f"%Nómina {dossier.periodo}%"),
+                                    SupplierPaymentOrder.observaciones.ilike(f"%SIPAP-{dossier.periodo}%")
+                                )
+                            )
                         )
                     ).order_by(SupplierPaymentOrder.created_at.desc())
 
