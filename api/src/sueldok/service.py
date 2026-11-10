@@ -1092,8 +1092,9 @@ async def create_payroll_dossier(
 
 async def enrich_dossier_with_payment_orders(db: AsyncSession, dossier) -> dict:
     import uuid
-    from sqlalchemy import select
+    from sqlalchemy import select, or_
     from api.src.financial.models import SupplierPaymentOrder
+    from api.src.accounts_receivable.models import ReceivablePayment
 
     data = format_dossier(dossier)
     po_ids = [uuid.UUID(p["payment_order_id"]) for p in data["phases"] if p.get("payment_order_id")]
@@ -1108,6 +1109,7 @@ async def enrich_dossier_with_payment_orders(db: AsyncSession, dossier) -> dict:
     auto_repaired = False
     for p in data["phases"]:
         p_po_id = p.get("payment_order_id")
+        p_type = p.get("phase_type", "")
         if p_po_id:
             po = po_map.get(p_po_id)
             if po:
@@ -1127,6 +1129,93 @@ async def enrich_dossier_with_payment_orders(db: AsyncSession, dossier) -> dict:
                         phase_obj.payment_order_id = None
                         phase_obj.estado = "pendiente"
                         auto_repaired = True
+        else:
+            # Blindaje anti-desincronización: si la fase no tiene payment_order_id,
+            # buscar si ya existe una Orden de Pago emitida en Tesorería para este período y concepto
+            if not p_type.startswith("compensacion_"):
+                po_subtipo = "nomina_salarios" if "salario_neto" in p_type else ("convenio_tercero" if "convenio_tercero" in p_type else ("prevision_ips" if "ips" in p_type else None))
+                if po_subtipo:
+                    stmt = select(SupplierPaymentOrder).where(
+                        SupplierPaymentOrder.company_id == dossier.company_id,
+                        SupplierPaymentOrder.subtipo == po_subtipo,
+                        SupplierPaymentOrder.estado != "anulado"
+                    )
+                    if "banco" in p_type or "sipap" in p_type:
+                        stmt = stmt.where(SupplierPaymentOrder.beneficiario_nombre.ilike("%SIPAP%"))
+                    elif "efectivo" in p_type:
+                        stmt = stmt.where(SupplierPaymentOrder.beneficiario_nombre.ilike("%Efectivo%"))
+                    elif "convenio_tercero" in p_type:
+                        t_name = p_type.replace("convenio_tercero_", "").replace("_", " ")
+                        stmt = stmt.where(SupplierPaymentOrder.beneficiario_nombre.ilike(f"%{t_name}%"))
+
+                    stmt = stmt.where(
+                        or_(
+                            SupplierPaymentOrder.periodo_nomina == dossier.periodo,
+                            SupplierPaymentOrder.observaciones.ilike(f"%{dossier.periodo}%")
+                        )
+                    ).order_by(SupplierPaymentOrder.created_at.desc())
+
+                    res_po = await db.execute(stmt)
+                    matched_po = res_po.scalars().first()
+                    if matched_po:
+                        p["payment_order_id"] = str(matched_po.id)
+                        p["payment_order_numero"] = matched_po.numero_orden
+                        p["payment_order_estado"] = matched_po.estado
+                        p["payment_order_monto_neto"] = float(matched_po.monto_neto or matched_po.monto_total or 0)
+                        p["estado"] = "pagado" if matched_po.estado in ("pagado", "conciliado") else "ejecutado"
+                        for phase_obj in (dossier.phases or []):
+                            if str(phase_obj.id) == p["id"]:
+                                phase_obj.payment_order_id = matched_po.id
+                                phase_obj.estado = p["estado"]
+                                phase_obj.executed_at = matched_po.created_at
+                                meta = phase_obj.phase_metadata or {}
+                                meta["payment_order_numero"] = matched_po.numero_orden
+                                phase_obj.phase_metadata = meta
+                                auto_repaired = True
+
+        # Blindaje compensaciones no-cash: reconciliar si ya existe recibo REC-NOMINA en AR
+        if "extra_club" in p_type and (p.get("estado") != "ejecutado" or not p.get("collection_receipt_id")):
+            clean_periodo = dossier.periodo.replace("-", "")
+            rec_stmt = select(ReceivablePayment).where(
+                ReceivablePayment.company_id == dossier.company_id,
+                ReceivablePayment.numero_recibo.ilike(f"%NOMINA%{clean_periodo}%EXTRA_CLUB%")
+            ).order_by(ReceivablePayment.created_at.desc())
+            rec_res = await db.execute(rec_stmt)
+            matched_rec = rec_res.scalars().first()
+            if matched_rec:
+                p["collection_receipt_id"] = str(matched_rec.id)
+                p["estado"] = "ejecutado"
+                for phase_obj in (dossier.phases or []):
+                    if str(phase_obj.id) == p["id"]:
+                        phase_obj.collection_receipt_id = matched_rec.id
+                        phase_obj.estado = "ejecutado"
+                        phase_obj.executed_at = matched_rec.created_at
+                        meta = phase_obj.phase_metadata or {}
+                        meta["numero_recibo"] = matched_rec.numero_recibo
+                        meta["recibo_pago_id"] = str(matched_rec.id)
+                        phase_obj.phase_metadata = meta
+                        auto_repaired = True
+
+        if "uniforme" in p_type and p.get("estado") != "ejecutado":
+            clean_periodo = dossier.periodo.replace("-", "")
+            rec_stmt = select(ReceivablePayment).where(
+                ReceivablePayment.company_id == dossier.company_id,
+                ReceivablePayment.numero_recibo.ilike(f"%NOMINA%{clean_periodo}%EXTRA_CLUB%")
+            )
+            rec_res = await db.execute(rec_stmt)
+            if rec_res.scalars().first():
+                p["estado"] = "ejecutado"
+                for phase_obj in (dossier.phases or []):
+                    if str(phase_obj.id) == p["id"]:
+                        phase_obj.estado = "ejecutado"
+                        auto_repaired = True
+
+    # Si hay fases ejecutadas o pagadas, el expediente no debe permanecer en 'borrador'
+    if any(p.get("estado") in ("ejecutado", "pagado") for p in data["phases"]):
+        if dossier.estado == "borrador":
+            dossier.estado = "en_proceso"
+            data["estado"] = "en_proceso"
+            auto_repaired = True
 
     if auto_repaired:
         try:
@@ -1212,8 +1301,12 @@ async def sync_payroll_dossier_from_sueldok(
         .where(PayrollDossier.company_id == cid, PayrollDossier.periodo == periodo)
     )
     existing = res.scalars().first()
+    has_executed = existing and any(p.estado in ("ejecutado", "pagado") or p.payment_order_id or p.collection_receipt_id for p in (existing.phases or []))
+    if has_executed:
+        existing.estado = "en_proceso"
+        return await enrich_dossier_with_payment_orders(db, existing)
     if existing and not force and existing.estado != "borrador":
-        return format_dossier(existing)
+        return await enrich_dossier_with_payment_orders(db, existing)
 
     # 2. Consultar a SueldOK Overview
     key = api_key or "ifk_santateresa_live_api_key_2026"
@@ -1587,6 +1680,10 @@ async def sync_payroll_dossier_from_sueldok(
     )
 
     if existing and force:
+        has_executed = any(p.estado in ("ejecutado", "pagado") or p.payment_order_id or p.collection_receipt_id for p in (existing.phases or []))
+        if has_executed:
+            existing.estado = "en_proceso"
+            return await enrich_dossier_with_payment_orders(db, existing)
         await db.delete(existing)
         await db.flush()
 

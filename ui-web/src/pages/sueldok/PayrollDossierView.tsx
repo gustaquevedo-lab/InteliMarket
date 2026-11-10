@@ -158,16 +158,6 @@ export default function PayrollDossierView({
           active = list.find((d: Dossier) => d.periodo === initialPeriodo) || list[0]
         }
         setSelectedDossier(active)
-
-        // Si el expediente activo está en borrador, auto-sincronizar de forma transparente con SueldOK
-        if (active && active.estado === "borrador") {
-          api.sueldok.syncFromSueldok(active.periodo, undefined, true).then((synced) => {
-            if (synced) {
-              setSelectedDossier(synced)
-              api.sueldok.listDossiers().then(l => setDossiers(l || []))
-            }
-          }).catch(() => {})
-        }
       } else {
         // Si no hay expedientes, auto-sincronizar el período activo desde SueldOK
         await handleSyncFromSueldok(initialPeriodo || "2026-10", false)
