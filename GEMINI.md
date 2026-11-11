@@ -117,4 +117,10 @@
    - **Prohibición de Orfandad:** Queda terminantemente PROHIBIDO que un producto conserve `precio_regular > precio_venta` sin una promoción activa y vigente en el catálogo.
    - **Candado Doble (Trigger SQL + Reconciliador del Scheduler):** Todo cambio de membresía en promociones está blindado a nivel de motor de base de datos por el trigger `trg_sync_promo_precio_fijo` (cubriendo `INSERT`, `UPDATE` y `DELETE`). Como salvaguarda proactiva redundante, el sincronizador periódico de `scheduler.py` reconcilia y revierte automáticamente cualquier producto que haya quedado desfasado sin promoción vigente.
 
+19. **INMUTABILIDAD DE EXPEDIENTES DE NÓMINA Y BLINDAJE DE FASES (ANTI-RESET DE SUELDOK):**
+   - **Prohibición Estricta de Auto-Sync Destructivo en Frontend:** Queda terminantemente PROHIBIDO colocar `useEffect` o disparadores automáticos al cargar `/sueldok` que ejecuten sincronizaciones forzadas (`syncFromSueldok(..., force=true)`). La carga de vista debe ser estrictamente de consulta (`GET`).
+   - **Prohibición Absoluta de Borrado en Cascada:** En el backend (`api/src/sueldok/service.py`), está prohibido ejecutar `db.delete(existing)` sobre expedientes que contengan fases ejecutadas, pagadas o con Órdenes de Pago emitidas. Si el expediente ya tiene movimientos, se preserva y avanza a `en_proceso`.
+   - **Reconciliación Canónica contra Tesorería:** El estado de cada fase (SIPAP, Efectivo, Extra Club, Uniformes, Convenios e IPS) debe deducirse y vincularse proactivamente contra los comprobantes reales de Tesorería (`supplier_payment_orders` y `receivable_payments`) filtrados estrictamente por `periodo_nomina`. Ningún reinicio o recarga de interfaz puede desvincular una OP ya pagada o retroceder una fase a `pendiente`.
+
+
 
