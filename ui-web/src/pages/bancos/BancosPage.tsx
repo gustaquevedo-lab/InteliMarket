@@ -1082,6 +1082,11 @@ export default function BancosPage() {
                             <span className="text-base font-black font-mono text-slate-900 dark:text-white">
                               {formatCurrency(b.saldo_actual, b.moneda)}
                             </span>
+                            {acctStats && acctStats.saldo_conciliado !== undefined && (
+                              <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 block mt-0.5">
+                                Conciliado: {formatCurrency(acctStats.saldo_conciliado, b.moneda)}
+                              </span>
+                            )}
                           </div>
                           {acctStats && acctStats.pendientes > 0 ? (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
@@ -1213,13 +1218,40 @@ export default function BancosPage() {
                           </span>
                         </div>
 
-                        <div className="flex items-baseline gap-3">
-                          <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-slate-900 dark:text-white">
-                            {formatCurrency(currentAccount.saldo_actual, currentAccount.moneda)}
-                          </span>
-                          <span className="text-xs font-bold uppercase text-slate-400">
-                            Saldo en libros ({currentAccount.moneda})
-                          </span>
+                        <div className="flex flex-wrap items-center gap-6 pt-1">
+                          <div>
+                            <span className="text-[10px] font-bold uppercase text-slate-400 block">
+                              Saldo en Libros ERP ({currentAccount.moneda})
+                            </span>
+                            <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-slate-900 dark:text-white">
+                              {formatCurrency(currentAccount.saldo_actual, currentAccount.moneda)}
+                            </span>
+                          </div>
+                          {(() => {
+                            const cStats = bankDashboard?.accounts?.find((a: any) => a.id === currentAccount.id)
+                            if (!cStats || cStats.saldo_conciliado === undefined) return null
+                            return (
+                              <>
+                                <div className="pl-5 border-l border-slate-200 dark:border-slate-700/80">
+                                  <span className="text-[10px] font-bold uppercase text-emerald-600 dark:text-emerald-400 block">
+                                    Saldo Conciliado ({cStats.conciliadas || 0} movs)
+                                  </span>
+                                  <span className="text-xl sm:text-2xl font-black font-mono tracking-tight text-emerald-700 dark:text-emerald-300">
+                                    {formatCurrency(cStats.saldo_conciliado, currentAccount.moneda)}
+                                  </span>
+                                </div>
+                                <div className="pl-5 border-l border-slate-200 dark:border-slate-700/80">
+                                  <span className="text-[10px] font-bold uppercase text-amber-600 dark:text-amber-400 block">
+                                    Pendiente Conciliación ({cStats.pendientes || 0} movs)
+                                  </span>
+                                  <span className="text-lg sm:text-xl font-black font-mono tracking-tight text-amber-700 dark:text-amber-300">
+                                    {Number(cStats.saldo_pendiente_neto || 0) > 0 ? "+" : ""}
+                                    {formatCurrency(cStats.saldo_pendiente_neto || 0, currentAccount.moneda)}
+                                  </span>
+                                </div>
+                              </>
+                            )
+                          })()}
                         </div>
 
                         <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 pt-1">

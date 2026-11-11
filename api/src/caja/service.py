@@ -7294,15 +7294,18 @@ async def get_vault_kardex(
             origen_label = {
                 "entrega_cajero": "Recaudación Cierre de Caja",
                 "cobranza_ar": "Cobranza CxC Clientes",
-                "ajuste": "Ajuste de Bóveda",
+                "ajuste": "Ajuste / Ingreso Inicial Bóveda",
                 "cheque_caja": "Cheques de Caja",
                 "devolucion_cajero": "Devolución Fondo Cajera",
                 "reintegro_sencillo": "Reintegro desde Fondo Sencillo",
-                "egreso_fondo": "Reposición Fondo Fijo",
-                "egreso_gasto": "Pago Gasto Directo",
+                "egreso_fondo": "Fondo Extraordinario Bóveda",
+                "egreso_gasto": "Ingreso Operativo Bóveda",
+                "cash_drop": "Retiro Parcial de Caja (Drop)",
+                "factura_admin": "Cobro de Factura en Administración",
+                "remanente": "Remanente Custodia Bóveda",
             }.get(e.origen, e.origen.replace("_", " ").title())
 
-            # 1. Ingreso a Bóveda
+            # 1. Ingreso original a Bóveda
             raw_events.append({
                 "id": f"ING-{str(e.id)}",
                 "fecha": e.created_at,
@@ -7317,37 +7320,36 @@ async def get_vault_kardex(
                 "observaciones": e.observaciones or "",
             })
 
-            # 2. Egreso si fue depositado al banco o transferido/asignado/gastado/ajustado
-            if e.estado == "depositado" and e.fecha_deposito:
-                ref_txt = str(e.bank_transaction_id)[:8].upper() if e.bank_transaction_id else "BANCO"
+            # 2. Egreso si ya salió físicamente de Bóveda (depositado, pagado a proveedor, gasto o ajuste)
+            if e.estado in ("depositado", "pagado_proveedor", "egreso_gasto", "ajuste", "asignado_cajero", "fondo_sencillo"):
+                f_egr = e.fecha_deposito or e.created_at
+                ref_txt = str(e.bank_transaction_id)[:8].upper() if e.bank_transaction_id else str(e.id)[:8].upper()
+                if e.estado == "depositado":
+                    egreso_concepto = f"Depósito Bancario (Trx #{ref_txt})"
+                    origen_egr = "deposito_bancario"
+                elif e.estado == "pagado_proveedor":
+                    egreso_concepto = "Egreso por Pago a Proveedor" + (f" ({e.observaciones})" if e.observaciones else "")
+                    origen_egr = "pagado_proveedor"
+                elif e.estado == "egreso_gasto":
+                    egreso_concepto = "Egreso por Gasto Directo" + (f" ({e.observaciones})" if e.observaciones else "")
+                    origen_egr = "egreso_gasto"
+                elif e.estado == "ajuste":
+                    egreso_concepto = "Ajuste / Salida Extraordinaria de Bóveda" + (f" ({e.observaciones})" if e.observaciones else "")
+                    origen_egr = "ajuste"
+                elif e.estado == "asignado_cajero":
+                    egreso_concepto = "Salida por Dotación Fondo Cajera" + (f" ({e.observaciones})" if e.observaciones else "")
+                    origen_egr = "asignado_cajero"
+                else:
+                    egreso_concepto = "Traspaso a Fondo de Sencillo" + (f" ({e.observaciones})" if e.observaciones else "")
+                    origen_egr = "fondo_sencillo"
+
                 raw_events.append({
                     "id": f"EGR-{str(e.id)}",
-                    "fecha": e.fecha_deposito,
+                    "fecha": f_egr,
                     "tipo": "egreso",
-                    "concepto": f"Depósito Bancario (Trx #{ref_txt})",
-                    "origen": "deposito_bancario",
+                    "concepto": egreso_concepto,
+                    "origen": origen_egr,
                     "referencia": ref_txt,
-                    "monto_ingreso": 0.0,
-                    "monto_egreso": monto_val,
-                    "estado": "depositado",
-                    "usuario": user_name,
-                    "observaciones": e.observaciones or "Fondos remesados al banco",
-                })
-            elif e.estado in ("asignado_cajero", "fondo_sencillo", "pagado_proveedor", "egreso_gasto", "ajuste"):
-                egreso_label = {
-                    "asignado_cajero": "Salida por Dotación Fondo de Cajera",
-                    "fondo_sencillo": "Traspaso a Fondo Permanente de Sencillo",
-                    "pagado_proveedor": "Egreso por Pago a Proveedor",
-                    "egreso_gasto": "Egreso por Gasto / Reposición de Fondo",
-                    "ajuste": "Ajuste / Salida Extraordinaria de Bóveda",
-                }.get(e.estado, e.estado.replace("_", " ").title())
-                raw_events.append({
-                    "id": f"EGR-{str(e.id)}",
-                    "fecha": e.fecha_deposito or e.created_at,
-                    "tipo": "egreso",
-                    "concepto": f"{egreso_label}" + (f" ({e.observaciones})" if e.observaciones else ""),
-                    "origen": e.estado,
-                    "referencia": str(e.id)[:8].upper(),
                     "monto_ingreso": 0.0,
                     "monto_egreso": monto_val,
                     "estado": e.estado,
@@ -7355,8 +7357,8 @@ async def get_vault_kardex(
                     "observaciones": e.observaciones or "",
                 })
 
-    # Ordenar cronológicamente para calcular el saldo acumulado progresivo
-    raw_events.sort(key=lambda x: x["fecha"] if isinstance(x["fecha"], datetime) else datetime.min)
+    # Ordenar cronológicamente. Si la fecha coincide, los ingresos van primero que los egresos.
+    raw_events.sort(key=lambda x: (x["fecha"] if isinstance(x["fecha"], datetime) else datetime.min, 0 if x["tipo"] == "ingreso" else 1))
 
     saldo = 0.0
     kardex = []

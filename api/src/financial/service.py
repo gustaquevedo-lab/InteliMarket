@@ -2085,45 +2085,44 @@ async def delete_bank_transaction(db: AsyncSession, company_id: str, transaction
             acc.saldo_actual = (acc.saldo_actual or Decimal("0")) + bt.monto
 
     # ── Reversión de Bóveda Central (VaultEntry) ──────────────────────────
-    # Si la transacción bancaria provino de un depósito de recaudación de bóveda,
-    # restauramos los fondos a la bóveda central (reintegrando sobres o remanentes).
-    vault_entries_res = await db.execute(
-        select(VaultEntry).where(
-            VaultEntry.bank_transaction_id == bt.id,
-            VaultEntry.company_id == cid,
-        )
-    )
-    vault_entries = list(vault_entries_res.scalars().all())
-
-    for ve in vault_entries:
-        if ve.handoff_id:
-            # Buscar si existe un sobre hermano/padre activo en bóveda
-            parent_res = await db.execute(
-                select(VaultEntry).where(
-                    VaultEntry.handoff_id == ve.handoff_id,
-                    VaultEntry.id != ve.id,
-                    VaultEntry.company_id == cid,
-                    VaultEntry.estado == "en_boveda",
-                ).order_by(VaultEntry.created_at.asc())
+    # Solo si la transacción bancaria provino estrictamente de un depósito de recaudación de bóveda
+    if bt.categoria == "deposito_recaudacion_caja":
+        vault_entries_res = await db.execute(
+            select(VaultEntry).where(
+                VaultEntry.bank_transaction_id == bt.id,
+                VaultEntry.company_id == cid,
             )
-            parent = parent_res.scalars().first()
-            if parent:
-                parent.monto_pyg = (parent.monto_pyg or Decimal("0")) + (ve.monto_pyg or Decimal("0"))
-                if parent.observaciones and "Remanente divisa" in parent.observaciones:
-                    parent.observaciones = (
-                        f"Restaurado en bóveda tras reversión de depósito bancario (Boleta #{bt.referencia or ''}). "
-                        f"Ref: {parent.observaciones}"
-                    )
-                await db.delete(ve)
-                continue
+        )
+        vault_entries = list(vault_entries_res.scalars().all())
 
-        # Si no había hermano en bóveda (el sobre completo fue depositado o no tiene handoff_id como cobranzas AR)
-        ve.estado = "en_boveda"
-        ve.bank_transaction_id = None
-        ve.fecha_deposito = None
+        for ve in vault_entries:
+            if ve.handoff_id:
+                # Buscar si existe un sobre hermano/padre activo en bóveda
+                parent_res = await db.execute(
+                    select(VaultEntry).where(
+                        VaultEntry.handoff_id == ve.handoff_id,
+                        VaultEntry.id != ve.id,
+                        VaultEntry.company_id == cid,
+                        VaultEntry.estado == "en_boveda",
+                    ).order_by(VaultEntry.created_at.asc())
+                )
+                parent = parent_res.scalars().first()
+                if parent:
+                    parent.monto_pyg = (parent.monto_pyg or Decimal("0")) + (ve.monto_pyg or Decimal("0"))
+                    if parent.observaciones and "Remanente divisa" in parent.observaciones:
+                        parent.observaciones = (
+                            f"Restaurado en bóveda tras reversión de depósito bancario (Boleta #{bt.referencia or ''}). "
+                            f"Ref: {parent.observaciones}"
+                        )
+                    await db.delete(ve)
+                    continue
+
+            ve.estado = "en_boveda"
+            ve.bank_transaction_id = None
+            ve.fecha_deposito = None
 
     # ── Reversión en Libro Diario de Bóveda (CashRegisterMovement) ─────────
-    if bt.referencia:
+    if bt.categoria == "deposito_recaudacion_caja" and bt.referencia:
         crm_res = await db.execute(
             select(CashRegisterMovement).where(
                 CashRegisterMovement.company_id == cid,
@@ -2135,8 +2134,26 @@ async def delete_bank_transaction(db: AsyncSession, company_id: str, transaction
         for crm in crm_res.scalars().all():
             await db.delete(crm)
 
+    acc_id = bt.bank_account_id
     await db.delete(bt)
     await db.flush()
+
+    # Recálculo canónico de saldo bancario exacto (evita desfases por borrado incremental)
+    if acc_id:
+        acc_res = await db.execute(select(BankAccount).where(BankAccount.id == acc_id))
+        acc = acc_res.scalar_one_or_none()
+        if acc:
+            bal_res = await db.execute(
+                select(
+                    func.coalesce(func.sum(case((BankTransaction.tipo == 'credito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("creditos"),
+                    func.coalesce(func.sum(case((BankTransaction.tipo == 'debito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("debitos"),
+                ).where(BankTransaction.bank_account_id == acc.id)
+            )
+            b_row = bal_res.fetchone()
+            acc.saldo_actual = (acc.saldo_inicial or Decimal("0")) + (b_row.creditos if b_row else Decimal("0")) - (b_row.debitos if b_row else Decimal("0"))
+            db.add(acc)
+            await db.flush()
+
     return True
 
 
@@ -2316,14 +2333,24 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
                     # Ya registrado previamente en libros
                     continue
 
-                # Si no existía transacción previa, insertar con descripción legible enriquecida
+                # Si no existía transacción previa en libros:
                 desc_enriquecida = desc_val
-                cat = "otros"
+                cat = "pendiente_conciliacion"
                 chq_id_val = None
+                es_conciliado = False
+                f_conc = None
+
                 if found_chq:
+                    # El cheque existe registrado en el ERP: se concilia y marca como cobrado
                     desc_enriquecida = f"PAGO A {found_chq.beneficiario} (Clearing Cheque #{found_chq.numero})"
                     cat = "pago_proveedor"
                     chq_id_val = found_chq.id
+                    es_conciliado = True
+                    f_conc = _now()
+                    found_chq.estado = "cobrado"
+                    found_chq.fecha_cobro = t["fecha"]
+                    db.add(found_chq)
+                    auto_conciliadas += 1
 
                 bt = BankTransaction(
                     company_id=uuid.UUID(company_id),
@@ -2336,13 +2363,12 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
                     referencia=ref_val or None,
                     categoria=cat,
                     cheque_id=chq_id_val,
-                    conciliado=True,
-                    fecha_conciliacion=_now()
+                    conciliado=es_conciliado,
+                    fecha_conciliacion=f_conc,
                 )
                 db.add(bt)
                 existing_keys.add(key)
                 nuevas += 1
-                auto_conciliadas += 1
                 new_inserted.append((bt, t))
                 continue
 
@@ -2665,9 +2691,16 @@ async def get_bank_dashboard(db: AsyncSession, company_id: str) -> dict:
 
     conciliadas_por_cuenta: dict[uuid.UUID, int] = {}
     pendientes_por_cuenta: dict[uuid.UUID, int] = {}
+    conc_neto_por_cuenta: dict[uuid.UUID, Decimal] = {}
+    pend_neto_por_cuenta: dict[uuid.UUID, Decimal] = {}
     for t in transactions:
         d = conciliadas_por_cuenta if t.conciliado else pendientes_por_cuenta
         d[t.bank_account_id] = d.get(t.bank_account_id, 0) + 1
+        signed = (t.monto or Decimal("0")) if t.tipo == "credito" else -(t.monto or Decimal("0"))
+        if t.conciliado:
+            conc_neto_por_cuenta[t.bank_account_id] = conc_neto_por_cuenta.get(t.bank_account_id, Decimal("0")) + signed
+        else:
+            pend_neto_por_cuenta[t.bank_account_id] = pend_neto_por_cuenta.get(t.bank_account_id, Decimal("0")) + signed
 
     # chequeo liviano de saldo bajo en cada carga del dashboard -- no hace
     # falta un cron aparte, son pocas cuentas y no duplica si ya hay una
@@ -2681,6 +2714,8 @@ async def get_bank_dashboard(db: AsyncSession, company_id: str) -> dict:
         "accounts": [
             {
                 "id": str(a.id), "banco": a.banco, "tipo": a.tipo, "moneda": a.moneda, "saldo_actual": a.saldo_actual,
+                "saldo_conciliado": (a.saldo_inicial or Decimal("0")) + conc_neto_por_cuenta.get(a.id, Decimal("0")),
+                "saldo_pendiente_neto": pend_neto_por_cuenta.get(a.id, Decimal("0")),
                 "conciliadas": conciliadas_por_cuenta.get(a.id, 0),
                 "pendientes": pendientes_por_cuenta.get(a.id, 0),
             }
