@@ -30,10 +30,12 @@ import {
   Square,
   Search,
   Wallet,
+  Plus,
+  Calendar,
 } from "lucide-react"
 import { api } from "../../api"
 import { useToast } from "../../context/ToastContext"
-import { formatPYG } from "../../utils/format"
+import { formatPYG, getCurrentPayrollPeriod, getPayrollPeriodsList } from "../../utils/format"
 import CurrencyInput from "../../components/CurrencyInput"
 
 interface Phase {
@@ -123,7 +125,9 @@ export default function PayrollDossierView({
   const [ipsMotivos, setIpsMotivos] = useState<Record<string, string>>({})
   const [savingIpsAdjustment, setSavingIpsAdjustment] = useState<string | null>(null)
 
-  const defaultActivePeriodo = initialPeriodo || "2026-10"
+  const [importModalOpen, setImportModalOpen] = useState(false)
+  const [periodToImport, setPeriodToImport] = useState(() => getCurrentPayrollPeriod())
+  const defaultActivePeriodo = initialPeriodo || getCurrentPayrollPeriod()
 
   const handleSyncFromSueldok = useCallback(async (targetPeriodo = defaultActivePeriodo, force = false) => {
     try {
@@ -160,7 +164,7 @@ export default function PayrollDossierView({
         setSelectedDossier(active)
       } else {
         // Si no hay expedientes, auto-sincronizar el período activo desde SueldOK
-        await handleSyncFromSueldok(initialPeriodo || "2026-10", false)
+        await handleSyncFromSueldok(initialPeriodo || getCurrentPayrollPeriod(), false)
       }
     } catch (err: any) {
       toast.error("Error al cargar expedientes de nómina")
@@ -483,6 +487,16 @@ export default function PayrollDossierView({
               </option>
             ))}
           </select>
+
+          <button
+            type="button"
+            onClick={() => setImportModalOpen(true)}
+            className="px-3 py-2 border rounded-lg border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+            title="Importar un nuevo período de nómina desde SueldOK"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Nuevo Período</span>
+          </button>
 
           <button
             onClick={() => handleSyncFromSueldok(selectedDossier?.periodo || defaultActivePeriodo, true)}
@@ -1511,6 +1525,65 @@ export default function PayrollDossierView({
                 className="px-5 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 font-bold text-xs transition"
               >
                 Cerrar Punteo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Importar Nuevo Período ───────────────────────── */}
+      {importModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-indigo-500" />
+                <h3 className="font-bold text-slate-900 dark:text-white text-base">Importar Período de Nómina</h3>
+              </div>
+              <button
+                onClick={() => setImportModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+              Selecciona el mes contable de nómina para consultar a SueldOK y generar el expediente multi-fase en InteliMarket.
+            </p>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                Período a Importar
+              </label>
+              <select
+                value={periodToImport}
+                onChange={(e) => setPeriodToImport(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+              >
+                {getPayrollPeriodsList(18, 2).map(p => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setImportModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  setImportModalOpen(false)
+                  await handleSyncFromSueldok(periodToImport, true)
+                }}
+                disabled={actionLoading === "sync"}
+                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 transition flex items-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Importar desde SueldOK</span>
               </button>
             </div>
           </div>

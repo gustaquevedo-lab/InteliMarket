@@ -49,7 +49,7 @@ import {
   Legend,
   CartesianGrid,
 } from "recharts"
-import { formatPYG, formatDate, formatDateTime, getTodayAsuncion } from "../../utils/format"
+import { formatPYG, formatDate, formatDateTime, getTodayAsuncion, getCurrentPayrollPeriod, getPayrollPeriodsList } from "../../utils/format"
 import CurrencyInput from "../../components/CurrencyInput"
 import { useToast } from "../../context/ToastContext"
 import { api, BankAccount, LaborSettlement } from "../../api"
@@ -237,10 +237,10 @@ export default function SueldokPage() {
   const [descuentoTipo, setDescuentoTipo] = useState("Faltante de Arqueo de Caja")
   const [descuentoMonto, setDescuentoMonto] = useState<number | string>("")
   const [descuentoCuotas, setDescuentoCuotas] = useState("1")
-  const [descuentoPeriodo, setDescuentoPeriodo] = useState("2026-09")
+  const [descuentoPeriodo, setDescuentoPeriodo] = useState(() => getCurrentPayrollPeriod())
   const [descuentoObs, setDescuentoObs] = useState("")
 
-  const [periodoNomina, setPeriodoNomina] = useState("2026-09")
+  const [periodoNomina, setPeriodoNomina] = useState(() => getCurrentPayrollPeriod())
   const [nominaFeedback, setNominaFeedback] = useState<string | null>(null)
 
   // Almacenamiento local reactivo para anticipos y deducciones nuevos
@@ -2825,9 +2825,9 @@ export default function SueldokPage() {
                     onChange={(e) => setPeriodoNomina(e.target.value)}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white outline-none font-mono"
                   >
-                    <option value="2026-09">Septiembre 2026</option>
-                    <option value="2026-08">Agosto 2026</option>
-                    <option value="2026-07">Julio 2026</option>
+                    {getPayrollPeriodsList().map(p => (
+                      <option key={p.value} value={p.value}>{p.label}</option>
+                    ))}
                   </select>
                 </div>
 

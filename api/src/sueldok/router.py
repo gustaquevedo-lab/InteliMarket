@@ -94,7 +94,7 @@ async def export_bonuses(
     """
     bonuses = payload.get("bonuses", [])
     total_monto = sum(float(b.get("bono_rendimiento_gs", 0)) for b in bonuses)
-    periodo = payload.get("periodo_mes", "2026-08")
+    periodo = payload.get("periodo_mes") or service.get_current_payroll_period()
     return {
         "status": "success",
         "message": f"Se exportaron {len(bonuses)} bonos de productividad a la planilla SueldOK de {periodo}",
@@ -223,7 +223,7 @@ async def create_dossier(
 
 @router.post("/dossiers/sync-from-sueldok", response_model=schemas.PayrollDossierOut)
 async def sync_dossier_from_sueldok(
-    periodo: str = Query("2026-09", description="Período de nómina a importar (YYYY-MM)"),
+    periodo: Optional[str] = Query(None, description="Período de nómina a importar (YYYY-MM). Si se omite, calcula el período dinámico"),
     company_id: str = Query("00000000-0000-0000-0000-000000000010"),
     api_key: Optional[str] = Query(None, description="API Key de la empresa en SueldOK"),
     force: bool = Query(False, description="Sobrescribir expediente existente si está en borrador"),
@@ -235,9 +235,10 @@ async def sync_dossier_from_sueldok(
     generando el expediente multi-fase y todas sus fases operativas y financieras.
     """
     user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    target_periodo = periodo or service.get_current_payroll_period()
     try:
         return await service.sync_payroll_dossier_from_sueldok(
-            db, company_id, periodo, api_key, user_id, force
+            db, company_id, target_periodo, api_key, user_id, force
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -413,7 +414,7 @@ async def get_third_party_annex_pdf(
     third_party_ruc = metadata.get("third_party_ruc")
     employees = metadata.get("employees", [])
     total_monto = float(phase.monto or 0)
-    periodo = phase.dossier.periodo if phase.dossier else "2026-09"
+    periodo = phase.dossier.periodo if phase.dossier else service.get_current_payroll_period()
 
     pdf_bytes = generate_third_party_annex_pdf(
         company_name="GRUPO SANTA TERESA E.A.S. - Extra Supermercado Mayorista",
@@ -472,7 +473,7 @@ async def get_third_party_punteo(
     third_party_ruc = metadata.get("third_party_ruc")
     employees = metadata.get("employees", [])
     total_monto = float(phase.monto or 0)
-    periodo = phase.dossier.periodo if phase.dossier else "2026-09"
+    periodo = phase.dossier.periodo if phase.dossier else service.get_current_payroll_period()
 
     items = []
     for idx, e in enumerate(employees, start=1):

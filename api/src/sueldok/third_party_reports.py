@@ -30,6 +30,7 @@ from api.src.sueldok.models import PayrollDossier, PayrollDossierPhase
 from api.src.financial.models import SupplierPaymentOrder
 from api.src.financial.schemas import SupplierPaymentOrderCreate
 from api.src.financial import service as financial_service
+from api.src.sueldok.service import get_current_payroll_period
 
 
 def generate_third_party_annex_pdf(
@@ -294,7 +295,7 @@ async def execute_third_party_phase(
     third_party_ruc = metadata.get("third_party_ruc")
     employees = metadata.get("employees", [])
     total_monto = float(phase.monto or 0)
-    periodo = phase.dossier.periodo if phase.dossier else "2026-10"
+    periodo = phase.dossier.periodo if phase.dossier else get_current_payroll_period()
 
     # 1. Create SupplierPaymentOrder (considerando si incluye factura institucional)
     total_banco = float(metadata.get("total_transferencia_banco") or 0)
@@ -396,7 +397,7 @@ async def execute_ips_phase(
 
     metadata = dict(phase.phase_metadata or {})
     total_monto = float(phase.monto or 0)
-    periodo = phase.dossier.periodo if phase.dossier else "2026-10"
+    periodo = phase.dossier.periodo if phase.dossier else get_current_payroll_period()
 
     # Si se envía un monto ajustado extraordinario
     if monto_ajustado is not None and monto_ajustado > 0:

@@ -4516,8 +4516,9 @@ export const api = {
     downloadSettlementReceiptPdf: (settlementId: string, filename?: string) =>
       downloadAuthenticated(`/v1/sueldok/settlements/${settlementId}/receipt-pdf?company_id=${COMPANY_ID}`, {}, filename || `recibo_finiquito_${settlementId.slice(0, 8)}.pdf`),
     createDossier: (data: any) => client.post<any>(`/v1/sueldok/dossiers?company_id=${COMPANY_ID}`, data),
-    syncFromSueldok: (periodo: string = "2026-09", apiKey?: string, force: boolean = false) => {
-      const q = new URLSearchParams({ company_id: COMPANY_ID, periodo, force: String(force) })
+    syncFromSueldok: (periodo?: string, apiKey?: string, force: boolean = false) => {
+      const q = new URLSearchParams({ company_id: COMPANY_ID, force: String(force) })
+      if (periodo) q.set("periodo", periodo)
       if (apiKey) q.set("api_key", apiKey)
       return client.post<any>(`/v1/sueldok/dossiers/sync-from-sueldok?${q.toString()}`)
     },

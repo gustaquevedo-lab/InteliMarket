@@ -4,7 +4,7 @@ import {
 } from "lucide-react"
 import html2canvas from "html2canvas"
 import jsPDF from "jspdf"
-import { formatPYG } from "../../utils/format"
+import { formatPYG, getCurrentPayrollPeriod, getPayrollPeriodsList } from "../../utils/format"
 import { useToast } from "../../context/ToastContext"
 import type { PayrollItem } from "./SueldokPage"
 
@@ -135,7 +135,7 @@ export function LiquidacionSalarioModal({
   const toast = useToast()
   const printRef = useRef<HTMLDivElement>(null)
 
-  const [selectedPeriod, setSelectedPeriod] = useState(periodoActivo || "2026-09")
+  const [selectedPeriod, setSelectedPeriod] = useState(periodoActivo || getCurrentPayrollPeriod())
   const [loadingPeriod, setLoadingPeriod] = useState(false)
   const [activeItem, setActiveItem] = useState<PayrollItem | null>(employee)
   const [currentRefs, setCurrentRefs] = useState<SystemReferences | undefined>(systemReferences)
@@ -144,7 +144,7 @@ export function LiquidacionSalarioModal({
   // Sincronizar cuando cambia el empleado, las referencias o el período base
   useEffect(() => {
     setActiveItem(employee)
-    setSelectedPeriod(periodoActivo || "2026-09")
+    setSelectedPeriod(periodoActivo || getCurrentPayrollPeriod())
     if (systemReferences) setCurrentRefs(systemReferences)
   }, [employee, periodoActivo, systemReferences])
 
@@ -491,12 +491,11 @@ export function LiquidacionSalarioModal({
                     </option>
                   ))
                 ) : (
-                  <>
-                    <option value="2026-10">2026-10 (Octubre 2026)</option>
-                    <option value="2026-09">2026-09 (Septiembre 2026)</option>
-                    <option value="2026-08">2026-08 (Agosto 2026)</option>
-                    <option value="2026-07">2026-07 (Julio 2026)</option>
-                  </>
+                  getPayrollPeriodsList().map(p => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))
                 )}
               </select>
             </div>

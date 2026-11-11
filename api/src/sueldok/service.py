@@ -24,6 +24,27 @@ SUELDOK_SYSTEM_KEY = os.environ.get("SUELDOK_SYSTEM_KEY", "ifk_santateresa_live_
 SUELDOK_COMPANY_ID = os.environ.get("SUELDOK_COMPANY_ID", "extra_supermercado_py")
 
 
+def get_current_payroll_period() -> str:
+    """
+    Retorna el período contable/salarial activo (YYYY-MM) en zona horaria America/Asuncion.
+    Si el día del mes es <= 15, la nómina habitual a pagar/conciliar es la del mes anterior;
+    a partir del día 16 corresponde al mes en curso.
+    """
+    from datetime import datetime, timedelta
+    import zoneinfo
+    try:
+        tz = zoneinfo.ZoneInfo("America/Asuncion")
+    except Exception:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("America/Asuncion")
+    now = datetime.now(tz)
+    if now.day <= 15:
+        first_of_month = now.replace(day=1)
+        prev_month = first_of_month - timedelta(days=1)
+        return prev_month.strftime("%Y-%m")
+    return now.strftime("%Y-%m")
+
+
 def generate_sueldok_sso_url(
     user_id: str = "admin_extra",
     company_id: str = SUELDOK_COMPANY_ID,
@@ -420,10 +441,10 @@ async def sync_corporate_remission_to_sueldok(
     for r in rows:
         ci = clean_ci(r["customer_ci"], r["customer_ruc"])
         monto = float(r["saldo_pendiente"] or r["monto_original"] or 0)
-        fecha = r["fecha_emision"].strftime("%Y-%m-%d") if r["fecha_emision"] else "2026-10-15"
+        fecha = r["fecha_emision"].strftime("%Y-%m-%d") if r["fecha_emision"] else datetime.now().strftime("%Y-%m-%d")
         ticket_ref = r["numero_documento"] or str(r["id"])
         rem_num = r["numero_remision"]
-        periodo = r["periodo_mes"] or "2026-10"
+        periodo = r["periodo_mes"] or get_current_payroll_period()
 
         debts.append({
             "ci": ci,
@@ -1278,7 +1299,7 @@ async def list_payroll_dossiers(db: AsyncSession, company_id: str) -> list[dict]
 async def sync_payroll_dossier_from_sueldok(
     db: AsyncSession,
     company_id: str,
-    periodo: str = "2026-09",
+    periodo: Optional[str] = None,
     api_key: Optional[str] = None,
     user_id: Optional[str] = None,
     force: bool = False
@@ -1298,6 +1319,9 @@ async def sync_payroll_dossier_from_sueldok(
         PayrollDossierCreate, BankBatch, DisbursementBatchEntry,
         ExtraClubTicket, ThirdPartyDeduction
     )
+
+    if not periodo:
+        periodo = get_current_payroll_period()
 
     cid = uuid.UUID(company_id)
 
@@ -1741,7 +1765,7 @@ async def execute_net_phase(
         is_cheque = "cheque" in phase.phase_type
         doss_res = await db.execute(select(PayrollDossier).where(PayrollDossier.id == did))
         curr_dossier = doss_res.scalars().first()
-        periodo = curr_dossier.periodo if curr_dossier else "2026-09"
+        periodo = curr_dossier.periodo if curr_dossier else get_current_payroll_period()
         
         if is_bank:
             beneficiario = f"Nómina {periodo} - SIPAP Bancario"

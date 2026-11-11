@@ -105,6 +105,55 @@ export function parseAsuncionDateStr(date: string | Date | null | undefined): st
   }
 }
 
+/**
+ * Retorna el período contable/salarial activo en formato YYYY-MM en zona America/Asuncion.
+ * Si estamos en los primeros 15 días del mes, la nómina operativa principal que se está
+ * pagando o conciliando corresponde al mes anterior; a partir del día 16 es el mes corriente.
+ */
+export function getCurrentPayrollPeriod(): string {
+  const today = getTodayAsuncion() // "YYYY-MM-DD"
+  const [yearStr, monthStr, dayStr] = today.split("-")
+  const year = parseInt(yearStr, 10)
+  const month = parseInt(monthStr, 10)
+  const day = parseInt(dayStr, 10)
+
+  if (day <= 15) {
+    const prevDate = new Date(year, month - 2, 1)
+    const prevY = prevDate.getFullYear()
+    const prevM = String(prevDate.getMonth() + 1).padStart(2, "0")
+    return `${prevY}-${prevM}`
+  }
+  return `${year}-${String(month).padStart(2, "0")}`
+}
+
+/**
+ * Genera una lista dinámica de períodos (YYYY-MM) con etiquetas legibles en español,
+ * desde N meses hacia adelante hasta M meses hacia atrás respecto a la fecha actual.
+ */
+export function getPayrollPeriodsList(monthsBack = 12, monthsForward = 2): Array<{ value: string; label: string }> {
+  const today = getTodayAsuncion()
+  const [yearStr, monthStr] = today.split("-")
+  const currYear = parseInt(yearStr, 10)
+  const currMonth = parseInt(monthStr, 10)
+  const list: Array<{ value: string; label: string }> = []
+
+  const monthNames = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  ]
+
+  for (let offset = monthsForward; offset >= -monthsBack; offset--) {
+    const d = new Date(currYear, currMonth - 1 + offset, 1)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, "0")
+    const val = `${y}-${m}`
+    const label = `${val} (${monthNames[d.getMonth()]} ${y})`
+    list.push({ value: val, label })
+  }
+  return list
+}
+
+
 
 export function formatNumber(value: number | string | null | undefined, decimals = 0): string {
   if (value == null) return "0"
