@@ -47,7 +47,20 @@ const BANK_CATEGORIA_LABELS: Record<string, { label: string; className: string }
   interes_ganado: { label: "Interés ganado", className: "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800" },
   transferencia_interna: { label: "Transferencia interna", className: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700" },
   ingreso_caja: { label: "Ingreso de caja", className: "bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300 border border-teal-200 dark:border-teal-800" },
+  pendiente_conciliacion: { label: "Pendiente conciliar", className: "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800" },
   otros: { label: "Otros", className: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700" },
+}
+
+// Evita el corrimiento -1 día que produce new Date("YYYY-MM-DD").toLocaleDateString("es-PY") en UTC-3
+function formatLocalDatePY(value?: string | null): string {
+  if (!value) return "—"
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(value)
+  if (isoMatch) {
+    return `${Number(isoMatch[3])}/${Number(isoMatch[2])}/${isoMatch[1]}`
+  }
+  const parsed = new Date(value)
+  if (isNaN(parsed.getTime())) return "—"
+  return parsed.toLocaleDateString("es-PY", { timeZone: "America/Asuncion" })
 }
 
 const CHEQUE_ESTADO_BADGES: Record<string, { label: string; className: string }> = {
@@ -1580,7 +1593,7 @@ export default function BancosPage() {
                         {filteredBankTxns.map(t => (
                           <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
                             <td className="p-3.5 whitespace-nowrap text-xs text-gray-600 dark:text-gray-300 font-mono">
-                              {t.fecha ? new Date(t.fecha).toLocaleDateString("es-PY") : "—"}
+                              {formatLocalDatePY(t.fecha)}
                             </td>
                             <td className="p-3.5 whitespace-nowrap">
                               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
@@ -1812,8 +1825,8 @@ export default function BancosPage() {
                                     </td>
                                     <td className="p-3">{c.beneficiario || c.emisor || "—"}</td>
                                     <td className="p-3 font-mono font-bold text-slate-900 dark:text-white">{formatGs(c.monto)}</td>
-                                    <td className="p-3 text-slate-500">{c.fecha_emision ? new Date(c.fecha_emision).toLocaleDateString("es-PY") : "—"}</td>
-                                    <td className="p-3 text-slate-500">{c.fecha_pago ? new Date(c.fecha_pago).toLocaleDateString("es-PY") : "—"}</td>
+                                    <td className="p-3 text-slate-500">{formatLocalDatePY(c.fecha_emision)}</td>
+                                    <td className="p-3 text-slate-500">{formatLocalDatePY(c.fecha_pago)}</td>
                                     <td className="p-3 text-center">
                                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${badge.className}`}>
                                         {badge.label}
@@ -2157,7 +2170,7 @@ export default function BancosPage() {
                           <div key={c.id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-gray-50 dark:bg-slate-800/50">
                             <div>
                               <div className="font-semibold text-gray-800 dark:text-gray-200">N° {c.numero} — {c.beneficiario}</div>
-                              <div className="text-gray-400 text-[11px]">{c.fecha_pago ? `Vence: ${new Date(c.fecha_pago).toLocaleDateString("es-PY")}` : ""}</div>
+                              <div className="text-gray-400 text-[11px]">{c.fecha_pago ? `Vence: ${formatLocalDatePY(c.fecha_pago)}` : ""}</div>
                             </div>
                             <span className="font-bold text-gray-900 dark:text-white font-mono">{formatGs(c.monto)}</span>
                           </div>
@@ -2185,7 +2198,7 @@ export default function BancosPage() {
                           <div key={d.id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-gray-50 dark:bg-slate-800/50">
                             <div>
                               <div className="font-semibold text-gray-800 dark:text-gray-200">{d.descripcion}</div>
-                              <div className="text-gray-400 text-[11px]">{new Date(d.fecha).toLocaleDateString("es-PY")}</div>
+                              <div className="text-gray-400 text-[11px]">{formatLocalDatePY(d.fecha)}</div>
                             </div>
                             <span className="font-bold text-gray-900 dark:text-white font-mono">{formatGs(d.monto)}</span>
                           </div>
@@ -2258,7 +2271,7 @@ export default function BancosPage() {
                               {isCreditTx(t.tipo) ? "+ Ingreso" : "- Egreso"}
                             </span>
                             <span className="font-bold text-sm text-gray-900 dark:text-white font-mono">{formatGs(t.monto)}</span>
-                            <span className="text-xs text-gray-400">· {t.fecha ? new Date(t.fecha).toLocaleDateString("es-PY") : ""}</span>
+                            <span className="text-xs text-gray-400">· {t.fecha ? formatLocalDatePY(t.fecha) : ""}</span>
                           </div>
                           <div className="text-xs text-gray-600 dark:text-gray-300">{t.descripcion || "Sin descripción"}</div>
                           {t.referencia && <div className="text-[11px] text-gray-400 font-mono">Ref: {t.referencia}</div>}
@@ -2437,11 +2450,11 @@ export default function BancosPage() {
                                 {formatGs(c.monto)}
                               </td>
                               <td className="p-3.5 whitespace-nowrap text-xs text-gray-500 font-mono">
-                                {c.fecha_emision ? new Date(c.fecha_emision).toLocaleDateString("es-PY") : "—"}
+                                {formatLocalDatePY(c.fecha_emision)}
                               </td>
                               <td className="p-3.5 whitespace-nowrap text-xs font-mono">
                                 <div className="text-gray-900 dark:text-white font-medium">
-                                  {c.fecha_pago ? new Date(c.fecha_pago).toLocaleDateString("es-PY") : "—"}
+                                  {formatLocalDatePY(c.fecha_pago)}
                                 </div>
                                 {c.dias_para_vencer != null && c.estado !== "cobrado" && c.estado !== "anulado" && (
                                   <div className={`text-[10px] font-semibold ${
@@ -2690,7 +2703,7 @@ export default function BancosPage() {
                           </div>
                           <div className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">{c.descripcion}</div>
                           <div className="text-[11px] text-gray-500 mt-1 flex items-center gap-1.5 flex-wrap">
-                            <span>Extracto: {c.fecha ? new Date(c.fecha).toLocaleDateString("es-PY") : "—"}</span>
+                            <span>Extracto: {formatLocalDatePY(c.fecha)}</span>
                             <span>→</span>
                             <span className="font-semibold text-gray-700 dark:text-gray-300">
                               {c.suggestion.descripcion} ({formatGs(c.suggestion.monto)})

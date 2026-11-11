@@ -65,14 +65,27 @@ def parse_bank_statement_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
         else:
             raise ValueError("Formato de banco no reconocido. Solo se admiten extractos oficiales de Banco Continental o Banco Interfisa.")
 
+def _group_words_by_row(words: List[Dict[str, Any]], tolerance: float = 3.0) -> List[List[Dict[str, Any]]]:
+    """Agrupa palabras extraídas por pdfplumber en filas visuales ordenadas izquierda->derecha."""
+    rows: List[List[Dict[str, Any]]] = []
+    for w in sorted(words, key=lambda x: (x["top"], x["x0"])):
+        if rows and abs(w["top"] - rows[-1][0]["top"]) <= tolerance:
+            rows[-1].append(w)
+        else:
+            rows.append([w])
+    return [sorted(r, key=lambda x: x["x0"]) for r in rows]
+
+
 def _parse_continental_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
     p1_text = pdf.pages[0].extract_text() or ""
-    
-    m_cta = re.search(r'(?:Cuenta|CTA):\s*(\d+)', p1_text, re.IGNORECASE) or re.search(r'GRUPO SANTA TERESA E\.A\.S\.\s*(\d+)', p1_text)
+
+    m_cta = (
+        re.search(r'(?:Cuenta|CTA):\s*(\d+)', p1_text, re.IGNORECASE)
+        or re.search(r'GRUPO SANTA TERESA E\.A\.S\.?\s*(\d+)', p1_text)
+    )
     numero_cuenta = m_cta.group(1) if m_cta else ""
-    
-    tipo_cuenta = "ahorro" if "AHORRO" in p1_text.upper() else "corriente"
-    
+    tipo_cuenta = "ahorro" if re.search(r'AHORROS?\s+LIBRES|PYG/AHO', p1_text, re.IGNORECASE) else "corriente"
+
     m_fechas = re.findall(r'(\d{2}/\d{2}/\d{4})', p1_text)
     periodo_desde = None
     periodo_hasta = None
@@ -84,92 +97,149 @@ def _parse_continental_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
             periodo_hasta = max(f1, f2)
         except Exception:
             pass
-            
-    m_saldo_ant = re.search(r'Saldo Anterior\s*([0-9\.,]+)', p1_text)
-    saldo_anterior = _parse_monto_pyg(m_saldo_ant.group(1)) if m_saldo_ant else Decimal("0")
-    
+
+    # Extraer Saldo Anterior y Disponible de la tabla superior derecha (evitando "0,0" de Saldos Retenidos)
+    saldo_anterior = Decimal("0")
+    saldo_disponible: Optional[Decimal] = None
+    p1_rows = _group_words_by_row(pdf.pages[0].extract_words())
+    for r in p1_rows:
+        right_words = [w for w in r if w["x0"] >= 360]
+        if not right_words:
+            continue
+        row_text = " ".join(w["text"] for w in right_words)
+        if "Saldo Anterior" in row_text:
+            num_toks = [w["text"] for w in right_words if re.match(r'^[\d\.]+$', w["text"])]
+            if num_toks:
+                val = _parse_monto_pyg(num_toks[-1])
+                if val is not None:
+                    saldo_anterior = val
+        elif "Disponible" in row_text:
+            num_toks = [w["text"] for w in right_words if re.match(r'^[\d\.]+$', w["text"])]
+            if num_toks:
+                val = _parse_monto_pyg(num_toks[-1])
+                if val is not None:
+                    saldo_disponible = val
+
     transacciones: List[Dict[str, Any]] = []
-    prev_saldo = saldo_anterior
+    # Límites horizontales por defecto para Continental (actualizados dinámicamente con los encabezados de cada página)
+    cut_hora_mov = 104.0
+    cut_mov_desc = 212.0
+    cut_desc_debe = 388.0
+    cut_debe_haber = 452.0
+    cut_haber_saldo = 515.0
 
     for page in pdf.pages:
-        tables = page.extract_tables()
-        for table in tables:
-            for row in table:
-                if not row:
-                    continue
-                if any("Día" in str(c) or "Dia" in str(c) or "Descripción" in str(c) or "Saldo" in str(c) for c in row if c):
-                    continue
+        rows = _group_words_by_row(page.extract_words())
+        for r in rows:
+            texts = [w["text"] for w in r]
+            if "Debe" in texts and "Haber" in texts and "Saldo" in texts:
+                w_mov = next((w for w in r if "Movimiento" in w["text"]), None)
+                w_desc = next((w for w in r if "Descrip" in w["text"]), None)
+                w_debe = next((w for w in r if w["text"] == "Debe"), None)
+                w_haber = next((w for w in r if w["text"] == "Haber"), None)
+                w_saldo = next((w for w in r if w["text"] == "Saldo"), None)
+                if w_mov:
+                    cut_hora_mov = w_mov["x0"] - 6.0
+                if w_desc:
+                    cut_mov_desc = w_desc["x0"] - 6.0
+                if w_debe:
+                    cut_desc_debe = w_debe["x0"] - 28.0
+                if w_debe and w_haber:
+                    cut_debe_haber = (w_debe["x1"] + w_haber["x0"]) / 2.0
+                if w_haber and w_saldo:
+                    cut_haber_saldo = (w_haber["x1"] + w_saldo["x0"]) / 2.0
+                continue
 
-                if len(row) == 6:
-                    dia_hora = str(row[0] or "").strip()
-                    parts = dia_hora.split(" ")
-                    dia_str = parts[0] if parts else ""
-                    hora_str = parts[1] if len(parts) > 1 else ""
-                    mov_codigo = str(row[1] or "").strip()
-                    desc_str = str(row[2] or "").strip()
-                    debe_str = row[3]
-                    haber_str = row[4]
-                    saldo_str = row[5]
-                elif len(row) >= 7:
-                    dia_str = str(row[0] or "").strip()
-                    hora_str = str(row[1] or "").strip()
-                    mov_codigo = str(row[2] or "").strip()
-                    desc_str = str(row[3] or "").strip()
-                    debe_str = row[4]
-                    haber_str = row[5]
-                    saldo_str = row[6]
+            if not r or r[0]["text"] == "Totales":
+                continue
+
+            # Fila válida de movimiento Continental: Dia (01-31) + Hora (HH:MM:SS)
+            if (
+                len(r) < 4
+                or not r[0]["text"].isdigit()
+                or len(r[0]["text"]) > 2
+                or not re.match(r'^\d{2}:\d{2}:\d{2}$', r[1]["text"])
+            ):
+                continue
+
+            dia = int(r[0]["text"])
+            hora_str = r[1]["text"]
+            mov_parts: List[str] = []
+            desc_parts: List[str] = []
+            debe_parts: List[str] = []
+            haber_parts: List[str] = []
+            saldo_parts: List[str] = []
+
+            for w in r[2:]:
+                xc = (w["x0"] + w["x1"]) / 2.0
+                if w["x0"] >= cut_haber_saldo or xc >= cut_haber_saldo:
+                    saldo_parts.append(w["text"])
+                elif cut_debe_haber <= xc < cut_haber_saldo:
+                    haber_parts.append(w["text"])
+                elif cut_desc_debe <= xc < cut_debe_haber and re.match(r'^[\d\.,]+$', w["text"]):
+                    debe_parts.append(w["text"])
+                elif cut_hora_mov <= w["x0"] < cut_mov_desc:
+                    mov_parts.append(w["text"])
                 else:
-                    continue
+                    desc_parts.append(w["text"])
 
-                if not dia_str.isdigit() or len(dia_str) > 2:
-                    continue
+            monto_debe = _parse_monto_pyg("".join(debe_parts))
+            monto_haber = _parse_monto_pyg("".join(haber_parts))
+            saldo_prog = _parse_monto_pyg("".join(saldo_parts))
 
-                dia = int(dia_str)
-                monto_debe = _parse_monto_pyg(debe_str)
-                monto_haber = _parse_monto_pyg(haber_str)
-                saldo_prog = _parse_monto_pyg(saldo_str)
+            if (monto_debe is None or monto_debe <= 0) and (monto_haber is None or monto_haber <= 0):
+                continue
 
-                if monto_debe is None and monto_haber is None:
-                    continue
-
-                tipo = "debito" if monto_debe and monto_debe > 0 else "credito"
+            # Usar estrictamente la columna Debe vs Haber (jamás reescribir con deltas entre filas)
+            if monto_debe and monto_debe > 0 and (not monto_haber or monto_haber <= 0):
+                tipo = "debito"
+                monto = monto_debe
+            elif monto_haber and monto_haber > 0 and (not monto_debe or monto_debe <= 0):
+                tipo = "credito"
+                monto = monto_haber
+            else:
+                # Resguardo extremo si ambas columnas tuvieran valores
+                tipo = "debito" if (monto_debe or Decimal("0")) >= (monto_haber or Decimal("0")) else "credito"
                 monto = monto_debe if tipo == "debito" else monto_haber
 
-                # Validación matemática infalible por Saldo Progresivo
-                if prev_saldo is not None and saldo_prog is not None:
-                    delta = saldo_prog - prev_saldo
-                    if delta > 0:
-                        tipo = "credito"
-                        monto = delta
-                    elif delta < 0:
-                        tipo = "debito"
-                        monto = abs(delta)
-                prev_saldo = saldo_prog
-                
-                fecha_txn = date.today()
-                if periodo_desde:
-                    try:
-                        mes = periodo_desde.month
-                        anio = periodo_desde.year
-                        fecha_txn = date(anio, mes, dia)
-                    except ValueError:
-                        fecha_txn = periodo_desde
-                        
-                nro_cheque = _extract_nro_cheque(desc_str, mov_codigo)
-                
-                transacciones.append({
-                    "fecha": fecha_txn,
-                    "hora": hora_str or None,
-                    "descripcion": desc_str,
-                    "referencia": mov_codigo or None,
-                    "tipo": tipo,
-                    "monto": monto,
-                    "saldo_progresivo": saldo_prog,
-                    "nro_cheque": nro_cheque
-                })
-                
-    saldo_cierre = transacciones[-1]["saldo_progresivo"] if transacciones else saldo_anterior
-    
+            fecha_txn = date.today()
+            if periodo_desde and periodo_hasta:
+                try:
+                    if periodo_desde.month == periodo_hasta.month:
+                        fecha_txn = date(periodo_desde.year, periodo_desde.month, dia)
+                    elif dia >= periodo_desde.day:
+                        fecha_txn = date(periodo_desde.year, periodo_desde.month, dia)
+                    else:
+                        fecha_txn = date(periodo_hasta.year, periodo_hasta.month, dia)
+                except ValueError:
+                    fecha_txn = periodo_hasta
+            elif periodo_desde:
+                try:
+                    fecha_txn = date(periodo_desde.year, periodo_desde.month, dia)
+                except ValueError:
+                    fecha_txn = periodo_desde
+
+            desc_str = " ".join(desc_parts).strip() or "MOVIMIENTO BANCARIO"
+            mov_codigo = " ".join(mov_parts).strip()
+            nro_cheque = _extract_nro_cheque(desc_str, mov_codigo)
+
+            transacciones.append({
+                "fecha": fecha_txn,
+                "hora": hora_str or None,
+                "descripcion": desc_str,
+                "referencia": mov_codigo or None,
+                "tipo": tipo,
+                "monto": monto,
+                "saldo_progresivo": saldo_prog,
+                "nro_cheque": nro_cheque,
+            })
+
+    saldo_cierre = (
+        saldo_disponible
+        if saldo_disponible is not None
+        else (transacciones[-1]["saldo_progresivo"] if transacciones else saldo_anterior)
+    )
+
     return {
         "banco": "BANCO CONTINENTAL",
         "tipo_cuenta": tipo_cuenta,
@@ -178,20 +248,21 @@ def _parse_continental_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
         "periodo_hasta": periodo_hasta,
         "saldo_anterior": saldo_anterior,
         "saldo_cierre": saldo_cierre,
-        "transacciones": transacciones
+        "transacciones": transacciones,
     }
+
 
 def _parse_interfisa_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
     p1_text = pdf.pages[0].extract_text() or ""
-    
-    # Extraer N° Cuenta (ej: 259058910 o 259026699)
-    m_cta = re.search(r'(?:Número de Cta|Cta\.?\s*C\.?AHORRO\s*Nº?|Cta)[:\s]*([0-9]+)', p1_text, re.IGNORECASE)
-    if not m_cta:
-        m_cta = re.search(r'\b(2590\d+)\b', p1_text)
+
+    m_cta = (
+        re.search(r'(?:Número de Cta|Cta\.?\s*C\.?AHORRO\s*Nº?|Cta)[:\s]*([0-9]+)', p1_text, re.IGNORECASE)
+        or re.search(r'\b(2590\d+)\b', p1_text)
+    )
     numero_cuenta = m_cta.group(1) if m_cta else ""
-    
-    tipo_cuenta = "ahorro" if "AHORRO" in p1_text.upper() else "corriente"
-    
+    is_ahorro = bool(re.search(r'Ahorros\s+a\s+la\s+Vista|C\.AHORRO|DEBITOS\s+CREDITOS', p1_text, re.IGNORECASE))
+    tipo_cuenta = "ahorro" if is_ahorro else "corriente"
+
     m_fechas = re.findall(r'(\d{2}/\d{2}/\d{4})', p1_text)
     periodo_desde = None
     periodo_hasta = None
@@ -205,106 +276,135 @@ def _parse_interfisa_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
             pass
 
     transacciones: List[Dict[str, Any]] = []
-    
-    # Regex para capturar líneas de movimiento de Interfisa (con fecha y hora)
-    # Ejemplo: 01-08-2026 10:46:33 260803252704 - 4.700 138.328.853
-    # O:       12-08-2026 11:15:28 5613539565 IPS APORTES 4.400 - 86.639.145
-    date_line_re = re.compile(r'^(\d{2}-\d{2}-\d{4})\s+(\d{2}:\d{2}:\d{2})\s+(\d+)\s+(.+)$')
-    
+    date_re = re.compile(r'^\d{2}-\d{2}-\d{4}$')
+    time_re = re.compile(r'^\d{2}:\d{2}:\d{2}$')
+
+    cut_desc_deb = 300.0
+    cut_deb_cred = 395.0
+    cut_cred_saldo = 490.0
+
     for page in pdf.pages:
-        text = page.extract_text() or ""
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        
-        idx = 0
-        while idx < len(lines):
-            line = lines[idx]
-            m = date_line_re.match(line)
-            if not m:
-                idx += 1
+        rows = _group_words_by_row(page.extract_words())
+        header_idx = -1
+        for i, r in enumerate(rows):
+            joined = " ".join(w["text"].upper() for w in r)
+            if ("DEBIT" in joined or "DÉBIT" in joined) and "SALDO" in joined:
+                header_idx = i
+                w_deb = next((w for w in r if "DEBIT" in w["text"].upper() or "DÉBIT" in w["text"].upper()), None)
+                w_cred = next((w for w in r if "CREDIT" in w["text"].upper() or "CRÉDIT" in w["text"].upper()), None)
+                w_saldo = next((w for w in r if w["text"].upper() == "SALDO"), None)
+                if w_deb and w_cred:
+                    cut_deb_cred = (w_deb["x1"] + w_cred["x0"]) / 2.0 + 10.0
+                if w_cred and w_saldo:
+                    cut_cred_saldo = (w_cred["x1"] + w_saldo["x0"]) / 2.0 + 10.0
+                if w_deb:
+                    cut_desc_deb = w_deb["x0"] - 25.0
+                break
+
+        body_rows = rows[header_idx + 1:] if header_idx >= 0 else rows
+        date_row_indices = [
+            i for i, r in enumerate(body_rows)
+            if len(r) >= 4 and date_re.match(r[0]["text"]) and time_re.match(r[1]["text"])
+        ]
+
+        for pos, ri in enumerate(date_row_indices):
+            r = body_rows[ri]
+            f_str = r[0]["text"]
+            h_str = r[1]["text"]
+            y_center = r[0]["top"]
+
+            prev_bound = body_rows[date_row_indices[pos - 1]][0]["top"] if pos > 0 else -1.0
+            next_bound = body_rows[date_row_indices[pos + 1]][0]["top"] if pos + 1 < len(date_row_indices) else 9999.0
+
+            deb_toks: List[str] = []
+            cred_toks: List[str] = []
+            saldo_toks: List[str] = []
+            comp_toks: List[str] = []
+            desc_toks: List[str] = []
+
+            if ri - 1 >= 0 and (ri - 1) not in date_row_indices:
+                pr = body_rows[ri - 1]
+                py = pr[0]["top"]
+                ptxt = " ".join(w["text"] for w in pr).upper()
+                if (
+                    0 < (y_center - py) <= 7.0
+                    and (py - prev_bound) >= (y_center - py)
+                    and not any(k in ptxt for k in ("FCH/OPER", "TOTAL", "CANT. MOV", "FONDO DE GARANT", "SALDO"))
+                ):
+                    desc_toks.extend(w["text"] for w in pr if 120.0 <= w["x0"] < cut_desc_deb)
+
+            start_idx = 3 if is_ahorro else 2
+            for w in r[start_idx:]:
+                xc = (w["x0"] + w["x1"]) / 2.0
+                if w["x0"] >= cut_cred_saldo or xc >= cut_cred_saldo:
+                    saldo_toks.append(w["text"])
+                elif cut_deb_cred <= xc < cut_cred_saldo:
+                    cred_toks.append(w["text"])
+                elif cut_desc_deb <= xc < cut_deb_cred:
+                    deb_toks.append(w["text"])
+                elif is_ahorro and 265.0 <= w["x0"] <= 325.0 and w["text"].isdigit() and len(w["text"]) >= 6:
+                    comp_toks.append(w["text"])
+                elif not is_ahorro and w["x0"] < 186.0 and not comp_toks and w["text"].isdigit():
+                    comp_toks.append(w["text"])
+                else:
+                    desc_toks.append(w["text"])
+
+            if ri + 1 < len(body_rows) and (ri + 1) not in date_row_indices:
+                nr = body_rows[ri + 1]
+                ny = nr[0]["top"]
+                ntxt = " ".join(w["text"] for w in nr).upper()
+                if (
+                    0 < (ny - y_center) <= 7.0
+                    and (next_bound - ny) > (ny - y_center)
+                    and not any(k in ntxt for k in ("TOTAL", "NÚMERO DE MOV", "NUMERO DE MOV", "FONDO DE GARANT", "CANT. MOV", "PÁGINA"))
+                ):
+                    desc_toks.extend(w["text"] for w in nr if 120.0 <= w["x0"] < cut_desc_deb)
+
+            monto_deb = _parse_monto_pyg("".join(deb_toks))
+            monto_cred = _parse_monto_pyg("".join(cred_toks))
+            saldo_prog = _parse_monto_pyg("".join(saldo_toks))
+
+            if (monto_deb is None or monto_deb <= 0) and (monto_cred is None or monto_cred <= 0):
                 continue
-                
-            f_str, h_str, comp_str, remainder = m.groups()
-            
-            # Contexto de descripción: puede venir en la línea anterior o siguiente
-            desc_parts = []
-            if idx > 0 and not date_line_re.match(lines[idx-1]) and "Fch/Oper/Valor" not in lines[idx-1]:
-                desc_parts.append(lines[idx-1])
-                
-            tokens = remainder.split()
-            # Los últimos 3 tokens típicamente corresponden a [Débito, Crédito, Saldo]
-            # o [Descripción..., Débito, Crédito, Saldo]
-            if len(tokens) >= 3:
-                saldo_str = tokens[-1]
-                cred_str = tokens[-2]
-                deb_str = tokens[-3]
-                inner_desc = " ".join(tokens[:-3]) if len(tokens) > 3 else ""
+
+            if monto_deb and monto_deb > 0 and (not monto_cred or monto_cred <= 0):
+                tipo = "debito"
+                monto = monto_deb
             else:
-                idx += 1
-                continue
-                
-            if inner_desc:
-                desc_parts.append(inner_desc)
-                
-            if idx + 1 < len(lines) and not date_line_re.match(lines[idx+1]) and "Fch/Oper/Valor" not in lines[idx+1] and "Página" not in lines[idx+1]:
-                desc_parts.append(lines[idx+1])
-                
-            full_desc = " ".join(desc_parts).strip() or "MOVIMIENTO BANCARIO"
-            
+                tipo = "credito"
+                monto = monto_cred
+
             try:
                 fecha_txn = datetime.strptime(f_str, "%d-%m-%Y").date()
             except Exception:
                 fecha_txn = date.today()
-                
-            monto_deb = _parse_monto_pyg(deb_str) if deb_str != "-" else None
-            monto_cred = _parse_monto_pyg(cred_str) if cred_str != "-" else None
-            saldo_prog = _parse_monto_pyg(saldo_str)
-            
-            if monto_deb is None and monto_cred is None:
-                idx += 1
-                continue
-                
-            tipo = "debito" if monto_deb is not None and monto_deb > 0 else "credito"
-            monto = monto_deb if tipo == "debito" else monto_cred
 
-            # Validación matemática infalible por Saldo Progresivo
-            if prev_saldo is not None and saldo_prog is not None:
-                delta = saldo_prog - prev_saldo
-                if delta > 0:
-                    tipo = "credito"
-                    monto = delta
-                elif delta < 0:
-                    tipo = "debito"
-                    monto = abs(delta)
-            else:
-                # Si es el primer movimiento o saldo estático, desambiguar por palabras clave
-                desc_upper = full_desc.upper()
-                if any(k in desc_upper for k in ["RECIBID", "ACREDIT", "DEPOSITO", "CREDITO"]) and tipo == "debito":
-                    tipo = "credito"
-                elif any(k in desc_upper for k in ["ENVIAD", "PAGO", "DEB", "OTORGAD"]) and tipo == "credito":
-                    tipo = "debito"
-
-            prev_saldo = saldo_prog
+            full_desc = " ".join(desc_toks).strip() or "MOVIMIENTO BANCARIO"
+            comp_str = "".join(comp_toks).strip()
             nro_cheque = _extract_nro_cheque(full_desc, comp_str)
 
             transacciones.append({
                 "fecha": fecha_txn,
                 "hora": h_str,
                 "descripcion": full_desc,
-                "referencia": comp_str,
+                "referencia": comp_str or None,
                 "tipo": tipo,
                 "monto": monto,
                 "saldo_progresivo": saldo_prog,
-                "nro_cheque": nro_cheque
+                "nro_cheque": nro_cheque,
             })
-            idx += 1
 
     saldo_cierre = transacciones[-1]["saldo_progresivo"] if transacciones else Decimal("0")
-    if transacciones:
+    if transacciones and transacciones[0]["saldo_progresivo"] is not None:
         first_tx = transacciones[0]
-        saldo_ant = (first_tx["saldo_progresivo"] - first_tx["monto"]) if first_tx["tipo"] == "credito" else (first_tx["saldo_progresivo"] + first_tx["monto"])
+        saldo_ant = (
+            (first_tx["saldo_progresivo"] - first_tx["monto"])
+            if first_tx["tipo"] == "credito"
+            else (first_tx["saldo_progresivo"] + first_tx["monto"])
+        )
     else:
         saldo_ant = Decimal("0")
-    
+
     return {
         "banco": "BANCO INTERFISA",
         "tipo_cuenta": tipo_cuenta,
@@ -313,5 +413,5 @@ def _parse_interfisa_pdf(pdf: pdfplumber.PDF) -> Dict[str, Any]:
         "periodo_hasta": periodo_hasta,
         "saldo_anterior": saldo_ant,
         "saldo_cierre": saldo_cierre,
-        "transacciones": transacciones
+        "transacciones": transacciones,
     }
