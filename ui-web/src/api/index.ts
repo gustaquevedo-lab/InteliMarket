@@ -4060,7 +4060,7 @@ export const api = {
   riskAgent: {
     dashboard: (dias?: number, companyId?: string) =>
       client.get<any>("/v1/risk-agent/dashboard", { company_id: companyId || COMPANY_ID, dias: dias || 30 }),
-    events: (params?: { dias?: number; nivel?: string; categoria?: string; cajero?: string; limit?: number; offset?: number; companyId?: string }) =>
+    events: (params?: { dias?: number; nivel?: string; categoria?: string; cajero?: string; usuario?: string; accion?: string; solo_descuentos?: boolean; limit?: number; offset?: number; companyId?: string }) =>
       client.get<any[]>("/v1/risk-agent/events", { company_id: params?.companyId || COMPANY_ID, ...params }),
     chat: (data: { message: string; conversation_history?: any[]; company_id?: string }) =>
       client.post<{ reply: string; suggested_prompts?: string[] }>("/v1/risk-agent/chat", { company_id: data.company_id || COMPANY_ID, ...data }),

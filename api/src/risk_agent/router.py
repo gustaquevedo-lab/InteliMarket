@@ -28,11 +28,16 @@ async def list_events(
     nivel: str | None = Query(None),
     categoria: str | None = Query(None),
     cajero: str | None = Query(None),
-    limit: int = Query(100, ge=1, le=500),
+    usuario: str | None = Query(None),
+    accion: str | None = Query(None),
+    solo_descuentos: bool = Query(False),
+    limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_risk_events(db, company_id, dias, nivel, categoria, cajero, limit, offset)
+    return await service.list_risk_events(
+        db, company_id, dias, nivel, categoria, cajero, usuario, accion, solo_descuentos, limit, offset
+    )
 
 
 @router.post("/chat", response_model=ChatMessageResponse)

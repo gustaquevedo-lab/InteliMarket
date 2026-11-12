@@ -10,10 +10,14 @@ class RiskEventItem(BaseModel):
     nivel_riesgo: str  # BAJO | MEDIO | ALTO
     categoria_riesgo: str  # operativo | financiero | fiscal | seguridad | inventario
     descripcion: str
+    tipo_evento_label: Optional[str] = None
     cajero: Optional[str] = None
     caja: Optional[str] = None
     autorizado_por: Optional[str] = None
+    usuario: Optional[str] = None
+    usuario_nombre: Optional[str] = None
     monto_gs: Optional[float] = None
+    detalles: Optional[dict] = None
     created_at: str
 
 
@@ -34,17 +38,28 @@ class RiskTrendPoint(BaseModel):
     bajo: int
 
 
+class AccionDisponible(BaseModel):
+    accion: str
+    label: str
+    total: int
+
+
 class RiskDashboard(BaseModel):
     periodo_dias: int
     total_eventos: int
     total_alto: int
     total_medio: int
     total_bajo: int
+    total_descuentos: int = 0
+    monto_total_descuentos_pyg: float = 0.0
     por_categoria: dict[str, int]
     por_accion: dict[str, int]
+    acciones_disponibles: list[AccionDisponible] = Field(default_factory=list)
+    usuarios_disponibles: list[str] = Field(default_factory=list)
     top_cajeros_riesgo: list[RiskByCajero]
     tendencia: list[RiskTrendPoint]
     eventos_recientes_alto: list[RiskEventItem]
+    eventos_recientes_descuento: list[RiskEventItem] = Field(default_factory=list)
     resumen_ejecutivo: str
 
 
@@ -57,3 +72,4 @@ class ChatMessageRequest(BaseModel):
 class ChatMessageResponse(BaseModel):
     reply: str
     suggested_prompts: list[str] = Field(default_factory=list)
+
