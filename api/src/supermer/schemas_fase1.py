@@ -409,6 +409,7 @@ class EquipmentCreate(BaseModel):
     temp_min_operacion: Optional[Decimal] = None
     temp_max_operacion: Optional[Decimal] = None
     alerta_habilitada: bool = True
+    activo: Optional[bool] = True
     proveedor_mantenimiento: Optional[str] = None
     fecha_ultimo_mantenimiento: Optional[date] = None
     fecha_proximo_mantenimiento: Optional[date] = None
@@ -428,6 +429,7 @@ class EquipmentUpdate(BaseModel):
     fecha_ultimo_mantenimiento: Optional[date] = None
     fecha_proximo_mantenimiento: Optional[date] = None
     proveedor_mantenimiento: Optional[str] = None
+    prioridad: Optional[str] = None
     notas: Optional[str] = None
 
 class EquipmentResponse(BaseModel):
@@ -442,6 +444,7 @@ class EquipmentResponse(BaseModel):
     area: Optional[str] = None
     ubicacion: Optional[str] = None
     activo: bool
+    prioridad: Optional[str] = "media"
     fecha_instalacion: Optional[date] = None
     fecha_ultimo_mantenimiento: Optional[date] = None
     fecha_proximo_mantenimiento: Optional[date] = None

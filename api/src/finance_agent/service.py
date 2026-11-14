@@ -202,6 +202,7 @@ async def get_liquidity_control_tower(db: AsyncSession, company_id: str) -> Liqu
     deuda_inmediata_exigible = ch_inmediatos + ap_mora
     deuda_total_exigible = ch_total + ap_total
     posicion_financiera_neta = liquidez_total - deuda_total_exigible
+    deficit_cobertura_inmediata = max(deuda_inmediata_exigible - liquidez_total, 0.0)
     compromisos_7d = deuda_inmediata_exigible + ch_7d + ap_7d
     compromisos_30d = deuda_inmediata_exigible + ch_30d + ap_30d
 

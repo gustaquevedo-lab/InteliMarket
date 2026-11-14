@@ -4820,9 +4820,12 @@ async def list_supplier_credit_notes(db: AsyncSession, company_id: str, supplier
     ).where(SupplierCreditNote.company_id == cid, SupplierCreditNote.cancelado == False)
     if solo_pendientes:
         query = query.where(SupplierCreditNote.saldo_disponible > 0)
-    if supplier_id:
-        sid = supplier_id if isinstance(supplier_id, uuid.UUID) else uuid.UUID(str(supplier_id))
-        query = query.where(SupplierCreditNote.supplier_id == sid)
+    if supplier_id and str(supplier_id).strip() and str(supplier_id).strip().lower() not in ("undefined", "null", "none"):
+        try:
+            sid = supplier_id if isinstance(supplier_id, uuid.UUID) else uuid.UUID(str(supplier_id).strip())
+            query = query.where(SupplierCreditNote.supplier_id == sid)
+        except (ValueError, TypeError):
+            pass
     query = query.order_by(SupplierCreditNote.fecha.desc())
     if limit is not None:
         query = query.limit(limit)

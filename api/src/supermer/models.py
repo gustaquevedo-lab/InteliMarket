@@ -1617,6 +1617,7 @@ class StoreEquipment(Base):
     proveedor_mantenimiento = Column(String(200))
     garantia_vencimiento = Column(Date)
     costo_adquisicion = Column(Numeric(12, 2))
+    prioridad = Column(String(10), default="media")
 
     notas = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
