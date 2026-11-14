@@ -197,7 +197,14 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-3 px-4 text-right text-xs font-mono font-bold text-amber-700">
                 {kpis?.absorcion_opex_pct || 23.71}%
               </td>
-              <td></td>
+              <td className="py-3 px-4 text-center">
+                <button
+                  onClick={() => onSelectMagnitude("opex")}
+                  className="text-xs text-amber-700 dark:text-amber-400 hover:underline font-semibold inline-flex items-center gap-0.5 cursor-pointer"
+                >
+                  Ver OPEX <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </td>
             </tr>
 
             {/* Magnitud 4.1: Nómina SueldOK */}
@@ -255,10 +262,10 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-right font-mono text-slate-500">2.6%</td>
               <td className="py-2.5 px-4 text-center">
                 <button
-                  onClick={() => onSelectMagnitude("ocupacion")}
+                  onClick={() => onSelectMagnitude("opex")}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Ver Seguros
+                  Ver en OPEX
                 </button>
               </td>
             </tr>
@@ -276,10 +283,10 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-right font-mono text-slate-500">1.9%</td>
               <td className="py-2.5 px-4 text-center">
                 <button
-                  onClick={() => onSelectMagnitude("mantenimiento")}
+                  onClick={() => onSelectMagnitude("opex")}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Ver Obras
+                  Ver en OPEX
                 </button>
               </td>
             </tr>
@@ -297,10 +304,10 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-right font-mono text-slate-500">2.4%</td>
               <td className="py-2.5 px-4 text-center">
                 <button
-                  onClick={() => onSelectMagnitude("logistica")}
+                  onClick={() => onSelectMagnitude("opex")}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Ver Insumos
+                  Ver en OPEX
                 </button>
               </td>
             </tr>
@@ -318,10 +325,10 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-right font-mono text-slate-500">3.4%</td>
               <td className="py-2.5 px-4 text-center">
                 <button
-                  onClick={() => onSelectMagnitude("administracion")}
+                  onClick={() => onSelectMagnitude("opex")}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Ver Gastos
+                  Ver en OPEX
                 </button>
               </td>
             </tr>
@@ -347,10 +354,10 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-right font-mono text-slate-500">0.6%</td>
               <td className="py-2.5 px-4 text-center">
                 <button
-                  onClick={() => onSelectMagnitude("administracion")}
+                  onClick={() => onSelectMagnitude("opex")}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Ver Comisiones
+                  Ver en OPEX
                 </button>
               </td>
             </tr>
@@ -372,6 +379,29 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
                 <span className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700">
                   Ganancia OPs
                 </span>
+              </td>
+            </tr>
+
+            {/* 6.2 INVERSIONES PATRIMONIALES (CAPEX - EXCLUIDAS DE EBITDA) */}
+            <tr className="text-xs bg-indigo-50/40 dark:bg-indigo-950/20 text-indigo-900 dark:text-indigo-200">
+              <td className="py-2.5 px-4 text-center text-indigo-500 font-mono">CAPEX</td>
+              <td className="py-2.5 px-4 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
+                <span>Inversiones en Activo Fijo y Equipamiento (Patrimonial — Excluido de EBITDA)</span>
+              </td>
+              <td className="py-2.5 px-4 text-right font-bold font-mono text-indigo-700 dark:text-indigo-300">
+                {formatPYG(kpis?.total_capex || 0)}
+              </td>
+              <td className="py-2.5 px-4 text-right font-mono text-xs text-indigo-500">
+                Balance
+              </td>
+              <td className="py-2.5 px-4 text-center">
+                <button
+                  onClick={() => onSelectMagnitude("capex")}
+                  className="px-2 py-0.5 rounded text-[10px] font-bold text-indigo-700 bg-indigo-100 dark:bg-indigo-900/50 hover:bg-indigo-200 dark:hover:bg-indigo-800 transition cursor-pointer"
+                >
+                  Ver CAPEX
+                </button>
               </td>
             </tr>
 

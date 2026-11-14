@@ -67,6 +67,7 @@ export function ReclassifyExpenseModal({
   const [naturaleza, setNaturaleza] = useState("OPEX_GASTO_OPERATIVO")
   const [costCenterId, setCostCenterId] = useState("")
   const [categoryId, setCategoryId] = useState("")
+  const [categorySearch, setCategorySearch] = useState("")
   const [productionArea, setProductionArea] = useState("")
   const [esInversion, setEsInversion] = useState(false)
   const [categoriaActivo, setCategoriaActivo] = useState("")
@@ -156,6 +157,13 @@ export function ReclassifyExpenseModal({
 
   const diferenciaSplit = Math.round(totalComprobante - totalAsignadoSplit)
   const isSplitCuadrado = Math.abs(diferenciaSplit) <= 1
+
+  // Filtro reactivo para las 75 categorías de gastos
+  const filteredCategories = useMemo(() => {
+    if (!categorySearch.trim()) return catalogs.expense_categories
+    const s = categorySearch.toLowerCase()
+    return catalogs.expense_categories.filter((c) => c.nombre.toLowerCase().includes(s))
+  }, [catalogs.expense_categories, categorySearch])
 
   const handleAddAllocationRow = () => {
     const pendiente = Math.max(0, diferenciaSplit)
@@ -348,6 +356,55 @@ export function ReclassifyExpenseModal({
           {/* ══════════════════════════════════════════════════════════ */}
           {!isSplit ? (
             <div className="space-y-4">
+              {/* Tarjeta explicativa de impacto financiero */}
+              {naturaleza === "CMV_MATERIA_PRIMA" && (
+                <div className="bg-amber-50 dark:bg-amber-950/40 p-3.5 rounded-2xl border border-amber-300 dark:border-amber-700/60 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
+                  <Sparkles className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-extrabold">Impacto: Sale de Gastos Operativos y entra al Costo de Ventas (CMV)</p>
+                    <p className="text-[11px] text-amber-800 dark:text-amber-300 mt-0.5">
+                      Este comprobante dejará de listarse en Gastos Operativos (OPEX) y se mostrará en la pestaña <strong>3. CMV / Compras</strong> como Materia Prima de Producción, protegiendo el margen comercial.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {naturaleza === "CMV_REVENTA" && (
+                <div className="bg-blue-50 dark:bg-blue-950/40 p-3.5 rounded-2xl border border-blue-300 dark:border-blue-700/60 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2.5">
+                  <Sparkles className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-extrabold">Impacto: Compra de Mercadería para Reventa (CMV Salón)</p>
+                    <p className="text-[11px] text-blue-800 dark:text-blue-300 mt-0.5">
+                      Saldrá de Gastos Operativos (OPEX) y se computará en el costo de mercaderías vendidas.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {naturaleza === "CAPEX_ACTIVO_FIJO" && (
+                <div className="bg-indigo-50 dark:bg-indigo-950/40 p-3.5 rounded-2xl border border-indigo-300 dark:border-indigo-700/60 text-xs text-indigo-900 dark:text-indigo-200 flex items-start gap-2.5">
+                  <Sparkles className="w-4 h-4 text-indigo-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-extrabold">Impacto: Sale de Gastos Operativos y entra a Inversiones (CAPEX)</p>
+                    <p className="text-[11px] text-indigo-800 dark:text-indigo-300 mt-0.5">
+                      Este comprobante se registrará como Activo Fijo Patrimonial. Saldrá inmediatamente de OPEX y <strong>no deducirá el EBITDA mensual</strong>. Se listará en la pestaña <strong>6. Inversiones / Activo Fijo</strong>.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {naturaleza === "ANTICIPO_PERSONAL" && (
+                <div className="bg-purple-50 dark:bg-purple-950/40 p-3.5 rounded-2xl border border-purple-300 dark:border-purple-700/60 text-xs text-purple-900 dark:text-purple-200 flex items-start gap-2.5">
+                  <Sparkles className="w-4 h-4 text-purple-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-extrabold">Impacto: Anticipo al Personal a descontar por Nómina</p>
+                    <p className="text-[11px] text-purple-800 dark:text-purple-300 mt-0.5">
+                      Saldrá de Gastos Operativos y se mostrará en la pestaña <strong>7. Anticipos y No Operativos</strong>. No afectará el Estado de Resultados.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Naturaleza Económica */}
                 <div>
@@ -395,17 +452,29 @@ export function ReclassifyExpenseModal({
                 </div>
 
                 {/* Categoría Contable del Supermercado */}
-                <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Rubro Específico (Plan de Cuentas)
-                  </label>
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Categoría del Gasto (Plan de Cuentas)
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {filteredCategories.length} de {catalogs.expense_categories.length} rubros
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Filtrar categorías (ej: panaderia, luz, software, mant)..."
+                    value={categorySearch}
+                    onChange={(e) => setCategorySearch(e.target.value)}
+                    className="w-full mb-1.5 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400 placeholder:text-slate-400"
+                  />
                   <select
                     value={categoryId}
                     onChange={(e) => setCategoryId(e.target.value)}
                     className="w-full text-xs font-medium bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
                   >
-                    <option value="">-- Seleccionar Rubro --</option>
-                    {catalogs.expense_categories.map((cat) => (
+                    <option value="">-- Seleccionar Rubro Contable --</option>
+                    {filteredCategories.map((cat) => (
                       <option key={cat.id} value={cat.id}>
                         {cat.nombre}
                       </option>

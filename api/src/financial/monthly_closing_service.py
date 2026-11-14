@@ -938,6 +938,13 @@ class MonthlyClosingService:
                             cat_familia = "administracion"
                             rubro = "Administración y Gestión"
 
+                        # Rubro y Sector reales de la base de datos
+                        cat_real = m.get("categoria_nombre") or "Gasto General"
+                        if has_split and len(allocations) > 0:
+                            sector_real = f"Split: {len(allocations)} sectores"
+                        else:
+                            sector_real = m.get("cost_center_nombre") or "Sin Sector"
+
                         item = {
                             "id": exp_id,
                             "fecha": m.get("fecha"),
@@ -953,22 +960,38 @@ class MonthlyClosingService:
                             "es_inversion": es_inv,
                             "categoria_activo": m.get("categoria_activo"),
                             "cost_center_id": m.get("cost_center_id"),
-                            "cost_center_nombre": m.get("cost_center_nombre"),
+                            "cost_center_nombre": sector_real,
                             "category_id": m.get("category_id"),
-                            "categoria_nombre": m.get("categoria_nombre"),
+                            "categoria_nombre": cat_real,
                             "categoria": cat_familia,
-                            "rubro": rubro,
+                            "rubro": cat_real,
                             "has_split": has_split,
                             "allocations": allocations
                         }
 
-                        # Filtrado según la magnitud solicitada
-                        if magnitude == "gastos":
-                            clean_items.append(item)
-                        elif magnitude in ["inversiones", "capex"] and es_inv:
-                            clean_items.append(item)
-                        elif magnitude == "cogs_mp" and nat == "CMV_MATERIA_PRIMA":
-                            clean_items.append(item)
+                        # Filtrado estricto por magnitud y naturaleza económica:
+                        # Si un comprobante se reclasifica a CMV, CAPEX o Anticipo, deja de listarse en OPEX inmediatamente.
+                        has_opex_alloc = any(a.get("naturaleza_economica") in ["OPEX_GASTO_OPERATIVO", "GASTO_DIFERIDO_CUOTAS"] for a in allocations) if has_split else False
+                        has_cogs_alloc = any(a.get("naturaleza_economica") in ["CMV_MATERIA_PRIMA", "CMV_REVENTA"] for a in allocations) if has_split else False
+                        has_capex_alloc = any(a.get("naturaleza_economica") == "CAPEX_ACTIVO_FIJO" for a in allocations) if has_split else False
+
+                        is_opex = ((not es_inv) and (nat in ["OPEX_GASTO_OPERATIVO", "GASTO_DIFERIDO_CUOTAS"])) or has_opex_alloc
+                        is_cogs_mp = (nat in ["CMV_MATERIA_PRIMA", "CMV_REVENTA"]) or (has_cogs_alloc and not has_opex_alloc)
+                        is_capex = (es_inv or (nat == "CAPEX_ACTIVO_FIJO")) or (has_capex_alloc and not has_opex_alloc)
+                        is_anticipo = (nat in ["ANTICIPO_PERSONAL", "PASIVO_PERIODO_ANTERIOR"])
+
+                        if magnitude in ["opex", "gastos"]:
+                            if is_opex:
+                                clean_items.append(item)
+                        elif magnitude in ["inversiones", "capex"]:
+                            if is_capex:
+                                clean_items.append(item)
+                        elif magnitude in ["cogs_mp", "materias_primas"]:
+                            if is_cogs_mp:
+                                clean_items.append(item)
+                        elif magnitude in ["anticipos"]:
+                            if is_anticipo:
+                                clean_items.append(item)
                         elif cat_familia == magnitude:
                             clean_items.append(item)
 

@@ -122,12 +122,9 @@ export default function MonthlyClosingPage() {
     { id: "ingresos", label: "2. Cajas / Ingresos", icon: DollarSign, badge: formatPYG(kpis.ventas_netas || 0) },
     { id: "cogs", label: "3. CMV / Compras", icon: ShoppingBag, badge: `${kpis.margen_bruto_pct || 0}% MB` },
     { id: "nomina", label: "4. Nómina SueldOK", icon: Users, badge: "44 pers." },
-    { id: "ocupacion", label: "5. Ocupación y Seguros", icon: Building2, badge: formatPYG(data?.opex?.ocupacion_servicios?.total || 0) },
-    { id: "mantenimiento", label: "6. Mantenimiento Edilicio", icon: Wrench, badge: formatPYG(data?.opex?.mantenimiento_infraestructura?.total || 0) },
-    { id: "logistica", label: "7. Logística e Insumos", icon: Truck, badge: formatPYG(data?.opex?.logistica_operacion?.total || 0) },
-    { id: "administracion", label: "8. Administración y Gestión", icon: Landmark, badge: formatPYG(data?.opex?.administracion_tecnologia?.total || 0) },
-    { id: "inversiones", label: "9. Inversiones / Activo Fijo (CAPEX)", icon: Layers, badge: formatPYG(kpis.total_capex || 0) },
-    { id: "gastos", label: "10. Todos los Comprobantes (Redestinar)", icon: Receipt, badge: "Split Activo" }
+    { id: "opex", label: "5. Gastos Operativos (OPEX)", icon: Building2, badge: formatPYG(kpis.total_opex || 0) },
+    { id: "capex", label: "6. Inversiones / Activo Fijo (CAPEX)", icon: Layers, badge: formatPYG(kpis.total_capex || 0) },
+    { id: "anticipos", label: "7. Anticipos y No Operativos", icon: Landmark, badge: "Excluidos P&L" }
   ]
 
   return (

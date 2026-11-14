@@ -47,6 +47,8 @@ export function ClosingMagnitudeDetail({
   onDataUpdated
 }: ClosingMagnitudeDetailProps) {
   const [searchTerm, setSearchTerm] = useState("")
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState("")
+  const [selectedSectorFilter, setSelectedSectorFilter] = useState("")
   const [remoteItems, setRemoteItems] = useState<any[] | null>(null)
   const [ncItems, setNcItems] = useState<any[]>([])
   const [mpItems, setMpItems] = useState<any[]>([])
@@ -287,20 +289,24 @@ export function ClosingMagnitudeDetail({
   ]
   const materiaPrimaPanaderia = mpItems.length > 0 ? mpItems : defaultMateriaPrimaPanaderia
 
-  // Filtrado de gastos OPEX
-  const sourceExpenses = remoteItems || REAL_GASTOS
-  const gastosFiltradosPorMagnitud = sourceExpenses.filter(g => {
-    if (magnitude === "ocupacion") return g.categoria === "ocupacion"
-    if (magnitude === "mantenimiento") return g.categoria === "mantenimiento"
-    if (magnitude === "logistica") return g.categoria === "logistica"
-    if (magnitude === "administracion") return g.categoria === "administracion"
+  // Filtrado de gastos OPEX / CAPEX / Anticipos
+  const sourceExpenses = remoteItems || (magnitude === "opex" || magnitude === "gastos" ? REAL_GASTOS : [])
+
+  const uniqueCategories = Array.from(new Set(sourceExpenses.map((g) => g.categoria_nombre || g.rubro).filter(Boolean))).sort()
+  const uniqueSectors = Array.from(new Set(sourceExpenses.map((g) => g.cost_center_nombre).filter(Boolean))).sort()
+
+  const gastosFiltradosPorMagnitud = sourceExpenses.filter((g) => {
+    if (selectedCategoryFilter && (g.categoria_nombre || g.rubro) !== selectedCategoryFilter) return false
+    if (selectedSectorFilter && (g.cost_center_nombre || "") !== selectedSectorFilter) return false
     return true
   })
 
-  const gastosGenerales = gastosFiltradosPorMagnitud.filter(g =>
+  const gastosGenerales = gastosFiltradosPorMagnitud.filter((g) =>
     (g.proveedor || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
     (g.concepto || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
     (g.comp || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (g.categoria_nombre || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (g.cost_center_nombre || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
     (g.ruc || "").includes(searchTerm)
   )
 
@@ -327,24 +333,29 @@ export function ClosingMagnitudeDetail({
       subtitle: `Mercaderías comerciales de reventa y compras de materias primas segregadas de OPEX`,
       icon: ShoppingBag
     },
-    ocupacion: {
-      title: `5. Ocupación, Seguros y Servicios Básicos (${monthLabel})`,
-      subtitle: `Pólizas de seguro, facturas ANDE, alquileres y servicios de infraestructura`,
+    opex: {
+      title: `5. Gastos Operativos (OPEX) (${monthLabel})`,
+      subtitle: `Egresos corrientes del ejercicio que deducen el EBITDA. Al redestinar a CMV, CAPEX o Anticipos, el comprobante sale inmediatamente de esta lista.`,
       icon: Building2
     },
-    mantenimiento: {
-      title: `6. Mantenimiento, Equipamiento e Infraestructura (${monthLabel})`,
-      subtitle: `Trabajos de albañilería, cableado de cajas, cañerías, herrería, balanzas y frío`,
-      icon: Wrench
+    gastos: {
+      title: `5. Gastos Operativos (OPEX) (${monthLabel})`,
+      subtitle: `Egresos corrientes del ejercicio que deducen el EBITDA. Al redestinar a CMV, CAPEX o Anticipos, el comprobante sale inmediatamente de esta lista.`,
+      icon: Building2
     },
-    logistica: {
-      title: `7. Logística, Insumos de Producción y Operación (${monthLabel})`,
-      subtitle: `Consumibles de salón, bolsas plásticas, bobinas térmicas para impresoras de caja y fletes`,
-      icon: Truck
+    capex: {
+      title: `6. Inversiones y Activos Fijos (CAPEX) (${monthLabel})`,
+      subtitle: `Equipamiento, maquinarias de producción, rodados y obras. Inversiones de balance que NO deducen el EBITDA ni el flujo mensual.`,
+      icon: Layers
     },
-    administracion: {
-      title: `8. Administración, Cartelería, Marketing y Finanzas (${monthLabel})`,
-      subtitle: `Cartelería local, publicidad en radio, folletos, uniformes, comisiones bancarias y de POS`,
+    inversiones: {
+      title: `6. Inversiones y Activos Fijos (CAPEX) (${monthLabel})`,
+      subtitle: `Equipamiento, maquinarias de producción, rodados y obras. Inversiones de balance que NO deducen el EBITDA ni el flujo mensual.`,
+      icon: Layers
+    },
+    anticipos: {
+      title: `7. Anticipos al Personal y Pasivos No Operativos (${monthLabel})`,
+      subtitle: `Desembolsos transitorios (adelantos de salario o pagos de deudas de ejercicios anteriores). Excluidos del Estado de Resultados P&L.`,
       icon: Landmark
     }
   }
@@ -394,12 +405,12 @@ export function ClosingMagnitudeDetail({
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-indigo-500" : ""}`} />
           </button>
 
-          {(magnitude === "nomina" || magnitude === "ocupacion" || magnitude === "mantenimiento" || magnitude === "logistica" || magnitude === "administracion" || magnitude === "cogs") && (
+          {magnitude !== "ingresos" && (
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
-                placeholder={magnitude === "nomina" ? "Buscar por nombre, CI o cargo..." : "Buscar proveedor, concepto o factura..."}
+                placeholder={magnitude === "nomina" ? "Buscar por nombre, CI o cargo..." : "Buscar proveedor, categoría, concepto o factura..."}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-9 pr-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64 shadow-sm"
@@ -887,23 +898,62 @@ export function ClosingMagnitudeDetail({
       )}
 
       {/* ─────────────────────────────────────────────────────────────────── */}
-      {/* VISTA 4: GASTOS OPERATIVOS (OPEX CON ACCIÓN DE REDESTINAR / SPLIT)  */}
+      {/* VISTA 4: COMPROBANTES DE OPEX / CAPEX / ANTICIPOS (CON REDESTINAR) */}
       {/* ─────────────────────────────────────────────────────────────────── */}
       {magnitude !== "nomina" && magnitude !== "ingresos" && magnitude !== "cogs" && (
         <div>
-          <div className="bg-indigo-50/50 dark:bg-indigo-950/20 px-6 py-3 border-b border-indigo-100 dark:border-indigo-900/50 flex flex-wrap justify-between items-center text-xs text-slate-700 dark:text-slate-300">
-            <div className="flex items-center gap-4">
+          <div className="bg-indigo-50/50 dark:bg-indigo-950/20 px-6 py-3.5 border-b border-indigo-100 dark:border-indigo-900/50 flex flex-wrap justify-between items-center gap-4 text-xs text-slate-700 dark:text-slate-300">
+            <div className="flex items-center gap-4 flex-wrap">
               <span className="font-semibold text-slate-600 dark:text-slate-400">
-                Comprobantes filtrados: <strong className="text-slate-900 dark:text-white">{gastosGenerales.length}</strong>
+                Comprobantes listados: <strong className="text-slate-900 dark:text-white">{gastosGenerales.length}</strong>
               </span>
               <span className="text-slate-300 dark:text-slate-700">|</span>
               <span className="font-semibold text-slate-600 dark:text-slate-400">
-                Total devengado en la categoría: <strong className="font-mono text-indigo-600 dark:text-indigo-400 font-bold">{formatPYG(totalGastosMonto)}</strong>
+                Total devengado: <strong className="font-mono text-indigo-600 dark:text-indigo-400 font-bold">{formatPYG(totalGastosMonto)}</strong>
               </span>
             </div>
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 italic">
-              💡 Haz clic en una fila o en &quot;Redestinar&quot; para reclasificar o dividir un comprobante entre sectores.
-            </span>
+
+            {/* Filtros dinámicos por Categoría del Plan de Cuentas y Sector */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={selectedCategoryFilter}
+                onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+                className="text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer shadow-xs max-w-xs truncate"
+              >
+                <option value="">Todas las Categorías ({uniqueCategories.length})</option>
+                {uniqueCategories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={selectedSectorFilter}
+                onChange={(e) => setSelectedSectorFilter(e.target.value)}
+                className="text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer shadow-xs max-w-xs truncate"
+              >
+                <option value="">Todos los Sectores ({uniqueSectors.length})</option>
+                {uniqueSectors.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+
+              {(selectedCategoryFilter || selectedSectorFilter) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategoryFilter("")
+                    setSelectedSectorFilter("")
+                  }}
+                  className="text-[11px] font-bold text-rose-600 hover:text-rose-700 hover:underline cursor-pointer"
+                >
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -914,8 +964,9 @@ export function ClosingMagnitudeDetail({
                   <th className="py-3 px-4">Comprobante</th>
                   <th className="py-3 px-4">Proveedor / Entidad</th>
                   <th className="py-3 px-4">RUC</th>
-                  <th className="py-3 px-4">Rubro / Destino</th>
-                  <th className="py-3 px-4">Descripción Detallada</th>
+                  <th className="py-3 px-4">Categoría (Plan de Cuentas)</th>
+                  <th className="py-3 px-4">Sector / Departamento</th>
+                  <th className="py-3 px-4">Descripción</th>
                   <th className="py-3 px-4 text-right font-bold">Importe (₲)</th>
                   <th className="py-3 px-4 text-center">Naturaleza</th>
                   <th className="py-3 px-4 text-center">Acción</th>
@@ -948,10 +999,14 @@ export function ClosingMagnitudeDetail({
                       <td className="py-3 px-4 font-bold text-slate-900 dark:text-slate-100">{g.proveedor}</td>
                       <td className="py-3 px-4 text-slate-500 font-mono whitespace-nowrap">{g.ruc}</td>
                       <td className="py-3 px-4">
-                        <span className="font-semibold text-indigo-600 dark:text-indigo-400 block">{g.rubro || "Gasto General"}</span>
-                        {g.cost_center_id && (
-                          <span className="text-[10px] text-slate-400 block">CC: {g.cost_center_id.slice(0, 8)}</span>
-                        )}
+                        <span className="font-bold text-slate-900 dark:text-slate-100 block">
+                          {g.categoria_nombre || g.rubro || "Gasto General"}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 block">
+                          {g.cost_center_nombre || "Sin Sector"}
+                        </span>
                       </td>
                       <td className="py-3 px-4 text-slate-700 dark:text-slate-300 max-w-xs truncate" title={g.concepto}>{g.concepto}</td>
                       <td className="py-3 px-4 text-right font-black font-mono text-slate-900 dark:text-slate-100 whitespace-nowrap">{formatPYG(g.monto)}</td>
@@ -961,8 +1016,16 @@ export function ClosingMagnitudeDetail({
                             SPLIT ({g.allocations?.length || 2})
                           </span>
                         ) : g.es_inversion ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-300">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-300">
                             CAPEX
+                          </span>
+                        ) : g.naturaleza_economica === "CMV_MATERIA_PRIMA" || g.naturaleza_economica === "CMV_REVENTA" ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300">
+                            CMV
+                          </span>
+                        ) : g.naturaleza_economica === "ANTICIPO_PERSONAL" ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-300">
+                            ANTICIPO
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-300">
@@ -991,7 +1054,7 @@ export function ClosingMagnitudeDetail({
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-slate-400">
+                    <td colSpan={10} className="py-8 text-center text-slate-400">
                       No se encontraron comprobantes para esta categoría o criterio de búsqueda.
                     </td>
                   </tr>
