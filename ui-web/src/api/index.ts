@@ -4934,11 +4934,23 @@ export const api = {
   },
   financial: {
     closing: {
-      getSummary: (month: number = 9, year: number = 2026, companyId: string = "80150377-9") =>
+      getSummary: (month: number = 11, year: number = 2026, companyId: string = "80150377-9") =>
         client.get<any>(`/v1/financial/closing/summary?month=${month}&year=${year}&company_id=${companyId}`),
-      getMagnitudeDetails: (magnitude: string, month: number = 9, year: number = 2026, companyId: string = "80150377-9") =>
+      getMagnitudeDetails: (magnitude: string, month: number = 11, year: number = 2026, companyId: string = "80150377-9") =>
         client.get<{ magnitude: string; month: number; year: number; count: number; items: any[] }>(
           `/v1/financial/closing/details/${magnitude}?month=${month}&year=${year}&company_id=${companyId}`
+        ),
+      getClassificationCatalogs: (companyId: string = "80150377-9") =>
+        client.get<{
+          naturalezas: Array<{ id: string; label: string }>
+          cost_centers: Array<{ id: string; nombre: string; tipo: string }>
+          expense_categories: Array<{ id: string; nombre: string }>
+          production_areas: Array<{ id: string; nombre: string }>
+        }>(`/v1/financial/closing/classification-catalogs?company_id=${companyId}`),
+      reclassifyExpense: (expenseId: string, payload: any) =>
+        client.post<{ status: string; message: string; expense_id: string; is_split: boolean }>(
+          `/v1/financial/closing/expenses/${expenseId}/reclassify`,
+          payload
         ),
     },
     invoices: {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import {
   DollarSign,
   TrendingUp,
@@ -17,139 +17,94 @@ import {
   Briefcase,
   ShoppingBag,
   ShieldCheck,
-  Receipt
+  Receipt,
+  RefreshCcw,
+  Sparkles,
+  ChevronDown
 } from "lucide-react"
 import { formatPYG } from "../../utils/format"
 import { ClosingPnlTable } from "../../components/financial/ClosingPnlTable"
 import { ClosingMagnitudeDetail } from "../../components/financial/ClosingMagnitudeDetail"
-
 import { api } from "../../api"
 
+const MESES = [
+  { id: 1, nombre: "Enero" },
+  { id: 2, nombre: "Febrero" },
+  { id: 3, nombre: "Marzo" },
+  { id: 4, nombre: "Abril" },
+  { id: 5, nombre: "Mayo" },
+  { id: 6, nombre: "Junio" },
+  { id: 7, nombre: "Julio" },
+  { id: 8, nombre: "Agosto" },
+  { id: 9, nombre: "Septiembre" },
+  { id: 10, nombre: "Octubre" },
+  { id: 11, nombre: "Noviembre" },
+  { id: 12, nombre: "Diciembre" }
+]
+
+const ANIOS = [2025, 2026, 2027]
+
 export default function MonthlyClosingPage() {
-  const [selectedMonth, setSelectedMonth] = useState(9)
-  const [selectedYear, setSelectedYear] = useState(2026)
+  // Inicialización por defecto en el mes y año actual de Asunción (Noviembre 2026)
+  const now = new Date()
+  const initialMonth = now.getMonth() + 1 // 11
+  const initialYear = now.getFullYear() // 2026
+
+  const [selectedMonth, setSelectedMonth] = useState(initialMonth)
+  const [selectedYear, setSelectedYear] = useState(initialYear)
   const [activeTab, setActiveTab] = useState("resumen")
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
-  // Carga de datos de cierre de Septiembre 2026 mediante API autenticada
-  useEffect(() => {
-    async function fetchClosingData() {
-      setLoading(true)
-      try {
-        const json = await api.financial.closing.getSummary(selectedMonth, selectedYear, "80150377-9")
-        if (json && json.kpis) {
-          setData(json)
-        } else {
-          throw new Error("Respuesta inválida del servidor")
-        }
-      } catch (err) {
-        console.warn("Cargando estructura canónica calibrada de Septiembre 2026 (sin anticipos en OPEX y aguinaldo diferido):", err)
-        // Estructura canónica oficial y limpia de Septiembre 2026
-        setData({
-          periodo: { mes: 9, anio: 2026, mes_nombre: "Septiembre" },
-          empresa: { razon_social: "GRUPO SANTA TERESA E.A.S.", nombre_fantasia: "Extra Supermercado Mayorista", ruc: "80150377-9" },
-          kpis: {
-            ventas_netas: 1234596102,
-            utilidad_bruta: 199215886,
-            margen_bruto_pct: 16.14,
-            total_opex: 251513833,
-            absorcion_opex_pct: 20.37,
-            costo_laboral_total: 156723023,
-            costo_laboral_pct: 12.69,
-            ebitda: -52297947,
-            ebitda_pct: -4.24,
-            resultado_neto: -59544557,
-            resultado_neto_pct: -4.82,
-          },
-          ingresos: {
-            ventas_netas: 1234596102,
-            ventas_brutas: 1234596102,
-            descuentos: 0,
-            ventas_efectivo: 541138681,
-            ventas_tarjetas_pos: 252264444,
-            ventas_extra_club: 193690808,
-            ventas_qr: 157106696,
-            ventas_pix: 19549539,
-            ventas_transferencias: 11827542
-          },
-          cogs: {
-            total_cmv: 1035380216,
-            cmv_mercaderias: 1020507216,
-            cmv_materia_prima_panaderia: 14873000,
-            cmv_materia_prima_rotiseria: 0,
-            mermas_frio_carniceria: 0
-          },
-          nomina: {
-            salario_base: 135000000,
-            horas_extras: 13214133,
-            masa_salarial_bruta: 148214133,
-            ips_patronal: 4520340,
-            gastos_directos_personal: 3988550,
-            total_costo_laboral: 156723023,
-            aguinaldo_provisional: 12351178,
-            aguinaldo_diferido_acumulado: 12351178,
-            es_desembolso_mes: false,
-            empleados_activos: 44
-          },
-          opex: {
-            ocupacion_servicios: {
-              total: 14140000,
-              nombre: "Ocupación, Seguros y Servicios Básicos",
-              detalles: [
-                { rubro: "Póliza de Seguros Riesgo Operativo (Río Seguros Cuota 1/10)", monto: 2000000 },
-                { rubro: "Energía Eléctrica (ANDE)", monto: 9693000 },
-                { rubro: "Servicios de Internet FTTH y Telecomunicaciones", monto: 2447000 }
-              ]
-            },
-            mantenimiento_infraestructura: {
-              total: 23852755,
-              nombre: "Mantenimiento, Equipamiento e Infraestructura",
-              detalles: [
-                { rubro: "Mano de Obra y Albañilería (Distribuidora Camille)", monto: 9700000 },
-                { rubro: "Trabajos de Herrería y Pasamanos (Elvio Arce)", monto: 3500000 },
-                { rubro: "Mantenimiento Cámaras de Frío y Motores", monto: 1981000 },
-                { rubro: "Adecuaciones Edilicias y Sanitarios", monto: 8671755 }
-              ]
-            },
-            logistica_operacion: {
-              total: 14351328,
-              nombre: "Logística, Operación e Insumos Salón",
-              detalles: [
-                { rubro: "Insumos de Cajas, Bolsas y Bobinas (Consumibles Salón)", monto: 14351328 }
-              ]
-            },
-            administracion_tecnologia: {
-              total: 42446727,
-              nombre: "Administración, Cartelería y Gestión",
-              detalles: [
-                { rubro: "Uniformes del Personal (Bienvenida Acuña)", monto: 4830000 },
-                { rubro: "Cartelería, Pórtico y Adhesivos (Alan Arias)", monto: 1735000 },
-                { rubro: "Publicidad y Difusión (Radio Oasis / Folletos)", monto: 2853000 },
-                { rubro: "Útiles, Agua, Telefonía y Gastos Generales", monto: 33028727 }
-              ]
-            },
-            total_opex_no_laboral: 94790810
-          },
-          financieros: {
-            total: 7753996,
-            total_gastos: 7753996,
-            comisiones_procesadoras_tarjetas: 6553996,
-            gastos_comisiones_bancarias: 1200000,
-            diferencia_cambio_ganancia: 507386,
-            diferencia_cambio_neta: 507386
-          },
-          conciliacion_bancaria: {
-            saldo_calibrado_oficial: 73874004,
-            estado: "CALIBRADO_Y_AUDITADO_100_PCT"
-          }
-        })
-      } finally {
-        setLoading(false)
+  // Carga reactiva de los datos de cierre para el mes y año seleccionados
+  const fetchClosingData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const json = await api.financial.closing.getSummary(selectedMonth, selectedYear, "80150377-9")
+      if (json && json.kpis) {
+        setData(json)
+      } else {
+        throw new Error("Respuesta inválida del servidor")
       }
+    } catch (err) {
+      console.warn(`[MonthlyClosingPage] Fallback a estructura base para ${selectedMonth}/${selectedYear}:`, err)
+      setData({
+        periodo: {
+          mes: selectedMonth,
+          anio: selectedYear,
+          mes_nombre: MESES.find(m => m.id === selectedMonth)?.nombre || `Mes ${selectedMonth}`
+        },
+        empresa: { razon_social: "GRUPO SANTA TERESA E.A.S.", nombre_fantasia: "Extra Supermercado Mayorista", ruc: "80150377-9" },
+        kpis: {
+          ventas_netas: 0,
+          utilidad_bruta: 0,
+          margen_bruto_pct: 0,
+          total_opex: 0,
+          absorcion_opex_pct: 0,
+          costo_laboral_total: 0,
+          costo_laboral_pct: 0,
+          total_capex: 0,
+          ebitda: 0,
+          ebitda_pct: 0,
+          resultado_neto: 0,
+          resultado_neto_pct: 0,
+        },
+        ingresos: { ventas_netas: 0, ventas_efectivo: 0, ventas_tarjetas_pos: 0, ventas_extra_club: 0, ventas_qr: 0, ventas_pix: 0, ventas_transferencias: 0 },
+        cogs: { total_cmv: 0, cmv_mercaderias: 0, cmv_materia_prima_panaderia: 0, cmv_materia_prima_rotiseria: 0, nc_acuerdos_proveedores: 0 },
+        nomina: { salario_base: 0, total_costo_laboral: 0, empleados_activos: 44 },
+        opex: { ocupacion_servicios: { total: 0, detalles: [] }, mantenimiento_infraestructura: { total: 0, detalles: [] }, logistica_operacion: { total: 0, detalles: [] }, administracion_tecnologia: { total: 0, detalles: [] }, total_opex_no_laboral: 0 },
+        capex: { total_capex: 0 },
+        financieros: { total_gastos: 0, comisiones_procesadoras_tarjetas: 0, gastos_comisiones_bancarias: 0, diferencia_cambio_neta: 0 },
+        conciliacion_bancaria: { saldo_calibrado_oficial: 0, cuentas_bancarias: [] }
+      })
+    } finally {
+      setLoading(false)
     }
-    fetchClosingData()
   }, [selectedMonth, selectedYear])
+
+  useEffect(() => {
+    fetchClosingData()
+  }, [fetchClosingData])
 
   const handleDownloadExcel = () => {
     window.open(`/api/v1/financial/closing/export/excel?month=${selectedMonth}&year=${selectedYear}&company_id=80150377-9`, "_blank")
@@ -160,16 +115,19 @@ export default function MonthlyClosingPage() {
   }
 
   const kpis = data?.kpis || {}
+  const mesNombre = data?.periodo?.mes_nombre || MESES.find(m => m.id === selectedMonth)?.nombre || `Mes ${selectedMonth}`
 
   const tabs = [
     { id: "resumen", label: "1. Resumen P&L en Cascada", icon: TrendingUp, badge: "Oficial" },
-    { id: "ingresos", label: "2. Cajas / Ingresos", icon: DollarSign, badge: "₲ 1.234M" },
-    { id: "cogs", label: "3. CMV / Compras", icon: ShoppingBag, badge: "82.66%" },
+    { id: "ingresos", label: "2. Cajas / Ingresos", icon: DollarSign, badge: formatPYG(kpis.ventas_netas || 0) },
+    { id: "cogs", label: "3. CMV / Compras", icon: ShoppingBag, badge: `${kpis.margen_bruto_pct || 0}% MB` },
     { id: "nomina", label: "4. Nómina SueldOK", icon: Users, badge: "44 pers." },
-    { id: "ocupacion", label: "5. Ocupación y Seguros", icon: Building2, badge: "11 comp." },
-    { id: "mantenimiento", label: "6. Mantenimiento Edilicio", icon: Wrench, badge: "25 comp." },
-    { id: "logistica", label: "7. Logística e Insumos", icon: Truck, badge: "27 comp." },
-    { id: "administracion", label: "8. Administración y Bancos", icon: Landmark, badge: "97 comp." }
+    { id: "ocupacion", label: "5. Ocupación y Seguros", icon: Building2, badge: formatPYG(data?.opex?.ocupacion_servicios?.total || 0) },
+    { id: "mantenimiento", label: "6. Mantenimiento Edilicio", icon: Wrench, badge: formatPYG(data?.opex?.mantenimiento_infraestructura?.total || 0) },
+    { id: "logistica", label: "7. Logística e Insumos", icon: Truck, badge: formatPYG(data?.opex?.logistica_operacion?.total || 0) },
+    { id: "administracion", label: "8. Administración y Gestión", icon: Landmark, badge: formatPYG(data?.opex?.administracion_tecnologia?.total || 0) },
+    { id: "inversiones", label: "9. Inversiones / Activo Fijo (CAPEX)", icon: Layers, badge: formatPYG(kpis.total_capex || 0) },
+    { id: "gastos", label: "10. Todos los Comprobantes (Redestinar)", icon: Receipt, badge: "Split Activo" }
   ]
 
   return (
@@ -198,14 +156,14 @@ export default function MonthlyClosingPage() {
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    Cierre Certificado: Setiembre 2026
+                    Cierre {mesNombre} {selectedYear}
                   </span>
                 </div>
                 <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white mt-1">
                   Cierre de Resultados y Flujo Mensual
                 </h1>
                 <p className="text-xs text-slate-400 font-medium mt-0.5">
-                  Estado de Resultados en cascada (P&L), costo laboral SueldOK auditado y conciliación bancaria integral
+                  Estado de Resultados (P&L) dinámico en cascada, redestinación de egresos con split por sector y conciliación bancaria
                 </p>
               </div>
             </div>
@@ -216,105 +174,153 @@ export default function MonthlyClosingPage() {
                 🏢 Extra Supermercado Mayorista · RUC 80150377-9
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
-                ⚡ 12.440 Tickets Auditados en Cajas Salón POS
+                ⚡ {data?.ingresos?.transacciones_count?.toLocaleString() || "—"} Tickets Salón POS
               </span>
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
-                🏦 Saldo Bancos Conciliado: {formatPYG(73874004)}
+                🏦 Saldo Bancos: {formatPYG(data?.conciliacion_bancaria?.saldo_calibrado_oficial || 0)}
               </span>
             </div>
           </div>
 
-          {/* Acciones de exportación y período */}
-          <div className="flex items-center gap-3 self-start lg:self-auto flex-wrap">
-            <div className="flex items-center gap-1.5 bg-slate-900/90 px-3 py-2 rounded-xl border border-slate-700/80 text-xs">
-              <Calendar className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="text-slate-200 font-bold text-xs">Septiembre 2026</span>
+          {/* 📅 SELECTOR DINÁMICO DE PERÍODO & ACCIONES */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 self-start lg:self-auto flex-wrap">
+            {/* Control Interactivo de Mes y Año */}
+            <div className="flex items-center gap-2 bg-slate-900/90 p-1.5 rounded-2xl border border-indigo-500/30 shadow-inner">
+              <Calendar className="w-4 h-4 text-indigo-400 ml-2" />
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                className="bg-transparent text-white font-extrabold text-xs py-1.5 px-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer"
+              >
+                {MESES.map((m) => (
+                  <option key={m.id} value={m.id} className="bg-slate-900 text-white">
+                    {m.nombre}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="bg-transparent text-slate-300 font-bold text-xs py-1.5 px-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer border-l border-slate-800"
+              >
+                {ANIOS.map((y) => (
+                  <option key={y} value={y} className="bg-slate-900 text-white">
+                    {y}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={fetchClosingData}
+                disabled={loading}
+                title="Recalcular cierre desde la base de datos"
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <RefreshCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin text-indigo-400" : ""}`} />
+              </button>
             </div>
 
-            <button
-              onClick={handleDownloadExcel}
-              className="px-4 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 shadow-lg shadow-emerald-600/30 transition flex items-center gap-2 cursor-pointer"
-            >
-              <FileSpreadsheet className="w-4 h-4 text-white" />
-              Descargar Excel (.xlsx)
-            </button>
+            {/* Acciones de exportación */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleDownloadExcel}
+                className="px-3.5 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 shadow-lg shadow-emerald-600/30 transition flex items-center gap-2 cursor-pointer"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-white" />
+                Descargar Excel (.xlsx)
+              </button>
 
-            <button
-              onClick={handleDownloadPdf}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm cursor-pointer"
-            >
-              <FileText className="w-4 h-4 text-indigo-400" />
-              Exportar PDF
-            </button>
+              <button
+                onClick={handleDownloadPdf}
+                className="px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm cursor-pointer"
+              >
+                <FileText className="w-4 h-4 text-indigo-400" />
+                Exportar PDF
+              </button>
+            </div>
           </div>
         </div>
 
         {/* 📊 BARRA DE KPIS EJECUTIVOS INTEGRADA AL HEADER */}
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3.5 mt-6 pt-6 border-t border-slate-800/80">
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+        <div className="grid grid-cols-2 lg:grid-cols-7 gap-3 mt-6 pt-6 border-t border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Ventas Netas Totales</span>
-              <span className="text-[10px] font-bold text-blue-400">100% Cajas</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ventas Netas</span>
+              <span className="text-[9px] font-bold text-blue-400">100% Cajas</span>
             </div>
-            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-blue-400">
-              {formatPYG(kpis.ventas_netas)}
+            <p className="text-lg lg:text-xl font-black font-mono tracking-tight text-blue-400">
+              {formatPYG(kpis.ventas_netas || 0)}
             </p>
-            <p className="text-[11px] text-slate-400 font-mono">12.440 tickets salón</p>
+            <p className="text-[10px] text-slate-400 font-mono">
+              {data?.ingresos?.transacciones_count?.toLocaleString() || 0} tickets salón
+            </p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Margen Bruto</span>
-              <span className="text-[10px] font-bold text-emerald-400">Comercial</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Margen Bruto</span>
+              <span className="text-[9px] font-bold text-emerald-400">Comercial</span>
             </div>
-            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-emerald-400">
-              {kpis.margen_bruto_pct || 17.34}%
+            <p className="text-lg lg:text-xl font-black font-mono tracking-tight text-emerald-400">
+              {kpis.margen_bruto_pct || 0}%
             </p>
-            <p className="text-[11px] text-slate-400 font-mono">Utilidad: {formatPYG(kpis.utilidad_bruta)}</p>
+            <p className="text-[10px] text-slate-400 font-mono">Utilidad: {formatPYG(kpis.utilidad_bruta || 0)}</p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Gastos OPEX Totales</span>
-              <span className="text-[10px] font-bold text-amber-400">Absorción</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Gastos OPEX</span>
+              <span className="text-[9px] font-bold text-amber-400">Absorción</span>
             </div>
-            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-amber-400">
-              {formatPYG(kpis.total_opex)}
+            <p className="text-lg lg:text-xl font-black font-mono tracking-tight text-amber-400">
+              {formatPYG(kpis.total_opex || 0)}
             </p>
-            <p className="text-[11px] text-slate-400 font-mono">{kpis.absorcion_opex_pct || 23.71}% s/ Ventas</p>
+            <p className="text-[10px] text-slate-400 font-mono">{kpis.absorcion_opex_pct || 0}% s/ Ventas</p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Costo Laboral SueldOK</span>
-              <span className="text-[10px] font-bold text-purple-400">Nómina</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Costo Laboral</span>
+              <span className="text-[9px] font-bold text-purple-400">SueldOK</span>
             </div>
-            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-purple-400">
-              {formatPYG(kpis.costo_laboral_total)}
+            <p className="text-lg lg:text-xl font-black font-mono tracking-tight text-purple-400">
+              {formatPYG(kpis.costo_laboral_total || 0)}
             </p>
-            <p className="text-[11px] text-slate-400 font-mono">44 funcionarios activos</p>
+            <p className="text-[10px] text-slate-400 font-mono">44 colaboradores</p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">EBITDA Operativo</span>
-              <span className="text-[10px] font-mono text-indigo-400">Operación</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Inversiones CAPEX</span>
+              <span className="text-[9px] font-bold text-indigo-400">Patrimonial</span>
             </div>
-            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-indigo-300">
-              {formatPYG(kpis.ebitda)}
+            <p className="text-lg lg:text-xl font-black font-mono tracking-tight text-indigo-300">
+              {formatPYG(kpis.total_capex || 0)}
             </p>
-            <p className="text-[11px] text-slate-400 font-mono">{kpis.ebitda_pct || -6.37}% s/ Ventas</p>
+            <p className="text-[10px] text-slate-400 font-mono">Activo Fijo (0 OPEX)</p>
           </div>
 
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          <div className="space-y-1 bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Saldo Cierre Bancos</span>
-              <span className="text-[10px] font-bold text-emerald-400">100% Conciliado</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">EBITDA Operativo</span>
+              <span className="text-[9px] font-mono text-cyan-400">Operación</span>
             </div>
-            <p className="text-xl lg:text-2xl font-black font-mono tracking-tight text-emerald-400">
-              {formatPYG(73874004)}
+            <p className="text-lg lg:text-xl font-black font-mono tracking-tight text-cyan-300">
+              {formatPYG(kpis.ebitda || 0)}
             </p>
-            <p className="text-[11px] text-slate-400 font-mono">Continental + Interfisa</p>
+            <p className="text-[10px] text-slate-400 font-mono">{kpis.ebitda_pct || 0}% s/ Ventas</p>
+          </div>
+
+          <div className="space-y-1 bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Saldo Cierre Bancos</span>
+              <span className="text-[9px] font-bold text-emerald-400">Conciliado</span>
+            </div>
+            <p className="text-lg lg:text-xl font-black font-mono tracking-tight text-emerald-400">
+              {formatPYG(data?.conciliacion_bancaria?.saldo_calibrado_oficial || 0)}
+            </p>
+            <p className="text-[10px] text-slate-400 font-mono">Continental + Interfisa</p>
           </div>
         </div>
       </div>
@@ -328,7 +334,7 @@ export default function MonthlyClosingPage() {
             <button
               key={t.id}
               onClick={() => setActiveTab(t.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
                 isActive
                   ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/50 dark:hover:bg-slate-800"
@@ -358,11 +364,14 @@ export default function MonthlyClosingPage() {
         />
       ) : (
         <ClosingMagnitudeDetail
-          key={activeTab}
+          key={`${activeTab}-${selectedMonth}-${selectedYear}`}
           magnitude={activeTab}
           closingData={data}
+          month={selectedMonth}
+          year={selectedYear}
           onBackToPnl={() => setActiveTab("resumen")}
           onExportExcel={handleDownloadExcel}
+          onDataUpdated={fetchClosingData}
         />
       )}
     </div>

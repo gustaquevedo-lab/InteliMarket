@@ -17,81 +17,89 @@ import {
   QrCode,
   Smartphone,
   Layers,
-  ArrowDownToLine,
-  Receipt
+  Receipt,
+  SlidersHorizontal,
+  Split,
+  RefreshCw
 } from "lucide-react"
 import { formatPYG } from "../../utils/format"
 import { REAL_NOMINA, REAL_GASTOS } from "./closingDataReal"
 import { api } from "../../api"
+import { ReclassifyExpenseModal } from "./ReclassifyExpenseModal"
 
 interface ClosingMagnitudeDetailProps {
   magnitude: string
   closingData?: any
+  month?: number
+  year?: number
   onBackToPnl: () => void
   onExportExcel: () => void
+  onDataUpdated?: () => void
 }
 
 export function ClosingMagnitudeDetail({
   magnitude,
   closingData,
+  month = 11,
+  year = 2026,
   onBackToPnl,
-  onExportExcel
+  onExportExcel,
+  onDataUpdated
 }: ClosingMagnitudeDetailProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [remoteItems, setRemoteItems] = useState<any[] | null>(null)
   const [ncItems, setNcItems] = useState<any[]>([])
   const [mpItems, setMpItems] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [selectedExpense, setSelectedExpense] = useState<any | null>(null)
+
+  const activeMonth = month || 11
+  const activeYear = year || 2026
 
   // Carga reactiva de comprobantes/items para la magnitud activa
-  useEffect(() => {
-    let isCancelled = false
-    async function fetchDetails() {
-      if (magnitude === "cogs") {
-        setLoading(true)
-        try {
-          const [resNc, resMp] = await Promise.all([
-            api.financial.closing.getMagnitudeDetails("cogs_nc", 9, 2026, "80150377-9"),
-            api.financial.closing.getMagnitudeDetails("cogs_mp", 9, 2026, "80150377-9")
-          ])
-          if (!isCancelled) {
-            if (resNc && resNc.items) setNcItems(resNc.items)
-            if (resMp && resMp.items) setMpItems(resMp.items)
-          }
-        } catch (err) {
-          console.warn("Error cargando detalles cogs", err)
-        } finally {
-          if (!isCancelled) setLoading(false)
-        }
-        return
-      }
-      if (magnitude === "nomina" || magnitude === "ingresos") {
-        setRemoteItems(null)
-        return
-      }
+  const fetchDetails = async () => {
+    if (magnitude === "cogs") {
       setLoading(true)
       try {
-        const res = await api.financial.closing.getMagnitudeDetails(magnitude, 9, 2026, "80150377-9")
-        if (!isCancelled && res && res.items && res.items.length > 0) {
-          setRemoteItems(res.items)
-        }
+        const [resNc, resMp] = await Promise.all([
+          api.financial.closing.getMagnitudeDetails("cogs_nc", activeMonth, activeYear, "80150377-9"),
+          api.financial.closing.getMagnitudeDetails("cogs_mp", activeMonth, activeYear, "80150377-9")
+        ])
+        if (resNc && resNc.items) setNcItems(resNc.items)
+        if (resMp && resMp.items) setMpItems(resMp.items)
       } catch (err) {
-        console.warn("Usando catálogo canónico sanitizado para", magnitude, err)
+        console.warn("Error cargando detalles cogs", err)
       } finally {
-        if (!isCancelled) setLoading(false)
+        setLoading(false)
       }
+      return
     }
-    fetchDetails()
-    return () => {
-      isCancelled = true
+    if (magnitude === "nomina" || magnitude === "ingresos") {
+      setRemoteItems(null)
+      return
     }
-  }, [magnitude])
+    setLoading(true)
+    try {
+      const res = await api.financial.closing.getMagnitudeDetails(magnitude, activeMonth, activeYear, "80150377-9")
+      if (res && res.items) {
+        setRemoteItems(res.items)
+      }
+    } catch (err) {
+      console.warn("Error cargando detalles para", magnitude, err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
-  // Datos de Nómina SueldOK (44 colaboradores)
+  useEffect(() => {
+    fetchDetails()
+  }, [magnitude, activeMonth, activeYear])
+
+  // Datos de Nómina SueldOK
   const nominaData = REAL_NOMINA
 
-  // Datos de Canales de Cobro (Septiembre 2026)
-  const canalesCobro = [
+  // Datos de Canales de Cobro (Fallback Septiembre 2026 si no hay datos dinámicos)
+  const defaultCanalesCobro = [
     {
       id: "efectivo",
       nombre: "Efectivo Guaraníes en Cajas",
@@ -107,7 +115,7 @@ export function ClosingMagnitudeDetail({
     {
       id: "tarjetas",
       nombre: "Tarjetas POS Bancard & Dinelco",
-      subtexto: "Tarjetas de Crédito (₲ 84.2M), Débito (₲ 54.8M), Bancard (₲ 83.2M), Dinelco (₲ 11.7M)",
+      subtexto: "Tarjetas de Crédito, Débito, Bancard y Dinelco",
       tickets: 1334,
       monto: 252264444,
       pct: 20.43,
@@ -119,7 +127,7 @@ export function ClosingMagnitudeDetail({
     {
       id: "extra_club",
       nombre: "Cobros Extra Club (Vales y Créditos)",
-      subtexto: "Compras a crédito autorizadas de colaboradores compensadas en planilla de nómina SueldOK",
+      subtexto: "Compras a crédito autorizadas de colaboradores compensadas en nómina SueldOK",
       tickets: 1073,
       monto: 193690808,
       pct: 15.69,
@@ -131,7 +139,7 @@ export function ClosingMagnitudeDetail({
     {
       id: "qr",
       nombre: "Billeteras Digitales y Cobros QR SIPAP",
-      subtexto: "Pagos interoperables QR Bancard y Dinelco cobrados al instante en cajas de salón",
+      subtexto: "Pagos interoperables QR Bancard y Dinelco cobrados al instante en cajas",
       tickets: 1613,
       monto: 157106696,
       pct: 12.72,
@@ -155,7 +163,7 @@ export function ClosingMagnitudeDetail({
     {
       id: "transferencias",
       nombre: "Transferencias Bancarias SIPAP",
-      subtexto: "Depósitos bancarios y transferencias directas de clientes mayoristas e institucionales",
+      subtexto: "Depósitos bancarios y transferencias directas de clientes mayoristas",
       tickets: 20,
       monto: 11827542,
       pct: 0.96,
@@ -166,118 +174,105 @@ export function ClosingMagnitudeDetail({
     }
   ]
 
-  // Datos de Ventas por Terminal / Caja
-  const cajasTerminales = [
-    {
-      caja: "Caja 4",
-      rol: "Caja Principal Salón (Mayor volumen)",
-      tickets: 4106,
-      monto: 472850120,
-      pct: 38.3,
-      ticket_promedio: 115160,
-      estado: "AUDITADA_100_PCT"
-    },
-    {
-      caja: "Caja 5",
-      rol: "Caja Rápida / Autoservicio",
-      tickets: 4480,
-      monto: 455950036,
-      pct: 36.9,
-      ticket_promedio: 101774,
-      estado: "AUDITADA_100_PCT"
-    },
-    {
-      caja: "Caja 3",
-      rol: "Caja Salón 1 (Atención General)",
-      tickets: 2732,
-      monto: 249999917,
-      pct: 20.3,
-      ticket_promedio: 91508,
-      estado: "AUDITADA_100_PCT"
-    },
-    {
-      caja: "Caja 2",
-      rol: "Caja Salón 2 (Refuerzo Horas Pico)",
-      tickets: 656,
-      monto: 60153506,
-      pct: 4.9,
-      ticket_promedio: 91697,
-      estado: "AUDITADA_100_PCT"
-    },
-    {
-      caja: "Caja 8",
-      rol: "Caja Mayorista / Despacho",
-      tickets: 449,
-      monto: 43304537,
-      pct: 3.5,
-      ticket_promedio: 96446,
-      estado: "AUDITADA_100_PCT"
-    },
-    {
-      caja: "Caja 7",
-      rol: "Caja Rotisería y Respaldo",
-      tickets: 39,
-      monto: 4193290,
-      pct: 0.3,
-      ticket_promedio: 107520,
-      estado: "AUDITADA_100_PCT"
-    }
+  const rawCanales = closingData?.ingresos?.canales_cobro
+  const canalesCobro = (rawCanales && rawCanales.length > 0)
+    ? rawCanales.map((c: any) => {
+        const canalName = c.canal || c.nombre || "Canal"
+        const isEfectivo = canalName.toLowerCase().includes("efectivo")
+        const isTarjeta = canalName.toLowerCase().includes("tarjeta") || canalName.toLowerCase().includes("bancard") || canalName.toLowerCase().includes("dinelco")
+        const isQr = canalName.toLowerCase().includes("qr")
+        const isPix = canalName.toLowerCase().includes("pix")
+        const isClub = canalName.toLowerCase().includes("extra") || canalName.toLowerCase().includes("club")
+
+        return {
+          id: c.canal || c.id,
+          nombre: canalName,
+          subtexto: c.descripcion || c.subtexto || `Cobros registrados vía ${canalName}`,
+          tickets: c.tickets || 0,
+          monto: c.total_cobrado != null ? c.total_cobrado : (c.monto || 0),
+          pct: c.pct_ventas != null ? c.pct_ventas : (c.pct || 0),
+          badge: canalName,
+          badgeColor: isEfectivo
+            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700"
+            : isTarjeta
+            ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border-blue-300 dark:border-blue-700"
+            : isQr
+            ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-300 dark:border-amber-700"
+            : isPix
+            ? "bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300 border-teal-300 dark:border-teal-700"
+            : isClub
+            ? "bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border-purple-300 dark:border-purple-700"
+            : "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700",
+          icon: isEfectivo ? DollarSign : isTarjeta ? CreditCard : isQr ? QrCode : isPix ? Smartphone : isClub ? Users : Landmark,
+          barColor: isEfectivo ? "bg-emerald-500" : isTarjeta ? "bg-blue-500" : isQr ? "bg-amber-500" : isPix ? "bg-teal-500" : isClub ? "bg-purple-500" : "bg-indigo-500"
+        }
+      })
+    : defaultCanalesCobro
+
+  // Datos de Ventas por Terminal / Caja (Fallback Septiembre 2026)
+  const defaultCajasTerminales = [
+    { caja: "Caja 4", rol: "Caja Principal Salón", tickets: 4106, monto: 472850120, pct: 38.3, ticket_promedio: 115160, estado: "AUDITADA_100_PCT" },
+    { caja: "Caja 5", rol: "Caja Rápida / Autoservicio", tickets: 4480, monto: 455950036, pct: 36.9, ticket_promedio: 101774, estado: "AUDITADA_100_PCT" },
+    { caja: "Caja 3", rol: "Caja Salón 1 (Atención General)", tickets: 2732, monto: 249999917, pct: 20.3, ticket_promedio: 91508, estado: "AUDITADA_100_PCT" },
+    { caja: "Caja 2", rol: "Caja Salón 2 (Refuerzo)", tickets: 656, monto: 60153506, pct: 4.9, ticket_promedio: 91697, estado: "AUDITADA_100_PCT" },
+    { caja: "Caja 8", rol: "Caja Mayorista / Despacho", tickets: 449, monto: 43304537, pct: 3.5, ticket_promedio: 96446, estado: "AUDITADA_100_PCT" },
+    { caja: "Caja 7", rol: "Caja Rotisería y Respaldo", tickets: 39, monto: 4193290, pct: 0.3, ticket_promedio: 107520, estado: "AUDITADA_100_PCT" }
   ]
 
-  // Datos de CMV (Septiembre 2026)
+  const rawCajas = closingData?.ingresos?.cajas_terminales
+  const cajasTerminales = (rawCajas && rawCajas.length > 0)
+    ? rawCajas.map((c: any) => ({
+        caja: c.caja,
+        rol: c.rol || "Punto de Venta Salón",
+        tickets: c.tickets_auditados != null ? c.tickets_auditados : (c.tickets || 0),
+        monto: c.volumen_facturado != null ? c.volumen_facturado : (c.monto || 0),
+        pct: c.pct_participacion != null ? c.pct_participacion : (c.pct || 0),
+        ticket_promedio: c.ticket_promedio || 0,
+        estado: c.estado || "AUDITADA_100_PCT"
+      }))
+    : defaultCajasTerminales
+
+  // Métricas dinámicas de ingresos
+  const totalVentasNetas = closingData?.kpis?.ventas_netas || closingData?.ingresos?.total_ventas_netas || 0
+  const totalTickets = closingData?.kpis?.tickets_auditados || closingData?.ingresos?.resumen_mensual?.total_tickets_auditados || 0
+  const ticketPromedioGeneral = closingData?.kpis?.ticket_promedio || closingData?.ingresos?.resumen_mensual?.ticket_promedio_general || 0
+
+  // Datos de CMV
   const cogsData = closingData?.cogs
-  const cmvComercial = cogsData?.cmv_mercaderias || 1020507216
-  const cmvMateriaPrima = cogsData?.cmv_materia_prima_panaderia || 28161848
-  const ncAcuerdos = cogsData?.nc_acuerdos_proveedores || 45653770
+  const cmvComercial = cogsData?.cmv_mercaderias || 0
+  const cmvMateriaPrima = cogsData?.cmv_materia_prima_panaderia || 0
+  const ncAcuerdos = cogsData?.nc_acuerdos_proveedores || 0
   const totalCmv = cogsData?.total_cmv || (cmvComercial + cmvMateriaPrima - ncAcuerdos)
-  const utilidadBruta = closingData?.kpis?.utilidad_bruta || (1234596102 - totalCmv)
-  const margenBrutoPct = closingData?.kpis?.margen_bruto_pct || ((utilidadBruta / 1234596102) * 100)
+  const utilidadBruta = closingData?.kpis?.utilidad_bruta || (totalVentasNetas - totalCmv)
+  const margenBrutoPct = closingData?.kpis?.margen_bruto_pct || (totalVentasNetas > 0 ? ((utilidadBruta / totalVentasNetas) * 100) : 0)
 
   const cogsBreakdown = [
     {
       concepto: "Mercaderías para Reventa en Salón",
       clasificacion: "Comercial / Reventa Directa",
-      base: "Costo Promedio Ponderado de 12.440 tickets vendidos",
+      base: "Costo Promedio Ponderado de ventas registradas en POS",
       monto: cmvComercial,
-      pct_ventas: (cmvComercial / 1234596102) * 100,
+      pct_ventas: totalVentasNetas > 0 ? (cmvComercial / totalVentasNetas) * 100 : 0,
       badge: "Reventa Salón",
       badgeColor: "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
     },
     {
-      concepto: "Materias Primas Panadería (Harinas, Levaduras e Insumos)",
-      clasificacion: "Producción Propia Panadería",
-      base: "Facturas de compras e insumos de producción panificados imputados a CMV",
+      concepto: "Materias Primas Panadería y Rotisería (Harinas, Insumos)",
+      clasificacion: "Producción Propia",
+      base: "Facturas y egresos imputados a CMV Materia Prima con split por sector",
       monto: cmvMateriaPrima,
-      pct_ventas: (cmvMateriaPrima / 1234596102) * 100,
-      badge: "Producción Panadería",
+      pct_ventas: totalVentasNetas > 0 ? (cmvMateriaPrima / totalVentasNetas) * 100 : 0,
+      badge: "Producción Propia",
       badgeColor: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
     },
     {
-      concepto: "(-) Deducción de Acuerdos Comerciales, Bonificaciones y Devoluciones de Proveedores",
+      concepto: "(-) Deducción de Acuerdos Comerciales y Notas de Crédito de Proveedores",
       clasificacion: "Acuerdos Comerciales & Notas de Crédito",
-      base: "47 Notas de Crédito de proveedores auditadas (Casa Gonzalito, Aquidaban, San José, Gosi)",
+      base: "Notas de Crédito de proveedores auditadas e imputadas a menor costo",
       monto: -ncAcuerdos,
-      pct_ventas: -(ncAcuerdos / 1234596102) * 100,
+      pct_ventas: totalVentasNetas > 0 ? -(ncAcuerdos / totalVentasNetas) * 100 : 0,
       badge: "Acuerdos Comerciales",
       badgeColor: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-    },
-    {
-      concepto: "Materias Primas Rotisería (Consumo Interno)",
-      clasificacion: "Producción Rotisería",
-      base: "Requisiciones internas registradas en salón",
-      monto: 0,
-      pct_ventas: 0.0,
-      badge: "Rotisería",
-      badgeColor: "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300"
-    },
-    {
-      concepto: "Mermas Operativas Frío y Carnicería",
-      clasificacion: "Mermas Controladas",
-      base: "Ajuste físico de fin de mes",
-      monto: 0,
-      pct_ventas: 0.0,
-      badge: "Mermas Control",
-      badgeColor: "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300"
     }
   ]
 
@@ -309,46 +304,53 @@ export function ClosingMagnitudeDetail({
     (g.ruc || "").includes(searchTerm)
   )
 
+  const monthNames = [
+    "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+  ]
+  const currentMonthName = monthNames[activeMonth] || `Mes ${activeMonth}`
+  const monthLabel = `${currentMonthName} ${activeYear}`
+
   const titleMap: Record<string, { title: string; subtitle: string; icon: any }> = {
     nomina: {
-      title: "4. Nómina y Costo Laboral SueldOK (Septiembre 2026)",
-      subtitle: "44 Colaboradores: Salarios base, IPS Obrero (9%), Vales y Neto a cobrar. Provisión de Aguinaldo (1/12) se acumula en Pasivo Diferido (no deducible de EBITDA de Septiembre).",
+      title: `4. Nómina y Costo Laboral SueldOK (${monthLabel})`,
+      subtitle: `${nominaData.length} Colaboradores: Salarios base, IPS Obrero (9%), Vales y Neto a cobrar. Provisión de Aguinaldo (1/12) se acumula en Pasivo Diferido.`,
       icon: Users
     },
     ingresos: {
-      title: "2. Cajas / Ingresos — Detalle de Canales de Cobro y Terminales POS",
-      subtitle: "12.440 tickets auditados en Cajas 2, 3, 4, 5, 7 y 8 con trazabilidad por medio de pago y cuadratura fiscal",
+      title: `2. Cajas / Ingresos — Canales de Cobro y Terminales POS (${monthLabel})`,
+      subtitle: `${totalTickets.toLocaleString()} tickets auditados con trazabilidad por medio de pago y cuadratura fiscal`,
       icon: DollarSign
     },
     cogs: {
-      title: "3. CMV / Compras — Costo de Mercaderías Vendidas y Producción",
-      subtitle: "Mercaderías comerciales de reventa y compras de materias primas de panadería segregadas de OPEX",
+      title: `3. CMV / Compras — Costo de Mercaderías Vendidas y Producción (${monthLabel})`,
+      subtitle: `Mercaderías comerciales de reventa y compras de materias primas segregadas de OPEX`,
       icon: ShoppingBag
     },
     ocupacion: {
-      title: "5. Ocupación, Seguros y Servicios Básicos (Septiembre 2026)",
-      subtitle: "Póliza Río Seguros (Cuota devengada 1/10 ₲ 2.000.000), facturas ANDE e internet FTTH",
+      title: `5. Ocupación, Seguros y Servicios Básicos (${monthLabel})`,
+      subtitle: `Pólizas de seguro, facturas ANDE, alquileres y servicios de infraestructura`,
       icon: Building2
     },
     mantenimiento: {
-      title: "6. Mantenimiento, Equipamiento e Infraestructura (Septiembre 2026)",
-      subtitle: "Trabajos de albañilería, cableado de cajas, cañerías, herrería, balanzas y cámaras de frío",
+      title: `6. Mantenimiento, Equipamiento e Infraestructura (${monthLabel})`,
+      subtitle: `Trabajos de albañilería, cableado de cajas, cañerías, herrería, balanzas y frío`,
       icon: Wrench
     },
     logistica: {
-      title: "7. Logística, Insumos de Producción y Operación (Septiembre 2026)",
-      subtitle: "Consumibles de salón, bolsas plásticas, bobinas térmicas para impresoras de caja y fletes",
+      title: `7. Logística, Insumos de Producción y Operación (${monthLabel})`,
+      subtitle: `Consumibles de salón, bolsas plásticas, bobinas térmicas para impresoras de caja y fletes`,
       icon: Truck
     },
     administracion: {
-      title: "8. Administración, Cartelería, Marketing y Finanzas (Septiembre 2026)",
-      subtitle: "Cartelería local, publicidad en radio, folletos promocionales, uniformes, comisiones bancarias y de POS",
+      title: `8. Administración, Cartelería, Marketing y Finanzas (${monthLabel})`,
+      subtitle: `Cartelería local, publicidad en radio, folletos, uniformes, comisiones bancarias y de POS`,
       icon: Landmark
     }
   }
 
   const currentMeta = titleMap[magnitude] || {
-    title: "Detalle Analítico por Magnitud",
+    title: `Detalle Analítico por Magnitud (${monthLabel})`,
     subtitle: "Comprobantes registrados en base de datos con trazabilidad financiera",
     icon: FileText
   }
@@ -383,7 +385,16 @@ export function ClosingMagnitudeDetail({
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
-          {(magnitude === "nomina" || magnitude === "ocupacion" || magnitude === "mantenimiento" || magnitude === "logistica" || magnitude === "administracion") && (
+          <button
+            onClick={fetchDetails}
+            disabled={loading}
+            title="Recargar comprobantes"
+            className="p-2 text-slate-500 hover:text-slate-900 dark:hover:text-white rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 transition cursor-pointer shadow-sm"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-indigo-500" : ""}`} />
+          </button>
+
+          {(magnitude === "nomina" || magnitude === "ocupacion" || magnitude === "mantenimiento" || magnitude === "logistica" || magnitude === "administracion" || magnitude === "cogs") && (
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
@@ -414,26 +425,26 @@ export function ClosingMagnitudeDetail({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-blue-50/60 dark:bg-blue-950/20 p-4 rounded-2xl border border-blue-200/60 dark:border-blue-900/40">
               <span className="text-[11px] font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider block">Ventas Netas Totales</span>
-              <p className="text-2xl font-black font-mono text-blue-900 dark:text-blue-200 mt-1">{formatPYG(1234596102)}</p>
+              <p className="text-2xl font-black font-mono text-blue-900 dark:text-blue-200 mt-1">{formatPYG(totalVentasNetas)}</p>
               <p className="text-[11px] text-blue-600/80 dark:text-blue-400/80 mt-0.5">100% ingresos certificados de salón</p>
             </div>
 
             <div className="bg-emerald-50/60 dark:bg-emerald-950/20 p-4 rounded-2xl border border-emerald-200/60 dark:border-emerald-900/40">
               <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">Tickets Auditados</span>
-              <p className="text-2xl font-black font-mono text-emerald-900 dark:text-emerald-200 mt-1">12.440</p>
+              <p className="text-2xl font-black font-mono text-emerald-900 dark:text-emerald-200 mt-1">{totalTickets.toLocaleString()}</p>
               <p className="text-[11px] text-emerald-600/80 dark:text-emerald-400/80 mt-0.5">Comprobantes emitidos en salón</p>
             </div>
 
             <div className="bg-indigo-50/60 dark:bg-indigo-950/20 p-4 rounded-2xl border border-indigo-200/60 dark:border-indigo-900/40">
               <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider block">Ticket Promedio</span>
-              <p className="text-2xl font-black font-mono text-indigo-900 dark:text-indigo-200 mt-1">{formatPYG(99244)}</p>
+              <p className="text-2xl font-black font-mono text-indigo-900 dark:text-indigo-200 mt-1">{formatPYG(ticketPromedioGeneral)}</p>
               <p className="text-[11px] text-indigo-600/80 dark:text-indigo-400/80 mt-0.5">Por transacción de compra en caja</p>
             </div>
 
             <div className="bg-amber-50/60 dark:bg-amber-950/20 p-4 rounded-2xl border border-amber-200/60 dark:border-amber-900/40">
               <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider block">Terminales Operativas</span>
-              <p className="text-2xl font-black font-mono text-amber-900 dark:text-amber-200 mt-1">6 Cajas</p>
-              <p className="text-[11px] text-amber-600/80 dark:text-amber-400/80 mt-0.5">Cajas 2, 3, 4, 5, 7 y 8 activas</p>
+              <p className="text-2xl font-black font-mono text-amber-900 dark:text-amber-200 mt-1">{cajasTerminales.length} Cajas</p>
+              <p className="text-[11px] text-amber-600/80 dark:text-amber-400/80 mt-0.5">Terminales con facturación activa</p>
             </div>
           </div>
 
@@ -443,12 +454,12 @@ export function ClosingMagnitudeDetail({
               <div>
                 <h4 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                   <CreditCard className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                  Desglose por Canal de Cobro y Medio de Pago
+                  Desglose por Canal de Cobro y Medio de Pago ({monthLabel})
                 </h4>
-                <p className="text-xs text-slate-500">Conciliación de pagos entre Bóveda Central, POS Bancard/Dinelco, QR y Extra Club</p>
+                <p className="text-xs text-slate-500">Conciliación de pagos entre Bóveda Central, POS Bancard/Dinelco, QR, PIX y Extra Club</p>
               </div>
               <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300">
-                Total: <strong className="text-indigo-600 dark:text-indigo-400">{formatPYG(1234596102)}</strong>
+                Total: <strong className="text-indigo-600 dark:text-indigo-400">{formatPYG(totalVentasNetas)}</strong>
               </span>
             </div>
 
@@ -465,7 +476,7 @@ export function ClosingMagnitudeDetail({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {canalesCobro.map((c) => {
+                  {canalesCobro.map((c: any) => {
                     const ChannelIcon = c.icon
                     return (
                       <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
@@ -490,11 +501,11 @@ export function ClosingMagnitudeDetail({
                           {formatPYG(c.monto)}
                         </td>
                         <td className="py-3 px-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
-                          {c.pct.toFixed(2)}%
+                          {Number(c.pct || 0).toFixed(2)}%
                         </td>
                         <td className="py-3 px-4">
                           <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
-                            <div className={`h-full ${c.barColor} rounded-full`} style={{ width: `${c.pct}%` }} />
+                            <div className={`h-full ${c.barColor} rounded-full`} style={{ width: `${Math.min(100, Math.max(0, c.pct))}%` }} />
                           </div>
                         </td>
                       </tr>
@@ -504,9 +515,9 @@ export function ClosingMagnitudeDetail({
                 <tfoot className="bg-slate-50/80 dark:bg-slate-950/80 font-black text-xs border-t border-slate-200 dark:border-slate-800">
                   <tr>
                     <td className="py-3 px-4" colSpan={2}>TOTAL VENTAS NETAS CONCILIADAS</td>
-                    <td className="py-3 px-4 text-center font-mono">12.440</td>
+                    <td className="py-3 px-4 text-center font-mono">{totalTickets.toLocaleString()}</td>
                     <td className="py-3 px-4 text-right font-mono text-indigo-600 dark:text-indigo-400 text-sm">
-                      {formatPYG(1234596102)}
+                      {formatPYG(totalVentasNetas)}
                     </td>
                     <td className="py-3 px-4 text-right font-mono">100.00%</td>
                     <td></td>
@@ -521,7 +532,7 @@ export function ClosingMagnitudeDetail({
             <div>
               <h4 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                Facturación Auditada por Caja / Terminal POS (Septiembre 2026)
+                Facturación Auditada por Caja / Terminal POS ({monthLabel})
               </h4>
               <p className="text-xs text-slate-500">Distribución de carga operativa y comprobantes fiscales por punto de emisión en salón</p>
             </div>
@@ -540,7 +551,7 @@ export function ClosingMagnitudeDetail({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {cajasTerminales.map((c, idx) => (
+                  {cajasTerminales.map((c: any, idx: number) => (
                     <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                       <td className="py-3 px-4 font-black text-slate-900 dark:text-slate-100 flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-emerald-500" />
@@ -557,7 +568,7 @@ export function ClosingMagnitudeDetail({
                         {formatPYG(c.ticket_promedio)}
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
-                        {c.pct.toFixed(1)}%
+                        {Number(c.pct || 0).toFixed(1)}%
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
@@ -582,7 +593,9 @@ export function ClosingMagnitudeDetail({
             <div className="bg-rose-50/60 dark:bg-rose-950/20 p-4 rounded-2xl border border-rose-200/60 dark:border-rose-900/40">
               <span className="text-[10px] font-bold text-rose-700 dark:text-rose-400 uppercase tracking-wider block">CMV Total Devengado Neto</span>
               <p className="text-xl font-black font-mono text-rose-900 dark:text-rose-200 mt-1">{formatPYG(totalCmv)}</p>
-              <p className="text-[10px] text-rose-600/80 dark:text-rose-400/80 mt-0.5">{((totalCmv / 1234596102) * 100).toFixed(2)}% sobre Ventas Netas</p>
+              <p className="text-[10px] text-rose-600/80 dark:text-rose-400/80 mt-0.5">
+                {totalVentasNetas > 0 ? ((totalCmv / totalVentasNetas) * 100).toFixed(2) : "0.00"}% sobre Ventas Netas
+              </p>
             </div>
 
             <div className="bg-emerald-50/60 dark:bg-emerald-950/20 p-4 rounded-2xl border border-emerald-200/60 dark:border-emerald-900/40">
@@ -594,19 +607,21 @@ export function ClosingMagnitudeDetail({
             <div className="bg-blue-50/60 dark:bg-blue-950/20 p-4 rounded-2xl border border-blue-200/60 dark:border-blue-900/40">
               <span className="text-[10px] font-bold text-blue-700 dark:text-blue-400 uppercase tracking-wider block">Reventa Comercial Salón</span>
               <p className="text-xl font-black font-mono text-blue-900 dark:text-blue-200 mt-1">{formatPYG(cmvComercial)}</p>
-              <p className="text-[10px] text-blue-600/80 dark:text-blue-400/80 mt-0.5">82.66% sobre Ventas</p>
+              <p className="text-[10px] text-blue-600/80 dark:text-blue-400/80 mt-0.5">
+                {totalVentasNetas > 0 ? ((cmvComercial / totalVentasNetas) * 100).toFixed(2) : "0.00"}% sobre Ventas
+              </p>
             </div>
 
             <div className="bg-amber-50/60 dark:bg-amber-950/20 p-4 rounded-2xl border border-amber-200/60 dark:border-amber-900/40">
               <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider block">Materia Prima Panadería</span>
               <p className="text-xl font-black font-mono text-amber-900 dark:text-amber-200 mt-1">{formatPYG(cmvMateriaPrima)}</p>
-              <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80 mt-0.5">24 compras de insumos</p>
+              <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80 mt-0.5">{materiaPrimaPanaderia.length} compras de insumos</p>
             </div>
 
             <div className="bg-teal-50/60 dark:bg-teal-950/20 p-4 rounded-2xl border border-teal-200/60 dark:border-teal-900/40">
               <span className="text-[10px] font-bold text-teal-700 dark:text-teal-400 uppercase tracking-wider block">(-) Acuerdos Comerciales / NC</span>
               <p className="text-xl font-black font-mono text-teal-800 dark:text-teal-200 mt-1">-{formatPYG(ncAcuerdos)}</p>
-              <p className="text-[10px] text-teal-600/80 dark:text-teal-400/80 mt-0.5">47 NCs devengadas (-3.70%)</p>
+              <p className="text-[10px] text-teal-600/80 dark:text-teal-400/80 mt-0.5">{ncItems.length || 0} NCs devengadas</p>
             </div>
           </div>
 
@@ -614,7 +629,7 @@ export function ClosingMagnitudeDetail({
           <div className="space-y-3">
             <h4 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Layers className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              Estructura Contable del Costo de Ventas (P&L)
+              Estructura Contable del Costo de Ventas (P&L - {monthLabel})
             </h4>
             <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
               <table className="w-full text-left text-xs">
@@ -653,7 +668,7 @@ export function ClosingMagnitudeDetail({
                     <td className="py-3 px-4 text-right font-mono text-rose-600 dark:text-rose-400 text-sm">
                       {formatPYG(totalCmv)}
                     </td>
-                    <td className="py-3 px-4 text-right font-mono">{((totalCmv / 1234596102) * 100).toFixed(2)}%</td>
+                    <td className="py-3 px-4 text-right font-mono">{totalVentasNetas > 0 ? ((totalCmv / totalVentasNetas) * 100).toFixed(2) : "0.00"}%</td>
                   </tr>
                 </tfoot>
               </table>
@@ -666,7 +681,7 @@ export function ClosingMagnitudeDetail({
               <div>
                 <h4 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                   <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                  Notas de Crédito, Acuerdos Comerciales y Bonificaciones de Proveedores ({ncItems.length || 47} NCs)
+                  Notas de Crédito y Bonificaciones de Proveedores ({ncItems.length} NCs)
                 </h4>
                 <p className="text-xs text-slate-500">Créditos de proveedores por volumen, acciones comerciales y devoluciones imputadas a menor costo de mercaderías</p>
               </div>
@@ -689,18 +704,7 @@ export function ClosingMagnitudeDetail({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {(ncItems.length > 0 ? ncItems : [
-                    { fecha: "2026-09-17", comp: "001-001-0048396", factura_afectada: null, proveedor: "CASA GONZALITO S.R.L.", concepto: "ACUERDO_COMERCIAL", categoria: "Acuerdo Comercial", monto: 30425026 },
-                    { fecha: "2026-09-09", comp: "001-003-0008599", factura_afectada: null, proveedor: "EXTRA S.A", concepto: "Devolución de mercadería", categoria: "Devolución", monto: 2776087 },
-                    { fecha: "2026-09-09", comp: "001-001-0048065", factura_afectada: null, proveedor: "CASA GONZALITO S.R.L.", concepto: "ACUERDO_COMERCIAL", categoria: "Acuerdo Comercial", monto: 2503125 },
-                    { fecha: "2026-09-09", comp: "001-001-0048066", factura_afectada: null, proveedor: "CASA GONZALITO S.R.L.", concepto: "ACUERDO_COMERCIAL", categoria: "Acuerdo Comercial", monto: 2503125 },
-                    { fecha: "2026-09-24", comp: "001-001-0086445", factura_afectada: "001-001-0353658", proveedor: "SAN JOSE IMPORT EXPORT S.A", concepto: "Devolución de mercadería", categoria: "Devolución", monto: 1408300 },
-                    { fecha: "2026-09-21", comp: "001-001-0007502", factura_afectada: null, proveedor: "DIST. AQUIDABAN S.R.L.", concepto: "Devolución de mercadería", categoria: "Devolución", monto: 1375752 },
-                    { fecha: "2026-09-04", comp: "001-008-0000819", factura_afectada: null, proveedor: "GOSI SAICI", concepto: "ACCIONES_PROMOCIONALES", categoria: "Promoción", monto: 694045 },
-                    { fecha: "2026-09-21", comp: "001-001-0007503", factura_afectada: null, proveedor: "DIST. AQUIDABAN S.R.L.", concepto: "Devolución de mercadería", categoria: "Devolución", monto: 603400 },
-                    { fecha: "2026-09-08", comp: "001-003-0008493", factura_afectada: null, proveedor: "EXTRA S.A", concepto: "Devolución de mercadería", categoria: "Devolución", monto: 476240 },
-                    { fecha: "2026-09-01", comp: "001-001-0005548", factura_afectada: null, proveedor: "PANAMA REPRESENTACIONES SA", concepto: "DIFERENCIA_PRECIO", categoria: "Ajuste Precio", monto: 450348 }
-                  ])
+                  {ncItems
                     .filter(nc => (nc.proveedor || "").toLowerCase().includes(searchTerm.toLowerCase()) || (nc.comp || "").includes(searchTerm) || (nc.concepto || "").toLowerCase().includes(searchTerm.toLowerCase()))
                     .map((nc, idx) => (
                       <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
@@ -724,15 +728,15 @@ export function ClosingMagnitudeDetail({
             </div>
           </div>
 
-          {/* TABLA 3: MATERIAS PRIMAS PANADERÍA */}
+          {/* TABLA 3: MATERIAS PRIMAS PANADERÍA Y ROTISERÍA (CON ACCIÓN DE REDESTINAR / SPLIT) */}
           <div className="space-y-3 pt-2">
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-extrabold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                   <ShoppingBag className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                  Materias Primas Panadería Devengadas ({materiaPrimaPanaderia.length} comprobantes)
+                  Materias Primas Panadería y Rotisería ({materiaPrimaPanaderia.length} comprobantes)
                 </h4>
-                <p className="text-xs text-slate-500">Facturas de compras e insumos de producción panificados imputadas al Costo de Ventas</p>
+                <p className="text-xs text-slate-500">Facturas de insumos de producción imputadas al Costo de Ventas. Haz clic para redestinar o dividir entre sectores.</p>
               </div>
               <span className="text-xs font-mono font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2.5 py-1 rounded-xl border border-amber-200 dark:border-amber-800">
                 Total MP: {formatPYG(cmvMateriaPrima)}
@@ -749,20 +753,55 @@ export function ClosingMagnitudeDetail({
                     <th className="py-3 px-4">RUC</th>
                     <th className="py-3 px-4">Descripción de Insumos</th>
                     <th className="py-3 px-4 text-right font-bold">Importe (₲)</th>
+                    <th className="py-3 px-4 text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {materiaPrimaPanaderia
                     .filter(m => (m.proveedor || "").toLowerCase().includes(searchTerm.toLowerCase()) || (m.comp || "").includes(searchTerm) || (m.concepto || "").toLowerCase().includes(searchTerm.toLowerCase()))
                     .map((m, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                      <tr
+                        key={m.id || idx}
+                        className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${m.id ? "cursor-pointer" : ""}`}
+                        onClick={(e) => {
+                          if ((e.target as HTMLElement).closest("button")) return
+                          if (m.id) setSelectedExpense(m)
+                        }}
+                      >
                         <td className="py-2.5 px-4 text-slate-500 font-mono">{m.fecha}</td>
-                        <td className="py-2.5 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">{m.comp}</td>
+                        <td className="py-2.5 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">
+                          <div className="flex items-center gap-1.5">
+                            <span>{m.comp}</span>
+                            {m.has_split && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
+                                <Split className="w-2.5 h-2.5" /> Split
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-slate-100">{m.proveedor}</td>
                         <td className="py-2.5 px-4 font-mono text-slate-500">{m.ruc}</td>
                         <td className="py-2.5 px-4 text-slate-700 dark:text-slate-300">{m.concepto}</td>
                         <td className="py-2.5 px-4 text-right font-black font-mono text-slate-900 dark:text-slate-100">
                           {formatPYG(m.monto)}
+                        </td>
+                        <td className="py-2.5 px-4 text-center">
+                          {m.id ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedExpense(m)
+                              }}
+                              className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 inline-flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                              title="Redestinar naturaleza o dividir por departamento"
+                            >
+                              <SlidersHorizontal className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                              Redestinar
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -801,7 +840,7 @@ export function ClosingMagnitudeDetail({
           <div className="bg-amber-50/60 dark:bg-amber-950/20 border-b border-amber-200 dark:border-amber-900/40 px-6 py-2.5 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
             <Info className="w-4 h-4 shrink-0 text-amber-600" />
             <span>
-              <strong>Tratamiento Contable:</strong> La provisión de Aguinaldo (1/12) se acumula contablemente en cuenta de Pasivo Diferido hacia Diciembre y <strong>no se deduce del flujo operativo ni del EBITDA de Septiembre</strong> (al no constituir desembolso efectivo en el período).
+              <strong>Tratamiento Contable:</strong> La provisión de Aguinaldo (1/12) se acumula contablemente en cuenta de Pasivo Diferido hacia Diciembre y <strong>no se deduce del flujo operativo ni del EBITDA</strong> (al no constituir desembolso efectivo en el período).
             </span>
           </div>
 
@@ -848,7 +887,7 @@ export function ClosingMagnitudeDetail({
       )}
 
       {/* ─────────────────────────────────────────────────────────────────── */}
-      {/* VISTA 4: GASTOS OPERATIVOS (OPEX)                                   */}
+      {/* VISTA 4: GASTOS OPERATIVOS (OPEX CON ACCIÓN DE REDESTINAR / SPLIT)  */}
       {/* ─────────────────────────────────────────────────────────────────── */}
       {magnitude !== "nomina" && magnitude !== "ingresos" && magnitude !== "cogs" && (
         <div>
@@ -862,6 +901,9 @@ export function ClosingMagnitudeDetail({
                 Total devengado en la categoría: <strong className="font-mono text-indigo-600 dark:text-indigo-400 font-bold">{formatPYG(totalGastosMonto)}</strong>
               </span>
             </div>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 italic">
+              💡 Haz clic en una fila o en &quot;Redestinar&quot; para reclasificar o dividir un comprobante entre sectores.
+            </span>
           </div>
 
           <div className="overflow-x-auto">
@@ -872,33 +914,84 @@ export function ClosingMagnitudeDetail({
                   <th className="py-3 px-4">Comprobante</th>
                   <th className="py-3 px-4">Proveedor / Entidad</th>
                   <th className="py-3 px-4">RUC</th>
-                  <th className="py-3 px-4">Rubro Específico</th>
+                  <th className="py-3 px-4">Rubro / Destino</th>
                   <th className="py-3 px-4">Descripción Detallada</th>
                   <th className="py-3 px-4 text-right font-bold">Importe (₲)</th>
-                  <th className="py-3 px-4 text-center">Estado</th>
+                  <th className="py-3 px-4 text-center">Naturaleza</th>
+                  <th className="py-3 px-4 text-center">Acción</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {gastosGenerales.length > 0 ? (
                   gastosGenerales.map((g, idx) => (
-                    <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                      <td className="py-3 px-4 text-slate-500 font-mono">{g.fecha}</td>
-                      <td className="py-3 px-4 font-mono font-semibold text-slate-700 dark:text-slate-300">{g.comp}</td>
+                    <tr
+                      key={g.id || idx}
+                      className={`hover:bg-indigo-50/50 dark:hover:bg-slate-800/60 transition-colors ${
+                        g.id ? "cursor-pointer" : ""
+                      }`}
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest("button")) return
+                        if (g.id) setSelectedExpense(g)
+                      }}
+                    >
+                      <td className="py-3 px-4 text-slate-500 font-mono whitespace-nowrap">{g.fecha}</td>
+                      <td className="py-3 px-4 font-mono font-semibold text-slate-700 dark:text-slate-300">
+                        <div className="flex items-center gap-1.5">
+                          <span>{g.comp}</span>
+                          {g.has_split && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
+                              <Split className="w-2.5 h-2.5" /> Split
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="py-3 px-4 font-bold text-slate-900 dark:text-slate-100">{g.proveedor}</td>
-                      <td className="py-3 px-4 text-slate-500 font-mono">{g.ruc}</td>
-                      <td className="py-3 px-4 font-medium text-indigo-600 dark:text-indigo-400">{g.rubro}</td>
-                      <td className="py-3 px-4 text-slate-700 dark:text-slate-300 max-w-md">{g.concepto}</td>
-                      <td className="py-3 px-4 text-right font-black font-mono text-slate-900 dark:text-slate-100">{formatPYG(g.monto)}</td>
+                      <td className="py-3 px-4 text-slate-500 font-mono whitespace-nowrap">{g.ruc}</td>
+                      <td className="py-3 px-4">
+                        <span className="font-semibold text-indigo-600 dark:text-indigo-400 block">{g.rubro || "Gasto General"}</span>
+                        {g.cost_center_id && (
+                          <span className="text-[10px] text-slate-400 block">CC: {g.cost_center_id.slice(0, 8)}</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-slate-700 dark:text-slate-300 max-w-xs truncate" title={g.concepto}>{g.concepto}</td>
+                      <td className="py-3 px-4 text-right font-black font-mono text-slate-900 dark:text-slate-100 whitespace-nowrap">{formatPYG(g.monto)}</td>
                       <td className="py-3 px-4 text-center">
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-300">
-                          PAGADO
-                        </span>
+                        {g.has_split ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-300">
+                            SPLIT ({g.allocations?.length || 2})
+                          </span>
+                        ) : g.es_inversion ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-300">
+                            CAPEX
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-300">
+                            OPEX
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {g.id ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedExpense(g)
+                            }}
+                            className="px-2.5 py-1 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs inline-flex items-center gap-1 transition-all cursor-pointer"
+                          >
+                            <SlidersHorizontal className="w-3 h-3" />
+                            Redestinar
+                          </button>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">—</span>
+                        )}
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400">
+                    <td colSpan={9} className="py-8 text-center text-slate-400">
                       No se encontraron comprobantes para esta categoría o criterio de búsqueda.
                     </td>
                   </tr>
@@ -907,6 +1000,20 @@ export function ClosingMagnitudeDetail({
             </table>
           </div>
         </div>
+      )}
+
+      {/* 🚀 MODAL INTERACTIVO DE REDESTINACIÓN Y SPLIT DE COMPROBANTES */}
+      {selectedExpense && (
+        <ReclassifyExpenseModal
+          isOpen={!!selectedExpense}
+          item={selectedExpense}
+          onClose={() => setSelectedExpense(null)}
+          onSaved={() => {
+            setSelectedExpense(null)
+            fetchDetails()
+            if (onDataUpdated) onDataUpdated()
+          }}
+        />
       )}
     </div>
   )
