@@ -10,7 +10,7 @@ import {
   Settings2, ShieldCheck, ShieldAlert, FileDown, Search, ArrowUpRight,
   ArrowDownRight, FileSpreadsheet, Receipt, RefreshCw, Calendar, Clock,
   DollarSign, Check, X, FileText, Filter, Eye, ChevronRight, Pencil, Trash2,
-  ArrowLeftRight, ArrowRight, Building2, ArrowUp, ArrowDown, ArrowUpDown
+  ArrowLeftRight, ArrowRight, Building2, ArrowUp, ArrowDown, ArrowUpDown, CreditCard
 } from "lucide-react"
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts"
 import { useAuth } from "../../context/AuthContext"
@@ -1921,16 +1921,55 @@ export default function BancosPage() {
                 </div>
               )}
 
-              {/* Posición de Caja Consolidada */}
+              {/* Posición de Caja Consolidada y Proyección de Liquidez */}
               {cashPosition && (
                 <div className="card p-6 min-w-0 overflow-hidden bg-gradient-to-br from-white to-gray-50 dark:from-slate-800 dark:to-slate-900 border border-gray-100 dark:border-gray-700">
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-2">
+                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-4">
                     <div>
-                      <h3 className="font-bold text-gray-400 text-xs uppercase tracking-wider">Posición de Caja Consolidada</h3>
-                      <div className="text-3xl sm:text-4xl font-extrabold mt-1 text-gray-900 dark:text-white font-mono tabular-nums">
-                        {formatGs(cashPosition.total_pyg_equivalente)}
+                      <h3 className="font-bold text-gray-400 text-xs uppercase tracking-wider">Posición de Caja Consolidada y Proyectada</h3>
+                      <div className="flex flex-wrap items-baseline gap-3 mt-1">
+                        <div className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white font-mono tabular-nums">
+                          {formatGs(cashPosition.total_pyg_equivalente)}
+                        </div>
+                        <span className="text-xs font-semibold px-2.5 py-1 rounded-md bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          Disponible en Bancos
+                        </span>
                       </div>
-                      <div className="flex flex-wrap gap-3 mt-2">
+
+                      {/* Bloques de Proyección de Fondos en Tránsito */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-3 border-t border-gray-200/60 dark:border-gray-700/60">
+                        <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40">
+                          <div className="text-[11px] font-semibold text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+                            <CreditCard className="w-3.5 h-3.5" /> Tarjetas / POS en Tránsito
+                          </div>
+                          <div className="text-base font-extrabold text-blue-900 dark:text-blue-100 font-mono mt-0.5">
+                            +{formatGs(cashPosition.total_tarjetas_transito || 0)}
+                          </div>
+                          <div className="text-[10px] text-blue-600/80 dark:text-blue-400 mt-0.5">Cajas cerradas a acreditar (Bancard/Dinelco/PIX)</div>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/40">
+                          <div className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
+                            <Receipt className="w-3.5 h-3.5" /> Cheques Emitidos en Tránsito
+                          </div>
+                          <div className="text-base font-extrabold text-amber-900 dark:text-amber-100 font-mono mt-0.5">
+                            -{formatGs(cashPosition.total_cheques_transito || 0)}
+                          </div>
+                          <div className="text-[10px] text-amber-600/80 dark:text-amber-400 mt-0.5">Cheques diferidos en proveedores</div>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40">
+                          <div className="text-[11px] font-semibold text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                            <ArrowUpRight className="w-3.5 h-3.5" /> Saldo Proyectado Neto
+                          </div>
+                          <div className="text-base font-extrabold text-purple-900 dark:text-purple-100 font-mono mt-0.5">
+                            {formatGs(cashPosition.saldo_proyectado_total ?? cashPosition.total_pyg_equivalente)}
+                          </div>
+                          <div className="text-[10px] text-purple-600/80 dark:text-purple-400 mt-0.5">Liquidez estimada post compensaciones</div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3 mt-3">
                         {Object.entries(cashPosition.por_moneda || {}).map(([m, v]: [string, any]) => (
                           <span key={m} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 dark:bg-slate-700 text-gray-800 dark:text-gray-200">
                             <span className="w-2 h-2 rounded-full bg-primary" />
@@ -2094,12 +2133,47 @@ export default function BancosPage() {
                           </div>
                         </div>
 
-                        <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700">
-                          <div className="text-xs text-gray-400">Saldo Actual</div>
-                          <div className="text-xl font-extrabold text-gray-900 dark:text-white font-mono mt-0.5">
-                            {formatGs(b.saldo_actual)}
-                          </div>
-                        </div>
+                        {/* Saldo y Fondos en Tránsito */}
+                        {(() => {
+                          const cpCuenta = (cashPosition?.cuentas || []).find((c: any) => c.id === b.id)
+                          const tarjetasTransito = Number(cpCuenta?.tarjetas_en_transito || 0)
+                          const chequesTransito = Number(cpCuenta?.cheques_en_transito || 0)
+                          const saldoProyectado = cpCuenta?.saldo_proyectado != null ? Number(cpCuenta.saldo_proyectado) : Number(b.saldo_actual || 0)
+
+                          return (
+                            <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-gray-400">Saldo Disponible</span>
+                                <span className="text-base font-extrabold text-gray-900 dark:text-white font-mono">
+                                  {formatGs(b.saldo_actual)}
+                                </span>
+                              </div>
+
+                              {tarjetasTransito > 0 && (
+                                <div className="flex items-center justify-between text-[11px] text-blue-600 dark:text-blue-400 font-medium bg-blue-50/50 dark:bg-blue-950/30 px-2 py-0.5 rounded">
+                                  <span>+ Tarjetas en tránsito:</span>
+                                  <span className="font-mono font-semibold">+{formatGs(tarjetasTransito)}</span>
+                                </div>
+                              )}
+
+                              {chequesTransito > 0 && (
+                                <div className="flex items-center justify-between text-[11px] text-amber-600 dark:text-amber-400 font-medium bg-amber-50/50 dark:bg-amber-950/30 px-2 py-0.5 rounded">
+                                  <span>- Cheques a compensar:</span>
+                                  <span className="font-mono font-semibold">-{formatGs(chequesTransito)}</span>
+                                </div>
+                              )}
+
+                              {(tarjetasTransito > 0 || chequesTransito > 0) && (
+                                <div className="flex items-center justify-between text-xs pt-1 border-t border-dashed border-gray-200 dark:border-gray-700">
+                                  <span className="text-gray-500 font-semibold">Saldo Proyectado:</span>
+                                  <span className={`font-mono font-bold ${saldoProyectado >= 0 ? "text-purple-600 dark:text-purple-400" : "text-rose-600"}`}>
+                                    {formatGs(saldoProyectado)}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })()}
 
                         <div className="flex items-center justify-between mt-3 text-xs">
                           {acctStats && acctStats.pendientes > 0 ? (
@@ -2149,22 +2223,51 @@ export default function BancosPage() {
                 </div>
               </div>
 
-              {/* Partidas Pendientes de Conciliar (Cheques y Depósitos de Caja) */}
-              {outstandingItems && (outstandingItems.cheques_pendientes?.length > 0 || outstandingItems.depositos_sin_conciliar?.length > 0) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-6">
+              {/* Partidas Pendientes de Conciliar (Tarjetas, Cheques y Depósitos de Caja) */}
+              {outstandingItems && (outstandingItems.cheques_pendientes?.length > 0 || outstandingItems.depositos_sin_conciliar?.length > 0 || outstandingItems.tarjetas_sin_conciliar?.length > 0) && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mt-6">
+                  {/* Tarjetas / POS en Tránsito */}
+                  {outstandingItems.tarjetas_sin_conciliar?.length > 0 && (
+                    <div className="card p-5">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                          <CreditCard className="w-4 h-4 text-blue-500" />
+                          Tarjetas / POS en Tránsito
+                        </h3>
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                          {outstandingItems.tarjetas_sin_conciliar.length}
+                        </span>
+                      </div>
+                      <div className="text-xl font-extrabold text-blue-600 dark:text-blue-400 font-mono mb-3">
+                        +{formatGs(outstandingItems.total_tarjetas_sin_conciliar)}
+                      </div>
+                      <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                        {outstandingItems.tarjetas_sin_conciliar.slice(0, 25).map((t: any) => (
+                          <div key={t.id} className="flex items-center justify-between text-xs p-2 rounded-lg bg-gray-50 dark:bg-slate-800/50">
+                            <div>
+                              <div className="font-semibold text-gray-800 dark:text-gray-200">{t.contraparte || "Tarjeta POS"}</div>
+                              <div className="text-gray-400 text-[11px] truncate max-w-[200px]" title={t.descripcion}>{t.descripcion}</div>
+                            </div>
+                            <span className="font-bold text-blue-600 dark:text-blue-400 font-mono shrink-0 ml-2">+{formatGs(t.monto)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {outstandingItems.cheques_pendientes?.length > 0 && (
                     <div className="card p-5">
                       <div className="flex items-center justify-between mb-2">
                         <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
                           <Receipt className="w-4 h-4 text-purple-500" />
-                          Cheques Emitidos Pendientes de Cobro
+                          Cheques Emitidos en Tránsito
                         </h3>
                         <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700">
                           {outstandingItems.cheques_pendientes.length}
                         </span>
                       </div>
                       <div className="text-xl font-extrabold text-amber-600 font-mono mb-3">
-                        {formatGs(outstandingItems.total_cheques_pendientes)}
+                        -{formatGs(outstandingItems.total_cheques_pendientes)}
                       </div>
                       <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                         {outstandingItems.cheques_pendientes.map((c: any) => (
@@ -2192,7 +2295,7 @@ export default function BancosPage() {
                         </span>
                       </div>
                       <div className="text-xl font-extrabold text-teal-600 font-mono mb-3">
-                        {formatGs(outstandingItems.total_depositos_sin_conciliar)}
+                        +{formatGs(outstandingItems.total_depositos_sin_conciliar)}
                       </div>
                       <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                         {outstandingItems.depositos_sin_conciliar.slice(0, 20).map((d: any) => (

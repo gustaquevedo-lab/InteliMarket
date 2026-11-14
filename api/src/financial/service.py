@@ -3001,11 +3001,48 @@ async def get_cash_position(db: AsyncSession, company_id: str) -> dict:
     )
     accounts = list(accounts_result.scalars().all())
 
+    # Consultar fondos en tránsito (tarjetas/POS no conciliadas y cheques emitidos pendientes)
+    from api.src.cheques.models import Cheque
+
+    tarjetas_q = await db.execute(
+        select(
+            BankTransaction.bank_account_id,
+            func.coalesce(func.sum(BankTransaction.monto), Decimal("0")),
+        )
+        .where(
+            BankTransaction.company_id == cid,
+            BankTransaction.categoria == "ventas_pos",
+            BankTransaction.conciliado == False,
+        )
+        .group_by(BankTransaction.bank_account_id)
+    )
+    tarjetas_por_cuenta = {r[0]: Decimal(str(r[1] or 0)) for r in tarjetas_q.all()}
+
+    cheques_q = await db.execute(
+        select(
+            Cheque.bank_account_id,
+            func.coalesce(func.sum(Cheque.monto), Decimal("0")),
+        )
+        .where(
+            Cheque.company_id == cid,
+            Cheque.estado.in_(["pendiente", "entregado"]),
+        )
+        .group_by(Cheque.bank_account_id)
+    )
+    cheques_por_cuenta = {r[0]: Decimal(str(r[1] or 0)) for r in cheques_q.all()}
+
     por_moneda: dict[str, Decimal] = {}
     total_pyg = Decimal("0")
+    total_tarjetas_transito = Decimal("0")
+    total_cheques_transito = Decimal("0")
     cuentas = []
     for a in accounts:
         saldo = a.saldo_actual or Decimal("0")
+        tarjetas_transito = tarjetas_por_cuenta.get(a.id, Decimal("0"))
+        cheques_transito = cheques_por_cuenta.get(a.id, Decimal("0"))
+        total_tarjetas_transito += tarjetas_transito
+        total_cheques_transito += cheques_transito
+
         por_moneda[a.moneda] = por_moneda.get(a.moneda, Decimal("0")) + saldo
         if a.moneda == "PYG":
             equivalente_pyg = saldo
@@ -3015,9 +3052,16 @@ async def get_cash_position(db: AsyncSession, company_id: str) -> dict:
             equivalente_pyg = (saldo * tasa) if tasa else None
         if equivalente_pyg is not None:
             total_pyg += equivalente_pyg
+
+        saldo_proy = saldo + tarjetas_transito - cheques_transito
+
         cuentas.append({
             "id": str(a.id), "banco": a.banco, "tipo": a.tipo, "moneda": a.moneda,
+            "numero_cuenta": a.numero_cuenta,
             "saldo_actual": saldo, "equivalente_pyg": equivalente_pyg,
+            "tarjetas_en_transito": tarjetas_transito,
+            "cheques_en_transito": cheques_transito,
+            "saldo_proyectado": saldo_proy,
         })
 
     # tendencia: saldo diario consolidado de las cuentas en PYG (simplificacion
@@ -3045,6 +3089,9 @@ async def get_cash_position(db: AsyncSession, company_id: str) -> dict:
 
     return {
         "total_pyg_equivalente": total_pyg,
+        "total_tarjetas_transito": total_tarjetas_transito,
+        "total_cheques_transito": total_cheques_transito,
+        "saldo_proyectado_total": total_pyg + total_tarjetas_transito - total_cheques_transito,
         "por_moneda": {k: v for k, v in por_moneda.items()},
         "cuentas": cuentas,
         "tendencia": tendencia,
@@ -3121,11 +3168,42 @@ async def get_outstanding_items(
         for t in depositos_result.scalars().all()
     ]
 
+    tarjetas_q = select(BankTransaction).where(
+        BankTransaction.company_id == cid,
+        BankTransaction.categoria == "ventas_pos",
+        BankTransaction.conciliado == False,
+    )
+    if bank_account_id:
+        tarjetas_q = tarjetas_q.where(BankTransaction.bank_account_id == uuid.UUID(bank_account_id))
+    if hasta:
+        tarjetas_q = tarjetas_q.where(BankTransaction.fecha <= hasta)
+
+    tarjetas_result = await db.execute(tarjetas_q.order_by(BankTransaction.fecha.desc()).limit(100))
+    tarjetas_sin_conciliar = [
+        {
+            "id": str(t.id), "bank_account_id": str(t.bank_account_id), "fecha": t.fecha.isoformat(),
+            "monto": t.monto, "descripcion": t.descripcion, "contraparte": t.contraparte,
+        }
+        for t in tarjetas_result.scalars().all()
+    ]
+
+    # Suma total real de todas las tarjetas sin conciliar (sin límite de 100)
+    total_tarjetas_sum_q = await db.execute(
+        select(func.coalesce(func.sum(BankTransaction.monto), Decimal("0"))).where(
+            BankTransaction.company_id == cid,
+            BankTransaction.categoria == "ventas_pos",
+            BankTransaction.conciliado == False,
+        )
+    )
+    total_tarjetas_val = total_tarjetas_sum_q.scalar_one()
+
     return {
         "cheques_pendientes": cheques_pendientes,
         "total_cheques_pendientes": sum((c["monto"] or Decimal("0")) for c in cheques_pendientes),
         "depositos_sin_conciliar": depositos_sin_conciliar,
         "total_depositos_sin_conciliar": sum((d["monto"] or Decimal("0")) for d in depositos_sin_conciliar),
+        "tarjetas_sin_conciliar": tarjetas_sin_conciliar,
+        "total_tarjetas_sin_conciliar": total_tarjetas_val,
     }
 
 
