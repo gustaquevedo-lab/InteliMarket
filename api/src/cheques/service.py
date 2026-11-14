@@ -174,6 +174,74 @@ async def _enrich_with_supplier_names(db: AsyncSession, cheques: list[Cheque]) -
     return out
 
 
+async def _sync_cheque_bancario(
+    db: AsyncSession,
+    cheque: Cheque,
+    estado_anterior: str,
+    nuevo_estado: str,
+    target_bank_account_id: uuid.UUID | str | None = None,
+) -> None:
+    """Sincroniza atómicamente el estado del cheque emitido con el módulo de Cuentas Bancarias.
+    1. Al pasar a 'cobrado': crea el débito en bank_transactions y resta bank_accounts.saldo_actual.
+    2. Al revertir de 'cobrado' a otro estado: elimina el débito y restituye bank_accounts.saldo_actual."""
+    ba_id = target_bank_account_id or cheque.bank_account_id
+    if not ba_id:
+        return
+    if isinstance(ba_id, str):
+        ba_id = uuid.UUID(ba_id)
+
+    from api.src.financial.models import BankAccount, BankTransaction
+
+    # Transición 1: Cheque compensado / cobrado en banco
+    if nuevo_estado == "cobrado" and estado_anterior != "cobrado":
+        # Validar si ya existe un débito para este cheque (idempotencia)
+        tx_existente = await db.execute(
+            select(BankTransaction).where(
+                BankTransaction.cheque_id == cheque.id,
+                BankTransaction.tipo == "debito",
+            )
+        )
+        if not tx_existente.scalar_one_or_none():
+            bank_acc = await db.get(BankAccount, ba_id)
+            if bank_acc:
+                f_pago = cheque.fecha_pago or cheque.fecha_emision or date.today()
+                beneficiario_txt = cheque.beneficiario or "PROVEEDOR"
+                tx = BankTransaction(
+                    company_id=cheque.company_id,
+                    bank_account_id=bank_acc.id,
+                    fecha=f_pago,
+                    tipo="debito",
+                    monto=Decimal(str(cheque.monto)),
+                    moneda=cheque.moneda or bank_acc.moneda or "PYG",
+                    descripcion=f"PAGO A {beneficiario_txt} (Clearing Cheque #{cheque.numero})",
+                    referencia=str(cheque.numero),
+                    contraparte=beneficiario_txt,
+                    categoria="pago_cheque",
+                    cheque_id=cheque.id,
+                    conciliado=True,
+                    fecha_conciliacion=datetime.now(timezone.utc),
+                )
+                db.add(tx)
+                bank_acc.saldo_actual = (bank_acc.saldo_actual or Decimal("0")) - Decimal(str(cheque.monto))
+                db.add(bank_acc)
+
+    # Transición 2: Reversión (desmarcar de cobrado a pendiente/entregado/anulado)
+    elif estado_anterior == "cobrado" and nuevo_estado != "cobrado":
+        tx_res = await db.execute(
+            select(BankTransaction).where(
+                BankTransaction.cheque_id == cheque.id,
+                BankTransaction.tipo == "debito",
+            )
+        )
+        tx = tx_res.scalar_one_or_none()
+        if tx:
+            bank_acc = await db.get(BankAccount, tx.bank_account_id)
+            if bank_acc:
+                bank_acc.saldo_actual = (bank_acc.saldo_actual or Decimal("0")) + Decimal(str(tx.monto))
+                db.add(bank_acc)
+            await db.delete(tx)
+
+
 async def update_cheque(
     db: AsyncSession,
     cheque_id: str,
@@ -232,6 +300,7 @@ async def update_cheque(
             user_nombre=user_nombre,
             notas=f"Cambio de estado: {', '.join(cambios)}" if cambios else "Actualización de estado",
         ))
+        await _sync_cheque_bancario(db, cheque, estado_ant, data.estado)
     elif cambios:
         db.add(ChequeHistorial(
             cheque_id=cheque.id,
@@ -341,6 +410,9 @@ async def update_estado(
             db.add(tx)
             if not cheque.bank_account_id:
                 cheque.bank_account_id = target_bid
+
+    # Sincronización automática con Cuentas Bancarias (débito/reversión al cobrar o anular)
+    await _sync_cheque_bancario(db, cheque, estado_anterior, nuevo_estado, target_ba_id)
 
     await db.flush()
 
