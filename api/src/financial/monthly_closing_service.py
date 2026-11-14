@@ -838,7 +838,7 @@ class MonthlyClosingService:
                     print(f"[MonthlyClosingService] Error fetching credit notes: {e}")
             return []
 
-        elif magnitude in ["ocupacion", "mantenimiento", "logistica", "administracion", "gastos", "cogs_mp", "inversiones", "capex"]:
+        elif magnitude in ["opex", "gastos", "cogs_mp", "materias_primas", "inversiones", "capex", "anticipos", "ocupacion", "mantenimiento", "logistica", "administracion"]:
             if self.session:
                 try:
                     # Traer todos los gastos del período con sus joins de centro de costo y categorías
