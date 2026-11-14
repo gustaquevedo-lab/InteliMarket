@@ -22,7 +22,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem, SupplierCreditNote, SupplierCreditNoteApplication
+from api.src.financial.models import SupplierInvoice, SupplierInvoiceItem, SupplierCreditNote, SupplierCreditNoteApplication, SupplierInvoicePayment
 from api.src.purchases.models import Supplier, PurchaseOrder, PurchaseInboxConfig, PurchaseReceipt, SupplierNcRequest
 from api.src.purchases.sifen_xml_parser import parse_sifen_xml, map_sifen_items_to_catalog
 from api.src.purchases.utils import normalize_invoice_number, invoice_numbers_match
@@ -501,6 +501,10 @@ async def ingest_parsed_dte(
 
     # 5. Crear la Factura de Proveedor
     total = dte_data.get("total", Decimal("0"))
+    is_contado = (dte_data.get("condicion") == "contado")
+    init_saldo = Decimal("0") if is_contado else total
+    init_estado = "pagada" if is_contado else "pendiente"
+
     invoice = SupplierInvoice(
         company_id=company_uuid,
         supplier_id=supplier.id,
@@ -515,12 +519,12 @@ async def ingest_parsed_dte(
         iva_10=dte_data.get("iva_10", Decimal("0")),
         iva_5=dte_data.get("iva_5", Decimal("0")),
         total=total,
-        saldo_pendiente=total,
+        saldo_pendiente=init_saldo,
         moneda=dte_data.get("moneda", "PYG"),
         tipo_cambio=dte_data.get("tipo_cambio", Decimal("1")),
         condicion=dte_data.get("condicion", "credito"),
         tipo_comprobante="factura",
-        estado="pendiente",
+        estado=init_estado,
         concepto=f"Factura SIFEN {numero_factura} de {supplier.razon_social}",
         notas=f"Ingresado vía {origen}. {origen_info or ''}".strip(),
         xml_sifen_url=xml_raw if xml_raw else None,
@@ -531,6 +535,17 @@ async def ingest_parsed_dte(
     )
     db.add(invoice)
     await db.flush()
+
+    if is_contado:
+        db.add(SupplierInvoicePayment(
+            invoice_id=invoice.id,
+            payment_method="contado",
+            monto=total,
+            moneda=dte_data.get("moneda", "PYG"),
+            fecha_pago=dte_data.get("fecha_emision") or datetime.now().date(),
+            referencia="Factura SIFEN condición contado",
+            estado="conciliado",
+        ))
 
     # 6. Crear los ítems de la factura
     created_items = []

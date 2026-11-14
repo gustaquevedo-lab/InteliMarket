@@ -699,7 +699,7 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
 
         exp.es_pago_proveedor = True
     elif exp.supplier_id and not exp.es_anticipo_sueldo and not exp.supplier_invoice_id:
-        from api.src.financial.models import SupplierInvoice
+        from api.src.financial.models import SupplierInvoice, SupplierInvoicePayment
         num_clean = (exp.numero_factura or f"CP-{str(exp.id)[:8].upper()}").strip()
         timb_clean = (exp.timbrado or "").strip() or None
 
@@ -712,8 +712,25 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
             check_q = check_q.where(SupplierInvoice.timbrado == timb_clean)
         existing_inv = (await db.execute(check_q)).scalar_one_or_none()
 
+        is_pagado = bool(exp.fund_id or exp.estado == "pagado")
         if existing_inv:
             exp.supplier_invoice_id = existing_inv.id
+            if is_pagado and (existing_inv.saldo_pendiente or Decimal("0")) > Decimal("0"):
+                saldo_act = Decimal(str(existing_inv.saldo_pendiente or 0))
+                monto_aplicar = min(exp.monto, saldo_act)
+                existing_inv.saldo_pendiente = max(Decimal("0"), saldo_act - monto_aplicar)
+                if existing_inv.saldo_pendiente == Decimal("0"):
+                    existing_inv.estado = "pagada"
+                db.add(SupplierInvoicePayment(
+                    invoice_id=existing_inv.id,
+                    payment_method="fondo_fijo" if exp.fund_id else "efectivo",
+                    monto=monto_aplicar,
+                    moneda=existing_inv.moneda or "PYG",
+                    fecha_pago=exp.fecha_gasto or date.today(),
+                    referencia=f"Gasto Fondo Fijo: {exp.descripcion or ''}"[:250],
+                    petty_cash_fund_id=exp.fund_id,
+                    estado="conciliado",
+                ))
         else:
             subtotal = (exp.gravado_10 or Decimal("0")) + (exp.gravado_5 or Decimal("0")) + (exp.exentas or Decimal("0"))
             new_inv = SupplierInvoice(
@@ -729,18 +746,29 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
                 iva_10=exp.iva_10 or Decimal("0"),
                 iva_5=exp.iva_5 or Decimal("0"),
                 total=exp.monto,
-                saldo_pendiente=exp.monto,
+                saldo_pendiente=Decimal("0") if is_pagado else exp.monto,
                 moneda="PYG",
                 tipo_cambio=Decimal("1"),
-                condicion="credito",
+                condicion="contado" if is_pagado else "credito",
                 tipo_comprobante="gasto",
-                estado="aprobada",
+                estado="pagada" if is_pagado else "aprobada",
                 concepto=f"Insumo/Gasto: {exp.descripcion}"[:300],
                 created_by=_safe_uuid(user_id),
             )
             db.add(new_inv)
             await db.flush()
             exp.supplier_invoice_id = new_inv.id
+            if is_pagado:
+                db.add(SupplierInvoicePayment(
+                    invoice_id=new_inv.id,
+                    payment_method="fondo_fijo" if exp.fund_id else "efectivo",
+                    monto=exp.monto,
+                    moneda="PYG",
+                    fecha_pago=exp.fecha_gasto or date.today(),
+                    referencia=f"Gasto Fondo Fijo: {exp.descripcion or ''}"[:250],
+                    petty_cash_fund_id=exp.fund_id,
+                    estado="conciliado",
+                ))
 
     await db.commit()
     await db.refresh(exp)

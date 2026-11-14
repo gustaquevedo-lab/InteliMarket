@@ -111,6 +111,22 @@ async def create_invoice(db: AsyncSession, data: SupplierInvoiceCreate, user_id:
             detail=f"La factura {data.numero_factura} ya se encuentra registrada para este proveedor."
         )
 
+    is_contado = (data.condicion == "contado")
+    from api.src.petty_cash.models import Expense
+    exp_q = select(Expense).where(
+        Expense.company_id == data.company_id,
+        Expense.numero_factura == norm_num
+    )
+    if data.supplier_id:
+        exp_q = exp_q.where((Expense.supplier_id == data.supplier_id) | (Expense.supplier_id.is_(None)))
+    exp_match = (await db.execute(exp_q)).scalars().first()
+
+    is_rendido = bool(exp_match and (exp_match.fund_id or exp_match.estado in ("aprobado", "pagado") or exp_match.rendicion_id))
+    is_pagada_directa = is_contado or is_rendido
+
+    init_saldo = Decimal("0") if is_pagada_directa else data.total
+    init_estado = "pagada" if is_pagada_directa else "pendiente"
+
     invoice = SupplierInvoice(
         company_id=data.company_id,
         supplier_id=data.supplier_id,
@@ -125,22 +141,24 @@ async def create_invoice(db: AsyncSession, data: SupplierInvoiceCreate, user_id:
         iva_10=data.iva_10,
         iva_5=data.iva_5,
         total=data.total,
-        saldo_pendiente=data.total,
+        saldo_pendiente=init_saldo,
         moneda=data.moneda,
         tipo_cambio=data.tipo_cambio,
         total_brl=data.total_brl if data.total_brl is not None else (
             (data.total / data.tipo_cambio).quantize(Decimal("0.01")) if data.moneda == "BRL" and data.tipo_cambio and data.tipo_cambio > 1 else (data.total if data.moneda == "BRL" else None)
         ),
         saldo_pendiente_brl=data.saldo_pendiente_brl if data.saldo_pendiente_brl is not None else (
-            data.total_brl if data.total_brl is not None else (
-                (data.total / data.tipo_cambio).quantize(Decimal("0.01")) if data.moneda == "BRL" and data.tipo_cambio and data.tipo_cambio > 1 else (data.total if data.moneda == "BRL" else None)
+            Decimal("0") if is_pagada_directa else (
+                data.total_brl if data.total_brl is not None else (
+                    (data.total / data.tipo_cambio).quantize(Decimal("0.01")) if data.moneda == "BRL" and data.tipo_cambio and data.tipo_cambio > 1 else (data.total if data.moneda == "BRL" else None)
+                )
             )
         ),
         purchase_order_id=data.purchase_order_id,
         receipt_id=data.receipt_id,
         condicion=data.condicion,
         tipo_comprobante=data.tipo_comprobante,
-        estado="pendiente",
+        estado=init_estado,
         concepto=data.concepto,
         notas=data.notas,
         comprobante_url=data.comprobante_url,
@@ -148,6 +166,26 @@ async def create_invoice(db: AsyncSession, data: SupplierInvoiceCreate, user_id:
     )
     db.add(invoice)
     await db.flush()
+
+    if exp_match:
+        exp_match.supplier_invoice_id = invoice.id
+        if not exp_match.supplier_id and data.supplier_id:
+            exp_match.supplier_id = data.supplier_id
+
+    if is_pagada_directa:
+        p_medio = "fondo_fijo" if (exp_match and exp_match.fund_id) else ("efectivo" if is_rendido else "contado")
+        ref_txt = f"Gasto Rendido/Fondo Fijo ({exp_match.descripcion or ''})" if is_rendido else "Factura Contado - Cancelada en mostrador / origen"
+        db.add(SupplierInvoicePayment(
+            invoice_id=invoice.id,
+            payment_method=p_medio,
+            monto=data.total,
+            moneda=data.moneda or "PYG",
+            fecha_pago=data.fecha_emision or _today(),
+            referencia=ref_txt[:250],
+            petty_cash_fund_id=exp_match.fund_id if exp_match else None,
+            estado="conciliado",
+        ))
+
     await db.refresh(invoice)
     return invoice
 
