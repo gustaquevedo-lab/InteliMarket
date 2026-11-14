@@ -2182,46 +2182,103 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
         saldo_ant = parsed["saldo_anterior"]
         saldo_cierre = parsed["closing_from_totals"]
 
-    duplicadas = await _count_duplicate_transactions(db, bank_account_id, transacciones)
-    nuevas = len(transacciones) - duplicadas
+    # ── Punteo y matching enriquecido previo a la importación ─────────────
+    existing = await db.execute(
+        select(BankTransaction)
+        .where(BankTransaction.bank_account_id == uuid.UUID(bank_account_id))
+    )
+    existing_txs = list(existing.scalars().all())
 
-    # Estimación de auto-conciliables de alta certeza (Verde)
-    listas_auto_conciliar = 0
     from api.src.cheques.models import Cheque
-    chq_nums = [t["nro_cheque"] for t in transacciones if t.get("nro_cheque")]
-    if chq_nums:
-        cid = account.company_id
-        res_chqs = await db.execute(
-            select(Cheque.numero, Cheque.monto).where(
-                Cheque.company_id == cid,
-                Cheque.estado.in_(["pendiente", "entregado"]),
-            )
+    from api.src.financial.pdf_parser import _extract_nro_cheque
+
+    cid = account.company_id
+    res_chqs = await db.execute(
+        select(Cheque).where(
+            Cheque.company_id == cid,
+            Cheque.estado.in_(["pendiente", "entregado", "en_cartera", "cobrado"]),
         )
-        chq_set = {(c.numero.strip().lstrip("0"), Decimal(str(c.monto))) for c in res_chqs.all()}
-        for t in transacciones:
-            nro = (t.get("nro_cheque") or "").strip().lstrip("0")
-            if (nro, Decimal(str(t["monto"]))) in chq_set:
-                listas_auto_conciliar += 1
+    )
+    all_chqs = list(res_chqs.scalars().all())
+
+    transacciones_enriquecidas = []
+    listas_auto_conciliar = 0
+    duplicadas_count = 0
+    nuevas_count = 0
+
+    for t in transacciones:
+        ref_val = (t.get("referencia") or "").strip()
+        desc_val = (t.get("descripcion") or "").strip()
+        t_monto = Decimal(str(t["monto"]))
+        matching_tx = _find_matching_existing_tx(existing_txs, t)
+
+        status = "solo_extracto"
+        match_tipo = None
+        match_detalle = None
+
+        if matching_tx is not None:
+            status = "ya_importado"
+            duplicadas_count += 1
+            st_lbl = "Conciliado" if matching_tx.conciliado else "Pendiente"
+            match_detalle = f"Ya registrado el {matching_tx.fecha.isoformat()} ({st_lbl})"
+        else:
+            nuevas_count += 1
+            if t["tipo"] == "debito":
+                nro = (t.get("nro_cheque") or _extract_nro_cheque(desc_val, ref_val) or "").strip().lstrip("0")
+                if nro:
+                    found_chq = next((
+                        c for c in all_chqs
+                        if (c.numero or "").strip().lstrip("0") == nro
+                        and abs(Decimal(str(c.monto)) - t_monto) <= Decimal("1")
+                    ), None)
+                    if found_chq:
+                        status = "conciliable"
+                        match_tipo = "cheque"
+                        match_detalle = f"Cheque #{found_chq.numero} ({found_chq.beneficiario or 'Sin beneficiario'})"
+                        listas_auto_conciliar += 1
+            elif t["tipo"] == "credito":
+                boletas = re.findall(r'\b\d{6,}\b', f"{ref_val} {desc_val}")
+                matched_boveda = None
+                for boleta in boletas:
+                    matched_boveda = next((
+                        tx for tx in existing_txs
+                        if tx.tipo == "credito"
+                        and abs(Decimal(str(tx.monto)) - t_monto) <= Decimal("1")
+                        and (boleta in (tx.referencia or "") or boleta in (tx.descripcion or ""))
+                    ), None)
+                    if matched_boveda:
+                        break
+                if matched_boveda:
+                    status = "conciliable"
+                    match_tipo = "deposito_boveda"
+                    match_detalle = f"Depósito Bóveda ({matched_boveda.referencia or 'Boleta'})"
+                    listas_auto_conciliar += 1
+
+            if status == "solo_extracto":
+                match_detalle = "Sin contrapartida en ERP (se registrará como Pendiente de Conciliación)"
+
+        transacciones_enriquecidas.append({
+            "fecha": t["fecha"].isoformat(),
+            "tipo": t["tipo"],
+            "monto": float(t["monto"]),
+            "descripcion": t["descripcion"],
+            "referencia": t.get("referencia"),
+            "nro_cheque": t.get("nro_cheque"),
+            "status": status,
+            "match_tipo": match_tipo,
+            "match_detalle": match_detalle,
+        })
 
     return {
         "sheet_matched": sheet_matched,
         "saldo_anterior": saldo_ant,
         "closing_from_totals": saldo_cierre,
         "total_detectadas": len(transacciones),
-        "nuevas": nuevas,
-        "duplicadas": duplicadas,
+        "nuevas": nuevas_count,
+        "duplicadas": duplicadas_count,
         "listas_auto_conciliar": listas_auto_conciliar,
-        "transacciones": [
-            {
-                "fecha": t["fecha"].isoformat(),
-                "tipo": t["tipo"],
-                "monto": float(t["monto"]),
-                "descripcion": t["descripcion"],
-                "referencia": t.get("referencia"),
-                "nro_cheque": t.get("nro_cheque"),
-            }
-            for t in transacciones
-        ],
+        "pendientes_conciliar": nuevas_count - listas_auto_conciliar,
+        "transacciones": transacciones_enriquecidas,
     }
 
 
@@ -2285,7 +2342,7 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
     if not account:
         raise ValueError("Cuenta bancaria no encontrada")
 
-    is_pdf = (filename and filename.lower().endswith(".pdf")) or file_bytes.startswith(b"%PDF")
+    saldo_cierre = None
     if is_pdf:
         parsed_pdf = pdf_parser.parse_bank_statement_pdf(file_bytes)
         pdf_cta = re.sub(r'\D', '', parsed_pdf.get("numero_cuenta") or "")
@@ -2297,11 +2354,13 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
             )
         transacciones = parsed_pdf["transacciones"]
         sheet_matched = f"PDF Oficial {parsed_pdf['banco']} ({parsed_pdf['tipo_cuenta']} / {parsed_pdf['numero_cuenta']})"
+        saldo_cierre = parsed_pdf.get("saldo_cierre")
     else:
         account_tipo = statement_import.account_tipo_normalizado(account.tipo, account.titular, account.numero_cuenta)
         parsed = statement_import.parse_statement(file_bytes, mes, anio, account.banco, account_tipo)
         transacciones = parsed["transacciones"]
         sheet_matched = parsed["sheet_matched"]
+        saldo_cierre = parsed.get("closing_from_totals")
 
     existing_txs_res = await db.execute(
         select(BankTransaction)
@@ -2457,15 +2516,36 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
 
     await db.flush()
 
-    # Recalcular saldo canónico exacto de forma dinámica para garantizar consistencia total
-    bal_res = await db.execute(
-        select(
-            func.coalesce(func.sum(case((BankTransaction.tipo == 'credito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("creditos"),
-            func.coalesce(func.sum(case((BankTransaction.tipo == 'debito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("debitos"),
-        ).where(BankTransaction.bank_account_id == account.id)
-    )
-    b_row = bal_res.fetchone()
-    account.saldo_actual = (account.saldo_inicial or Decimal("0")) + b_row.creditos - b_row.debitos
+    # ── ANCLAJE DEL SALDO AL EXTRACTO OFICIAL CERTIFICADO ───────────────────
+    # Si el extracto incluye el saldo de cierre certificado por el banco,
+    # el saldo de la cuenta se ancla directamente a ese saldo de cierre oficial,
+    # sumando/restando únicamente movimientos registrados con fecha POSTERIOR a la fecha de corte.
+    if saldo_cierre is not None and len(transacciones) > 0:
+        fecha_corte = max(t["fecha"] for t in transacciones)
+        post_res = await db.execute(
+            select(
+                func.coalesce(func.sum(case((BankTransaction.tipo == 'credito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("creditos_post"),
+                func.coalesce(func.sum(case((BankTransaction.tipo == 'debito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("debitos_post"),
+            ).where(
+                BankTransaction.bank_account_id == account.id,
+                BankTransaction.fecha > fecha_corte
+            )
+        )
+        post_row = post_res.fetchone()
+        account.saldo_actual = Decimal(str(saldo_cierre)) + post_row.creditos_post - post_row.debitos_post
+        account.saldo_verificado_manualmente = True
+        account.saldo_verificado_at = datetime.now(timezone.utc)
+    else:
+        # Fallback de recálculo si el archivo no contenía saldo_cierre explícito
+        bal_res = await db.execute(
+            select(
+                func.coalesce(func.sum(case((BankTransaction.tipo == 'credito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("creditos"),
+                func.coalesce(func.sum(case((BankTransaction.tipo == 'debito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("debitos"),
+            ).where(BankTransaction.bank_account_id == account.id)
+        )
+        b_row = bal_res.fetchone()
+        account.saldo_actual = (account.saldo_inicial or Decimal("0")) + b_row.creditos - b_row.debitos
+
     db.add(account)
     await db.flush()
 

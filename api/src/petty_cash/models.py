@@ -283,3 +283,19 @@ class ExpenseDisbursement(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class ExpenseAllocation(Base):
+    """Línea de imputación/prorrateo de un gasto entre sectores y naturalezas."""
+    __tablename__ = "expense_allocations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    expense_id = Column(UUID(as_uuid=True), ForeignKey("expenses.id", ondelete="CASCADE"), nullable=False, index=True)
+    cost_center_id = Column(UUID(as_uuid=True), ForeignKey("cost_centers.id", ondelete="SET NULL"), nullable=True, index=True)
+    category_id = Column(UUID(as_uuid=True), ForeignKey("expense_categories.id", ondelete="SET NULL"), nullable=True, index=True)
+    naturaleza_economica = Column(String(50), nullable=False, server_default="OPEX_GASTO_OPERATIVO")
+    production_area = Column(String(50), nullable=True)
+    monto = Column(Numeric(15, 2), nullable=False)
+    notas = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+

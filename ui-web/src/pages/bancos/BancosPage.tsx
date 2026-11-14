@@ -147,6 +147,7 @@ export default function BancosPage() {
   const now = new Date()
   const [importForm, setImportForm] = useState<{ mes: number; anio: number; file: File | null }>({ mes: now.getMonth() + 1, anio: now.getFullYear(), file: null })
   const [importPreview, setImportPreview] = useState<any>(null)
+  const [previewFilter, setPreviewFilter] = useState<"todos" | "conciliables" | "pendientes" | "duplicadas">("todos")
   const [importLoading, setImportLoading] = useState(false)
   const [reconcileModal, setReconcileModal] = useState<{ txId: string; suggestions: any[]; loading: boolean } | null>(null)
   const [autoModal, setAutoModal] = useState<{ loading: boolean; candidates: AutoCandidate[] } | null>(null)
@@ -2918,89 +2919,272 @@ export default function BancosPage() {
       {/* MODAL: Importar Extracto Bancario */}
       {showImportBank && (
         <div className="modal-overlay" onClick={() => { setShowImportBank(false); setImportPreview(null); }}>
-          <div className="modal-content max-w-lg p-0 overflow-hidden flex flex-col max-h-[85vh] border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-100 dark:border-gray-800 shrink-0">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                <Upload className="w-5 h-5 text-primary" />
-                Importar Extracto Bancario Oficial
-              </h3>
-              <p className="text-xs text-gray-500 mt-1">
-                Subí el extracto bancario en <b>PDF oficial</b> o planilla <b>Excel (.xlsx / .xls)</b> entregada por el banco.
-              </p>
+          <div className={`modal-content ${importPreview ? "max-w-5xl" : "max-w-lg"} p-0 overflow-hidden flex flex-col max-h-[90vh] border border-slate-200 dark:border-slate-800 transition-all duration-200`} onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-gray-100 dark:border-gray-800 shrink-0 flex items-center justify-between bg-slate-50/50 dark:bg-slate-800/40">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <Upload className="w-5 h-5 text-primary" />
+                  {importPreview ? "Punteo Previo de Conciliación Bancaria" : "Importar Extracto Bancario Oficial"}
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {importPreview
+                    ? "Verificá el contraste entre las operaciones del extracto y el ERP antes de confirmar la importación."
+                    : "Subí el extracto bancario en PDF oficial o planilla Excel (.xlsx / .xls) entregada por el banco."}
+                </p>
+              </div>
+              {importPreview?.closing_from_totals != null && (
+                <div className="text-right">
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">Saldo Oficial Extracto</span>
+                  <span className="text-base font-extrabold text-emerald-600 dark:text-emerald-400 font-mono">
+                    {formatGs(importPreview.closing_from_totals)}
+                  </span>
+                </div>
+              )}
             </div>
-            <div className="p-6 space-y-4 flex-1 min-h-0 overflow-y-auto">
-              <div>
-                <label className="label-field">Cuenta Bancaria Destino *</label>
-                <select className="input-field" value={selectedBank} onChange={e => { setSelectedBank(e.target.value); setImportPreview(null); }}>
-                  <option value="">Seleccionar cuenta...</option>
-                  {banks.map(b => <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label-field">Mes del Extracto</label>
-                  <select className="input-field" value={importForm.mes} onChange={e => { setImportForm({ ...importForm, mes: Number(e.target.value) }); setImportPreview(null); }}>
-                    {["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"].map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="label-field">Año</label>
-                  <input className="input-field" type="number" value={importForm.anio} onChange={e => { setImportForm({ ...importForm, anio: Number(e.target.value) }); setImportPreview(null); }} />
-                </div>
-              </div>
-              <div>
-                <label className="label-field">Archivo del Extracto (PDF o Excel)</label>
-                <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-primary rounded-xl p-4 text-center cursor-pointer bg-slate-50/50 dark:bg-slate-800/30 transition-colors relative">
-                  <input
-                    type="file"
-                    accept=".pdf,.xlsx,.xls"
-                    onChange={e => { setImportForm({ ...importForm, file: e.target.files?.[0] || null }); setImportPreview(null); }}
-                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                  />
-                  <div className="flex flex-col items-center gap-1.5 pointer-events-none">
-                    <FileSpreadsheet className="w-8 h-8 text-primary/70" />
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                      {importForm.file ? importForm.file.name : "Hacé clic o arrastrá el extracto aquí"}
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      Soporta extractos PDF de Banco Continental y Banco Interfisa, o archivos Excel (.xlsx/.xls)
-                    </span>
+
+            <div className="p-5 space-y-4 flex-1 min-h-0 overflow-y-auto">
+              {!importPreview ? (
+                <>
+                  <div>
+                    <label className="label-field">Cuenta Bancaria Destino *</label>
+                    <select className="input-field" value={selectedBank} onChange={e => { setSelectedBank(e.target.value); setImportPreview(null); }}>
+                      <option value="">Seleccionar cuenta...</option>
+                      {banks.map(b => <option key={b.id} value={b.id}>{formatBankLabel(b)}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="label-field">Mes del Extracto</label>
+                      <select className="input-field" value={importForm.mes} onChange={e => { setImportForm({ ...importForm, mes: Number(e.target.value) }); setImportPreview(null); }}>
+                        {["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"].map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label-field">Año</label>
+                      <input className="input-field" type="number" value={importForm.anio} onChange={e => { setImportForm({ ...importForm, anio: Number(e.target.value) }); setImportPreview(null); }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label-field">Archivo del Extracto (PDF o Excel)</label>
+                    <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-primary rounded-xl p-6 text-center cursor-pointer bg-slate-50/50 dark:bg-slate-800/30 transition-colors relative">
+                      <input
+                        type="file"
+                        accept=".pdf,.xlsx,.xls"
+                        onChange={e => { setImportForm({ ...importForm, file: e.target.files?.[0] || null }); setImportPreview(null); }}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                      />
+                      <div className="flex flex-col items-center gap-2 pointer-events-none">
+                        <FileSpreadsheet className="w-10 h-10 text-primary/70" />
+                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                          {importForm.file ? importForm.file.name : "Hacé clic o arrastrá el extracto aquí"}
+                        </span>
+                        <span className="text-xs text-slate-400 max-w-sm">
+                          Soporta extractos PDF de Banco Continental y Banco Interfisa, o archivos Excel (.xlsx/.xls)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button onClick={handlePreviewImport} disabled={!selectedBank || !importForm.file || importLoading} className="btn-primary w-full disabled:opacity-50 flex items-center justify-center gap-2 text-xs py-2.5">
+                    {importLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />} Analizar y Puntear Extracto
+                  </button>
+                </>
+              ) : (
+                <div className="space-y-4">
+                  {/* KPI Cards del Extracto */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Detectadas</div>
+                      <div className="text-lg font-bold text-slate-800 dark:text-slate-100 font-mono mt-0.5">
+                        {importPreview.total_detectadas}
+                      </div>
+                      <div className="text-[11px] text-slate-500 truncate" title={importPreview.sheet_matched}>
+                        {importPreview.sheet_matched}
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3" /> Conciliables con ERP
+                      </div>
+                      <div className="text-lg font-bold text-emerald-700 dark:text-emerald-300 font-mono mt-0.5">
+                        {importPreview.listas_auto_conciliar || 0}
+                      </div>
+                      <div className="text-[11px] text-emerald-600/80">
+                        Cheques o depósitos con match exacto
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> Solo en Extracto
+                      </div>
+                      <div className="text-lg font-bold text-amber-700 dark:text-amber-300 font-mono mt-0.5">
+                        {importPreview.pendientes_conciliar ?? (importPreview.nuevas - (importPreview.listas_auto_conciliar || 0))}
+                      </div>
+                      <div className="text-[11px] text-amber-600/80">
+                        Quedarán pendientes de conciliación
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Ya en Sistema
+                      </div>
+                      <div className="text-lg font-bold text-slate-600 dark:text-slate-300 font-mono mt-0.5">
+                        {importPreview.duplicadas || 0}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        Omitidos (ya registrados antes)
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Punteo Tabs */}
+                  <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 pb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Punteo Previo:</span>
+                      {(["todos", "conciliables", "pendientes", "duplicadas"] as const).map(tabKey => {
+                        const count =
+                          tabKey === "todos" ? (importPreview.transacciones?.length || 0)
+                          : tabKey === "conciliables" ? (importPreview.listas_auto_conciliar || 0)
+                          : tabKey === "pendientes" ? (importPreview.pendientes_conciliar ?? (importPreview.nuevas - (importPreview.listas_auto_conciliar || 0)))
+                          : (importPreview.duplicadas || 0)
+                        const active = previewFilter === tabKey
+                        return (
+                          <button
+                            key={tabKey}
+                            onClick={() => setPreviewFilter(tabKey)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                              active
+                                ? "bg-primary text-white shadow-sm"
+                                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                            }`}
+                          >
+                            {tabKey === "todos" ? "Todos" : tabKey === "conciliables" ? "Conciliables" : tabKey === "pendientes" ? "Pendientes" : "Ya Registrados"} ({count})
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <button
+                      onClick={() => setImportPreview(null)}
+                      className="text-xs text-primary hover:underline flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" /> Cambiar archivo
+                    </button>
+                  </div>
+
+                  {/* Tabla de Movimientos del Extracto */}
+                  <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
+                    <div className="max-h-[360px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                      <table className="w-full text-left">
+                        <thead className="bg-slate-100/80 dark:bg-slate-800 text-[11px] font-bold uppercase text-slate-500 sticky top-0 z-10 backdrop-blur-sm">
+                          <tr>
+                            <th className="py-2.5 px-3">Fecha</th>
+                            <th className="py-2.5 px-2">Tipo</th>
+                            <th className="py-2.5 px-3">Concepto / Descripción</th>
+                            <th className="py-2.5 px-3">Ref / Cheque</th>
+                            <th className="py-2.5 px-3 text-right">Monto</th>
+                            <th className="py-2.5 px-3">Punteo / Diagnóstico</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                          {(() => {
+                            const filtered = (importPreview.transacciones || []).filter((tx: any) => {
+                              if (previewFilter === "conciliables") return tx.status === "conciliable"
+                              if (previewFilter === "pendientes") return tx.status === "solo_extracto"
+                              if (previewFilter === "duplicadas") return tx.status === "ya_importado"
+                              return true
+                            })
+
+                            if (filtered.length === 0) {
+                              return (
+                                <tr>
+                                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                                    No hay operaciones en este filtro.
+                                  </td>
+                                </tr>
+                              )
+                            }
+
+                            return filtered.map((tx: any, idx: number) => {
+                              const isCredito = tx.tipo === "credito" || tx.tipo === "deposito"
+                              return (
+                                <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                                  <td className="py-2 px-3 whitespace-nowrap font-mono text-slate-600 dark:text-slate-300">
+                                    {tx.fecha}
+                                  </td>
+                                  <td className="py-2 px-2 whitespace-nowrap">
+                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                      isCredito
+                                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                                        : "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300"
+                                    }`}>
+                                      {isCredito ? "+ Ingreso" : "- Egreso"}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-3 max-w-[260px] truncate font-medium text-slate-800 dark:text-slate-200" title={tx.descripcion}>
+                                    {tx.descripcion}
+                                  </td>
+                                  <td className="py-2 px-3 whitespace-nowrap font-mono text-slate-500">
+                                    {tx.nro_cheque ? `CHQ #${tx.nro_cheque}` : (tx.referencia || "—")}
+                                  </td>
+                                  <td className={`py-2 px-3 whitespace-nowrap font-mono font-bold text-right ${
+                                    isCredito ? "text-emerald-600 dark:text-emerald-400" : "text-slate-900 dark:text-white"
+                                  }`}>
+                                    {formatGs(tx.monto)}
+                                  </td>
+                                  <td className="py-2 px-3 whitespace-nowrap">
+                                    {tx.status === "conciliable" ? (
+                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300/50">
+                                        <CheckCircle className="w-3 h-3 text-emerald-600" />
+                                        {tx.match_detalle || "Concilia con ERP"}
+                                      </span>
+                                    ) : tx.status === "ya_importado" ? (
+                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-300/50">
+                                        <Check className="w-3 h-3" />
+                                        {tx.match_detalle || "Ya registrado"}
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300/50">
+                                        <Clock className="w-3 h-3 text-amber-600" />
+                                        Solo en extracto (Pendiente)
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              )
+                            })
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Nota aclaratoria de anclaje de saldo */}
+                  <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800/40 text-xs text-blue-900 dark:text-blue-200 space-y-1">
+                    <div className="font-semibold flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                      Reglas de Conciliación y Anclaje de Saldo:
+                    </div>
+                    <ul className="list-disc list-inside space-y-0.5 text-[11px] text-blue-800/90 dark:text-blue-300/90">
+                      <li>Las operaciones <b>Conciliables</b> matchean y cancelan su comprobante en el ERP de forma transparente.</li>
+                      <li>Las operaciones <b>Solo en Extracto</b> se guardan como <i>Pendientes de Conciliación</i> para que puedas imputarlas sin alterar las cuentas a ciegas.</li>
+                      <li>El saldo de la cuenta se ancla exactamente al <b>Saldo de Cierre Oficial ({formatGs(importPreview.closing_from_totals)})</b> certificado por el extracto, blindando la cuenta de desfases históricos.</li>
+                    </ul>
                   </div>
                 </div>
-              </div>
-
-              {!importPreview && (
-                <button onClick={handlePreviewImport} disabled={!selectedBank || !importForm.file || importLoading} className="btn-outline w-full disabled:opacity-50 flex items-center justify-center gap-2 text-xs">
-                  {importLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null} Vista Previa del Archivo
-                </button>
-              )}
-
-              {importPreview && (
-                <div className="card p-4 bg-gray-50 dark:bg-slate-800 space-y-2 border">
-                  <div className="text-xs font-bold text-gray-500 uppercase">Resumen de Análisis</div>
-                  <div className="text-sm font-semibold text-gray-900 dark:text-white">Hoja detectada: {importPreview.sheet_matched}</div>
-                  <div className="text-xs text-gray-600 dark:text-gray-300">{importPreview.total_detectadas} movimientos encontrados</div>
-                  <div className="text-xs text-emerald-600 font-bold">{importPreview.nuevas} movimientos nuevos para importar</div>
-                  {importPreview.duplicadas > 0 && <div className="text-xs text-gray-400">{importPreview.duplicadas} movimientos ya existían (se omitirán)</div>}
-                  {importPreview.listas_auto_conciliar != null && importPreview.listas_auto_conciliar > 0 && (
-                    <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-medium flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                      <span><strong>{importPreview.listas_auto_conciliar} operaciones</strong> coinciden con cheques o depósitos del sistema y se conciliarán automáticamente al importar.</span>
-                    </div>
-                  )}
-                  {importPreview.closing_from_totals != null && (
-                    <div className="text-xs text-primary font-semibold mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                      Saldo de cierre según extracto: {formatGs(importPreview.closing_from_totals)}
-                    </div>
-                  )}
-                </div>
               )}
             </div>
+
             <div className="p-4 sm:p-5 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm shrink-0 sticky bottom-0 z-20 shadow-[0_-4px_16px_rgba(0,0,0,0.08)]">
-              <button onClick={() => { setShowImportBank(false); setImportPreview(null); }} className="btn-ghost text-xs">Cancelar</button>
+              <button onClick={() => { setShowImportBank(false); setImportPreview(null); }} className="btn-ghost text-xs">
+                Cancelar
+              </button>
               <button onClick={handleConfirmImport} disabled={!importPreview || importLoading} className="btn-primary text-xs disabled:opacity-50 flex items-center gap-2">
-                {importLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {importPreview ? `Importar ${importPreview.nuevas} Movimientos` : "Importar"}
+                {importLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {importPreview ? `Confirmar e Importar (${importPreview.nuevas} Movimientos)` : "Importar"}
               </button>
             </div>
           </div>

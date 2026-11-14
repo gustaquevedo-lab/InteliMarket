@@ -499,6 +499,11 @@ async def _record_treasury_ingress(
         det_str = f" ({' + '.join(det_monedas)})" if det_monedas else ""
 
         vault_entry_id = uuid.uuid4()
+        ref_rem = getattr(data, "referencia", None) or ""
+        obs_vault = f"Cobro AR Recibo #{numero_recibo}{det_str} - Cliente: {customer_name}"
+        if ref_rem and ref_rem not in obs_vault:
+            obs_vault += f" [{ref_rem}]"
+
         await db.execute(
             text("""
                 INSERT INTO vault_entries
@@ -512,7 +517,7 @@ async def _record_treasury_ingress(
                 "monto_pyg": float(monto_pyg),
                 "monto_brl": float(monto_brl),
                 "monto_usd": float(monto_usd),
-                "obs": f"Cobro AR Recibo #{numero_recibo}{det_str} - Cliente: {customer_name}",
+                "obs": obs_vault,
                 "user_id": uid,
             },
         )
@@ -2779,18 +2784,51 @@ async def revert_corporate_remission_payment(
     if rem.estado not in ("PAGADO", "PAGADO_PARCIAL"):
         return {"error": f"La remisión se encuentra en estado '{rem.estado}'. Solo se pueden revertir pagos de remisiones en estado PAGADO o PAGADO_PARCIAL."}
 
+    # 0. Localizar todos los pagos de cuentas por cobrar (receivable_payments) asociados a esta remisión
+    rp_res = await db.execute(
+        text("""
+            SELECT DISTINCT rp.id, rp.vault_entry_id, rp.bank_account_id, rp.cheque_id, rp.numero_recibo, rp.monto_total
+            FROM receivable_payments rp
+            LEFT JOIN receivable_payment_allocations rpa ON rpa.receivable_payment_id = rp.id
+            LEFT JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
+            WHERE rp.company_id = :cid
+              AND (
+                  ar.corporate_remission_id = :rem_id
+                  OR rp.observaciones ILIKE :obs_rem
+                  OR rp.referencia ILIKE :obs_rem
+              )
+        """),
+        {"cid": company_id, "rem_id": remission_id, "obs_rem": f"%{rem.numero_remision}%"}
+    )
+    linked_rps = rp_res.fetchall()
+    rp_ids = [r.id for r in linked_rps]
+    ve_ids = [r.vault_entry_id for r in linked_rps if r.vault_entry_id]
+    chq_ids = [r.cheque_id for r in linked_rps if r.cheque_id]
+    recibo_nums = [r.numero_recibo for r in linked_rps if r.numero_recibo]
+
     # 1. Revertir transacciones bancarias asociadas
     bt_res = await db.execute(
         text("""
             SELECT id, bank_account_id, monto
             FROM bank_transactions
             WHERE company_id = :cid
-              AND categoria = 'cobranzas_corporativas'
-              AND (descripcion ILIKE :desc_rem OR referencia ILIKE :ref_rem)
+              AND (
+                  (categoria IN ('cobranzas_corporativas', 'cobranzas') AND (descripcion ILIKE :desc_rem OR referencia ILIKE :ref_rem))
+                  OR (descripcion ILIKE :desc_rem)
+              )
         """),
         {"cid": company_id, "desc_rem": f"%{rem.numero_remision}%", "ref_rem": f"%{rem.numero_remision}%"}
     )
-    bts = bt_res.fetchall()
+    bts = list(bt_res.fetchall())
+    for rec in recibo_nums:
+        bt_rec = await db.execute(
+            text("SELECT id, bank_account_id, monto FROM bank_transactions WHERE company_id = :cid AND descripcion ILIKE :rec"),
+            {"cid": company_id, "rec": f"%{rec}%"}
+        )
+        for r_row in bt_rec.fetchall():
+            if r_row.id not in [b.id for b in bts]:
+                bts.append(r_row)
+
     for bt in bts:
         if bt.bank_account_id and bt.monto:
             await db.execute(
@@ -2803,38 +2841,52 @@ async def revert_corporate_remission_payment(
         )
 
     # 2. Revertir entradas en bóveda
-    ve_res = await db.execute(
+    if ve_ids:
+        await db.execute(
+            text("DELETE FROM vault_entries WHERE id = ANY(:ve_ids)"),
+            {"ve_ids": ve_ids}
+        )
+    # Reversión por observación de remisión o recibo para entradas históricas o sin enlace directo
+    await db.execute(
         text("""
-            SELECT id
-            FROM vault_entries
+            DELETE FROM vault_entries
             WHERE company_id = :cid
               AND origen = 'cobranza_ar'
-              AND observaciones ILIKE :obs_rem
+              AND (observaciones ILIKE :obs_rem)
         """),
         {"cid": company_id, "obs_rem": f"%{rem.numero_remision}%"}
     )
-    ves = ve_res.fetchall()
-    for ve in ves:
+    for rec in recibo_nums:
         await db.execute(
-            text("DELETE FROM vault_entries WHERE id = :id"),
-            {"id": ve.id}
+            text("DELETE FROM vault_entries WHERE company_id = :cid AND origen = 'cobranza_ar' AND observaciones ILIKE :rec"),
+            {"cid": company_id, "rec": f"%{rec}%"}
         )
 
     # 3. Anular cheques recibidos
-    chq_res = await db.execute(
+    if chq_ids:
+        await db.execute(
+            text("UPDATE cheques SET estado = 'anulado', updated_at = NOW() WHERE id = ANY(:chq_ids)"),
+            {"chq_ids": chq_ids}
+        )
+    await db.execute(
         text("""
-            SELECT id
-            FROM cheques
+            UPDATE cheques
+            SET estado = 'anulado', updated_at = NOW()
             WHERE company_id = :cid
-              AND concepto ILIKE :con_rem
+              AND (concepto ILIKE :con_rem OR notas ILIKE :con_rem)
         """),
         {"cid": company_id, "con_rem": f"%{rem.numero_remision}%"}
     )
-    chqs = chq_res.fetchall()
-    for chq in chqs:
+
+    # 3b. Eliminar registros de receivable_payments y asignaciones para permitir re-cobro limpio sin duplicaciones
+    if rp_ids:
         await db.execute(
-            text("UPDATE cheques SET estado = 'anulado', updated_at = NOW() WHERE id = :id"),
-            {"id": chq.id}
+            text("DELETE FROM receivable_payment_allocations WHERE receivable_payment_id = ANY(:rp_ids)"),
+            {"rp_ids": rp_ids}
+        )
+        await db.execute(
+            text("DELETE FROM receivable_payments WHERE id = ANY(:rp_ids)"),
+            {"rp_ids": rp_ids}
         )
 
     # 4. Restaurar comprobantes de la remisión a REMITIDO_EMPRESA con su saldo pendiente neto real
