@@ -2225,17 +2225,31 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
             nuevas_count += 1
             if t["tipo"] == "debito":
                 nro = (t.get("nro_cheque") or _extract_nro_cheque(desc_val, ref_val) or "").strip().lstrip("0")
+                found_chq = None
                 if nro:
                     found_chq = next((
                         c for c in all_chqs
                         if (c.numero or "").strip().lstrip("0") == nro
                         and abs(Decimal(str(c.monto)) - t_monto) <= Decimal("1")
                     ), None)
-                    if found_chq:
-                        status = "conciliable"
-                        match_tipo = "cheque"
-                        match_detalle = f"Cheque #{found_chq.numero} ({found_chq.beneficiario or 'Sin beneficiario'})"
-                        listas_auto_conciliar += 1
+
+                # Heurística flexible para cheques: coincidencia por monto exacto (o ±100 Gs) y número parecido o misma cuenta
+                if not found_chq:
+                    found_chq = next((
+                        c for c in all_chqs
+                        if c.estado in ("pendiente", "entregado")
+                        and abs(Decimal(str(c.monto)) - t_monto) <= Decimal("100")
+                        and (
+                            (nro and (nro in (c.numero or "") or (c.numero or "").strip().lstrip("0") in nro))
+                            or getattr(c, "bank_account_id", None) == account.id
+                        )
+                    ), None)
+
+                if found_chq:
+                    status = "conciliable"
+                    match_tipo = "cheque"
+                    match_detalle = f"Cheque #{found_chq.numero} ({found_chq.beneficiario or 'Sin beneficiario'})"
+                    listas_auto_conciliar += 1
             elif t["tipo"] == "credito":
                 boletas = re.findall(r'\b\d{6,}\b', f"{ref_val} {desc_val}")
                 matched_boveda = None
@@ -2248,10 +2262,37 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
                     ), None)
                     if matched_boveda:
                         break
+
+                # Heurística 1: Depósito de recaudación por monto exacto (dentro de ±4 días) aunque el nro de boleta difiera
+                if not matched_boveda:
+                    matched_boveda = next((
+                        tx for tx in existing_txs
+                        if tx.tipo == "credito"
+                        and abs(Decimal(str(tx.monto)) - t_monto) <= Decimal("1")
+                        and tx.categoria == "deposito_recaudacion_caja"
+                        and abs((tx.fecha - t["fecha"]).days) <= 4
+                    ), None)
+
+                # Heurística 2: Transferencia interna entre cuentas por monto exacto (dentro de ±4 días)
+                matched_trf = None
+                if not matched_boveda:
+                    matched_trf = next((
+                        tx for tx in existing_txs
+                        if tx.tipo == "credito"
+                        and abs(Decimal(str(tx.monto)) - t_monto) <= Decimal("1")
+                        and tx.categoria == "transferencia_interna"
+                        and abs((tx.fecha - t["fecha"]).days) <= 4
+                    ), None)
+
                 if matched_boveda:
                     status = "conciliable"
                     match_tipo = "deposito_boveda"
                     match_detalle = f"Depósito Bóveda ({matched_boveda.referencia or 'Boleta'})"
+                    listas_auto_conciliar += 1
+                elif matched_trf:
+                    status = "conciliable"
+                    match_tipo = "transferencia_interna"
+                    match_detalle = f"Transf. Interna: {matched_trf.descripcion[:30]}"
                     listas_auto_conciliar += 1
 
             if status == "solo_extracto":
@@ -2400,7 +2441,7 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
                 auto_conciliadas += 1
             continue
 
-        # 1. Detección y auto-conciliación de Depósitos de Bóveda (Créditos)
+        # 1. Detección y auto-conciliación de Depósitos de Bóveda y Transferencias Internas (Créditos)
         if t["tipo"] == "credito":
             m_boleta = re.search(r'\b(\d{7,8})\b', f"{ref_val} {desc_val}")
             boleta = m_boleta.group(1) if m_boleta else None
@@ -2413,22 +2454,57 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
                     and (boleta in (tx.referencia or "") or boleta in (tx.descripcion or ""))
                 ), None)
 
-            if matched_boveda:
-                if not matched_boveda.conciliado:
-                    matched_boveda.conciliado = True
-                    matched_boveda.fecha_conciliacion = _now()
-                    db.add(matched_boveda)
+            # Heurística 1: Depósito de recaudación por monto exacto (±4 días) aunque el nro de boleta difiera
+            if not matched_boveda:
+                matched_boveda = next((
+                    tx for tx in existing_txs
+                    if tx.tipo == "credito"
+                    and abs(Decimal(str(tx.monto)) - t_monto) <= Decimal("1")
+                    and tx.categoria == "deposito_recaudacion_caja"
+                    and abs((tx.fecha - t["fecha"]).days) <= 4
+                ), None)
+
+            # Heurística 2: Transferencia interna entre cuentas propias por monto exacto (±4 días)
+            matched_trf = None
+            if not matched_boveda:
+                matched_trf = next((
+                    tx for tx in existing_txs
+                    if tx.tipo == "credito"
+                    and abs(Decimal(str(tx.monto)) - t_monto) <= Decimal("1")
+                    and tx.categoria == "transferencia_interna"
+                    and abs((tx.fecha - t["fecha"]).days) <= 4
+                ), None)
+
+            target_match = matched_boveda or matched_trf
+            if target_match:
+                if not target_match.conciliado:
+                    target_match.conciliado = True
+                    target_match.fecha_conciliacion = _now()
+                    db.add(target_match)
                     auto_conciliadas += 1
                 continue
 
         # 2. Detección y enriquecimiento de Cheques / Clearing (Débitos)
         elif t["tipo"] == "debito":
             nro = (t.get("nro_cheque") or _extract_nro_cheque(desc_val, ref_val) or "").strip().lstrip("0")
+            found_chq = None
             if nro:
                 found_chq = next((
                     c for c in all_chqs
                     if (c.numero or "").strip().lstrip("0") == nro
                     and abs(Decimal(str(c.monto)) - t_monto) <= Decimal("1")
+                ), None)
+
+            # Heurística flexible para cheques: coincidencia por monto exacto (o ±100 Gs) y número parecido o misma cuenta
+            if not found_chq:
+                found_chq = next((
+                    c for c in all_chqs
+                    if c.estado in ("pendiente", "entregado")
+                    and abs(Decimal(str(c.monto)) - t_monto) <= Decimal("100")
+                    and (
+                        (nro and (nro in (c.numero or "") or (c.numero or "").strip().lstrip("0") in nro))
+                        or getattr(c, "bank_account_id", None) == account.id
+                    )
                 ), None)
 
                 existing_chq_tx = next((
