@@ -2660,7 +2660,6 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
         account.saldo_actual = Decimal(str(saldo_cierre)) + post_row.creditos_post - post_row.debitos_post
         account.saldo_verificado_manualmente = True
         account.saldo_verificado_at = datetime.now(timezone.utc)
-        account.saldo_verificado_por = "Extracto Oficial Banco"
     else:
         bal_res = await db.execute(
             select(
