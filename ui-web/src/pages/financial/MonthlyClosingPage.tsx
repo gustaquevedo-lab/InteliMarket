@@ -53,6 +53,7 @@ export default function MonthlyClosingPage() {
   const [selectedMonth, setSelectedMonth] = useState(initialMonth)
   const [selectedYear, setSelectedYear] = useState(initialYear)
   const [activeTab, setActiveTab] = useState("resumen")
+  const [activeSubTab, setActiveSubTab] = useState("todas")
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
@@ -330,7 +331,10 @@ export default function MonthlyClosingPage() {
           return (
             <button
               key={t.id}
-              onClick={() => setActiveTab(t.id)}
+              onClick={() => {
+                setActiveTab(t.id)
+                setActiveSubTab("todas")
+              }}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
                 isActive
                   ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700 font-extrabold"
@@ -357,18 +361,29 @@ export default function MonthlyClosingPage() {
       {activeTab === "resumen" ? (
         <ClosingPnlTable
           data={data}
-          onSelectMagnitude={(mag) => setActiveTab(mag)}
+          onSelectMagnitude={(mag, sub) => {
+            setActiveTab(mag)
+            if (sub) setActiveSubTab(sub)
+          }}
         />
       ) : (
         <ClosingMagnitudeDetail
-          key={`${activeTab}-${selectedMonth}-${selectedYear}`}
+          key={`${activeTab}-${activeSubTab}-${selectedMonth}-${selectedYear}`}
           magnitude={activeTab}
+          subMagnitude={activeSubTab}
           closingData={data}
           month={selectedMonth}
           year={selectedYear}
-          onBackToPnl={() => setActiveTab("resumen")}
+          onBackToPnl={() => {
+            setActiveTab("resumen")
+            setActiveSubTab("todas")
+          }}
           onExportExcel={handleDownloadExcel}
           onDataUpdated={fetchClosingData}
+          onNavigateTab={(tab) => {
+            setActiveTab(tab)
+            setActiveSubTab("todas")
+          }}
         />
       )}
     </div>

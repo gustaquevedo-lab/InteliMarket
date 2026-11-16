@@ -4,7 +4,7 @@ import { formatPYG } from "../../utils/format"
 
 interface ClosingPnlTableProps {
   data: any
-  onSelectMagnitude: (magnitude: string) => void
+  onSelectMagnitude: (magnitude: string, subMagnitude?: string) => void
 }
 
 export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProps) {
@@ -262,10 +262,10 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-right font-mono text-slate-500">2.6%</td>
               <td className="py-2.5 px-4 text-center">
                 <button
-                  onClick={() => onSelectMagnitude("opex")}
+                  onClick={() => onSelectMagnitude("opex", "ocupacion")}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Ver en OPEX
+                  Ver Ocupación
                 </button>
               </td>
             </tr>
@@ -283,10 +283,10 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-right font-mono text-slate-500">1.9%</td>
               <td className="py-2.5 px-4 text-center">
                 <button
-                  onClick={() => onSelectMagnitude("opex")}
+                  onClick={() => onSelectMagnitude("opex", "mantenimiento")}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Ver en OPEX
+                  Ver Mantenimiento
                 </button>
               </td>
             </tr>
@@ -304,10 +304,10 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-right font-mono text-slate-500">2.4%</td>
               <td className="py-2.5 px-4 text-center">
                 <button
-                  onClick={() => onSelectMagnitude("opex")}
+                  onClick={() => onSelectMagnitude("opex", "logistica")}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Ver en OPEX
+                  Ver Logística
                 </button>
               </td>
             </tr>
@@ -325,10 +325,10 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-right font-mono text-slate-500">3.4%</td>
               <td className="py-2.5 px-4 text-center">
                 <button
-                  onClick={() => onSelectMagnitude("opex")}
+                  onClick={() => onSelectMagnitude("opex", "administracion")}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Ver en OPEX
+                  Ver Administración
                 </button>
               </td>
             </tr>
