@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import {
   Search,
   Download,
   Users,
   FileText,
   ArrowLeft,
+  Building,
   Building2,
   Wrench,
   Truck,
+  Briefcase,
   Landmark,
   ShoppingBag,
   DollarSign,
@@ -29,24 +31,29 @@ import { ReclassifyExpenseModal } from "./ReclassifyExpenseModal"
 
 interface ClosingMagnitudeDetailProps {
   magnitude: string
+  subMagnitude?: string
   closingData?: any
   month?: number
   year?: number
   onBackToPnl: () => void
   onExportExcel: () => void
   onDataUpdated?: () => void
+  onNavigateTab?: (targetTab: string) => void
 }
 
 export function ClosingMagnitudeDetail({
   magnitude,
+  subMagnitude,
   closingData,
   month = 11,
   year = 2026,
   onBackToPnl,
   onExportExcel,
-  onDataUpdated
+  onDataUpdated,
+  onNavigateTab
 }: ClosingMagnitudeDetailProps) {
   const [searchTerm, setSearchTerm] = useState("")
+  const [familyFilter, setFamilyFilter] = useState<string>(subMagnitude || "todas")
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState("")
   const [selectedSectorFilter, setSelectedSectorFilter] = useState("")
   const [remoteItems, setRemoteItems] = useState<any[] | null>(null)
@@ -54,6 +61,10 @@ export function ClosingMagnitudeDetail({
   const [mpItems, setMpItems] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedExpense, setSelectedExpense] = useState<any | null>(null)
+
+  useEffect(() => {
+    if (subMagnitude) setFamilyFilter(subMagnitude)
+  }, [subMagnitude])
 
   const activeMonth = month || 11
   const activeYear = year || 2026
@@ -278,30 +289,54 @@ export function ClosingMagnitudeDetail({
     }
   ]
 
-  // Materias primas panadería segregadas
-  const defaultMateriaPrimaPanaderia = [
-    { fecha: "2026-09-02", comp: "F-001-002-0045211", proveedor: "ALTAJA S.A.", ruc: "80021456-1", concepto: "INSUMOS PARA PANADERIA", monto: 775000 },
-    { fecha: "2026-09-07", comp: "F-001-001-0048011", proveedor: "CASA GONZALITO S.R.L.", ruc: "80005427", concepto: "Harina 50 kg para panaderia", monto: 3160000 },
-    { fecha: "2026-09-14", comp: "F-001-003-0008412", proveedor: "HILAGRO S.A.", ruc: "80021456-1", concepto: "79 HARINAS 000 25kg PARA USO INTERNO", monto: 6320000 },
-    { fecha: "2026-09-16", comp: "F-002-001-0018933", proveedor: "CASA GONZALITO S.R.L.", ruc: "80005427", concepto: "HARINA PARA USO EN PANADERIA", monto: 1501000 },
-    { fecha: "2026-09-23", comp: "F-001-001-0008412", proveedor: "BIO X S.A.I CALIDAD Y TECNOLOGIA", ruc: "80096321-8", concepto: "COMPRA DE INSUMOS PARA PANADERIA", monto: 1717000 },
-    { fecha: "2026-09-30", comp: "INT-PAN-001", proveedor: "GRUPO SANTA TERESA E.A.S.", ruc: "80150377-9", concepto: "INSUMOS PARA PANADERIA", monto: 5713026 }
-  ]
-  const materiaPrimaPanaderia = mpItems.length > 0 ? mpItems : defaultMateriaPrimaPanaderia
+  // Materias primas de producción (100% dinámicas desde la base de datos)
+  const materiaPrimaPanaderia = mpItems
 
-  // Filtrado de gastos OPEX / CAPEX / Anticipos
-  const sourceExpenses = remoteItems || (magnitude === "opex" || magnitude === "gastos" ? REAL_GASTOS : [])
+  // Gastos OPEX / CAPEX / Anticipos reales devueltos por el API
+  const sourceExpenses: any[] = remoteItems || []
 
-  const uniqueCategories = Array.from(new Set(sourceExpenses.map((g) => g.categoria_nombre || g.rubro).filter(Boolean))).sort()
-  const uniqueSectors = Array.from(new Set(sourceExpenses.map((g) => g.cost_center_nombre).filter(Boolean))).sort()
+  // Agrupación contable por Familia de Gasto OPEX
+  const opexFamilies = useMemo(() => {
+    const families: Record<string, { count: number; monto: number }> = {
+      todas: { count: sourceExpenses.length, monto: sourceExpenses.reduce((s: number, g: any) => s + (Number(g.monto) || 0), 0) },
+      ocupacion: { count: 0, monto: 0 },
+      mantenimiento: { count: 0, monto: 0 },
+      logistica: { count: 0, monto: 0 },
+      administracion: { count: 0, monto: 0 }
+    }
+    sourceExpenses.forEach((g: any) => {
+      const fam = g.categoria || "administracion"
+      if (families[fam]) {
+        families[fam].count += 1
+        families[fam].monto += Number(g.monto) || 0
+      } else {
+        families.administracion.count += 1
+        families.administracion.monto += Number(g.monto) || 0
+      }
+    })
+    return families
+  }, [sourceExpenses])
 
-  const gastosFiltradosPorMagnitud = sourceExpenses.filter((g) => {
+  const gastosFiltradosPorFamilia: any[] = useMemo(() => {
+    if (familyFilter === "todas") return sourceExpenses
+    return sourceExpenses.filter((g: any) => (g.categoria || "administracion") === familyFilter)
+  }, [sourceExpenses, familyFilter])
+
+  const uniqueCategories: string[] = useMemo(() => {
+    return Array.from(new Set(gastosFiltradosPorFamilia.map((g: any) => g.categoria_nombre || g.rubro).filter(Boolean) as string[])).sort()
+  }, [gastosFiltradosPorFamilia])
+
+  const uniqueSectors: string[] = useMemo(() => {
+    return Array.from(new Set(gastosFiltradosPorFamilia.map((g: any) => g.cost_center_nombre).filter(Boolean) as string[])).sort()
+  }, [gastosFiltradosPorFamilia])
+
+  const gastosFiltradosPorMagnitud: any[] = gastosFiltradosPorFamilia.filter((g: any) => {
     if (selectedCategoryFilter && (g.categoria_nombre || g.rubro) !== selectedCategoryFilter) return false
     if (selectedSectorFilter && (g.cost_center_nombre || "") !== selectedSectorFilter) return false
     return true
   })
 
-  const gastosGenerales = gastosFiltradosPorMagnitud.filter((g) =>
+  const gastosGenerales: any[] = gastosFiltradosPorMagnitud.filter((g: any) =>
     (g.proveedor || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
     (g.concepto || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
     (g.comp || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -371,7 +406,7 @@ export function ClosingMagnitudeDetail({
   const totalNominaNeto = nominaData.reduce((acc, curr) => acc + curr.neto, 0)
   const totalNominaBruto = nominaData.reduce((acc, curr) => acc + curr.total_devengado, 0)
   const totalNominaIpsPatronal = nominaData.reduce((acc, curr) => acc + curr.ips_patronal, 0)
-  const totalGastosMonto = gastosGenerales.reduce((acc, curr) => acc + curr.monto, 0)
+  const totalGastosMonto = gastosGenerales.reduce((acc: number, curr: any) => acc + (Number(curr.monto) || 0), 0)
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -761,6 +796,7 @@ export function ClosingMagnitudeDetail({
                     <th className="py-3 px-4">Fecha</th>
                     <th className="py-3 px-4">Comprobante</th>
                     <th className="py-3 px-4">Proveedor</th>
+                    <th className="py-3 px-4">Área / Sector</th>
                     <th className="py-3 px-4">RUC</th>
                     <th className="py-3 px-4">Descripción de Insumos</th>
                     <th className="py-3 px-4 text-right font-bold">Importe (₲)</th>
@@ -768,54 +804,69 @@ export function ClosingMagnitudeDetail({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {materiaPrimaPanaderia
-                    .filter(m => (m.proveedor || "").toLowerCase().includes(searchTerm.toLowerCase()) || (m.comp || "").includes(searchTerm) || (m.concepto || "").toLowerCase().includes(searchTerm.toLowerCase()))
-                    .map((m, idx) => (
-                      <tr
-                        key={m.id || idx}
-                        className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${m.id ? "cursor-pointer" : ""}`}
-                        onClick={(e) => {
-                          if ((e.target as HTMLElement).closest("button")) return
-                          if (m.id) setSelectedExpense(m)
-                        }}
-                      >
-                        <td className="py-2.5 px-4 text-slate-500 font-mono">{m.fecha}</td>
-                        <td className="py-2.5 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">
-                          <div className="flex items-center gap-1.5">
-                            <span>{m.comp}</span>
-                            {m.has_split && (
-                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
-                                <Split className="w-2.5 h-2.5" /> Split
-                              </span>
+                  {materiaPrimaPanaderia.length > 0 ? (
+                    materiaPrimaPanaderia
+                      .filter(m => (m.proveedor || "").toLowerCase().includes(searchTerm.toLowerCase()) || (m.comp || "").includes(searchTerm) || (m.concepto || "").toLowerCase().includes(searchTerm.toLowerCase()))
+                      .map((m, idx) => (
+                        <tr
+                          key={m.id || idx}
+                          className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${m.id ? "cursor-pointer" : ""}`}
+                          onClick={(e) => {
+                            if ((e.target as HTMLElement).closest("button")) return
+                            if (m.id) setSelectedExpense(m)
+                          }}
+                        >
+                          <td className="py-2.5 px-4 text-slate-500 font-mono">{m.fecha}</td>
+                          <td className="py-2.5 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">
+                            <div className="flex items-center gap-1.5">
+                              <span>{m.comp}</span>
+                              {m.has_split && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
+                                  <Split className="w-2.5 h-2.5" /> Split
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-slate-100">{m.proveedor}</td>
+                          <td className="py-2.5 px-4">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 dark:border-amber-800 uppercase">
+                              {m.production_area || m.cost_center_nombre || "Panadería"}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-4 font-mono text-slate-500">{m.ruc}</td>
+                          <td className="py-2.5 px-4 text-slate-700 dark:text-slate-300">{m.concepto || "Compra de Materia Prima"}</td>
+                          <td className="py-2.5 px-4 text-right font-black font-mono text-slate-900 dark:text-slate-100">
+                            {formatPYG(m.monto)}
+                          </td>
+                          <td className="py-2.5 px-4 text-center">
+                            {m.id ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setSelectedExpense(m)
+                                }}
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 inline-flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                                title="Redestinar naturaleza o dividir por departamento"
+                              >
+                                <SlidersHorizontal className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                                Redestinar
+                              </button>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">—</span>
                             )}
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-slate-100">{m.proveedor}</td>
-                        <td className="py-2.5 px-4 font-mono text-slate-500">{m.ruc}</td>
-                        <td className="py-2.5 px-4 text-slate-700 dark:text-slate-300">{m.concepto}</td>
-                        <td className="py-2.5 px-4 text-right font-black font-mono text-slate-900 dark:text-slate-100">
-                          {formatPYG(m.monto)}
-                        </td>
-                        <td className="py-2.5 px-4 text-center">
-                          {m.id ? (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setSelectedExpense(m)
-                              }}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 inline-flex items-center gap-1 transition-all cursor-pointer shadow-xs"
-                              title="Redestinar naturaleza o dividir por departamento"
-                            >
-                              <SlidersHorizontal className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
-                              Redestinar
-                            </button>
-                          ) : (
-                            <span className="text-[10px] text-slate-400">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                        </tr>
+                      ))
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-slate-400">
+                        <ShoppingBag className="w-8 h-8 text-slate-300 mx-auto mb-1.5" />
+                        <p className="font-bold text-xs text-slate-700 dark:text-slate-300">No hay materias primas imputadas en este período</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">Puedes redestinar facturas de harina e insumos de producción desde la pestaña 5. Gastos Operativos (OPEX).</p>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -902,6 +953,83 @@ export function ClosingMagnitudeDetail({
       {/* ─────────────────────────────────────────────────────────────────── */}
       {magnitude !== "nomina" && magnitude !== "ingresos" && magnitude !== "cogs" && (
         <div>
+          {/* Sub-pestañas de Familias de Gasto Canónicas del Supermercado (Ocupación, Mantenimiento, Logística, Administración) */}
+          {(magnitude === "opex" || magnitude === "gastos") && (
+            <div className="bg-slate-100 dark:bg-slate-900/60 p-2.5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap gap-2 items-center">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 pl-2">
+                Familias de Gasto:
+              </span>
+              <button
+                type="button"
+                onClick={() => { setFamilyFilter("todas"); setSelectedCategoryFilter(""); setSelectedSectorFilter(""); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  familyFilter === "todas"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-700"
+                }`}
+              >
+                <span>Todos los Gastos</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20 text-white font-mono">{opexFamilies.todas.count}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setFamilyFilter("ocupacion"); setSelectedCategoryFilter(""); setSelectedSectorFilter(""); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  familyFilter === "ocupacion"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-700"
+                }`}
+              >
+                <Building className="w-3.5 h-3.5" />
+                <span>Ocupación & Servicios</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20 text-white font-mono">{opexFamilies.ocupacion.count}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setFamilyFilter("mantenimiento"); setSelectedCategoryFilter(""); setSelectedSectorFilter(""); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  familyFilter === "mantenimiento"
+                    ? "bg-amber-600 text-white shadow-sm"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-700"
+                }`}
+              >
+                <Wrench className="w-3.5 h-3.5" />
+                <span>Mantenimiento & Infraestructura</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20 text-white font-mono">{opexFamilies.mantenimiento.count}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setFamilyFilter("logistica"); setSelectedCategoryFilter(""); setSelectedSectorFilter(""); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  familyFilter === "logistica"
+                    ? "bg-emerald-600 text-white shadow-sm"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-700"
+                }`}
+              >
+                <Truck className="w-3.5 h-3.5" />
+                <span>Logística & Insumos</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20 text-white font-mono">{opexFamilies.logistica.count}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setFamilyFilter("administracion"); setSelectedCategoryFilter(""); setSelectedSectorFilter(""); }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  familyFilter === "administracion"
+                    ? "bg-purple-600 text-white shadow-sm"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-700"
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>Administración & Gestión</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20 text-white font-mono">{opexFamilies.administracion.count}</span>
+              </button>
+            </div>
+          )}
+
           <div className="bg-indigo-50/50 dark:bg-indigo-950/20 px-6 py-3.5 border-b border-indigo-100 dark:border-indigo-900/50 flex flex-wrap justify-between items-center gap-4 text-xs text-slate-700 dark:text-slate-300">
             <div className="flex items-center gap-4 flex-wrap">
               <span className="font-semibold text-slate-600 dark:text-slate-400">
@@ -921,7 +1049,7 @@ export function ClosingMagnitudeDetail({
                 className="text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer shadow-xs max-w-xs truncate"
               >
                 <option value="">Todas las Categorías ({uniqueCategories.length})</option>
-                {uniqueCategories.map((c) => (
+                {uniqueCategories.map((c: string) => (
                   <option key={c} value={c}>
                     {c}
                   </option>
@@ -934,7 +1062,7 @@ export function ClosingMagnitudeDetail({
                 className="text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer shadow-xs max-w-xs truncate"
               >
                 <option value="">Todos los Sectores ({uniqueSectors.length})</option>
-                {uniqueSectors.map((s) => (
+                {uniqueSectors.map((s: string) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
@@ -974,7 +1102,7 @@ export function ClosingMagnitudeDetail({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {gastosGenerales.length > 0 ? (
-                  gastosGenerales.map((g, idx) => (
+                  gastosGenerales.map((g: any, idx: number) => (
                     <tr
                       key={g.id || idx}
                       className={`hover:bg-indigo-50/50 dark:hover:bg-slate-800/60 transition-colors ${
@@ -1071,8 +1199,18 @@ export function ClosingMagnitudeDetail({
           isOpen={!!selectedExpense}
           item={selectedExpense}
           onClose={() => setSelectedExpense(null)}
-          onSaved={() => {
+          onSaved={(newNat: string, expId: string) => {
             setSelectedExpense(null)
+            // Salida inmediata optimista de la tabla actual para retroalimentación instantánea
+            if (magnitude === "opex" || magnitude === "gastos") {
+              if (newNat !== "OPEX_GASTO_OPERATIVO" && newNat !== "GASTO_DIFERIDO_CUOTAS") {
+                setRemoteItems((prev) => (prev ? prev.filter((x) => x.id !== expId) : []))
+              }
+            } else if (magnitude === "cogs") {
+              if (newNat !== "CMV_MATERIA_PRIMA" && newNat !== "CMV_REVENTA") {
+                setMpItems((prev) => prev.filter((x) => x.id !== expId))
+              }
+            }
             fetchDetails()
             if (onDataUpdated) onDataUpdated()
           }}

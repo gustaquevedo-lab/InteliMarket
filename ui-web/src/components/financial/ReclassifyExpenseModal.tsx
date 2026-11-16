@@ -24,7 +24,7 @@ interface ReclassifyExpenseModalProps {
   item: any
   isOpen: boolean
   onClose: () => void
-  onSaved: () => void
+  onSaved: (newNaturaleza: string, expenseId: string) => void
 }
 
 interface AllocationRow {
@@ -36,6 +36,23 @@ interface AllocationRow {
   monto: number
   notas: string
 }
+
+const DEFAULT_NATURALEZAS = [
+  { id: "OPEX_GASTO_OPERATIVO", label: "Gasto Operativo (OPEX)" },
+  { id: "CMV_MATERIA_PRIMA", label: "Materia Prima (CMV Panadería / Rotisería)" },
+  { id: "CMV_REVENTA", label: "Compra de Mercadería para Reventa (CMV Salón)" },
+  { id: "CAPEX_ACTIVO_FIJO", label: "Inversión / Activo Fijo (CAPEX)" },
+  { id: "ANTICIPO_PERSONAL", label: "Anticipo al Personal (Descuento Nómina)" },
+  { id: "GASTO_DIFERIDO_CUOTAS", label: "Gasto Diferido en Cuotas (Seguros / Pólizas)" }
+]
+
+const DEFAULT_PRODUCTION_AREAS = [
+  { id: "panaderia", nombre: "Panadería" },
+  { id: "rotiseria", nombre: "Rotisería" },
+  { id: "carniceria", nombre: "Carnicería" },
+  { id: "verduleria", nombre: "Verdulería" },
+  { id: "salon_general", nombre: "Salón / General" }
+]
 
 export function ReclassifyExpenseModal({
   item,
@@ -51,13 +68,13 @@ export function ReclassifyExpenseModal({
     expense_categories: Array<{ id: string; nombre: string }>
     production_areas: Array<{ id: string; nombre: string }>
   }>({
-    naturalezas: [],
+    naturalezas: DEFAULT_NATURALEZAS,
     cost_centers: [],
     expense_categories: [],
-    production_areas: []
+    production_areas: DEFAULT_PRODUCTION_AREAS
   })
 
-  const [loadingCatalogs, setLoadingCatalogs] = useState(true)
+  const [loadingCatalogs, setLoadingCatalogs] = useState(false)
   const [saving, setSaving] = useState(false)
 
   // Modo: Destino único vs Split por sector
@@ -75,7 +92,7 @@ export function ReclassifyExpenseModal({
   // Estado para Split
   const [allocations, setAllocations] = useState<AllocationRow[]>([])
 
-  // Carga de catálogos y preparación inicial del ítem
+  // Carga reactiva de catálogos cuando el modal se abre
   useEffect(() => {
     let isCancelled = false
     async function loadCatalogs() {
@@ -83,7 +100,12 @@ export function ReclassifyExpenseModal({
       try {
         const res = await api.financial.closing.getClassificationCatalogs()
         if (!isCancelled && res) {
-          setCatalogs(res)
+          setCatalogs({
+            naturalezas: res.naturalezas && res.naturalezas.length > 0 ? res.naturalezas : DEFAULT_NATURALEZAS,
+            cost_centers: res.cost_centers || [],
+            expense_categories: res.expense_categories || [],
+            production_areas: res.production_areas && res.production_areas.length > 0 ? res.production_areas : DEFAULT_PRODUCTION_AREAS
+          })
         }
       } catch (err) {
         console.warn("Error cargando catálogos de clasificación:", err)
@@ -91,11 +113,14 @@ export function ReclassifyExpenseModal({
         if (!isCancelled) setLoadingCatalogs(false)
       }
     }
-    loadCatalogs()
+
+    if (isOpen) {
+      loadCatalogs()
+    }
     return () => {
       isCancelled = true
     }
-  }, [])
+  }, [isOpen])
 
   // Inicializar formulario con los datos del comprobante al abrirse
   useEffect(() => {
@@ -161,8 +186,11 @@ export function ReclassifyExpenseModal({
   // Filtro reactivo para las 75 categorías de gastos
   const filteredCategories = useMemo(() => {
     if (!categorySearch.trim()) return catalogs.expense_categories
-    const s = categorySearch.toLowerCase()
-    return catalogs.expense_categories.filter((c) => c.nombre.toLowerCase().includes(s))
+    const s = categorySearch.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    return catalogs.expense_categories.filter((c) => {
+      const name = c.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      return name.includes(s)
+    })
   }, [catalogs.expense_categories, categorySearch])
 
   const handleAddAllocationRow = () => {
@@ -197,7 +225,10 @@ export function ReclassifyExpenseModal({
   }
 
   const handleSave = async () => {
-    if (!item?.id) return
+    if (!item?.id) {
+      toast.error("El comprobante seleccionado no cuenta con ID único para ser redestinado en la base de datos.")
+      return
+    }
 
     if (isSplit) {
       if (!isSplitCuadrado) {
@@ -237,8 +268,18 @@ export function ReclassifyExpenseModal({
 
       const res = await api.financial.closing.reclassifyExpense(item.id, payload)
       if (res && res.status === "success") {
-        toast.success("Comprobante redestinado y cierre recalculado exitosamente.")
-        onSaved()
+        if (naturaleza === "CMV_MATERIA_PRIMA") {
+          toast.success("✅ Comprobante transferido a 3. CMV / Compras (Materia Prima Panadería). Salió de OPEX.")
+        } else if (naturaleza === "CMV_REVENTA") {
+          toast.success("✅ Comprobante transferido a 3. CMV / Compras (Mercadería Reventa Salón). Salió de OPEX.")
+        } else if (naturaleza === "CAPEX_ACTIVO_FIJO" || esInversion) {
+          toast.success("✅ Comprobante transferido a 6. Inversiones / Activo Fijo (CAPEX). Ya no reduce EBITDA.")
+        } else if (naturaleza === "ANTICIPO_PERSONAL") {
+          toast.success("✅ Comprobante transferido a 7. Anticipos y No Operativos (Descuento Nómina).")
+        } else {
+          toast.success("✅ Clasificación contable y departamento actualizados exitosamente.")
+        }
+        onSaved(naturaleza, item.id)
         onClose()
       } else {
         throw new Error(res?.message || "Error al redestinar el gasto")
@@ -458,7 +499,7 @@ export function ReclassifyExpenseModal({
                       Categoría del Gasto (Plan de Cuentas)
                     </label>
                     <span className="text-[10px] text-slate-400 font-mono">
-                      {filteredCategories.length} de {catalogs.expense_categories.length} rubros
+                      {loadingCatalogs ? "Cargando rubros..." : `${filteredCategories.length} de ${catalogs.expense_categories.length} rubros`}
                     </span>
                   </div>
                   <input
@@ -473,7 +514,7 @@ export function ReclassifyExpenseModal({
                     onChange={(e) => setCategoryId(e.target.value)}
                     className="w-full text-xs font-medium bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
                   >
-                    <option value="">-- Seleccionar Rubro Contable --</option>
+                    <option value="">{loadingCatalogs ? "-- Cargando catálogo contable... --" : "-- Seleccionar Rubro Contable --"}</option>
                     {filteredCategories.map((cat) => (
                       <option key={cat.id} value={cat.id}>
                         {cat.nombre}

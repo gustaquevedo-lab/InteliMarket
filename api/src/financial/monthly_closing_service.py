@@ -246,6 +246,19 @@ class MonthlyClosingService:
                 if row_cmv and row_cmv[0]:
                     cmv_comercial = int(row_cmv[0])
 
+                # Sumar compras de mercadería de salón imputadas en expenses
+                q_reventa_exp = text("""
+                    SELECT COALESCE(SUM(monto), 0)
+                    FROM expenses
+                    WHERE fecha_gasto >= :desde AND fecha_gasto <= :hasta
+                      AND anulado = false
+                      AND naturaleza_economica = 'CMV_REVENTA';
+                """)
+                res_reventa = await self.session.execute(q_reventa_exp, {"desde": desde_date, "hasta": hasta_date})
+                row_reventa = res_reventa.fetchone()
+                if row_reventa and row_reventa[0]:
+                    cmv_comercial += int(row_reventa[0])
+
                 # 2. Materias Primas desde expenses y expense_allocations
                 q_mp = text("""
                     WITH effective_allocations AS (
