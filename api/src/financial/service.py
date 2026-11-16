@@ -2229,7 +2229,14 @@ def _match_single_statement_transaction(
     chq_by_num: dict,
     chq_by_monto: dict,
     account_id: uuid.UUID,
+    used_tx_ids: Optional[set] = None,
+    used_chq_ids: Optional[set] = None,
 ):
+    if used_tx_ids is None:
+        used_tx_ids = set()
+    if used_chq_ids is None:
+        used_chq_ids = set()
+
     from api.src.financial.pdf_parser import _extract_nro_cheque
 
     ref_val = (t.get("referencia") or "").strip()
@@ -2240,34 +2247,50 @@ def _match_single_statement_transaction(
 
     # 1. Coincidencia exacta con movimiento ya en el sistema
     matched_tx = exact_map.get(key)
+    if matched_tx and matched_tx.id in used_tx_ids:
+        matched_tx = None
 
-    # 2. Coincidencia por token de referencia (>=6 dígitos) + tipo + monto dentro de ±5 días
+    # 2. Coincidencia por token de referencia (>=6 dígitos) + tipo + monto dentro de ±7 días
     if not matched_tx:
         t_tokens = set(re.findall(r'\b\d{6,}\b', f"{ref_val} {desc_val}"))
         if t_tokens:
             for cand in amount_map.get((t["tipo"], t_monto), []):
-                if cand.fecha and abs((cand.fecha - t_fecha).days) <= 5:
+                if cand.id in used_tx_ids:
+                    continue
+                if cand.fecha and abs((cand.fecha - t_fecha).days) <= 7:
                     if t_tokens & tokens_map.get(cand.id, set()):
                         matched_tx = cand
                         break
 
     if matched_tx:
-        st_lbl = "Conciliado" if matched_tx.conciliado else "Pendiente"
-        return {
-            "status": "ya_importado",
-            "match_tipo": None,
-            "match_detalle": f"Ya registrado el {matched_tx.fecha.isoformat()} ({st_lbl})",
-            "target": matched_tx,
-            "key": key,
-            "t_monto": t_monto,
-            "ref_val": ref_val,
-            "desc_val": desc_val,
-        }
+        used_tx_ids.add(matched_tx.id)
+        if matched_tx.conciliado:
+            return {
+                "status": "ya_importado",
+                "match_tipo": None,
+                "match_detalle": f"Ya registrado el {matched_tx.fecha.isoformat()} (Conciliado)",
+                "target": matched_tx,
+                "key": key,
+                "t_monto": t_monto,
+                "ref_val": ref_val,
+                "desc_val": desc_val,
+            }
+        else:
+            return {
+                "status": "conciliable",
+                "match_tipo": matched_tx.categoria or "movimiento_erp",
+                "match_detalle": f"Movimiento ERP: {matched_tx.descripcion[:35]}",
+                "target": matched_tx,
+                "key": key,
+                "t_monto": t_monto,
+                "ref_val": ref_val,
+                "desc_val": desc_val,
+            }
 
-    # 3. Conciliables: Débitos (Cheques) o Créditos (Depósitos de Bóveda / Transferencias internas)
+    # 3. Conciliables: Débitos (Cheques / Transferencias / Pagos) o Créditos (Depósitos de Bóveda / Transferencias internas)
     if t["tipo"] == "credito":
         t_tokens = set(re.findall(r'\b\d{6,}\b', f"{ref_val} {desc_val}"))
-        cands = amount_map.get(("credito", t_monto), [])
+        cands = [tx for tx in amount_map.get(("credito", t_monto), []) if tx.id not in used_tx_ids]
         matched_boveda = next((tx for tx in cands if any(b in (tx.referencia or "") or b in (tx.descripcion or "") for b in t_tokens)), None)
         if not matched_boveda:
             matched_boveda = next((tx for tx in cands if tx.categoria == "deposito_recaudacion_caja" and abs((tx.fecha - t_fecha).days) <= 4), None)
@@ -2275,44 +2298,51 @@ def _match_single_statement_transaction(
         if not matched_boveda:
             matched_trf = next((tx for tx in cands if tx.categoria == "transferencia_interna" and abs((tx.fecha - t_fecha).days) <= 4), None)
 
-        if matched_boveda:
-            return {
-                "status": "conciliable",
-                "match_tipo": "deposito_boveda",
-                "match_detalle": f"Depósito Bóveda ({matched_boveda.referencia or 'Boleta'})",
-                "target": matched_boveda,
-                "key": key,
-                "t_monto": t_monto,
-                "ref_val": ref_val,
-                "desc_val": desc_val,
-            }
-        elif matched_trf:
-            return {
-                "status": "conciliable",
-                "match_tipo": "transferencia_interna",
-                "match_detalle": f"Transf. Interna: {matched_trf.descripcion[:30]}",
-                "target": matched_trf,
-                "key": key,
-                "t_monto": t_monto,
-                "ref_val": ref_val,
-                "desc_val": desc_val,
-            }
+        target_cred = matched_boveda or matched_trf
+        if target_cred:
+            used_tx_ids.add(target_cred.id)
+            if target_cred.conciliado:
+                return {
+                    "status": "ya_importado",
+                    "match_tipo": None,
+                    "match_detalle": f"Ya registrado el {target_cred.fecha.isoformat()} ({target_cred.descripcion[:35]})",
+                    "target": target_cred,
+                    "key": key,
+                    "t_monto": t_monto,
+                    "ref_val": ref_val,
+                    "desc_val": desc_val,
+                }
+            else:
+                m_tipo = "deposito_boveda" if target_cred == matched_boveda else "transferencia_interna"
+                m_det = f"Depósito Bóveda ({target_cred.referencia or 'Boleta'})" if m_tipo == "deposito_boveda" else f"Transf. Interna: {target_cred.descripcion[:30]}"
+                return {
+                    "status": "conciliable",
+                    "match_tipo": m_tipo,
+                    "match_detalle": m_det,
+                    "target": target_cred,
+                    "key": key,
+                    "t_monto": t_monto,
+                    "ref_val": ref_val,
+                    "desc_val": desc_val,
+                }
 
     elif t["tipo"] == "debito":
         nro = (t.get("nro_cheque") or _extract_nro_cheque(desc_val, ref_val) or "").strip().lstrip("0")
         found_chq = None
         if nro:
-            found_chq = chq_by_num_monto.get((nro, t_monto))
+            c = chq_by_num_monto.get((nro, t_monto))
+            if c and c.id not in used_chq_ids:
+                found_chq = c
             if not found_chq:
                 for c in chq_by_num.get(nro, []):
-                    if abs(Decimal(str(c.monto)) - t_monto) <= Decimal("100"):
+                    if c.id not in used_chq_ids and abs(Decimal(str(c.monto)) - t_monto) <= Decimal("100"):
                         found_chq = c
                         break
 
         # Heurística flexible para cheques si no matcheó por número pero es explícitamente operación de cheque
         if not found_chq and any(k in desc_val.upper() for k in ["CHEQUE", "CHQ", "CLEARING"]):
             for c in chq_by_monto.get(t_monto, []):
-                if c.estado in ("pendiente", "entregado") and (
+                if c.id not in used_chq_ids and c.estado in ("pendiente", "entregado") and (
                     (nro and (nro in (c.numero or "") or (c.numero or "").strip().lstrip("0") in nro))
                     or getattr(c, "bank_account_id", None) == account_id
                 ):
@@ -2320,6 +2350,7 @@ def _match_single_statement_transaction(
                     break
 
         if found_chq:
+            used_chq_ids.add(found_chq.id)
             return {
                 "status": "conciliable",
                 "match_tipo": "cheque",
@@ -2331,6 +2362,61 @@ def _match_single_statement_transaction(
                 "desc_val": desc_val,
                 "nro_cheque": found_chq.numero,
             }
+
+        # 3.b Transferencias / Débitos ERP (a proveedores, gastos, nómina, transferencias internas)
+        t_tokens = set(re.findall(r'\b\d{6,}\b', f"{ref_val} {desc_val}"))
+        cands = [tx for tx in amount_map.get(("debito", t_monto), []) if tx.id not in used_tx_ids]
+
+        # Prioridad 1: Token de referencia común (SIPAP / número de operación) dentro de ±7 días
+        matched_deb = next((
+            tx for tx in cands
+            if tx.fecha and abs((tx.fecha - t_fecha).days) <= 7 and (
+                t_tokens & tokens_map.get(tx.id, set())
+            )
+        ), None)
+
+        # Prioridad 2: Monto exacto dentro de ±4 días
+        if not matched_deb:
+            matched_deb = next((
+                tx for tx in cands
+                if tx.fecha and abs((tx.fecha - t_fecha).days) <= 4
+            ), None)
+
+        # Prioridad 3: Tolerancia de ±100 Gs. por redondeo bancario dentro de ±3 días
+        if not matched_deb:
+            for k_monto in [k[1] for k in amount_map.keys() if k[0] == "debito" and abs(k[1] - t_monto) <= Decimal("100")]:
+                matched_deb = next((
+                    tx for tx in amount_map.get(("debito", k_monto), [])
+                    if tx.id not in used_tx_ids and tx.fecha and abs((tx.fecha - t_fecha).days) <= 3
+                ), None)
+                if matched_deb:
+                    break
+
+        if matched_deb:
+            used_tx_ids.add(matched_deb.id)
+            if matched_deb.conciliado:
+                return {
+                    "status": "ya_importado",
+                    "match_tipo": None,
+                    "match_detalle": f"Ya registrado el {matched_deb.fecha.isoformat()} ({matched_deb.descripcion[:35]})",
+                    "target": matched_deb,
+                    "key": key,
+                    "t_monto": t_monto,
+                    "ref_val": ref_val,
+                    "desc_val": desc_val,
+                }
+            else:
+                cat_lbl = "Pago Proveedor" if "proveedor" in (matched_deb.categoria or "") else ("Salario" if matched_deb.categoria == "salarios" else "Débito ERP")
+                return {
+                    "status": "conciliable",
+                    "match_tipo": matched_deb.categoria or "debito_erp",
+                    "match_detalle": f"{cat_lbl}: {matched_deb.descripcion[:35]}",
+                    "target": matched_deb,
+                    "key": key,
+                    "t_monto": t_monto,
+                    "ref_val": ref_val,
+                    "desc_val": desc_val,
+                }
 
     # 4. Sin contrapartida: Solo en extracto
     return {
@@ -2413,15 +2499,62 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
 
     exact_map, amount_map, tokens_map, chq_by_num_monto, chq_by_num, chq_by_monto = _build_bank_statement_index(existing_txs, all_chqs)
 
+    # ── Pre-agrupación N-a-1 de boletas de depósito fraccionadas (efectivo + cheque 24hs) ──
+    slip_to_indices = defaultdict(list)
+    for idx, t in enumerate(transacciones):
+        if t["tipo"] == "credito":
+            toks = set(re.findall(r'\b\d{8}\b', f"{t.get('referencia', '')} {t.get('descripcion', '')}"))
+            for tok in toks:
+                slip_to_indices[tok].append(idx)
+
+    grouped_indices_map = {}
+    for tok, indices in slip_to_indices.items():
+        if len(indices) >= 2:
+            group_sum = sum(Decimal(str(transacciones[i]["monto"])) for i in indices)
+            for tx in existing_txs:
+                if tx.tipo == "credito" and tok in f"{tx.referencia or ''} {tx.descripcion or ''}":
+                    if abs(Decimal(str(tx.monto)) - group_sum) <= Decimal("100"):
+                        for i in indices:
+                            grouped_indices_map[i] = (tx, tok, group_sum, len(indices))
+                        break
+
     transacciones_enriquecidas = []
     listas_auto_conciliar = 0
     duplicadas_count = 0
     nuevas_count = 0
+    used_tx_ids = set()
+    used_chq_ids = set()
 
-    for t in transacciones:
-        res = _match_single_statement_transaction(
-            t, exact_map, amount_map, tokens_map, chq_by_num_monto, chq_by_num, chq_by_monto, account.id
-        )
+    for idx, t in enumerate(transacciones):
+        if idx in grouped_indices_map:
+            erp_tx, tok, grp_sum, grp_count = grouped_indices_map[idx]
+            used_tx_ids.add(erp_tx.id)
+            if erp_tx.conciliado:
+                res = {
+                    "status": "ya_importado",
+                    "match_tipo": None,
+                    "match_detalle": f"Ya registrado (Boleta #{tok} en {grp_count} partidas, Total: ₲ {int(grp_sum):,})",
+                    "target": erp_tx,
+                    "key": (t["fecha"], t["tipo"], Decimal(str(t["monto"])), t.get("descripcion", ""), t.get("referencia", "")),
+                    "t_monto": Decimal(str(t["monto"])),
+                    "ref_val": t.get("referencia", ""),
+                    "desc_val": t.get("descripcion", ""),
+                }
+            else:
+                res = {
+                    "status": "conciliable",
+                    "match_tipo": "deposito_boveda",
+                    "match_detalle": f"Depósito Bóveda Boleta #{tok} (Fraccionado en {grp_count} partidas, Total: ₲ {int(grp_sum):,})",
+                    "target": erp_tx,
+                    "key": (t["fecha"], t["tipo"], Decimal(str(t["monto"])), t.get("descripcion", ""), t.get("referencia", "")),
+                    "t_monto": Decimal(str(t["monto"])),
+                    "ref_val": t.get("referencia", ""),
+                    "desc_val": t.get("descripcion", ""),
+                }
+        else:
+            res = _match_single_statement_transaction(
+                t, exact_map, amount_map, tokens_map, chq_by_num_monto, chq_by_num, chq_by_monto, account.id, used_tx_ids, used_chq_ids
+            )
         st = res["status"]
         if st == "ya_importado":
             duplicadas_count += 1
@@ -2532,12 +2665,43 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
 
     exact_map, amount_map, tokens_map, chq_by_num_monto, chq_by_num, chq_by_monto = _build_bank_statement_index(existing_txs, all_chqs)
 
+    # ── Pre-agrupación N-a-1 de boletas de depósito fraccionadas (efectivo + cheque 24hs) ──
+    slip_to_indices = defaultdict(list)
+    for idx, t in enumerate(transacciones):
+        if t["tipo"] == "credito":
+            toks = set(re.findall(r'\b\d{8}\b', f"{t.get('referencia', '')} {t.get('descripcion', '')}"))
+            for tok in toks:
+                slip_to_indices[tok].append(idx)
+
+    grouped_indices_map = {}
+    for tok, indices in slip_to_indices.items():
+        if len(indices) >= 2:
+            group_sum = sum(Decimal(str(transacciones[i]["monto"])) for i in indices)
+            for tx in existing_txs:
+                if tx.tipo == "credito" and tok in f"{tx.referencia or ''} {tx.descripcion or ''}":
+                    if abs(Decimal(str(tx.monto)) - group_sum) <= Decimal("100"):
+                        for i in indices:
+                            grouped_indices_map[i] = (tx, tok, group_sum, len(indices))
+                        break
+
     nuevas = 0
     auto_conciliadas = 0
+    used_tx_ids = set()
+    used_chq_ids = set()
 
-    for t in transacciones:
+    for idx, t in enumerate(transacciones):
+        if idx in grouped_indices_map:
+            erp_tx, tok, grp_sum, grp_count = grouped_indices_map[idx]
+            used_tx_ids.add(erp_tx.id)
+            if not erp_tx.conciliado:
+                erp_tx.conciliado = True
+                erp_tx.fecha_conciliacion = _now()
+                db.add(erp_tx)
+                auto_conciliadas += 1
+            continue
+
         res = _match_single_statement_transaction(
-            t, exact_map, amount_map, tokens_map, chq_by_num_monto, chq_by_num, chq_by_monto, account.id
+            t, exact_map, amount_map, tokens_map, chq_by_num_monto, chq_by_num, chq_by_monto, account.id, used_tx_ids, used_chq_ids
         )
         st = res["status"]
         key = res["key"]
@@ -2560,7 +2724,7 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
             match_tipo = res["match_tipo"]
             target = res["target"]
 
-            if match_tipo in ("deposito_boveda", "transferencia_interna"):
+            if isinstance(target, BankTransaction):
                 if not target.conciliado:
                     target.conciliado = True
                     target.fecha_conciliacion = _now()
