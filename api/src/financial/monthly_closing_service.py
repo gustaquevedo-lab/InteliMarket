@@ -275,11 +275,29 @@ class MonthlyClosingService:
                         UNION ALL
                         SELECT 
                             e.monto,
-                            e.naturaleza_economica,
-                            e.production_area,
+                            CASE 
+                                WHEN e.naturaleza_economica != 'OPEX_GASTO_OPERATIVO' THEN e.naturaleza_economica
+                                WHEN ec.nombre ILIKE 'INSUMOS DE PRODUCCIÓN%' OR ec.nombre ILIKE '%MATERIA%PRIMA%' 
+                                     OR e.descripcion ILIKE '%INSUMOS PARA PANADERIA%' OR e.descripcion ILIKE '%INSUMOS PANADERIA%' 
+                                     OR e.descripcion ILIKE '%COMPRA DE PANIFICADOS%' OR e.descripcion ILIKE '%HARINA%50%' 
+                                     OR e.descripcion ILIKE '%HARINA%25%' THEN 'CMV_MATERIA_PRIMA'
+                                WHEN e.descripcion ILIKE 'Pago proveedor%' OR e.es_pago_proveedor = true THEN 'CMV_REVENTA'
+                                WHEN ec.nombre ILIKE '%ANTICIPO%' OR e.descripcion ILIKE '%anticipo de sueldo%' THEN 'ANTICIPO_PERSONAL'
+                                WHEN e.es_inversion = true OR ec.nombre IN ('MUEBLES Y ÚTILES') THEN 'CAPEX_ACTIVO_FIJO'
+                                ELSE e.naturaleza_economica
+                            END as naturaleza_economica,
+                            COALESCE(e.production_area,
+                                CASE 
+                                    WHEN ec.nombre ILIKE '%ROTISER%' OR e.descripcion ILIKE '%ROTISER%' THEN 'rotiseria'
+                                    WHEN ec.nombre ILIKE '%CARNICER%' OR e.descripcion ILIKE '%CARNICER%' THEN 'carniceria'
+                                    WHEN ec.nombre ILIKE '%FLV%' THEN 'flv'
+                                    ELSE 'panaderia'
+                                END
+                            ) as production_area,
                             cc.nombre as centro_costo
                         FROM expenses e
                         LEFT JOIN cost_centers cc ON e.cost_center_id = cc.id
+                        LEFT JOIN expense_categories ec ON e.category_id = ec.id
                         WHERE e.anulado = false
                           AND e.fecha_gasto >= :desde AND e.fecha_gasto <= :hasta
                           AND NOT EXISTS (SELECT 1 FROM expense_allocations ea WHERE ea.expense_id = e.id)
@@ -475,8 +493,18 @@ class MonthlyClosingService:
                         UNION ALL
                         SELECT 
                             e.monto,
-                            e.naturaleza_economica,
-                            e.es_inversion,
+                            CASE 
+                                WHEN e.naturaleza_economica != 'OPEX_GASTO_OPERATIVO' THEN e.naturaleza_economica
+                                WHEN ec.nombre ILIKE 'INSUMOS DE PRODUCCIÓN%' OR ec.nombre ILIKE '%MATERIA%PRIMA%' 
+                                     OR e.descripcion ILIKE '%INSUMOS PARA PANADERIA%' OR e.descripcion ILIKE '%INSUMOS PANADERIA%' 
+                                     OR e.descripcion ILIKE '%COMPRA DE PANIFICADOS%' OR e.descripcion ILIKE '%HARINA%50%' 
+                                     OR e.descripcion ILIKE '%HARINA%25%' THEN 'CMV_MATERIA_PRIMA'
+                                WHEN ec.nombre ILIKE '%ANTICIPO%' OR e.descripcion ILIKE '%anticipo de sueldo%' OR e.descripcion ILIKE '%faltante de vuelto%' THEN 'ANTICIPO_PERSONAL'
+                                WHEN e.descripcion ILIKE 'Pago proveedor%' OR e.es_pago_proveedor = true THEN 'CMV_REVENTA'
+                                WHEN e.es_inversion = true OR ec.nombre IN ('MUEBLES Y ÚTILES') THEN 'CAPEX_ACTIVO_FIJO'
+                                ELSE e.naturaleza_economica
+                            END as naturaleza_economica,
+                            (e.es_inversion = true OR ec.nombre IN ('MUEBLES Y ÚTILES')) as es_inversion,
                             e.proveedor,
                             e.descripcion,
                             e.numero_factura,
@@ -621,14 +649,25 @@ class MonthlyClosingService:
                         UNION ALL
                         SELECT 
                             e.monto,
-                            e.naturaleza_economica,
-                            e.es_inversion,
-                            e.categoria_activo,
+                            CASE 
+                                WHEN e.naturaleza_economica != 'OPEX_GASTO_OPERATIVO' THEN e.naturaleza_economica
+                                WHEN ec.nombre ILIKE 'INSUMOS DE PRODUCCIÓN%' OR ec.nombre ILIKE '%MATERIA%PRIMA%' 
+                                     OR e.descripcion ILIKE '%INSUMOS PARA PANADERIA%' OR e.descripcion ILIKE '%INSUMOS PANADERIA%' 
+                                     OR e.descripcion ILIKE '%COMPRA DE PANIFICADOS%' OR e.descripcion ILIKE '%HARINA%50%' 
+                                     OR e.descripcion ILIKE '%HARINA%25%' THEN 'CMV_MATERIA_PRIMA'
+                                WHEN ec.nombre ILIKE '%ANTICIPO%' OR e.descripcion ILIKE '%anticipo de sueldo%' THEN 'ANTICIPO_PERSONAL'
+                                WHEN e.descripcion ILIKE 'Pago proveedor%' OR e.es_pago_proveedor = true THEN 'CMV_REVENTA'
+                                WHEN e.es_inversion = true OR ec.nombre IN ('MUEBLES Y ÚTILES') THEN 'CAPEX_ACTIVO_FIJO'
+                                ELSE e.naturaleza_economica
+                            END as naturaleza_economica,
+                            (e.es_inversion = true OR ec.nombre IN ('MUEBLES Y ÚTILES')) as es_inversion,
+                            COALESCE(e.categoria_activo, 'Mobiliario y Equipamiento') as categoria_activo,
                             e.proveedor,
                             e.descripcion,
                             e.numero_factura,
                             e.fecha_gasto
                         FROM expenses e
+                        LEFT JOIN expense_categories ec ON e.category_id = ec.id
                         WHERE e.anulado = false
                           AND e.fecha_gasto >= :desde AND e.fecha_gasto <= :hasta
                           AND NOT EXISTS (SELECT 1 FROM expense_allocations ea WHERE ea.expense_id = e.id)
@@ -892,11 +931,38 @@ class MonthlyClosingService:
                         prov = (m.get("proveedor") or "").upper()
                         conc = (m.get("concepto") or "").upper()
                         monto = m.get("monto") or 0.0
-                        nat = m.get("naturaleza_economica") or "OPEX_GASTO_OPERATIVO"
-                        es_inv = bool(m.get("es_inversion")) or (nat == "CAPEX_ACTIVO_FIJO")
                         cat_nombre = (m.get("categoria_nombre") or "").upper()
                         cc_nombre = (m.get("cost_center_nombre") or "").upper()
                         has_split = (m.get("split_count") or 0) > 0
+                        raw_nat = m.get("naturaleza_economica") or "OPEX_GASTO_OPERATIVO"
+
+                        # Inferencia canónica de naturaleza económica si el registro tiene el default genérico
+                        if not has_split and raw_nat == "OPEX_GASTO_OPERATIVO":
+                            if any(k in cat_nombre for k in ["INSUMOS DE PRODUCCIÓN", "MATERIA PRIMA"]) or any(k in conc for k in ["INSUMOS PARA PANADERIA", "INSUMOS PANADERIA", "COMPRA DE PANIFICADOS", "HARINA 50", "HARINA 25"]):
+                                nat = "CMV_MATERIA_PRIMA"
+                            elif "ANTICIPO" in cat_nombre or "ANTICIPO DE SUELDO" in conc or "FALTANTE DE VUELTO" in conc:
+                                nat = "ANTICIPO_PERSONAL"
+                            elif "PAGO PROVEEDOR" in conc or m.get("es_pago_proveedor"):
+                                nat = "CMV_REVENTA"
+                            elif bool(m.get("es_inversion")) or cat_nombre in ["MUEBLES Y ÚTILES"]:
+                                nat = "CAPEX_ACTIVO_FIJO"
+                            else:
+                                nat = raw_nat
+                        else:
+                            nat = raw_nat
+
+                        es_inv = bool(m.get("es_inversion")) or (nat == "CAPEX_ACTIVO_FIJO")
+
+                        prod_area = m.get("production_area")
+                        if not prod_area and nat == "CMV_MATERIA_PRIMA":
+                            if "ROTISER" in cat_nombre or "ROTISER" in conc:
+                                prod_area = "rotiseria"
+                            elif "CARNICER" in cat_nombre or "CARNICER" in conc:
+                                prod_area = "carniceria"
+                            elif "FLV" in cat_nombre:
+                                prod_area = "flv"
+                            else:
+                                prod_area = "panaderia"
 
                         # Si tiene split, buscar las líneas de asignación
                         allocations = []
@@ -969,7 +1035,7 @@ class MonthlyClosingService:
                             "tipo_pago": m.get("tipo_pago"),
                             "forma_pago_resumen": m.get("forma_pago_resumen"),
                             "naturaleza_economica": nat,
-                            "production_area": m.get("production_area"),
+                            "production_area": prod_area,
                             "es_inversion": es_inv,
                             "categoria_activo": m.get("categoria_activo"),
                             "cost_center_id": m.get("cost_center_id"),
@@ -987,11 +1053,12 @@ class MonthlyClosingService:
                         has_opex_alloc = any(a.get("naturaleza_economica") in ["OPEX_GASTO_OPERATIVO", "GASTO_DIFERIDO_CUOTAS"] for a in allocations) if has_split else False
                         has_cogs_alloc = any(a.get("naturaleza_economica") in ["CMV_MATERIA_PRIMA", "CMV_REVENTA"] for a in allocations) if has_split else False
                         has_capex_alloc = any(a.get("naturaleza_economica") == "CAPEX_ACTIVO_FIJO" for a in allocations) if has_split else False
+                        has_anticipo_alloc = any(a.get("naturaleza_economica") in ["ANTICIPO_PERSONAL", "PASIVO_PERIODO_ANTERIOR"] for a in allocations) if has_split else False
 
                         is_opex = ((not es_inv) and (nat in ["OPEX_GASTO_OPERATIVO", "GASTO_DIFERIDO_CUOTAS"])) or has_opex_alloc
-                        is_cogs_mp = (nat in ["CMV_MATERIA_PRIMA", "CMV_REVENTA"]) or (has_cogs_alloc and not has_opex_alloc)
-                        is_capex = (es_inv or (nat == "CAPEX_ACTIVO_FIJO")) or (has_capex_alloc and not has_opex_alloc)
-                        is_anticipo = (nat in ["ANTICIPO_PERSONAL", "PASIVO_PERIODO_ANTERIOR"])
+                        is_cogs_mp = (nat in ["CMV_MATERIA_PRIMA", "CMV_REVENTA"]) or has_cogs_alloc
+                        is_capex = (es_inv or (nat == "CAPEX_ACTIVO_FIJO")) or has_capex_alloc
+                        is_anticipo = (nat in ["ANTICIPO_PERSONAL", "PASIVO_PERIODO_ANTERIOR"]) or has_anticipo_alloc
 
                         if magnitude in ["opex", "gastos"]:
                             if is_opex:
@@ -1086,6 +1153,11 @@ class MonthlyClosingService:
 
             # Insertar cada línea del split
             for a in allocations:
+                nat_a = a.get("naturaleza_economica", "OPEX_GASTO_OPERATIVO")
+                prod_area_a = a.get("production_area") or None
+                if nat_a == "CMV_MATERIA_PRIMA" and not prod_area_a:
+                    prod_area_a = "panaderia"
+
                 await self.session.execute(text("""
                     INSERT INTO expense_allocations (
                         id, expense_id, cost_center_id, category_id,
@@ -1098,8 +1170,8 @@ class MonthlyClosingService:
                     "exp_id": expense_id,
                     "cc_id": a.get("cost_center_id") or None,
                     "cat_id": a.get("category_id") or None,
-                    "nat": a.get("naturaleza_economica", "OPEX_GASTO_OPERATIVO"),
-                    "prod_area": a.get("production_area") or None,
+                    "nat": nat_a,
+                    "prod_area": prod_area_a,
                     "monto": float(a.get("monto", 0)),
                     "notas": a.get("notas", "")
                 })
@@ -1107,6 +1179,9 @@ class MonthlyClosingService:
             # Actualizar cabecera del comprobante con la naturaleza de la primera asignación
             first = allocations[0]
             nat_first = first.get("naturaleza_economica", "OPEX_GASTO_OPERATIVO")
+            prod_area_first = first.get("production_area") or None
+            if nat_first == "CMV_MATERIA_PRIMA" and not prod_area_first:
+                prod_area_first = "panaderia"
             es_inv = (nat_first == "CAPEX_ACTIVO_FIJO") or payload.get("es_inversion", False)
 
             await self.session.execute(text("""
@@ -1123,7 +1198,7 @@ class MonthlyClosingService:
                 "nat": nat_first,
                 "cc_id": first.get("cost_center_id") or None,
                 "cat_id": first.get("category_id") or None,
-                "prod_area": first.get("production_area") or None,
+                "prod_area": prod_area_first,
                 "es_inv": es_inv,
                 "cat_act": payload.get("categoria_activo")
             })
@@ -1135,6 +1210,9 @@ class MonthlyClosingService:
 
             nat = payload.get("naturaleza_economica", "OPEX_GASTO_OPERATIVO")
             es_inv = bool(payload.get("es_inversion", False)) or (nat == "CAPEX_ACTIVO_FIJO")
+            prod_area = payload.get("production_area") or None
+            if nat == "CMV_MATERIA_PRIMA" and not prod_area:
+                prod_area = "panaderia"
 
             await self.session.execute(text("""
                 UPDATE expenses
@@ -1150,7 +1228,7 @@ class MonthlyClosingService:
                 "nat": nat,
                 "cc_id": payload.get("cost_center_id") or None,
                 "cat_id": payload.get("category_id") or None,
-                "prod_area": payload.get("production_area") or None,
+                "prod_area": prod_area,
                 "es_inv": es_inv,
                 "cat_act": payload.get("categoria_activo")
             })

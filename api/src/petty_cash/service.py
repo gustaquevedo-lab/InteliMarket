@@ -624,14 +624,80 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
         estado="pendiente",  # Se carga siempre en pendiente para luego ser aprobado y pagado
         notas=data.notas,
         # Clasificación Contable Multinaturaleza (Cierre P&L / Balances)
-        naturaleza_economica=str(data.naturaleza_economica.value if hasattr(data.naturaleza_economica, "value") else data.naturaleza_economica) if data.naturaleza_economica else "OPEX_GASTO_OPERATIVO",
-        production_area=str(data.production_area.value if hasattr(data.production_area, "value") else data.production_area) if data.production_area else None,
-        periodo_devengado=data.periodo_devengado,
-        cuota_actual=data.cuota_actual,
-        total_cuotas=data.total_cuotas,
-        requisicion_id=_safe_uuid(data.requisicion_id) if data.requisicion_id else None,
-    )
-    db.add(exp)
+        # Auto-inferencia inteligente de naturaleza económica si no fue especificada o viene en default
+        naturaleza_economica = str(data.naturaleza_economica.value if hasattr(data.naturaleza_economica, "value") else data.naturaleza_economica) if data.naturaleza_economica else None
+        production_area = str(data.production_area.value if hasattr(data.production_area, "value") else data.production_area) if data.production_area else None
+
+        if not naturaleza_economica or naturaleza_economica == "OPEX_GASTO_OPERATIVO":
+            cat_name = ""
+            if data.category_id:
+                cat_obj = await db.get(ExpenseCategory, _safe_uuid(data.category_id))
+                if cat_obj and cat_obj.nombre:
+                    cat_name = cat_obj.nombre.upper()
+            desc_up = (data.descripcion or "").upper()
+
+            if "INSUMOS DE PRODUCCIÓN" in cat_name or "MATERIA PRIMA" in cat_name or "INSUMOS PARA PANADERIA" in desc_up or "HARINA" in desc_up or "COMPRA DE PANIFICADOS" in desc_up:
+                naturaleza_economica = "CMV_MATERIA_PRIMA"
+                if not production_area:
+                    if "ROTISER" in cat_name or "ROTISER" in desc_up:
+                        production_area = "rotiseria"
+                    elif "CARNICER" in cat_name or "CARNICER" in desc_up:
+                        production_area = "carniceria"
+                    elif "FLV" in cat_name:
+                        production_area = "flv"
+                    else:
+                        production_area = "panaderia"
+            elif "ANTICIPO" in cat_name or "ANTICIPO DE SUELDO" in desc_up or getattr(data, "es_anticipo_sueldo", False):
+                naturaleza_economica = "ANTICIPO_PERSONAL"
+            elif "PAGO PROVEEDOR" in desc_up or getattr(data, "es_pago_proveedor", False):
+                naturaleza_economica = "CMV_REVENTA"
+            elif "MUEBLES Y ÚTILES" in cat_name and float(data.monto or 0) >= 300000:
+                naturaleza_economica = "CAPEX_ACTIVO_FIJO"
+            else:
+                naturaleza_economica = "OPEX_GASTO_OPERATIVO"
+
+        exp = Expense(
+            company_id=uuid.UUID(company_id),
+            fund_id=_safe_uuid(data.fund_id),
+            cost_center_id=_safe_uuid(data.cost_center_id),
+            category_id=_safe_uuid(data.category_id),
+            supplier_id=_safe_uuid(data.supplier_id),
+            fecha_gasto=fecha_dt,
+            monto=monto,
+            moneda="PYG",
+            tipo_comprobante=data.tipo_comprobante,
+            numero_factura=data.numero_factura,
+            timbrado=data.timbrado,
+            proveedor=data.proveedor,
+            ruc=data.ruc,
+            descripcion=data.descripcion,
+            forma_pago=data.forma_pago,
+            archivo_adjunto_path=data.archivo_adjunto_path,
+            es_factura_credito=data.es_factura_credito,
+            dias_credito=data.dias_credito,
+            fecha_vencimiento=fecha_venc_dt,
+            es_pago_proveedor=data.es_pago_proveedor,
+            es_anticipo_sueldo=data.es_anticipo_sueldo,
+            employee_id=_safe_uuid(data.employee_id),
+            employee_name=data.employee_name,
+            employee_ci=data.employee_ci,
+            periodo_nomina=data.periodo_nomina,
+            cuotas_anticipo=data.cuotas_anticipo or 1,
+            sueldok_sync_status="pendiente",
+            sueldok_sync_id=str(data.sueldok_sync_id) if getattr(data, "sueldok_sync_id", None) else None,
+            monto_brl=Decimal(str(data.monto_brl)) if getattr(data, "monto_brl", None) else None,
+            auditoria_estado=auditoria_estado,
+            auditoria_motivo=auditoria_motivo,
+            registrado_por=_safe_uuid(user_id),
+            estado="pendiente",  # Se carga siempre en pendiente para luego ser aprobado y pagado
+            notas=data.notas,
+            naturaleza_economica=naturaleza_economica,
+            production_area=production_area,
+            periodo_devengado=data.periodo_devengado,
+            cuota_actual=data.cuota_actual,
+            total_cuotas=data.total_cuotas,
+            requisicion_id=_safe_uuid(data.requisicion_id) if data.requisicion_id else None,
+        )
     await db.flush()
 
     # Si se asocia a facturas comerciales pendientes (multi-factura o legacy single)

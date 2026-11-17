@@ -132,7 +132,24 @@ export function ReclassifyExpenseModal({
     setNaturaleza(item.naturaleza_economica || "OPEX_GASTO_OPERATIVO")
     setCostCenterId(item.cost_center_id || "")
     setCategoryId(item.category_id || "")
-    setProductionArea(item.production_area || "")
+    
+    // Auto-detección inteligente del área de producción
+    let inferredProdArea = item.production_area || ""
+    const catName = (item.categoria_nombre || "").toUpperCase()
+    const desc = (item.concepto || "").toUpperCase()
+    if (!inferredProdArea) {
+      if (catName.includes("ROTISER") || desc.includes("ROTISER")) {
+        inferredProdArea = "rotiseria"
+      } else if (catName.includes("CARNICER") || desc.includes("CARNICER")) {
+        inferredProdArea = "carniceria"
+      } else if (catName.includes("PANADER") || desc.includes("PANADER") || desc.includes("HARINA")) {
+        inferredProdArea = "panaderia"
+      } else if (item.naturaleza_economica === "CMV_MATERIA_PRIMA") {
+        inferredProdArea = "panaderia"
+      }
+    }
+    setProductionArea(inferredProdArea)
+
     setEsInversion(Boolean(item.es_inversion) || item.naturaleza_economica === "CAPEX_ACTIVO_FIJO")
     setCategoriaActivo(item.categoria_activo || "")
 
@@ -250,7 +267,7 @@ export function ReclassifyExpenseModal({
         naturaleza_economica: naturaleza,
         cost_center_id: costCenterId || null,
         category_id: categoryId || null,
-        production_area: productionArea || null,
+        production_area: (naturaleza === "CMV_MATERIA_PRIMA" && !productionArea) ? "panaderia" : (productionArea || null),
         es_inversion: esInversion || naturaleza === "CAPEX_ACTIVO_FIJO",
         categoria_activo: categoriaActivo || null
       }
@@ -295,10 +312,10 @@ export function ReclassifyExpenseModal({
   if (!isOpen || !item) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in">
+      <div className="w-full max-w-3xl max-h-[92dvh] sm:max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
         {/* 🌟 CABECERA FIJA (SHRINK-0) */}
-        <div className="shrink-0 px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 flex items-center justify-between">
+        <div className="shrink-0 px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-indigo-600/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-200 dark:border-indigo-800/60">
               <Receipt className="w-5 h-5" />
@@ -459,6 +476,13 @@ export function ReclassifyExpenseModal({
                       setNaturaleza(val)
                       if (val === "CAPEX_ACTIVO_FIJO") setEsInversion(true)
                       else if (val === "OPEX_GASTO_OPERATIVO") setEsInversion(false)
+                      if (val === "CMV_MATERIA_PRIMA" && !productionArea) {
+                        const cat = (item.categoria_nombre || "").toUpperCase()
+                        const desc = (item.concepto || "").toUpperCase()
+                        if (cat.includes("ROTISER") || desc.includes("ROTISER")) setProductionArea("rotiseria")
+                        else if (cat.includes("CARNICER") || desc.includes("CARNICER")) setProductionArea("carniceria")
+                        else setProductionArea("panaderia")
+                      }
                     }}
                     className="w-full text-xs font-medium bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500"
                   >
@@ -723,7 +747,7 @@ export function ReclassifyExpenseModal({
         </div>
 
         {/* 🌟 PIE DE ACCIONES FIJO (SHRINK-0) */}
-        <div className="shrink-0 px-6 py-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between">
+        <div className="shrink-0 px-4 sm:px-6 py-3.5 sm:py-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between sticky bottom-0 z-20">
           <button
             type="button"
             onClick={onClose}

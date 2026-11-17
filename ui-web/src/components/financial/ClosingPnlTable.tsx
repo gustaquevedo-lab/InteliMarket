@@ -21,7 +21,7 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
             Estado de Resultados en Cascada (P&L Devengado)
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Cierre Oficial de Septiembre 2026 — Grupo Santa Teresa E.A.S. / Extra Supermercado Mayorista
+            Cierre Oficial de {data.periodo?.mes_nombre || "Noviembre"} {data.periodo?.anio || 2026} — Grupo Santa Teresa E.A.S. / Extra Supermercado Mayorista
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
@@ -137,15 +137,26 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td></td>
             </tr>
 
-            {/* 2.2 Materias Primas Panadería */}
+            {/* 2.2 Materias Primas Panadería y Rotisería */}
             <tr className="text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50">
               <td className="py-2.5 px-4 text-center text-slate-400">2.2</td>
               <td className="py-2.5 px-4 pl-8 text-slate-700 dark:text-slate-300">
-                Materias Primas Panadería (Harinas, Levaduras e Insumos Producción)
+                Materias Primas Panadería y Rotisería (Harinas, Levaduras e Insumos Producción)
               </td>
-              <td className="py-2.5 px-4 text-right font-mono font-medium">{formatPYG(cogs?.cmv_materia_prima_panaderia)}</td>
-              <td className="py-2.5 px-4 text-right font-mono text-slate-500">2.41%</td>
-              <td></td>
+              <td className="py-2.5 px-4 text-right font-mono font-medium">
+                {formatPYG((cogs?.cmv_materia_prima_panaderia || 0) + (cogs?.cmv_materia_prima_rotiseria || 0))}
+              </td>
+              <td className="py-2.5 px-4 text-right font-mono text-slate-500">
+                {kpis?.ventas_netas ? (((cogs?.cmv_materia_prima_panaderia || 0) + (cogs?.cmv_materia_prima_rotiseria || 0)) / kpis.ventas_netas * 100).toFixed(2) + "%" : "2.41%"}
+              </td>
+              <td className="py-2.5 px-4 text-center">
+                <button
+                  onClick={() => onSelectMagnitude("cogs_mp")}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
+                >
+                  Ver Materias Primas
+                </button>
+              </td>
             </tr>
 
             {/* 2.3 NC y Acuerdos Comerciales */}
@@ -153,18 +164,21 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-center text-emerald-600">2.3</td>
               <td className="py-2.5 px-4 pl-8 flex items-center gap-1.5">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                <span>(-) Notas de Crédito, Acuerdos Comerciales y Bonificaciones de Proveedores (47 NCs)</span>
+                <span>(-) Notas de Crédito, Acuerdos Comerciales y Bonificaciones de Proveedores</span>
               </td>
               <td className="py-2.5 px-4 text-right font-mono font-bold text-emerald-700 dark:text-emerald-300">
-                -{formatPYG(cogs?.nc_acuerdos_proveedores || 45653770)}
+                -{formatPYG(cogs?.nc_acuerdos_proveedores || 0)}
               </td>
               <td className="py-2.5 px-4 text-right font-mono text-[11px] text-emerald-600">
-                -3.70%
+                {kpis?.ventas_netas ? (-((cogs?.nc_acuerdos_proveedores || 0) / kpis.ventas_netas * 100)).toFixed(2) + "%" : "-3.70%"}
               </td>
               <td className="py-2.5 px-4 text-center">
-                <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-800">
-                  Aporte Margen
-                </span>
+                <button
+                  onClick={() => onSelectMagnitude("cogs_nc")}
+                  className="text-xs text-emerald-700 dark:text-emerald-400 hover:underline font-semibold cursor-pointer"
+                >
+                  Ver NCs
+                </button>
               </td>
             </tr>
 
@@ -296,12 +310,14 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
               <td className="py-2.5 px-4 text-center text-slate-400">4.4</td>
               <td className="py-2.5 px-4 pl-8 text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <Truck className="w-3.5 h-3.5 text-slate-400" />
-                Logística, Insumos y Producción (Harinas Uso Interno, Insumos Panadería, Bolsas Cajas)
+                Logística, Bolsas y Consumibles Operativos (Bolsas Cajas, Bobinas, Fletes)
               </td>
               <td className="py-2.5 px-4 text-right font-mono font-medium">
                 {formatPYG(opex?.logistica_operacion?.total)}
               </td>
-              <td className="py-2.5 px-4 text-right font-mono text-slate-500">2.4%</td>
+              <td className="py-2.5 px-4 text-right font-mono text-slate-500">
+                {kpis?.ventas_netas ? (((opex?.logistica_operacion?.total || 0) / kpis.ventas_netas * 100)).toFixed(2) + "%" : "2.4%"}
+              </td>
               <td className="py-2.5 px-4 text-center">
                 <button
                   onClick={() => onSelectMagnitude("opex", "logistica")}
@@ -409,7 +425,7 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
             <tr className="bg-emerald-100/80 dark:bg-emerald-950/40 font-bold text-slate-900 dark:text-slate-100 border-t-2 border-emerald-500">
               <td className="py-3.5 px-4 text-center text-xs text-slate-500">7.0</td>
               <td className="py-3.5 px-4 text-sm text-emerald-900 dark:text-emerald-200">
-                RESULTADO NETO DEL EJERCICIO (SETIEMBRE 2026)
+                RESULTADO NETO DEL EJERCICIO ({((data.periodo?.mes_nombre || "Noviembre") + " " + (data.periodo?.anio || 2026)).toUpperCase()})
               </td>
               <td className="py-3.5 px-4 text-right text-emerald-900 dark:text-emerald-300 font-black font-mono text-base">
                 {formatPYG(kpis?.resultado_neto)}
@@ -430,7 +446,7 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
         <div className="flex items-center gap-2">
           <Landmark className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
           <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-            Saldos Bancarios Calibrados Oficiales al 30/09/2026 (5 Cuentas Maestras Continental e Interfisa):
+            Saldos Bancarios Calibrados Oficiales al cierre de {data.periodo?.mes_nombre || "período"} (5 Cuentas Maestras Continental e Interfisa):
           </span>
         </div>
         <div className="flex items-center gap-3">
