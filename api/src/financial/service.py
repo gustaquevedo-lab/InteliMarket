@@ -2585,7 +2585,7 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
                         voucher_match = bool(t_tokens & ar_tokens)
                         date_close = abs((ar["fecha"] - t["fecha"]).days) <= 4 if ar.get("fecha") else False
 
-                        if voucher_match or (not t_tokens and date_close):
+                        if voucher_match or date_close:
                             used_ar_ids.add(ar["id"])
                             b_name = ar["banco_nombre"] or (ar["forma_pago"].upper() if ar.get("forma_pago") else "OTRO")
                             res["match_tipo"] = "cobro_mal_imputado"
