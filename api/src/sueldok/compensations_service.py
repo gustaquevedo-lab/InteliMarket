@@ -246,6 +246,7 @@ async def process_settlement_compensation(
     uid = uuid.UUID(user_id) if user_id else None
     raw_ci = str(employee_ci or "")
     clean_doc = _clean_ci(raw_ci)
+    base_doc = clean_doc[:-1] if len(clean_doc) >= 6 else clean_doc
 
     # 1. Buscar o crear cliente del empleado
     cust_query = select(Customer).where(
@@ -253,8 +254,12 @@ async def process_settlement_compensation(
         or_(
             Customer.ci == clean_doc,
             Customer.ci == raw_ci,
+            Customer.ci == base_doc,
             Customer.extra_club_numero == clean_doc,
-            Customer.ruc.ilike(f"%{clean_doc}%")
+            Customer.extra_club_numero == base_doc,
+            Customer.ruc.ilike(f"%{clean_doc}%"),
+            Customer.ruc.ilike(f"%{base_doc}%"),
+            Customer.razon_social.ilike(f"%{employee_nombre.strip()}%")
         )
     )
     cust_res = await db.execute(cust_query)
@@ -294,11 +299,12 @@ async def process_settlement_compensation(
     db.add(rec_payment)
     await db.flush()
 
-    # 3. Amortizar Cuentas por Cobrar abiertas (vales / créditos impagos)
+    # 3. Amortizar Cuentas por Cobrar abiertas (vales / créditos impagos / remitidos a empresa)
     ar_query = select(Account).where(
         Account.company_id == cid,
         Account.customer_id == customer.id,
-        Account.estado == "pendiente"
+        Account.saldo_pendiente > 0,
+        Account.estado.in_(["pendiente", "REMITIDO_EMPRESA"])
     ).order_by(Account.fecha_vencimiento.asc(), Account.created_at.asc())
     ar_res = await db.execute(ar_query)
     open_accounts = ar_res.scalars().all()
@@ -316,6 +322,19 @@ async def process_settlement_compensation(
         if acc.saldo_pendiente <= 0:
             acc.estado = "pagado"
             acc.saldo_pendiente = 0
+        acc.ultimo_pago = datetime.now(timezone.utc)
+
+        # Si el documento estaba en una Remisión Corporativa, actualizar la remisión
+        if acc.corporate_remission_id:
+            rem_q = select(CorporateRemission).where(CorporateRemission.id == acc.corporate_remission_id)
+            rem_r = await db.execute(rem_q)
+            rem_obj = rem_r.scalars().first()
+            if rem_obj:
+                rem_obj.saldo_pendiente = max(Decimal("0"), (rem_obj.saldo_pendiente or Decimal("0")) - alloc_amt)
+                if rem_obj.saldo_pendiente <= Decimal("0"):
+                    rem_obj.estado = "PAGADO"
+                rem_prev = rem_obj.notas or ""
+                rem_obj.notas = f"{rem_prev}\n[Compensado en Finiquito {employee_nombre} - {receipt_num}]".strip()
 
         alloc = ReceivablePaymentAllocation(
             receivable_payment_id=rec_payment.id,

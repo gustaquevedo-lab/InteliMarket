@@ -738,6 +738,10 @@ export default function SueldokPage() {
       // Daniel Acosta Merlo
       setFiniquitoOPMontoExtraClub(1491708)
       setFiniquitoOPMontoAnticipos(655800)
+    } else if (ci.includes("571814") || ci.includes("5718147")) {
+      // Augusto Barbosa Santacruz
+      setFiniquitoOPMontoExtraClub(69510)
+      setFiniquitoOPMontoAnticipos(0)
     } else {
       const desc = Number(settlement.descuentos_salariales_monto || 0)
       setFiniquitoOPMontoExtraClub(desc)
