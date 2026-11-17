@@ -14,6 +14,7 @@ from api.src.accounts_receivable import export_service as ar_export_service
 from api.src.accounts_receivable import pdf_reports as ar_pdf_reports
 from api.src.accounts_receivable.schemas import (
     ReceivablePaymentCreate,
+    ReceivablePaymentRectify,
     ReceivableGlobalPaymentCreate,
     CompensateInternalConsumptionInput,
     CorporateRemissionCreate,
@@ -21,7 +22,6 @@ from api.src.accounts_receivable.schemas import (
     CorporateRemissionPayInput,
     CorporateRemissionRevertInput,
     CreditBlockingPolicy,
-    ReceivablePaymentRectify,
 )
 from api.src.integrated_finance import pdf_reports
 from api.src.auth.middleware import require_auth
@@ -178,20 +178,17 @@ async def rectify_payment(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
 ):
-    try:
-        return await service.rectify_receivable_payment(
-            db=db,
-            company_id=company_id,
-            payment_id=payment_id,
-            nueva_forma_pago=body.forma_pago,
-            nuevo_bank_account_id=str(body.bank_account_id) if body.bank_account_id else None,
-            nueva_referencia=body.referencia,
-            nueva_fecha=body.fecha,
-            motivo=body.motivo,
-            user_id=user.get("id"),
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    result = await service.rectify_receivable_payment(
+        db,
+        company_id,
+        payment_id,
+        body,
+        user_id=user.get("id") or user.get("sub"),
+        user_nombre=user.get("user_nombre") or user.get("user_email") or "Usuario",
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 @router.get("/companies/{company_id}/accounts-receivable/customers/{customer_id}/statement.pdf")

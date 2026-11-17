@@ -2499,6 +2499,23 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
 
     exact_map, amount_map, tokens_map, chq_by_num_monto, chq_by_num, chq_by_monto = _build_bank_statement_index(existing_txs, all_chqs)
 
+    # ── Cobros AR recientes para detección de cobros mal imputados (otra cuenta o efectivo) ──
+    res_ar = await db.execute(
+        text("""
+            SELECT rp.id, rp.numero_recibo, rp.monto_total, rp.forma_pago, rp.bank_account_id,
+                   rp.referencia, rp.referencia_transferencia, rp.fecha, c.razon_social as customer_name,
+                   ba.banco as banco_nombre
+            FROM receivable_payments rp
+            LEFT JOIN customers c ON c.id = rp.customer_id
+            LEFT JOIN bank_accounts ba ON ba.id = rp.bank_account_id
+            WHERE rp.company_id = :cid
+              AND rp.fecha >= :w_start AND rp.fecha <= :w_end
+        """),
+        {"cid": account.company_id, "w_start": w_start, "w_end": w_end},
+    )
+    ar_payments = [dict(r._mapping) for r in res_ar.fetchall()]
+    used_ar_ids = set()
+
     # ── Pre-agrupación N-a-1 de boletas de depósito fraccionadas (efectivo + cheque 24hs) ──
     slip_to_indices = defaultdict(list)
     for idx, t in enumerate(transacciones):
@@ -2555,6 +2572,29 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
             res = _match_single_statement_transaction(
                 t, exact_map, amount_map, tokens_map, chq_by_num_monto, chq_by_num, chq_by_monto, account.id, used_tx_ids, used_chq_ids
             )
+            # Detectar si corresponde a un cobro AR cargado en otra cuenta o en efectivo
+            if res["status"] == "solo_extracto" and t["tipo"] == "credito":
+                t_monto = Decimal(str(t["monto"]))
+                t_tokens = set(re.findall(r'\b\d{6,}\b', f"{t.get('referencia', '')} {t.get('descripcion', '')}"))
+                for ar in ar_payments:
+                    if ar["id"] in used_ar_ids:
+                        continue
+                    if abs(Decimal(str(ar["monto_total"])) - t_monto) <= Decimal("100"):
+                        ar_ref_str = f"{ar.get('referencia') or ''} {ar.get('referencia_transferencia') or ''}"
+                        ar_tokens = set(re.findall(r'\b\d{6,}\b', ar_ref_str))
+                        voucher_match = bool(t_tokens & ar_tokens)
+                        date_close = abs((ar["fecha"] - t["fecha"]).days) <= 4 if ar.get("fecha") else False
+
+                        if voucher_match or (not t_tokens and date_close):
+                            used_ar_ids.add(ar["id"])
+                            b_name = ar["banco_nombre"] or (ar["forma_pago"].upper() if ar.get("forma_pago") else "OTRO")
+                            res["match_tipo"] = "cobro_mal_imputado"
+                            res["match_detalle"] = f"Existe cobro Recibo #{ar['numero_recibo']} ({ar['customer_name'] or 'Cliente'}) imputado a {b_name}"
+                            res["ar_payment_id"] = str(ar["id"])
+                            res["ar_numero_recibo"] = ar["numero_recibo"]
+                            res["ar_banco_actual"] = b_name
+                            break
+
         st = res["status"]
         if st == "ya_importado":
             duplicadas_count += 1
@@ -2573,6 +2613,9 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
             "status": st,
             "match_tipo": res["match_tipo"],
             "match_detalle": res["match_detalle"],
+            "ar_payment_id": res.get("ar_payment_id"),
+            "ar_numero_recibo": res.get("ar_numero_recibo"),
+            "ar_banco_actual": res.get("ar_banco_actual"),
         })
 
     return {
@@ -2664,6 +2707,23 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
     all_chqs = list(res_chqs.scalars().all())
 
     exact_map, amount_map, tokens_map, chq_by_num_monto, chq_by_num, chq_by_monto = _build_bank_statement_index(existing_txs, all_chqs)
+
+    # ── Cobros AR recientes para detección de cobros mal imputados (otra cuenta o efectivo) ──
+    res_ar = await db.execute(
+        text("""
+            SELECT rp.id, rp.numero_recibo, rp.monto_total, rp.forma_pago, rp.bank_account_id,
+                   rp.referencia, rp.referencia_transferencia, rp.fecha, c.razon_social as customer_name,
+                   ba.banco as banco_nombre
+            FROM receivable_payments rp
+            LEFT JOIN customers c ON c.id = rp.customer_id
+            LEFT JOIN bank_accounts ba ON ba.id = rp.bank_account_id
+            WHERE rp.company_id = :cid
+              AND rp.fecha >= :w_start AND rp.fecha <= :w_end
+        """),
+        {"cid": account.company_id, "w_start": w_start, "w_end": w_end},
+    )
+    ar_payments = [dict(r._mapping) for r in res_ar.fetchall()]
+    used_ar_ids = set()
 
     # ── Pre-agrupación N-a-1 de boletas de depósito fraccionadas (efectivo + cheque 24hs) ──
     slip_to_indices = defaultdict(list)

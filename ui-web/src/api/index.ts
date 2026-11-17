@@ -4114,6 +4114,8 @@ export const api = {
     downloadCobranzasExcel: (params?: { fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/cobranzas.xlsx`, params, "cobranzas.xlsx"),
     downloadCobranzasPdf: (params?: { fecha_desde?: string; fecha_hasta?: string }) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/export/cobranzas.pdf`, params, "cobranzas.pdf"),
     downloadReceiptA6Pdf: (paymentId: string) => downloadAuthenticated(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/${paymentId}/receipt.pdf`, undefined, `recibo_${paymentId.slice(0, 8)}.pdf`),
+    rectifyPayment: (paymentId: string, data: { forma_pago: string; bank_account_id?: string; referencia?: string; fecha_transferencia?: string; motivo: string }) =>
+      client.patch<{ status: string; message: string; payment_id: string }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments/${paymentId}/rectify`, data),
     pendingForCustomer: (customerId: string) => client.get<{ id: string; numero_documento: string; fecha_emision: string; fecha_vencimiento: string | null; moneda: string; monto_original: number; saldo_pendiente: number; dias_mora: number }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/pending`),
     registerPayment: (data: { customer_id: string; monto_total: number; moneda?: string; forma_pago?: string; referencia?: string; fecha?: string; observaciones?: string; aplica_retencion?: boolean; monto_retencion?: number; retencion_numero_comprobante?: string; retencion_fecha?: string; retencion_porcentaje?: number; monto_efectivo_recibido?: number; monto_pyg?: number; monto_brl?: number; monto_usd?: number; monto_transferencia?: number; fecha_transferencia?: string; referencia_transferencia?: string; monto_cheque?: number; tasa_brl?: number; tasa_usd?: number; monto_facturas_canceladas?: number; diferencia_monto?: number; tipo_diferencia?: string; allocations: { accounts_receivable_id: string; monto: number }[] }) =>
       client.post<{ id: string; monto_total: number; allocations: { accounts_receivable_id: string; monto: number; nuevo_saldo: number; nuevo_estado: string }[] }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/payments`, data),
@@ -4173,12 +4175,7 @@ export const api = {
     compensateInternalConsumption: (data: { customer_id: string; accounts_receivable_ids: string[]; category_id: string; cost_center_id?: string; fecha?: string; observaciones?: string }) =>
       client.post<{ success: boolean; payment_id: string; numero_recibo: string; monto_total: number; facturas_canceladas: number; gastos_registrados: number }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/compensate-internal-consumption`, data),
     verifyReceipt: (paymentId: string) => client.get<any>(`/v1/accounts-receivable/receipts/${paymentId}/verify`),
-    rectifyPayment: (paymentId: string, data: { forma_pago?: string; bank_account_id?: string; referencia?: string; fecha?: string; motivo: string }) =>
-      client.patch<{ success: boolean; payment_id: string; numero_recibo: string; forma_pago: string; bank_account_id?: string; monto: number; mensaje: string }>(
-        `/v1/companies/${COMPANY_ID}/accounts-receivable/payments/${paymentId}/rectify`,
-        data
-      ),
-    documentPayments: (id: string) => client.get<{ id: string; numero_recibo?: string; fecha: string; forma_pago: string | null; referencia: string | null; bank_account_id?: string | null; observaciones: string | null; monto: number; created_at: string }[]>(`/v1/accounts-receivable/${id}/payments`),
+    documentPayments: (id: string) => client.get<{ id: string; fecha: string; forma_pago: string | null; referencia: string | null; observaciones: string | null; monto: number; created_at: string }[]>(`/v1/accounts-receivable/${id}/payments`),
     customerPayments: (customerId: string) => client.get<{ id: string; fecha: string; monto_total: number; forma_pago: string | null; referencia: string | null; observaciones: string | null; created_at: string; allocations: { accounts_receivable_id: string; numero_documento: string; monto: number }[] }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/payments`),
     corporateAgreementsSummary: () => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/summary`),
     corporateAgreementPendingDocs: (empresa: string, fecha_corte?: string, tipo_destino?: string) =>

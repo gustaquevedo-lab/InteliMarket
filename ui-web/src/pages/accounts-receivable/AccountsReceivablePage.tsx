@@ -138,31 +138,78 @@ export default function AccountsReceivablePage() {
   const [invoiceSale, setInvoiceSale] = useState<Sale | null>(null)
   const [invoiceItems, setInvoiceItems] = useState<SaleItem[]>([])
   const [invoiceLoading, setInvoiceLoading] = useState(false)
-  const [docPayments, setDocPayments] = useState<{ id: string; numero_recibo?: string; fecha: string; forma_pago: string | null; referencia: string | null; bank_account_id?: string | null; observaciones?: string | null; monto: number }[]>([])
+  const [docPayments, setDocPayments] = useState<{ id: string; fecha: string; forma_pago: string | null; referencia: string | null; monto: number }[]>([])
   const [customerDocs, setCustomerDocs] = useState<AccountsReceivable[]>([])
-
-  // Modal Rectificar Cobro / Imputación Operativa
-  const [rectifyModal, setRectifyModal] = useState<{
-    paymentId: string
-    numeroRecibo?: string
-    monto: number
-    formaPago: string
-    bankAccountId: string
-    referencia: string
-    fecha: string
-  } | null>(null)
-  const [rectifyForm, setRectifyForm] = useState({
-    forma_pago: "transferencia",
-    bank_account_id: "",
-    referencia: "",
-    fecha: "",
-    motivo: "",
-  })
-  const [rectifying, setRectifying] = useState(false)
 
   // Recibos e Historial de Cobros
   const [recentPayments, setRecentPayments] = useState<any[]>([])
   const [paymentsLoading, setPaymentsLoading] = useState(false)
+
+  // Modal de Rectificación de Imputación / Medio de Pago
+  const [showRectifyModal, setShowRectifyModal] = useState(false)
+  const [rectifyPaymentTarget, setRectifyPaymentTarget] = useState<any>(null)
+  const [rectifyLoading, setRectifyLoading] = useState(false)
+  const [rectifyBanks, setRectifyBanks] = useState<any[]>([])
+  const [rectifyForm, setRectifyForm] = useState({
+    forma_pago: "transferencia",
+    bank_account_id: "",
+    referencia: "",
+    fecha_transferencia: "",
+    motivo: "",
+  })
+
+  const handleOpenRectify = async (payment: any) => {
+    setRectifyPaymentTarget(payment)
+    setRectifyForm({
+      forma_pago: (payment.forma_pago || "transferencia").toLowerCase(),
+      bank_account_id: payment.bank_account_id || "",
+      referencia: payment.referencia || payment.referencia_transferencia || "",
+      fecha_transferencia: payment.fecha_transferencia || payment.fecha || "",
+      motivo: "",
+    })
+    setShowRectifyModal(true)
+    if (rectifyBanks.length === 0) {
+      try {
+        const banks = await api.financial.banks.list()
+        setRectifyBanks(banks || [])
+      } catch (err) {
+        console.error("Error cargando bancos para rectificación", err)
+      }
+    }
+  }
+
+  const handleSaveRectify = async () => {
+    if (!rectifyPaymentTarget) return
+    if (!rectifyForm.motivo || rectifyForm.motivo.trim().length < 3) {
+      toast.error("Motivo obligatorio", "Debe ingresar el motivo de la rectificación para la bitácora de auditoría.")
+      return
+    }
+    const esBancario = ["transferencia", "deposito", "deposito_bancario"].includes(rectifyForm.forma_pago)
+    if (esBancario && !rectifyForm.bank_account_id) {
+      toast.error("Banco obligatorio", "Debe seleccionar la cuenta bancaria de destino.")
+      return
+    }
+    setRectifyLoading(true)
+    try {
+      await api.accountsReceivable.rectifyPayment(rectifyPaymentTarget.id, {
+        forma_pago: rectifyForm.forma_pago,
+        bank_account_id: rectifyForm.bank_account_id || undefined,
+        referencia: rectifyForm.referencia || undefined,
+        fecha_transferencia: rectifyForm.fecha_transferencia || undefined,
+        motivo: rectifyForm.motivo,
+      })
+      toast.success("Recibo Rectificado", "La imputación del cobro y los saldos se actualizaron correctamente.")
+      setShowRectifyModal(false)
+      if (selectedDoc) {
+        api.accountsReceivable.documentPayments(selectedDoc.id).then(setDocPayments).catch(() => {})
+      }
+      fetchData()
+    } catch (err: any) {
+      toast.error("Error al rectificar", err?.message || "No se pudo rectificar el pago")
+    } finally {
+      setRectifyLoading(false)
+    }
+  }
 
   // Reportes exportables (Aging / Cobranzas / Deuda Detallada)
   const [reportFechaDesde, setReportFechaDesde] = useState(() => getAsuncionDateStr(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)))
@@ -1373,33 +1420,6 @@ export default function AccountsReceivablePage() {
       toast.error("Error", err?.message || "No se pudo actualizar la política de mora")
     } finally {
       setSavingPolicy(false)
-    }
-  }
-
-  const handleSaveRectify = async () => {
-    if (!rectifyModal) return
-    if (!rectifyForm.motivo.trim()) {
-      toast.error("Motivo requerido", "Debe ingresar el motivo de la rectificación para auditoría.")
-      return
-    }
-    setRectifying(true)
-    try {
-      await api.accountsReceivable.rectifyPayment(rectifyModal.paymentId, {
-        forma_pago: rectifyForm.forma_pago,
-        bank_account_id: rectifyForm.forma_pago !== "efectivo" ? rectifyForm.bank_account_id : undefined,
-        referencia: rectifyForm.referencia,
-        fecha: rectifyForm.fecha,
-        motivo: rectifyForm.motivo,
-      })
-      toast.success("Cobro rectificado", "La imputación operativa y saldos fueron actualizados correctamente.")
-      setRectifyModal(null)
-      if (selectedDoc) {
-        api.accountsReceivable.documentPayments(selectedDoc.id).then(setDocPayments).catch(() => {})
-      }
-    } catch (err: any) {
-      toast.error("Error al rectificar", err.message || "No se pudo rectificar el cobro.")
-    } finally {
-      setRectifying(false)
     }
   }
 
@@ -7871,27 +7891,8 @@ export default function AccountsReceivablePage() {
                             <Printer className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => {
-                              const isTransf = (p.forma_pago || "").toLowerCase().includes("transf") || (p.forma_pago || "").toLowerCase().includes("deposito")
-                              const defaultBankId = p.bank_account_id || (bankAccounts.length > 0 ? bankAccounts[0].id : "")
-                              setRectifyModal({
-                                paymentId: p.id,
-                                numeroRecibo: p.numero_recibo,
-                                monto: p.monto,
-                                formaPago: p.forma_pago || "efectivo",
-                                bankAccountId: defaultBankId,
-                                referencia: p.referencia || "",
-                                fecha: p.fecha || getTodayAsuncion(),
-                              })
-                              setRectifyForm({
-                                forma_pago: isTransf ? "transferencia" : (p.forma_pago || "transferencia"),
-                                bank_account_id: defaultBankId,
-                                referencia: p.referencia || "",
-                                fecha: p.fecha || getTodayAsuncion(),
-                                motivo: "",
-                              })
-                            }}
-                            className="p-1 rounded hover:bg-amber-200/60 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 transition"
+                            onClick={() => handleOpenRectify(p)}
+                            className="p-1 rounded hover:bg-blue-200/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 transition"
                             title="Rectificar Medio de Pago o Cuenta Bancaria"
                           >
                             <Pencil className="w-3.5 h-3.5" />
@@ -7907,173 +7908,6 @@ export default function AccountsReceivablePage() {
 
             <div className="p-6 border-t flex justify-end">
               <button onClick={() => setSelectedDoc(null)} className="btn-outline text-xs">Cerrar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: Rectificar Imputación Operativa de Cobro */}
-      {rectifyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setRectifyModal(null)}>
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-            {/* Cabecera shrink-0 */}
-            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-900/50">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-xl">
-                  <Pencil className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-gray-900 dark:text-white text-sm">Rectificar Imputación de Cobro</h3>
-                    {rectifyModal.numeroRecibo && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                        {rectifyModal.numeroRecibo}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Reasigna la cuenta bancaria o canal sin alterar las facturas canceladas.</p>
-                </div>
-              </div>
-              <button onClick={() => setRectifyModal(null)} className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-slate-100 dark:hover:bg-slate-800">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Cuerpo Central flex-1 overflow-y-auto */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4 text-xs">
-              {/* Tarjeta resumen del cobro actual */}
-              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Monto Total Cobrado</span>
-                  <div className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">{formatPYG(rectifyModal.monto)}</div>
-                </div>
-                <div className="text-right">
-                  <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Canal Actual</span>
-                  <div className="font-medium text-gray-700 dark:text-gray-300 capitalize">{rectifyModal.formaPago.replace(/_/g, " ")}</div>
-                </div>
-              </div>
-
-              {/* Selector Forma de Pago */}
-              <div>
-                <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1.5">
-                  Nuevo Medio de Pago / Destino
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRectifyForm({ ...rectifyForm, forma_pago: "transferencia" })}
-                    className={`p-2.5 rounded-xl border text-left font-medium transition flex items-center gap-2 ${
-                      rectifyForm.forma_pago === "transferencia"
-                        ? "border-amber-500 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-500/50 shadow-sm"
-                        : "border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800 text-gray-700 dark:text-gray-300"
-                    }`}
-                  >
-                    <Landmark className="w-4 h-4 text-amber-500 shrink-0" />
-                    <div>
-                      <div className="text-xs font-bold">Transferencia Bancaria</div>
-                      <div className="text-[10px] text-gray-500">Acredita en cuenta bancaria</div>
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setRectifyForm({ ...rectifyForm, forma_pago: "efectivo" })}
-                    className={`p-2.5 rounded-xl border text-left font-medium transition flex items-center gap-2 ${
-                      rectifyForm.forma_pago === "efectivo"
-                        ? "border-amber-500 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-500/50 shadow-sm"
-                        : "border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800 text-gray-700 dark:text-gray-300"
-                    }`}
-                  >
-                    <Banknote className="w-4 h-4 text-emerald-500 shrink-0" />
-                    <div>
-                      <div className="text-xs font-bold">Efectivo (Bóveda)</div>
-                      <div className="text-[10px] text-gray-500">Custodia física en Bóveda</div>
-                    </div>
-                  </button>
-                </div>
-              </div>
-
-              {/* Si es transferencia: Cuenta Bancaria y Referencia */}
-              {rectifyForm.forma_pago !== "efectivo" && (
-                <div className="space-y-3 p-3.5 rounded-xl bg-amber-50/40 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-900/30">
-                  <div>
-                    <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">
-                      Cuenta Bancaria de Destino <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={rectifyForm.bank_account_id}
-                      onChange={e => setRectifyForm({ ...rectifyForm, bank_account_id: e.target.value })}
-                      className="w-full text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 font-medium focus:ring-2 focus:ring-amber-500 outline-none"
-                    >
-                      {bankAccounts.map(b => (
-                        <option key={b.id} value={b.id}>
-                          {b.banco} — Cta: {b.numero_cuenta} {b.alias ? `(${b.alias})` : ""} [{b.moneda}]
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">
-                      N° de Referencia / Voucher / Comprobante
-                    </label>
-                    <input
-                      type="text"
-                      value={rectifyForm.referencia}
-                      onChange={e => setRectifyForm({ ...rectifyForm, referencia: e.target.value })}
-                      placeholder="Ej: 2611065519382"
-                      className="w-full text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 font-mono focus:ring-2 focus:ring-amber-500 outline-none"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Fecha */}
-              <div>
-                <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">
-                  Fecha de la Operación
-                </label>
-                <input
-                  type="date"
-                  value={rectifyForm.fecha}
-                  onChange={e => setRectifyForm({ ...rectifyForm, fecha: e.target.value })}
-                  className="w-full text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 focus:ring-2 focus:ring-amber-500 outline-none"
-                />
-              </div>
-
-              {/* Motivo de la Rectificación (Obligatorio) */}
-              <div>
-                <label className="block text-[11px] font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-1">
-                  Motivo de la Rectificación <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  rows={2}
-                  value={rectifyForm.motivo}
-                  onChange={e => setRectifyForm({ ...rectifyForm, motivo: e.target.value })}
-                  placeholder="Ej: Se seleccionó Continental por error, comprobante físico corresponde a Interfisa."
-                  className="w-full text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 focus:ring-2 focus:ring-amber-500 outline-none"
-                />
-              </div>
-            </div>
-
-            {/* Pie de Acciones shrink-0 */}
-            <div className="px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2.5 shrink-0 bg-slate-50 dark:bg-slate-900/50">
-              <button
-                type="button"
-                onClick={() => setRectifyModal(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-slate-200 dark:hover:bg-slate-800 transition"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveRectify}
-                disabled={rectifying || !rectifyForm.motivo.trim()}
-                className="px-5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shadow-sm"
-              >
-                {rectifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                Guardar Rectificación
-              </button>
             </div>
           </div>
         </div>
@@ -8543,6 +8377,139 @@ export default function AccountsReceivablePage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Rectificar Imputación / Canal de Cobro */}
+      {showRectifyModal && rectifyPaymentTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden rounded-2xl shadow-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+            {/* Cabecera */}
+            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <Landmark className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                    Rectificar Imputación / Canal de Cobro
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Recibo #{rectifyPaymentTarget.numero_recibo || rectifyPaymentTarget.id?.slice(0, 8)} · Monto: {formatPYG(rectifyPaymentTarget.monto || rectifyPaymentTarget.monto_total || 0)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRectifyModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Cuerpo */}
+            <div className="p-5 overflow-y-auto space-y-4 text-xs flex-1">
+              <div className="p-3 rounded-xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-900/40 text-blue-900 dark:text-blue-300 space-y-1">
+                <p className="font-semibold text-[11px]">¿Cómo funciona la rectificación?</p>
+                <p className="text-[11px] leading-relaxed">
+                  Permite corregir errores de tipeo al imputar un cobro (ej. si se cargó en Efectivo o en otro banco). Los saldos bancarios y de bóveda se recalculan y sincronizan atómicamente. Las facturas del cliente permanecen debidamente canceladas.
+                </p>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Forma de Pago de Destino
+                </label>
+                <select
+                  value={rectifyForm.forma_pago}
+                  onChange={(e) => setRectifyForm({ ...rectifyForm, forma_pago: e.target.value })}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-semibold"
+                >
+                  <option value="transferencia">Transferencia Bancaria</option>
+                  <option value="deposito_bancario">Depósito Bancario</option>
+                  <option value="efectivo">Efectivo (Bóveda Central)</option>
+                </select>
+              </div>
+
+              {["transferencia", "deposito_bancario"].includes(rectifyForm.forma_pago) && (
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Cuenta Bancaria de Destino *
+                  </label>
+                  <select
+                    value={rectifyForm.bank_account_id}
+                    onChange={(e) => setRectifyForm({ ...rectifyForm, bank_account_id: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-semibold"
+                  >
+                    <option value="">-- Seleccionar cuenta bancaria --</option>
+                    {rectifyBanks.map((b: any) => (
+                      <option key={b.id} value={b.id}>
+                        {b.banco} ({b.tipo} - {b.numero_cuenta})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    N° Comprobante / Voucher / Referencia
+                  </label>
+                  <input
+                    type="text"
+                    value={rectifyForm.referencia}
+                    onChange={(e) => setRectifyForm({ ...rectifyForm, referencia: e.target.value })}
+                    placeholder="Ej: 22661632 o 2611065519382"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Fecha de la Operación
+                  </label>
+                  <input
+                    type="date"
+                    value={rectifyForm.fecha_transferencia}
+                    onChange={(e) => setRectifyForm({ ...rectifyForm, fecha_transferencia: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Motivo de la Rectificación * (Auditoría)
+                </label>
+                <textarea
+                  rows={2}
+                  value={rectifyForm.motivo}
+                  onChange={(e) => setRectifyForm({ ...rectifyForm, motivo: e.target.value })}
+                  placeholder="Ej: Cajero seleccionó Banco Continental por error, comprobante muestra transferencia a Interfisa"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 resize-none text-slate-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            {/* Pie de Acciones */}
+            <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-2 bg-slate-50 dark:bg-slate-900/80 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowRectifyModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={rectifyLoading}
+                onClick={handleSaveRectify}
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {rectifyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                Guardar Rectificación
+              </button>
+            </div>
           </div>
         </div>
       )}

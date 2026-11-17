@@ -282,9 +282,10 @@ class CreditBlockingPolicy(BaseModel):
 
 
 class ReceivablePaymentRectify(BaseModel):
-    forma_pago: Optional[str] = None
+    forma_pago: str
     bank_account_id: Optional[UUID] = None
     referencia: Optional[str] = None
-    fecha: Optional[date] = None
-    motivo: str = Field(..., min_length=3, description="Motivo obligatorio para auditoría")
+    fecha_transferencia: Optional[date] = None
+    motivo: str = Field(min_length=3, description="Motivo obligatorio de la rectificación")
+
 

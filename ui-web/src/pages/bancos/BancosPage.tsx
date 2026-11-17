@@ -452,6 +452,31 @@ export default function BancosPage() {
     } finally { setImportLoading(false) }
   }
 
+  const [reassigningArId, setReassigningArId] = useState<string | null>(null)
+
+  const handleReassignArPayment = async (tx: any) => {
+    if (!tx.ar_payment_id || !selectedBank) return
+    setReassigningArId(tx.ar_payment_id)
+    try {
+      await api.accountsReceivable.rectifyPayment(tx.ar_payment_id, {
+        forma_pago: "transferencia",
+        bank_account_id: selectedBank,
+        referencia: tx.referencia || undefined,
+        fecha_transferencia: tx.fecha || undefined,
+        motivo: `Reasignado desde conciliador bancario a cuenta actual (Extracto Ref: ${tx.referencia || "s/ref"})`,
+      })
+      toast.success("Cobro reasignado", `Recibo #${tx.ar_numero_recibo || ""} reasignado exitosamente a este banco.`)
+      if (importForm.file) {
+        const preview = await api.financial.banks.previewImportFile(selectedBank, importForm.file, importForm.mes, importForm.anio)
+        setImportPreview(preview)
+      }
+    } catch (e: any) {
+      toast.error("Error al reasignar", e?.message || "No se pudo reasignar el cobro a esta cuenta")
+    } finally {
+      setReassigningArId(null)
+    }
+  }
+
   const openReconcileModal = async (txId: string) => {
     setReconcileModal({ txId, suggestions: [], loading: true })
     try {
@@ -3249,6 +3274,26 @@ export default function BancosPage() {
                                         <Check className="w-3 h-3" />
                                         {tx.match_detalle || "Ya registrado"}
                                       </span>
+                                    ) : tx.match_tipo === "cobro_mal_imputado" ? (
+                                      <div className="flex items-center gap-2">
+                                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 border border-amber-300/50" title={tx.match_detalle}>
+                                          <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                                          <span className="max-w-[200px] truncate">{tx.match_detalle}</span>
+                                        </span>
+                                        <button
+                                          type="button"
+                                          disabled={reassigningArId === tx.ar_payment_id}
+                                          onClick={() => handleReassignArPayment(tx)}
+                                          className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-medium text-[11px] shadow-sm transition flex items-center gap-1 disabled:opacity-50 shrink-0"
+                                          title="Reasignar este cobro a esta cuenta bancaria y refrescar"
+                                        >
+                                          {reassigningArId === tx.ar_payment_id ? (
+                                            <Loader2 className="w-3 h-3 animate-spin" />
+                                          ) : (
+                                            "Reasignar a este banco"
+                                          )}
+                                        </button>
+                                      </div>
                                     ) : (
                                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300/50">
                                         <Clock className="w-3 h-3 text-amber-600" />
