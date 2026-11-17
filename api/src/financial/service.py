@@ -2972,6 +2972,65 @@ async def suggest_reconciliation_matches(db: AsyncSession, company_id: str, tran
                     "match_nro": False,
                 })
 
+        # Búsqueda de Cobros AR (receivable_payments) candidatos para conciliar
+        t_tokens = set(re.findall(r'\b\d{6,}\b', f"{tx.referencia or ''} {tx.descripcion or ''}"))
+        rp_res = await db.execute(
+            text("""
+                SELECT rp.id, rp.numero_recibo, rp.monto_total, rp.forma_pago, rp.fecha,
+                       rp.referencia, rp.referencia_transferencia, rp.bank_account_id,
+                       COALESCE(c.razon_social, c.nombre_fantasia, 'Cliente') as cliente,
+                       ba.banco as banco_actual, ba.numero_cuenta as cuenta_actual
+                FROM receivable_payments rp
+                LEFT JOIN customers c ON c.id = rp.customer_id
+                LEFT JOIN bank_accounts ba ON ba.id = rp.bank_account_id
+                WHERE rp.company_id = :cid
+                  AND rp.monto_total >= :m_min AND rp.monto_total <= :m_max
+                ORDER BY rp.fecha DESC LIMIT 15
+            """),
+            {
+                "cid": cid,
+                "m_min": float(monto_abs - tolerancia),
+                "m_max": float(monto_abs + tolerancia),
+            },
+        )
+        for r_row in rp_res.mappings().all():
+            r_id = str(r_row["id"])
+            r_num = r_row["numero_recibo"]
+            r_monto = Decimal(str(r_row["monto_total"]))
+            r_fecha = r_row["fecha"]
+            r_ref = str(r_row["referencia_transferencia"] or r_row["referencia"] or "")
+            r_bank_id = str(r_row["bank_account_id"]) if r_row["bank_account_id"] else None
+            misma_cuenta = (r_bank_id == str(tx.bank_account_id))
+
+            dias = abs((tx.fecha - r_fecha).days) if r_fecha else 0
+            diff_monto = abs(r_monto - monto_abs)
+            mismo_monto = diff_monto <= (monto_abs * Decimal("0.001"))
+            match_voucher = bool(t_tokens and any(tok in r_ref for tok in t_tokens))
+
+            if match_voucher or (mismo_monto and dias <= 7):
+                confidence = "verde" if (match_voucher or (mismo_monto and dias <= 2)) else "amarillo"
+
+                if misma_cuenta:
+                    desc_sug = f"Cobro AR Recibo #{r_num} — {r_row['cliente']}"
+                elif r_bank_id:
+                    desc_sug = f"Cobro AR Recibo #{r_num} — {r_row['cliente']} (En {r_row['banco_actual']} Cta {r_row['cuenta_actual']} - Reasignar y conciliar)"
+                else:
+                    desc_sug = f"Cobro AR Recibo #{r_num} — {r_row['cliente']} (En Efectivo/Bóveda - Rectificar a banco y conciliar)"
+
+                if r_ref:
+                    desc_sug += f" [Voucher {r_ref}]"
+
+                sugerencias.append({
+                    "tipo": "receivable_payment",
+                    "id": r_id,
+                    "descripcion": desc_sug,
+                    "monto": float(r_monto),
+                    "fecha": r_fecha.isoformat() if r_fecha else None,
+                    "diferencia_dias": dias,
+                    "confidence": confidence,
+                    "match_nro": match_voucher,
+                })
+
     # Ordenar: nivel verde primero, luego los que coinciden por número, luego por diferencia de días
     sugerencias.sort(key=lambda s: (0 if s["confidence"] == "verde" else 1, 0 if s.get("match_nro") else 1, s["diferencia_dias"]))
     return sugerencias[:10]
@@ -3051,6 +3110,20 @@ async def reconcile_transaction(
             ve.bank_transaction_id = bt.id
             ve.fecha_deposito = bt.fecha_conciliacion or _now()
         bt.categoria = "deposito_caja"
+    elif matched_type == "receivable_payment" and matched_id:
+        from api.src.accounts_receivable.service import rectify_receivable_payment
+        await rectify_receivable_payment(
+            db=db,
+            company_id=str(bt.company_id),
+            payment_id=matched_id,
+            nueva_forma_pago="transferencia",
+            nuevo_bank_account_id=str(bt.bank_account_id),
+            nueva_referencia=bt.referencia,
+            motivo=f"Conciliación bancaria directa con extracto (Tx {bt.id})",
+            user_id=user_id,
+            existing_bt_target_id=str(bt.id),
+        )
+        bt.categoria = "cobranzas"
 
     await db.flush()
     await db.refresh(bt)

@@ -21,6 +21,7 @@ from api.src.accounts_receivable.schemas import (
     CorporateRemissionPayInput,
     CorporateRemissionRevertInput,
     CreditBlockingPolicy,
+    ReceivablePaymentRectify,
 )
 from api.src.integrated_finance import pdf_reports
 from api.src.auth.middleware import require_auth
@@ -167,6 +168,30 @@ async def register_payment(company_id: str, body: ReceivablePaymentCreate, db: A
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+@router.patch("/companies/{company_id}/accounts-receivable/payments/{payment_id}/rectify")
+async def rectify_payment(
+    company_id: str,
+    payment_id: str,
+    body: ReceivablePaymentRectify,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    try:
+        return await service.rectify_receivable_payment(
+            db=db,
+            company_id=company_id,
+            payment_id=payment_id,
+            nueva_forma_pago=body.forma_pago,
+            nuevo_bank_account_id=str(body.bank_account_id) if body.bank_account_id else None,
+            nueva_referencia=body.referencia,
+            nueva_fecha=body.fecha,
+            motivo=body.motivo,
+            user_id=user.get("id"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/companies/{company_id}/accounts-receivable/customers/{customer_id}/statement.pdf")

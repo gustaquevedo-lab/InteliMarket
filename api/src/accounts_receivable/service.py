@@ -945,10 +945,359 @@ async def create_receivable_payment(db: AsyncSession, company_id: str, data, reg
 
 
 
+async def rectify_receivable_payment(
+    db: AsyncSession,
+    company_id: str,
+    payment_id: str,
+    nueva_forma_pago: str | None = None,
+    nuevo_bank_account_id: str | None = None,
+    nueva_referencia: str | None = None,
+    nueva_fecha: date | None = None,
+    motivo: str = "",
+    user_id: str | None = None,
+    existing_bt_target_id: str | None = None,
+) -> dict:
+    """Rectifica la imputación operativa o medio de pago de un cobro ya registrado.
+    No altera el desglose de facturas ni saldo del cliente (la deuda ya fue cancelada),
+    sino que reubica atómicamente el destino de los fondos (bancos o bóveda) y saldos."""
+    if not motivo or not motivo.strip():
+        raise ValueError("El motivo de la rectificación es obligatorio para auditoría.")
+
+    # 1. Obtener el cobro
+    rp_row = await db.execute(
+        text("""
+            SELECT id, company_id, customer_id, monto_total, moneda, forma_pago,
+                   referencia, fecha, observaciones, registrado_por, numero_recibo,
+                   bank_account_id, vault_entry_id, destino_fondos, monto_transferencia,
+                   monto_efectivo_recibido, referencia_transferencia
+            FROM receivable_payments
+            WHERE id::text = :pid AND company_id::text = :cid
+        """),
+        {"pid": str(payment_id), "cid": str(company_id)},
+    )
+    rp = rp_row.mappings().first()
+    if not rp:
+        raise ValueError(f"Recibo de cobro {payment_id} no encontrado")
+
+    old_forma = (rp["forma_pago"] or "efectivo").lower()
+    target_forma = (nueva_forma_pago or old_forma).lower()
+    old_bank_id = str(rp["bank_account_id"]) if rp["bank_account_id"] else None
+    target_bank_id = str(nuevo_bank_account_id) if nuevo_bank_account_id else old_bank_id
+    monto_total = Decimal(str(rp["monto_total"]))
+    numero_recibo = rp["numero_recibo"]
+    ref_final = nueva_referencia if nueva_referencia is not None else (rp["referencia_transferencia"] or rp["referencia"])
+    fecha_final = nueva_fecha if nueva_fecha is not None else rp["fecha"]
+
+    # 2. Buscar transacción bancaria vinculada si existía
+    bt_res = await db.execute(
+        text("""
+            SELECT id, bank_account_id, monto, conciliado, fecha, referencia
+            FROM bank_transactions
+            WHERE company_id::text = :cid
+              AND (
+                  descripcion ILIKE :rec_pattern
+                  OR (referencia = :ref AND monto = :monto)
+              )
+            ORDER BY created_at DESC LIMIT 1
+        """),
+        {
+            "cid": str(company_id),
+            "rec_pattern": f"%{numero_recibo}%",
+            "ref": rp["referencia"] or "___NONE___",
+            "monto": float(monto_total),
+        },
+    )
+    bt = bt_res.mappings().first()
+
+    if bt and bt["conciliado"] and not existing_bt_target_id:
+        raise ValueError("La transacción bancaria asociada ya se encuentra CONCILIADA con el extracto bancario. Debe desconciliarla primero si requiere rectificarla.")
+
+    # 3. Conciliación directa con una línea de extracto existente (existing_bt_target_id)
+    if existing_bt_target_id:
+        bt_target_res = await db.execute(
+            text("SELECT id, bank_account_id, monto, descripcion FROM bank_transactions WHERE id::text = :tid"),
+            {"tid": str(existing_bt_target_id)},
+        )
+        bt_target = bt_target_res.mappings().first()
+        if bt_target:
+            if bt and str(bt["id"]) != str(bt_target["id"]):
+                await db.execute(
+                    text("UPDATE bank_accounts SET saldo_actual = saldo_actual - :m, updated_at = NOW() WHERE id::text = :aid"),
+                    {"m": float(bt["monto"]), "aid": str(bt["bank_account_id"])},
+                )
+                await db.execute(
+                    text("DELETE FROM bank_transactions WHERE id = :bt_id"),
+                    {"bt_id": bt["id"]},
+                )
+
+            if rp["vault_entry_id"]:
+                await db.execute(
+                    text("""
+                        UPDATE vault_entries
+                        SET estado = 'anulado',
+                            observaciones = COALESCE(observaciones, '') || :nota
+                        WHERE id = :ve_id AND estado = 'en_boveda'
+                    """),
+                    {"ve_id": rp["vault_entry_id"], "nota": f" [Anulado: rectificado y conciliado en banco - {motivo}]"},
+                )
+
+            cust_name = ""
+            cust_res = await db.execute(
+                text("SELECT razon_social, nombre_fantasia FROM customers WHERE id::text = :cid"),
+                {"cid": str(rp["customer_id"])},
+            )
+            c_row = cust_res.first()
+            if c_row:
+                cust_name = c_row.razon_social or c_row.nombre_fantasia or ""
+
+            ref_str = f" - Ref/Voucher: {ref_final}" if ref_final else ""
+            await db.execute(
+                text("""
+                    UPDATE bank_transactions
+                    SET categoria = 'cobranzas',
+                        conciliado = true,
+                        fecha_conciliacion = NOW(),
+                        contraparte = COALESCE(contraparte, :cname),
+                        descripcion = :desc,
+                        updated_at = NOW()
+                    WHERE id = :tid
+                """),
+                {
+                    "tid": bt_target["id"],
+                    "cname": cust_name,
+                    "desc": f"Cobro AR Transferencia Recibo #{numero_recibo}{ref_str} - Cliente: {cust_name}".strip(),
+                },
+            )
+
+            nota_audit = f"\n[Rectificación y Conciliación {date.today().isoformat()}: {motivo}]"
+            await db.execute(
+                text("""
+                    UPDATE receivable_payments
+                    SET forma_pago = 'transferencia',
+                        destino_fondos = 'banco',
+                        bank_account_id = :bank_id,
+                        monto_transferencia = :monto,
+                        monto_efectivo_recibido = 0,
+                        referencia = :ref,
+                        referencia_transferencia = :ref,
+                        vault_entry_id = NULL,
+                        observaciones = COALESCE(observaciones, '') || :audit
+                    WHERE id = :pid
+                """),
+                {
+                    "bank_id": str(bt_target["bank_account_id"]),
+                    "monto": float(monto_total),
+                    "ref": ref_final,
+                    "audit": nota_audit,
+                    "pid": rp["id"],
+                },
+            )
+
+            await db.flush()
+            return {
+                "success": True,
+                "payment_id": str(rp["id"]),
+                "numero_recibo": numero_recibo,
+                "forma_pago": "transferencia",
+                "bank_account_id": str(bt_target["bank_account_id"]),
+                "monto": float(monto_total),
+                "mensaje": f"Recibo #{numero_recibo} reasignado y conciliado con la transacción bancaria exitosamente.",
+            }
+
+    # 4. Evaluar transiciones estándar:
+    # A. A Banco (Transferencia / Depósito)
+    if target_forma in ("transferencia", "deposito", "deposito_bancario") and target_bank_id:
+        if bt:
+            # Si cambió de cuenta bancaria
+            if str(bt["bank_account_id"]) != target_bank_id:
+                # Restar de la cuenta vieja
+                await db.execute(
+                    text("UPDATE bank_accounts SET saldo_actual = saldo_actual - :m, updated_at = NOW() WHERE id::text = :aid"),
+                    {"m": float(bt["monto"]), "aid": str(bt["bank_account_id"])},
+                )
+                # Sumar a la cuenta nueva
+                await db.execute(
+                    text("UPDATE bank_accounts SET saldo_actual = saldo_actual + :m, updated_at = NOW() WHERE id::text = :aid"),
+                    {"m": float(bt["monto"]), "aid": target_bank_id},
+                )
+                # Mover la transacción bancaria
+                await db.execute(
+                    text("""
+                        UPDATE bank_transactions
+                        SET bank_account_id = :new_aid,
+                            referencia = :ref,
+                            fecha = :fec,
+                            updated_at = NOW()
+                        WHERE id = :bt_id
+                    """),
+                    {
+                        "new_aid": target_bank_id,
+                        "ref": ref_final,
+                        "fec": fecha_final,
+                        "bt_id": bt["id"],
+                    },
+                )
+            else:
+                # Solo actualizar fecha/referencia
+                await db.execute(
+                    text("""
+                        UPDATE bank_transactions
+                        SET referencia = :ref, fecha = :fec, updated_at = NOW()
+                        WHERE id = :bt_id
+                    """),
+                    {"ref": ref_final, "fec": fecha_final, "bt_id": bt["id"]},
+                )
+        else:
+            # No existía BankTransaction (ej: era efectivo o no se insertó). Crear BankTransaction en la cuenta nueva
+            new_bt_id = uuid.uuid4()
+            ref_str = f" - Ref/Voucher: {ref_final}" if ref_final else ""
+            cust_name = ""
+            cust_res = await db.execute(
+                text("SELECT razon_social, nombre_fantasia FROM customers WHERE id::text = :cid"),
+                {"cid": str(rp["customer_id"])},
+            )
+            c_row = cust_res.first()
+            if c_row:
+                cust_name = c_row.razon_social or c_row.nombre_fantasia or ""
+
+            await db.execute(
+                text("""
+                    INSERT INTO bank_transactions
+                        (id, company_id, bank_account_id, fecha, tipo, monto, moneda, descripcion, referencia, contraparte, conciliado, fecha_conciliacion, categoria, created_at)
+                    VALUES
+                        (:id, :company_id, :bank_account_id, :fecha, 'credito', :monto, :moneda, :descripcion, :referencia, :contraparte, false, NULL, 'cobranzas', NOW())
+                """),
+                {
+                    "id": new_bt_id,
+                    "company_id": str(company_id),
+                    "bank_account_id": target_bank_id,
+                    "fecha": fecha_final,
+                    "monto": float(monto_total),
+                    "moneda": rp["moneda"] or "PYG",
+                    "descripcion": f"Cobro AR Transferencia Recibo #{numero_recibo}{ref_str} - Cliente: {cust_name}".strip(),
+                    "referencia": ref_final,
+                    "contraparte": cust_name,
+                },
+            )
+            await db.execute(
+                text("UPDATE bank_accounts SET saldo_actual = saldo_actual + :m, updated_at = NOW() WHERE id::text = :aid"),
+                {"m": float(monto_total), "aid": target_bank_id},
+            )
+
+        # Si venía de efectivo (bóveda), neutralizar la entrada en bóveda si existe
+        if rp["vault_entry_id"]:
+            await db.execute(
+                text("""
+                    UPDATE vault_entries
+                    SET estado = 'anulado',
+                        observaciones = COALESCE(observaciones, '') || :nota
+                    WHERE id = :ve_id AND estado = 'en_boveda'
+                """),
+                {"ve_id": rp["vault_entry_id"], "nota": f" [Anulado: rectificado a banco {target_bank_id} - {motivo}]"},
+            )
+
+        # Actualizar el recibo
+        nota_audit = f"\n[Rectificación {date.today().isoformat()}: {motivo}]"
+        await db.execute(
+            text("""
+                UPDATE receivable_payments
+                SET forma_pago = :forma,
+                    destino_fondos = 'banco',
+                    bank_account_id = :bank_id,
+                    monto_transferencia = :monto,
+                    monto_efectivo_recibido = 0,
+                    referencia = :ref,
+                    referencia_transferencia = :ref,
+                    fecha = :fec,
+                    fecha_transferencia = :fec,
+                    vault_entry_id = NULL,
+                    observaciones = COALESCE(observaciones, '') || :audit
+                WHERE id = :pid
+            """),
+            {
+                "forma": target_forma,
+                "bank_id": target_bank_id,
+                "monto": float(monto_total),
+                "ref": ref_final,
+                "fec": fecha_final,
+                "audit": nota_audit,
+                "pid": rp["id"],
+            },
+        )
+
+    # B. A Efectivo (Bóveda)
+    elif target_forma == "efectivo":
+        if bt:
+            # Revertir saldo de cuenta bancaria y eliminar la transacción no conciliada
+            await db.execute(
+                text("UPDATE bank_accounts SET saldo_actual = saldo_actual - :m, updated_at = NOW() WHERE id::text = :aid"),
+                {"m": float(bt["monto"]), "aid": str(bt["bank_account_id"])},
+            )
+            await db.execute(
+                text("DELETE FROM bank_transactions WHERE id = :bt_id"),
+                {"bt_id": bt["id"]},
+            )
+
+        # Crear entrada en bóveda si no tenía
+        new_ve_id = rp["vault_entry_id"]
+        if not new_ve_id:
+            new_ve_id = uuid.uuid4()
+            await db.execute(
+                text("""
+                    INSERT INTO vault_entries
+                        (id, company_id, origen, monto_pyg, monto_brl, monto_usd, estado, observaciones, registrado_por, created_at)
+                    VALUES
+                        (:id, :company_id, 'cobranza_ar', :monto, 0, 0, 'en_boveda', :obs, :uid, NOW())
+                """),
+                {
+                    "id": new_ve_id,
+                    "company_id": str(company_id),
+                    "monto": float(monto_total),
+                    "obs": f"Cobro AR Recibo #{numero_recibo} [Rectificado a Efectivo - {motivo}]",
+                    "uid": rp["registrado_por"],
+                },
+            )
+
+        nota_audit = f"\n[Rectificación {date.today().isoformat()}: {motivo}]"
+        await db.execute(
+            text("""
+                UPDATE receivable_payments
+                SET forma_pago = 'efectivo',
+                    destino_fondos = 'boveda',
+                    bank_account_id = NULL,
+                    monto_transferencia = 0,
+                    monto_efectivo_recibido = :monto,
+                    vault_entry_id = :ve_id,
+                    fecha = :fec,
+                    observaciones = COALESCE(observaciones, '') || :audit
+                WHERE id = :pid
+            """),
+            {
+                "monto": float(monto_total),
+                "ve_id": new_ve_id,
+                "fec": fecha_final,
+                "audit": nota_audit,
+                "pid": rp["id"],
+            },
+        )
+
+    await db.flush()
+    return {
+        "success": True,
+        "payment_id": str(rp["id"]),
+        "numero_recibo": numero_recibo,
+        "forma_pago": target_forma,
+        "bank_account_id": target_bank_id if target_forma != "efectivo" else None,
+        "monto": float(monto_total),
+        "mensaje": f"Recibo #{numero_recibo} rectificado exitosamente.",
+    }
+
+
+
 async def list_payments_for_document(db: AsyncSession, accounts_receivable_id: str) -> list[dict]:
     result = await db.execute(
         text("""
-            SELECT rp.id, rp.fecha, rp.forma_pago, rp.referencia, rp.observaciones, rpa.monto, rp.created_at
+            SELECT rp.id, rp.numero_recibo, rp.fecha, rp.forma_pago, rp.referencia, rp.bank_account_id, rp.observaciones, rpa.monto, rp.created_at
             FROM receivable_payment_allocations rpa
             JOIN receivable_payments rp ON rp.id = rpa.receivable_payment_id
             WHERE rpa.accounts_receivable_id = :ar_id

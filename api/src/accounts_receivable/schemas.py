@@ -280,3 +280,11 @@ class CreditBlockingPolicy(BaseModel):
     bloqueo_mora_activo: bool = False
     dias_mora_limite: int = Field(default=60, ge=1, le=365)
 
+
+class ReceivablePaymentRectify(BaseModel):
+    forma_pago: Optional[str] = None
+    bank_account_id: Optional[UUID] = None
+    referencia: Optional[str] = None
+    fecha: Optional[date] = None
+    motivo: str = Field(..., min_length=3, description="Motivo obligatorio para auditoría")
+

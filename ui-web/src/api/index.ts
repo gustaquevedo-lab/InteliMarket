@@ -4173,7 +4173,12 @@ export const api = {
     compensateInternalConsumption: (data: { customer_id: string; accounts_receivable_ids: string[]; category_id: string; cost_center_id?: string; fecha?: string; observaciones?: string }) =>
       client.post<{ success: boolean; payment_id: string; numero_recibo: string; monto_total: number; facturas_canceladas: number; gastos_registrados: number }>(`/v1/companies/${COMPANY_ID}/accounts-receivable/compensate-internal-consumption`, data),
     verifyReceipt: (paymentId: string) => client.get<any>(`/v1/accounts-receivable/receipts/${paymentId}/verify`),
-    documentPayments: (id: string) => client.get<{ id: string; fecha: string; forma_pago: string | null; referencia: string | null; observaciones: string | null; monto: number; created_at: string }[]>(`/v1/accounts-receivable/${id}/payments`),
+    rectifyPayment: (paymentId: string, data: { forma_pago?: string; bank_account_id?: string; referencia?: string; fecha?: string; motivo: string }) =>
+      client.patch<{ success: boolean; payment_id: string; numero_recibo: string; forma_pago: string; bank_account_id?: string; monto: number; mensaje: string }>(
+        `/v1/companies/${COMPANY_ID}/accounts-receivable/payments/${paymentId}/rectify`,
+        data
+      ),
+    documentPayments: (id: string) => client.get<{ id: string; numero_recibo?: string; fecha: string; forma_pago: string | null; referencia: string | null; bank_account_id?: string | null; observaciones: string | null; monto: number; created_at: string }[]>(`/v1/accounts-receivable/${id}/payments`),
     customerPayments: (customerId: string) => client.get<{ id: string; fecha: string; monto_total: number; forma_pago: string | null; referencia: string | null; observaciones: string | null; created_at: string; allocations: { accounts_receivable_id: string; numero_documento: string; monto: number }[] }[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/customers/${customerId}/payments`),
     corporateAgreementsSummary: () => client.get<any[]>(`/v1/companies/${COMPANY_ID}/accounts-receivable/corporate-agreements/summary`),
     corporateAgreementPendingDocs: (empresa: string, fecha_corte?: string, tipo_destino?: string) =>
