@@ -4,7 +4,7 @@ import {
   XCircle, AlertTriangle, Clock, Calendar, RefreshCw, Loader2,
   Building2, Landmark, User, FileText, ArrowUpRight, ArrowDownLeft, ShieldCheck,
   Check, X, FileSpreadsheet, History, Info, Sparkles, DollarSign, Receipt, Ban,
-  ArrowUp, ArrowDown, ArrowUpDown, Printer
+  ArrowUp, ArrowDown, ArrowUpDown, Printer, Edit3, RotateCcw
 } from "lucide-react"
 import { api } from "../../api"
 import { useAuth } from "../../context/AuthContext"
@@ -93,6 +93,33 @@ export default function ChequesPage() {
   const [cuentaRechazoId, setCuentaRechazoId] = useState("")
   const [notasRechazo, setNotasRechazo] = useState("")
   const [rechazando, setRechazando] = useState(false)
+
+  // Modal Edición Completa de Cheque (N°, Fechas, Monto, Estado, etc.)
+  const [chequeAEditar, setChequeAEditar] = useState<any | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [editForm, setEditForm] = useState({
+    numero: "",
+    banco_emisor: BANCOS_PARAGUAY[0],
+    bank_account_id: "",
+    beneficiario: "",
+    supplier_id: "",
+    monto: "",
+    moneda: "PYG",
+    fecha_emision: getTodayAsuncion(),
+    fecha_pago: getTodayAsuncion(),
+    fecha_entrega: "",
+    tipo: "emitido",
+    diferido: false,
+    estado: "pendiente",
+    concepto: "",
+    notas: "",
+  })
+
+  // Modal Reversión Rápida de Compensación (Cheques cobrados que aún no compensaron)
+  const [chequeARevertir, setChequeARevertir] = useState<any | null>(null)
+  const [estadoDestinoReversion, setEstadoDestinoReversion] = useState<string>("entregado")
+  const [motivoReversion, setMotivoReversion] = useState<string>("")
+  const [revertiendo, setRevertiendo] = useState<boolean>(false)
 
   // Filtro rápido de cronograma de vencimiento diferidos
   const [filtroVencimiento, setFiltroVencimiento] = useState<string>("all")
@@ -419,6 +446,95 @@ export default function ChequesPage() {
       toast.error("Error al registrar cheque", err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleAbrirEditar = (c: any) => {
+    const esEmitido = c.tipo === "emitido" || c.tipo_cheque === "emitido" || Boolean(c.bank_account_id)
+    const bancoDetectado = c.banco_emisor || (bankAccounts.find((b: any) => b.id === c.bank_account_id)?.banco || BANCOS_PARAGUAY[0])
+    setChequeAEditar(c)
+    setEditForm({
+      numero: c.numero || "",
+      banco_emisor: bancoDetectado,
+      bank_account_id: c.bank_account_id || (bankAccounts.length > 0 ? bankAccounts[0].id : ""),
+      beneficiario: c.beneficiario || c.supplier_nombre || supplierMap[c.supplier_id] || "",
+      supplier_id: c.supplier_id || "",
+      monto: String(c.monto || ""),
+      moneda: c.moneda || "PYG",
+      fecha_emision: c.fecha_emision ? String(c.fecha_emision).slice(0, 10) : getTodayAsuncion(),
+      fecha_pago: c.fecha_pago ? String(c.fecha_pago).slice(0, 10) : (c.fecha_emision ? String(c.fecha_emision).slice(0, 10) : getTodayAsuncion()),
+      fecha_entrega: c.fecha_entrega ? String(c.fecha_entrega).slice(0, 10) : "",
+      tipo: esEmitido ? "emitido" : "recibido",
+      diferido: Boolean(c.diferido),
+      estado: c.estado || "pendiente",
+      concepto: c.observaciones || c.concepto || "",
+      notas: "",
+    })
+  }
+
+  const handleGuardarEdicion = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!chequeAEditar) return
+    if (!editForm.numero.trim()) { toast.error("Ingresá el número de cheque", ""); return }
+    if (!editForm.beneficiario.trim()) { toast.error("Ingresá el beneficiario o proveedor", ""); return }
+    const montoNum = parseFloat(editForm.monto)
+    if (!montoNum || montoNum <= 0) { toast.error("Ingresá un monto válido", ""); return }
+    if (editForm.tipo === "emitido" && !editForm.bank_account_id) {
+      toast.error("Seleccioná la cuenta bancaria emisora", "")
+      return
+    }
+
+    setSavingEdit(true)
+    try {
+      const payload: any = {
+        numero: editForm.numero.trim(),
+        banco_emisor: editForm.banco_emisor || undefined,
+        bank_account_id: editForm.tipo === "emitido" ? (editForm.bank_account_id || undefined) : undefined,
+        beneficiario: editForm.beneficiario.trim(),
+        supplier_id: editForm.supplier_id || undefined,
+        monto: montoNum,
+        moneda: editForm.moneda,
+        fecha_emision: editForm.fecha_emision,
+        fecha_pago: editForm.diferido ? editForm.fecha_pago : (editForm.fecha_pago || editForm.fecha_emision),
+        fecha_entrega: editForm.fecha_entrega || undefined,
+        diferido: editForm.diferido,
+        estado: editForm.estado,
+        concepto: editForm.concepto?.trim() || undefined,
+        notas: editForm.notas?.trim() || undefined,
+      }
+
+      await api.cheques.update(chequeAEditar.id, payload)
+      toast.success("Cheque Modificado con Éxito", `El cheque N° ${editForm.numero} fue actualizado correctamente.`)
+      setChequeAEditar(null)
+      loadData()
+    } catch (err: any) {
+      toast.error("Error al actualizar cheque", err.message)
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  const handleRevertirCompensacion = async () => {
+    if (!chequeARevertir) return
+    setRevertiendo(true)
+    try {
+      const notaFinal = motivoReversion.trim() || "Reversión de compensación bancaria: cheque diferido no debitado en banco aún."
+      await api.cheques.updateEstado(chequeARevertir.id, {
+        estado: estadoDestinoReversion,
+        notas: notaFinal,
+      })
+      toast.success(
+        "Compensación Revertida",
+        `El cheque N° ${chequeARevertir.numero} volvió a estado '${statusConfig[estadoDestinoReversion]?.label || estadoDestinoReversion}'.`
+      )
+      setChequeARevertir(null)
+      setMotivoReversion("")
+      setEstadoDestinoReversion("entregado")
+      loadData()
+    } catch (err: any) {
+      toast.error("Error al revertir compensación", err.message)
+    } finally {
+      setRevertiendo(false)
     }
   }
 
@@ -896,6 +1012,15 @@ export default function ChequesPage() {
                             <History className="w-3.5 h-3.5" />
                           </button>
 
+                          {/* EDITAR CHEQUE (Número, Banco, Beneficiario, Fechas, Monto, Estado) */}
+                          <button
+                            onClick={() => handleAbrirEditar(c)}
+                            className="p-1.5 rounded-lg text-indigo-400 hover:text-indigo-200 hover:bg-indigo-950/60 border border-indigo-500/30 transition"
+                            title="Editar datos del cheque (corregir número, banco, fechas, monto o estado)"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+
                           {/* ACCIONES CHEQUES RECIBIDOS DE CLIENTES */}
                           {!esEmitido && c.estado === "en_cartera" && (
                             <button
@@ -913,6 +1038,19 @@ export default function ChequesPage() {
                               title="Efectivizar cobro de cheque"
                             >
                               <Check className="w-3 h-3" />Efectivizar
+                            </button>
+                          )}
+                          {!esEmitido && c.estado === "cobrado" && (
+                            <button
+                              onClick={() => {
+                                setChequeARevertir(c)
+                                setEstadoDestinoReversion("en_cartera")
+                                setMotivoReversion("")
+                              }}
+                              className="px-2 py-1 rounded-lg text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/25 transition flex items-center gap-1"
+                              title="Revertir cobro de cheque de cliente a cartera"
+                            >
+                              <RotateCcw className="w-3 h-3" />Revertir
                             </button>
                           )}
 
@@ -933,6 +1071,19 @@ export default function ChequesPage() {
                               title="Marcar cheque como compensado / debitado por el banco"
                             >
                               <Check className="w-3 h-3" />Compensó
+                            </button>
+                          )}
+                          {esEmitido && c.estado === "cobrado" && (
+                            <button
+                              onClick={() => {
+                                setChequeARevertir(c)
+                                setEstadoDestinoReversion("entregado")
+                                setMotivoReversion("")
+                              }}
+                              className="px-2 py-1 rounded-lg text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/25 transition flex items-center gap-1"
+                              title="Revertir compensación: volver a cheque diferido en tránsito pendiente de cobro"
+                            >
+                              <RotateCcw className="w-3 h-3" />Revertir
                             </button>
                           )}
 
@@ -1747,6 +1898,469 @@ export default function ChequesPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL REVERSIÓN DE COMPENSACIÓN BANCARIA */}
+      {chequeARevertir && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { if (!revertiendo) setChequeARevertir(null) }}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-amber-300/60 dark:border-amber-700/40 flex flex-col max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-amber-100 dark:border-amber-900/40 bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-400/30">
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white">Revertir Compensación de Cheque</h3>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                    N° <strong className="font-mono text-purple-600 dark:text-purple-400">{chequeARevertir.numero}</strong> · {chequeARevertir.banco_emisor || "Banco"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={revertiendo}
+                onClick={() => setChequeARevertir(null)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4 flex-1 overflow-y-auto text-xs">
+              <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-amber-800 dark:text-amber-200 space-y-1">
+                  <p>
+                    <strong>Ajuste de cartera:</strong> Este cheque figura actualmente como <span className="underline font-bold">Cobrado / Compensado</span>.
+                  </p>
+                  <p>
+                    Si aún no compensó en el banco o fue marcado por error, al confirmar volverá al estado seleccionado y se reincorporará a los cheques diferidos pendientes de débito.
+                  </p>
+                  <p className="text-[10px] text-amber-700 dark:text-amber-300">
+                    ℹ️ Si existía una transacción bancaria de débito asociada a este cobro, será cancelada automáticamente y se restituirá el saldo en la cuenta bancaria.
+                  </p>
+                </div>
+              </div>
+
+              {/* Resumen del cheque */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="bg-gray-50 dark:bg-slate-800/60 rounded-xl p-3 border border-gray-100 dark:border-slate-700">
+                  <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Monto del Cheque</p>
+                  <p className="font-black font-mono text-gray-900 dark:text-white mt-0.5">
+                    {formatCurrency(chequeARevertir.monto, chequeARevertir.moneda)}
+                  </p>
+                </div>
+                <div className="bg-gray-50 dark:bg-slate-800/60 rounded-xl p-3 border border-gray-100 dark:border-slate-700">
+                  <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Beneficiario / Proveedor</p>
+                  <p className="font-bold text-gray-800 dark:text-gray-200 mt-0.5 truncate">
+                    {chequeARevertir.beneficiario || supplierMap[chequeARevertir.supplier_id] || "Al Portador"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Estado de destino */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1.5">
+                  Revertir cheque al estado <span className="text-red-500">*</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEstadoDestinoReversion("entregado")}
+                    className={`p-3 rounded-xl border text-left transition ${
+                      estadoDestinoReversion === "entregado"
+                        ? "border-purple-500 bg-purple-50/80 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 ring-2 ring-purple-500/20"
+                        : "border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800 text-gray-700 dark:text-gray-300"
+                    }`}
+                  >
+                    <p className="font-extrabold text-xs">Entregado a Proveedor</p>
+                    <p className="text-[10px] opacity-75 mt-0.5">En poder del proveedor, aguarda compensación (Recomendado)</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEstadoDestinoReversion("pendiente")}
+                    className={`p-3 rounded-xl border text-left transition ${
+                      estadoDestinoReversion === "pendiente"
+                        ? "border-purple-500 bg-purple-50/80 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200 ring-2 ring-purple-500/20"
+                        : "border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-800 text-gray-700 dark:text-gray-300"
+                    }`}
+                  >
+                    <p className="font-extrabold text-xs">Pendiente de Entrega</p>
+                    <p className="text-[10px] opacity-75 mt-0.5">En gaveta / caja, aún no entregado físicamente</p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Motivo de reversión */}
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Motivo de la Reversión (para auditoría)
+                </label>
+                <input
+                  type="text"
+                  value={motivoReversion}
+                  onChange={e => setMotivoReversion(e.target.value)}
+                  placeholder="Ej: Aún no compensó en banco / Marcado cobrado por error..."
+                  className="input text-xs w-full"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between bg-gray-50/70 dark:bg-slate-900/50 shrink-0">
+              <button
+                type="button"
+                disabled={revertiendo}
+                onClick={() => setChequeARevertir(null)}
+                className="btn-outline text-xs px-4 py-2 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={revertiendo}
+                onClick={handleRevertirCompensacion}
+                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center gap-2 shadow-sm"
+              >
+                {revertiendo ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /><span>Revirtiendo...</span></>
+                ) : (
+                  <><RotateCcw className="w-4 h-4" /><span>Confirmar Reversión</span></>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDICIÓN COMPLETA DE CHEQUE */}
+      {chequeAEditar && (() => {
+        const esEmitido = editForm.tipo === "emitido"
+        const selectedAccount = bankAccounts.find((ba: any) => ba.id === editForm.bank_account_id)
+        const currentSaldo = selectedAccount ? Number(selectedAccount.saldo_actual || 0) : 0
+        const montoNum = Number(editForm.monto) || 0
+        const currency = esEmitido ? (selectedAccount?.moneda || "PYG") : editForm.moneda
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => { if (!savingEdit) setChequeAEditar(null) }}>
+            <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gradient-to-r from-indigo-500/10 via-purple-500/5 to-transparent shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                    <Edit3 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-extrabold text-gray-900 dark:text-white">
+                        Editar Cheque N° {editForm.numero || chequeAEditar.numero}
+                      </h3>
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${esEmitido ? "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300" : "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"}`}>
+                        {esEmitido ? "Emitido a Proveedor" : "Recibido de Cliente"}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                      Corregí número de cheque, banco, contraparte, fechas, monto o estado de compensación
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  disabled={savingEdit}
+                  onClick={() => setChequeAEditar(null)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-40"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Form Content */}
+              <form onSubmit={handleGuardarEdicion} className="flex-1 flex flex-col overflow-hidden">
+                <div className="p-6 space-y-4 flex-1 overflow-y-auto text-xs">
+                  {/* BLOQUE 1: IDENTIFICACIÓN Y BANCO */}
+                  <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                      1. Identificación y Entidad Bancaria
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-start">
+                      <div className="sm:col-span-5">
+                        <label className="label-field mb-1">
+                          Número de Cheque <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          className="input-field font-mono text-xs font-bold"
+                          placeholder="Ej: 00482910"
+                          value={editForm.numero}
+                          onChange={e => setEditForm(f => ({ ...f, numero: e.target.value }))}
+                        />
+                        <p className="text-[10px] text-gray-400 mt-1">Podés corregir cualquier error de número aquí</p>
+                      </div>
+
+                      {esEmitido ? (
+                        <div className="sm:col-span-7">
+                          <label className="label-field mb-1">
+                            Cuenta Bancaria Emisora <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            className="input-field text-xs font-medium"
+                            value={editForm.bank_account_id}
+                            onChange={e => {
+                              const ba = bankAccounts.find((a: any) => a.id === e.target.value)
+                              setEditForm(f => ({
+                                ...f,
+                                bank_account_id: e.target.value,
+                                banco_emisor: ba?.banco || f.banco_emisor
+                              }))
+                            }}
+                          >
+                            <option value="">— Seleccionar Cuenta Bancaria —</option>
+                            {bankAccounts.map((ba: any) => (
+                              <option key={ba.id} value={ba.id}>
+                                {ba.alias ? `[${ba.alias}] ` : ""}{ba.banco} — {ba.numero_cuenta} ({ba.moneda})
+                              </option>
+                            ))}
+                          </select>
+                          {selectedAccount && (
+                            <p className="text-[10px] text-gray-500 mt-1 font-mono">
+                              Saldo actual: Gs. {currentSaldo.toLocaleString("es-PY")}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="sm:col-span-7">
+                          <label className="label-field mb-1">Banco Emisor del Cheque</label>
+                          <select
+                            className="input-field text-xs font-medium"
+                            value={editForm.banco_emisor}
+                            onChange={e => setEditForm(f => ({ ...f, banco_emisor: e.target.value }))}
+                          >
+                            {BANCOS_PARAGUAY.map(b => (
+                              <option key={b} value={b}>{b}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* BLOQUE 2: CONTRAPARTE Y MONTO */}
+                  <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                      2. Contraparte y Monto
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-start">
+                      {esEmitido ? (
+                        <div className="md:col-span-7">
+                          <SupplierSearchInput
+                            label="Beneficiario / Proveedor"
+                            required
+                            suppliers={suppliers}
+                            value={editForm.beneficiario}
+                            supplierId={editForm.supplier_id}
+                            onSelectSupplier={({ id, name }) => setEditForm(f => ({ ...f, beneficiario: name, supplier_id: id || "" }))}
+                            onClear={() => setEditForm(f => ({ ...f, beneficiario: "", supplier_id: "" }))}
+                            placeholder="Buscar proveedor por Razón Social o RUC..."
+                          />
+                        </div>
+                      ) : (
+                        <div className="md:col-span-7">
+                          <label className="label-field mb-1">
+                            Cliente Librador / Titular <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              required
+                              className="input-field pl-9 text-xs font-semibold"
+                              placeholder="Nombre del librador..."
+                              value={editForm.beneficiario}
+                              onChange={e => setEditForm(f => ({ ...f, beneficiario: e.target.value }))}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="md:col-span-5">
+                        <label className="label-field mb-1">
+                          Monto del Cheque <span className="text-red-500">*</span>
+                        </label>
+                        <CurrencyInput
+                          value={editForm.monto}
+                          onChangeValue={num => setEditForm(f => ({ ...f, monto: String(num) }))}
+                          currency={currency}
+                          placeholder="0"
+                          className="input-field text-xs font-mono font-black text-gray-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BLOQUE 3: MODALIDAD Y FECHAS */}
+                  <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-amber-500" />
+                        3. Modalidad y Fechas
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={editForm.diferido}
+                          onChange={e => setEditForm(f => ({ ...f, diferido: e.target.checked }))}
+                          className="rounded border-gray-300 text-purple-600 focus:ring-purple-500 w-4 h-4"
+                        />
+                        <span className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                          ¿Es Cheque Diferido?
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="label-field mb-1">Fecha de Emisión *</label>
+                        <input
+                          type="date"
+                          required
+                          className="input-field text-xs font-mono"
+                          value={editForm.fecha_emision}
+                          onChange={e => setEditForm(f => ({ ...f, fecha_emision: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="label-field mb-1">
+                          Fecha de Vencimiento / Pago *
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          className="input-field text-xs font-mono font-bold text-purple-600 dark:text-purple-400"
+                          value={editForm.fecha_pago}
+                          onChange={e => setEditForm(f => ({ ...f, fecha_pago: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="label-field mb-1">Fecha de Entrega</label>
+                        <input
+                          type="date"
+                          className="input-field text-xs font-mono"
+                          value={editForm.fecha_entrega}
+                          onChange={e => setEditForm(f => ({ ...f, fecha_entrega: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BLOQUE 4: ESTADO Y CLEARING BANCARIO */}
+                  <div className="bg-slate-50/60 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/60 space-y-3">
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-purple-500" />
+                      4. Estado y Clearing Bancario
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                      <div>
+                        <label className="label-field mb-1">
+                          Estado Actual del Cheque <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          className="input-field text-xs font-bold"
+                          value={editForm.estado}
+                          onChange={e => setEditForm(f => ({ ...f, estado: e.target.value }))}
+                        >
+                          <option value="pendiente">Pendiente de Entrega (en gaveta)</option>
+                          <option value="entregado">Entregado a Proveedor (aguarda cobro / en tránsito)</option>
+                          <option value="cobrado">Cobrado / Compensado en Banco (debitado)</option>
+                          <option value="rechazado">Rechazado / Sin Fondos</option>
+                          <option value="anulado">Anulado</option>
+                          {!esEmitido && <option value="en_cartera">En Cartera</option>}
+                          {!esEmitido && <option value="depositado">Depositado</option>}
+                        </select>
+                      </div>
+
+                      <div className="text-[11px] p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/60">
+                        {editForm.estado === "cobrado" ? (
+                          <span className="text-emerald-700 dark:text-emerald-400 font-medium">
+                            ✅ <strong>Compensado:</strong> El cheque se considera debitado por el banco.
+                          </span>
+                        ) : chequeAEditar.estado === "cobrado" && editForm.estado !== "cobrado" ? (
+                          <span className="text-amber-700 dark:text-amber-400 font-bold">
+                            ⚠️ <strong>Reversión activa:</strong> Se eliminará el débito bancario asociado y se restituirá el saldo de la cuenta.
+                          </span>
+                        ) : (
+                          <span className="text-slate-600 dark:text-slate-400">
+                            Estado: <strong>{statusConfig[editForm.estado]?.label || editForm.estado}</strong>.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BLOQUE 5: OBSERVACIONES Y NOTA DE AUDITORÍA */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="label-field mb-1">Concepto / Facturas Cubiertas</label>
+                      <input
+                        type="text"
+                        className="input-field text-xs"
+                        placeholder="Ej: Pago Fac 001-002-123456..."
+                        value={editForm.concepto}
+                        onChange={e => setEditForm(f => ({ ...f, concepto: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <label className="label-field mb-1">Motivo / Nota de la Modificación</label>
+                      <input
+                        type="text"
+                        className="input-field text-xs"
+                        placeholder="Ej: Corrección de número de cheque / Reversión de cobro..."
+                        value={editForm.notas}
+                        onChange={e => setEditForm(f => ({ ...f, notas: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer siempre visible */}
+                <div className="px-6 py-4 border-t border-gray-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setChequeAEditar(null)}
+                    disabled={savingEdit}
+                    className="btn-outline text-xs px-4 py-2"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingEdit || !editForm.numero.trim() || !editForm.beneficiario.trim() || montoNum <= 0}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black transition disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                  >
+                    {savingEdit ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Guardando Cambios...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-4 h-4" />
+                        <span>Guardar Modificación</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* MODAL IMPRESIÓN CHEQUE BANCO CONTINENTAL (EPSON LX-300+ ESC/P) */}
       <ImprimirChequeContinentalModal

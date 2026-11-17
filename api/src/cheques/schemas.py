@@ -6,17 +6,16 @@ from uuid import UUID
 
 ESTADOS_VALIDOS = ["pendiente", "entregado", "cobrado", "rechazado", "anulado", "en_cartera", "depositado"]
 
-# Transiciones permitidas -- un cheque cobrado o anulado es un hecho consumado,
-# no vuelve atras; rechazado puede reintentarse marcandolo pendiente de nuevo
-# tras renegociar con el proveedor.
+# Transiciones permitidas -- altamente flexibles para permitir reversión de cobros indebidos,
+# reactivación de cheques diferidos que aún no compensaron, y corrección de cheques anulados o rechazados.
 TRANSICIONES_VALIDAS = {
-    "pendiente": {"entregado", "cobrado", "rechazado", "anulado"},
+    "pendiente": {"entregado", "cobrado", "rechazado", "anulado", "en_cartera"},
     "entregado": {"cobrado", "rechazado", "anulado", "pendiente"},
-    "rechazado": {"pendiente", "anulado"},
-    "en_cartera": {"depositado", "cobrado", "rechazado", "anulado"},
-    "depositado": {"cobrado", "rechazado", "anulado"},
-    "cobrado": {"entregado", "rechazado"},
-    "anulado": set(),
+    "rechazado": {"pendiente", "entregado", "en_cartera", "anulado"},
+    "en_cartera": {"depositado", "cobrado", "rechazado", "anulado", "pendiente"},
+    "depositado": {"cobrado", "rechazado", "anulado", "en_cartera"},
+    "cobrado": {"entregado", "pendiente", "rechazado", "anulado", "en_cartera", "depositado"},
+    "anulado": {"pendiente", "entregado", "en_cartera"},
 }
 
 
@@ -39,6 +38,13 @@ class ChequeCreate(BaseModel):
     @field_validator("fecha_entrega", "fecha_pago", mode="before")
     @classmethod
     def parse_optional_date(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+    @field_validator("bank_account_id", "supplier_id", "invoice_payment_id", mode="before")
+    @classmethod
+    def parse_optional_uuid(cls, v):
         if v == "" or v is None:
             return None
         return v
@@ -71,6 +77,13 @@ class ChequeUpdate(BaseModel):
     @field_validator("fecha_entrega", "fecha_pago", "fecha_emision", mode="before")
     @classmethod
     def parse_optional_date(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+    @field_validator("bank_account_id", "supplier_id", mode="before")
+    @classmethod
+    def parse_optional_uuid(cls, v):
         if v == "" or v is None:
             return None
         return v

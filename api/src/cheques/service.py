@@ -198,10 +198,10 @@ async def _sync_cheque_bancario(
         tx_existente = await db.execute(
             select(BankTransaction).where(
                 BankTransaction.cheque_id == cheque.id,
-                BankTransaction.tipo == "debito",
+                BankTransaction.tipo.in_(["debito", "egreso"]),
             )
         )
-        if not tx_existente.scalar_one_or_none():
+        if not tx_existente.scalars().first():
             bank_acc = await db.get(BankAccount, ba_id)
             if bank_acc:
                 f_pago = cheque.fecha_pago or cheque.fecha_emision or date.today()
@@ -225,16 +225,15 @@ async def _sync_cheque_bancario(
                 bank_acc.saldo_actual = (bank_acc.saldo_actual or Decimal("0")) - Decimal(str(cheque.monto))
                 db.add(bank_acc)
 
-    # Transición 2: Reversión (desmarcar de cobrado a pendiente/entregado/anulado)
+    # Transición 2: Reversión (desmarcar de cobrado a pendiente/entregado/anulado/etc)
     elif estado_anterior == "cobrado" and nuevo_estado != "cobrado":
         tx_res = await db.execute(
             select(BankTransaction).where(
                 BankTransaction.cheque_id == cheque.id,
-                BankTransaction.tipo == "debito",
+                BankTransaction.tipo.in_(["debito", "egreso"]),
             )
         )
-        tx = tx_res.scalar_one_or_none()
-        if tx:
+        for tx in tx_res.scalars().all():
             bank_acc = await db.get(BankAccount, tx.bank_account_id)
             if bank_acc:
                 bank_acc.saldo_actual = (bank_acc.saldo_actual or Decimal("0")) + Decimal(str(tx.monto))
@@ -260,16 +259,24 @@ async def update_cheque(
     if data.banco_emisor is not None and data.banco_emisor != cheque.banco_emisor:
         cambios.append(f"Banco: {cheque.banco_emisor} -> {data.banco_emisor}")
         cheque.banco_emisor = data.banco_emisor
-    if data.bank_account_id is not None:
+    if data.bank_account_id is not None and data.bank_account_id != cheque.bank_account_id:
+        from api.src.financial.models import BankAccount
+        bank_acc = await db.get(BankAccount, data.bank_account_id)
+        if bank_acc and not data.banco_emisor:
+            cheque.banco_emisor = bank_acc.banco or cheque.banco_emisor
+        cambios.append("Cuenta bancaria actualizada")
         cheque.bank_account_id = data.bank_account_id
     if data.beneficiario is not None and data.beneficiario.strip() != cheque.beneficiario:
         cambios.append(f"Beneficiario: {cheque.beneficiario} -> {data.beneficiario.strip()}")
         cheque.beneficiario = data.beneficiario.strip()
-    if data.supplier_id is not None:
+    if data.supplier_id is not None and data.supplier_id != cheque.supplier_id:
+        cambios.append("Proveedor actualizado")
         cheque.supplier_id = data.supplier_id
     if data.monto is not None and data.monto != cheque.monto:
         cambios.append(f"Monto: {cheque.monto} -> {data.monto}")
         cheque.monto = data.monto
+    if data.moneda is not None and data.moneda != cheque.moneda:
+        cheque.moneda = data.moneda
     if data.fecha_emision is not None and data.fecha_emision != cheque.fecha_emision:
         cambios.append(f"Emisión: {cheque.fecha_emision} -> {data.fecha_emision}")
         cheque.fecha_emision = data.fecha_emision
@@ -279,26 +286,32 @@ async def update_cheque(
     if data.fecha_pago is not None and data.fecha_pago != cheque.fecha_pago:
         cambios.append(f"Vencimiento/Pago: {cheque.fecha_pago} -> {data.fecha_pago}")
         cheque.fecha_pago = data.fecha_pago
-    if data.diferido is not None:
+    if data.diferido is not None and data.diferido != cheque.diferido:
+        cambios.append(f"Diferido: {'Sí' if data.diferido else 'No'}")
         cheque.diferido = data.diferido
-    if data.concepto is not None:
+    if data.concepto is not None and data.concepto != cheque.concepto:
         cheque.concepto = data.concepto
-    if data.notas is not None:
+    if data.notas is not None and data.notas != cheque.notas:
         cheque.notas = data.notas
 
     # Si cambia el estado
     if data.estado is not None and data.estado != cheque.estado:
+        permitidos = TRANSICIONES_VALIDAS.get(cheque.estado, set())
+        if permitidos and data.estado not in permitidos:
+            raise ValueError(f"No se puede pasar de '{cheque.estado}' a '{data.estado}'")
         estado_ant = cheque.estado
         cheque.estado = data.estado
         cheque.estado_updated_by = uuid.UUID(user_id) if user_id else None
         cheque.estado_updated_at = datetime.now(timezone.utc)
+        cambios.append(f"Estado: {estado_ant} -> {data.estado}")
+        nota_hist = data.notas or (f"Cambio de estado: {', '.join(cambios)}" if cambios else "Actualización de estado")
         db.add(ChequeHistorial(
             cheque_id=cheque.id,
             estado_anterior=estado_ant,
             estado_nuevo=data.estado,
             user_id=uuid.UUID(user_id) if user_id else None,
             user_nombre=user_nombre,
-            notas=f"Cambio de estado: {', '.join(cambios)}" if cambios else "Actualización de estado",
+            notas=nota_hist,
         ))
         await _sync_cheque_bancario(db, cheque, estado_ant, data.estado)
     elif cambios:
@@ -308,8 +321,34 @@ async def update_cheque(
             estado_nuevo=cheque.estado,
             user_id=uuid.UUID(user_id) if user_id else None,
             user_nombre=user_nombre,
-            notas=f"Edición de datos: {'; '.join(cambios)}",
+            notas=data.notas or f"Edición de datos: {'; '.join(cambios)}",
         ))
+
+    # Si sigue cobrado y se modificaron datos como monto o número o fecha, sincronizar con bank_transactions
+    if cheque.estado == "cobrado":
+        from api.src.financial.models import BankTransaction, BankAccount
+        tx_res = await db.execute(
+            select(BankTransaction).where(
+                BankTransaction.cheque_id == cheque.id,
+                BankTransaction.tipo.in_(["debito", "egreso"]),
+            )
+        )
+        for tx in tx_res.scalars().all():
+            if data.monto is not None and Decimal(str(data.monto)) != Decimal(str(tx.monto)):
+                diff = Decimal(str(data.monto)) - Decimal(str(tx.monto))
+                tx.monto = Decimal(str(data.monto))
+                bank_acc = await db.get(BankAccount, tx.bank_account_id)
+                if bank_acc:
+                    bank_acc.saldo_actual = (bank_acc.saldo_actual or Decimal("0")) - diff
+                    db.add(bank_acc)
+            if data.numero is not None:
+                tx.referencia = str(data.numero).strip()
+            if data.fecha_pago is not None:
+                tx.fecha = data.fecha_pago
+            if data.beneficiario is not None:
+                tx.contraparte = data.beneficiario.strip()
+                tx.descripcion = f"PAGO A {data.beneficiario.strip()} (Clearing Cheque #{cheque.numero})"
+            db.add(tx)
 
     cheque.updated_at = datetime.now(timezone.utc)
     await db.flush()
