@@ -163,7 +163,7 @@ export default function ComprasVsVentasTab({ fechaDesde, fechaHasta }: ComprasVs
             </h3>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Proyección calibrada según ritmo actual y antecedentes del mismo período del año pasado
+            Compara ventas facturadas vs. compras recepcionadas (facturas reales de proveedores menos Notas de Crédito)
           </p>
         </div>
 
@@ -288,11 +288,14 @@ export default function ComprasVsVentasTab({ fechaDesde, fechaHasta }: ComprasVs
           </div>
         </div>
 
-        {/* KPI 4: Compras Recibidas */}
-        <div className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition">
+        {/* KPI 4: Compras Recibidas (Facturadas) */}
+        <div
+          className="relative overflow-hidden rounded-2xl p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition"
+          title="Mercadería legalmente facturada por proveedores en el período seleccionado, menos Notas de Crédito comerciales aplicadas (faltantes o devoluciones). Excluye servicios y gastos operativos."
+        >
           <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-500 absolute top-0 left-0" />
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Compras Recibidas</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Compras Recibidas (Facturas)</span>
             <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600">
               <ShoppingCart className="w-4 h-4" />
             </div>
@@ -301,8 +304,8 @@ export default function ComprasVsVentasTab({ fechaDesde, fechaHasta }: ComprasVs
             {formatPYG(resumen.total_compras)}
           </p>
           <div className="flex items-center justify-between text-[11px] text-slate-400 mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <span>{resumen.total_facturas_compras?.toLocaleString("es-PY")} facturas</span>
-            <span className="text-blue-600 font-bold font-mono">Recepción Stock</span>
+            <span>{resumen.total_facturas_compras?.toLocaleString("es-PY")} facturas (neto NCs)</span>
+            <span className="text-blue-600 font-bold font-mono">Facturas Proveedor</span>
           </div>
         </div>
 

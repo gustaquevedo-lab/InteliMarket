@@ -3617,8 +3617,11 @@ export default function PurchasesPage() {
               <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-indigo-300">
                 📦 {suppliers.length} proveedores homologados
               </span>
-              <span className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400">
-                💰 {formatPYG(totalComprasEsteMes)} compras del mes
+              <span
+                className="bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-emerald-400"
+                title="Suma del total bruto de órdenes de compra (OC) emitidas en el mes. Mide intención y pedidos cursados a proveedores, previo a la recepción de facturas."
+              >
+                📋 {formatPYG(totalComprasEsteMes)} pedidos en OCs (mes)
               </span>
             </div>
           </div>
@@ -3647,15 +3650,21 @@ export default function PurchasesPage() {
 
         {/* 📊 BARRA DE KPIS EJECUTIVOS */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-800/80">
-          <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
+          <div
+            className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80"
+            title="Volumen bruto solicitado en órdenes de compra (OCs) este mes. Mide intención y pedidos cursados a proveedores, previo a la recepción y facturación."
+          >
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Compras del Mes</span>
-              <DollarSign className="w-4 h-4 text-indigo-400" />
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pedidos Emitidos (OCs)</span>
+              <ClipboardList className="w-4 h-4 text-indigo-400" />
             </div>
             <p className="text-2xl font-black font-mono tracking-tight text-indigo-300">
               {formatPYG(totalComprasEsteMes)}
             </p>
-            <p className="text-[11px] text-slate-400">{ordersEsteMes.length.toLocaleString()} órdenes emitidas</p>
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>{ordersEsteMes.length.toLocaleString()} órdenes emitidas</span>
+              <span className="text-[10px] text-slate-500 font-medium">Volumen Pedido</span>
+            </div>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3.5 rounded-2xl border border-slate-800/80">
