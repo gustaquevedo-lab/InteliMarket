@@ -6940,29 +6940,8 @@ async def incorporate_session_to_vault_and_banks(
             desc_txt = f"Recaudación {map_info['canal_label']}{desc_comis} Turno {session_obj.cajero_nombre} ({reg.nombre}) - Acred. est.: {fecha_acred.strftime('%d/%m/%Y')}"
             target_bank_id = uuid.UUID(map_info["bank_account_id"])
 
-            if existing_bt:
-                # Si ya existía y no está conciliado con extracto, actualizarlo con el valor post-reclasificación de Tesorería
-                if not existing_bt.conciliado:
-                    existing_bt.monto = monto_neto_gs
-                    existing_bt.bank_account_id = target_bank_id
-                    existing_bt.fecha = fecha_acred
-                    existing_bt.descripcion = desc_txt
-                    existing_bt.contraparte = map_info["canal_label"]
-            else:
-                bt = BankTransaction(
-                    company_id=cid,
-                    bank_account_id=target_bank_id,
-                    fecha=fecha_acred,
-                    tipo="credito",
-                    monto=monto_neto_gs,
-                    moneda=map_info.get("moneda") or "PYG",
-                    descripcion=desc_txt,
-                    referencia=ref_code,
-                    contraparte=map_info["canal_label"],
-                    conciliado=False,
-                    categoria="ventas_pos",
-                )
-                db.add(bt)
+            if existing_bt and not existing_bt.conciliado:
+                await db.delete(existing_bt)
 
             bank_transactions_creadas.append({
                 "banco": map_info.get("banco_nombre"),
@@ -6975,7 +6954,6 @@ async def incorporate_session_to_vault_and_banks(
                 "referencia": ref_code,
             })
         else:
-            # Si tras una reclasificación en Tesorería el canal quedó en 0 Gs y existía una transacción no conciliada, eliminarla
             if existing_bt and not existing_bt.conciliado:
                 await db.delete(existing_bt)
 

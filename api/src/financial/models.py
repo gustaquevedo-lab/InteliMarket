@@ -110,6 +110,7 @@ class BankAccount(Base):
     numero_cuenta = Column(String(50), nullable=False)
     moneda = Column(String(3), default="PYG")
     saldo_inicial = Column(Numeric(15, 2), default=0)
+    fecha_corte_saldo_inicial = Column(Date)
     saldo_actual = Column(Numeric(15, 2), default=0)
     titular = Column(String(200))
     activo = Column(Boolean, default=True)

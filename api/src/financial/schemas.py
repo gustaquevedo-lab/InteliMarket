@@ -266,6 +266,7 @@ class BankAccountResponse(BaseModel):
     numero_cuenta: str
     moneda: str
     saldo_inicial: Decimal
+    fecha_corte_saldo_inicial: Optional[date] = None
     saldo_actual: Decimal
     titular: Optional[str] = None
     activo: bool
