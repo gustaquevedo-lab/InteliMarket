@@ -8,7 +8,7 @@ import {
   AlertTriangle, Filter, ChevronDown, ChevronUp, Edit, Edit3, Send, Ban, RefreshCw,
   UserPlus, FileSpreadsheet, ClipboardList, TrendingUp, ArrowUp, ArrowDown, ArrowRight,
   MessageSquare, Calendar, Hash, Percent, Printer, Link2, Check, Save, ExternalLink,
-  Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, Scale, CheckCircle, Calculator,
+  Sparkles, Sun, CloudRain, Snowflake, Flame, ShieldAlert, ShieldCheck, Scale, CheckCircle, Calculator,
   HelpCircle, AlertCircle, Box, Layers, Building2, Phone, Mail, MapPin, SlidersHorizontal,
   ChevronRight, ArrowUpDown, ChevronLeft, CheckSquare, Square, PieChart, Undo2, Receipt, History, Star,
   Lock, Unlock, FileCheck, Barcode, RotateCcw, CreditCard, Briefcase, Wrench, Globe, LayoutGrid, Table,
@@ -33,6 +33,7 @@ import {
   type SupplierInvoice,
   type CustomerLostDemand,
   type PackBarcode,
+  type MonthlyPurchaseThreshold,
 } from "../../api"
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
@@ -75,6 +76,7 @@ const DEFAULT_SUB_TAB_BY_MACRO: Record<MacroTab, MainTab> = {
 
 const poStatusMap: Record<string, { label: string; bg: string; text: string }> = {
   borrador: { label: "Borrador", bg: "bg-slate-100 dark:bg-slate-800", text: "text-slate-600 dark:text-slate-300" },
+  pendiente_autorizacion: { label: "Pendiente Autorización", bg: "bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700", text: "text-amber-800 dark:text-amber-300 font-semibold" },
   confirmado: { label: "Confirmada", bg: "bg-blue-50 dark:bg-blue-900/30", text: "text-blue-600 dark:text-blue-400" },
   enviada: { label: "Enviada a Proveedor", bg: "bg-amber-50 dark:bg-amber-900/30", text: "text-amber-600 dark:text-amber-400" },
   enviado: { label: "Enviada a Proveedor", bg: "bg-amber-50 dark:bg-amber-900/30", text: "text-amber-600 dark:text-amber-400" },
@@ -129,6 +131,7 @@ export default function PurchasesPage() {
   const [invoices, setInvoices] = useState<SupplierInvoice[]>([])
   const [requisitions, setRequisitions] = useState<PurchaseRequisition[]>([])
   const [rfqs, setRfqs] = useState<PurchaseRfq[]>([])
+  const [monthlyThreshold, setMonthlyThreshold] = useState<MonthlyPurchaseThreshold | null>(null)
 
   // Demandas de clientes registradas en cajas
   const [lostDemands, setLostDemands] = useState<CustomerLostDemand[]>([])
@@ -785,6 +788,7 @@ export default function PurchasesPage() {
         creditNotesRes,
         ncRequestsRes,
         inboxConfigRes,
+        thresholdRes,
       ] = await Promise.allSettled([
         api.purchases.listPOs(),
         api.purchases.lostDemand.list(),
@@ -805,6 +809,7 @@ export default function PurchasesPage() {
         api.financial.creditNotes().catch(() => []),
         api.purchases.listSupplierNcRequests(),
         api.purchases.getInboxConfig(),
+        api.purchases.getMonthlyThreshold().catch(() => null),
       ])
 
       if (ordersRes.status === "fulfilled") setOrders(ordersRes.value || [])
@@ -828,6 +833,7 @@ export default function PurchasesPage() {
       if (returnsRes.status === "fulfilled") setSupplierReturns(returnsRes.value || [])
       if (creditNotesRes.status === "fulfilled") setSupplierCreditNotes(creditNotesRes.value || [])
       if (ncRequestsRes.status === "fulfilled") setSupplierNcRequests(ncRequestsRes.value || [])
+      if (thresholdRes.status === "fulfilled" && thresholdRes.value) setMonthlyThreshold(thresholdRes.value)
       if (inboxConfigRes.status === "fulfilled" && inboxConfigRes.value) {
         const conf: any = inboxConfigRes.value
         setInboxConfig(conf)
@@ -1083,14 +1089,36 @@ export default function PurchasesPage() {
 
   const handleConfirmPO = async (id: string) => {
     try {
-      await api.purchases.confirmPO(id)
-      toast.success("Orden Confirmada", "La OC pasó a estado confirmada.")
+      const res = await api.purchases.confirmPO(id)
+      if (res && res.estado === "pendiente_autorizacion") {
+        toast.warning(
+          "Enviada a Autorización",
+          "La orden supera el umbral mensual del 80% y fue enviada a Administración para su autorización."
+        )
+      } else {
+        toast.success("Orden Confirmada", "La OC pasó a estado confirmada.")
+      }
       fetchAll()
       if (selectedPO?.id === id) {
-        setSelectedPO((prev: any) => prev ? { ...prev, estado: "confirmado" } : null)
+        setSelectedPO((prev: any) => prev ? { ...prev, estado: res?.estado || "confirmado" } : null)
       }
     } catch (e: any) {
-      toast.error("Error al confirmar", e.message)
+      toast.error("Atención", e.message || "No se pudo confirmar la orden.")
+      fetchAll()
+    }
+  }
+
+  const handleRequestPOAuth = async (id: string) => {
+    const motivo = window.prompt("Observación o justificación para Administración (opcional):")
+    try {
+      await api.purchases.requestPOAuthorization(id, motivo || undefined)
+      toast.info("Solicitud Enviada", "La orden pasó a estado Pendiente de Autorización de Administración.")
+      fetchAll()
+      if (selectedPO?.id === id) {
+        setSelectedPO((prev: any) => prev ? { ...prev, estado: "pendiente_autorizacion" } : null)
+      }
+    } catch (e: any) {
+      toast.error("Error al solicitar autorización", e.message)
     }
   }
 
@@ -5138,6 +5166,76 @@ export default function PurchasesPage() {
       ────────────────────────────────────────────────────────────────────────── */}
       {tab === "ordenes" && (
         <div className="space-y-5">
+          {monthlyThreshold && (
+            <div className="card p-4 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border-slate-700/80 text-white shadow-lg">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl ${monthlyThreshold.excedido ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+                    <Scale className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold tracking-tight">Presupuesto Mensual de Compras ({monthlyThreshold.mes_actual_label})</h3>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        monthlyThreshold.excedido 
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' 
+                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      }`}>
+                        {monthlyThreshold.excedido ? 'Umbral 80% Excedido' : 'Dentro del Umbral (80%)'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Base: 80% de ventas cerradas de {monthlyThreshold.mes_anterior_label} ({formatPYG(monthlyThreshold.ventas_mes_anterior)})
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-6 text-xs">
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-mono">Tope Mensual (80%)</span>
+                    <span className="font-extrabold text-sm text-slate-200 font-mono">{formatPYG(monthlyThreshold.umbral_compras)}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-mono">Compras Confirmadas</span>
+                    <span className="font-extrabold text-sm text-indigo-300 font-mono">{formatPYG(monthlyThreshold.compras_mes_actual)}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-mono">Saldo Disponible</span>
+                    <span className={`font-extrabold text-sm font-mono ${monthlyThreshold.disponible >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {formatPYG(monthlyThreshold.disponible)}
+                    </span>
+                  </div>
+                  <div className="w-36">
+                    <div className="flex justify-between text-[10px] text-slate-400 font-mono mb-1">
+                      <span>Ejecución</span>
+                      <span className={monthlyThreshold.porcentaje_consumido > 100 ? 'text-rose-400 font-bold' : 'text-slate-300'}>
+                        {monthlyThreshold.porcentaje_consumido}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-700/60 rounded-full h-2 overflow-hidden">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-500 ${
+                          monthlyThreshold.porcentaje_consumido > 100
+                            ? 'bg-rose-500'
+                            : monthlyThreshold.porcentaje_consumido > 80
+                            ? 'bg-amber-400'
+                            : 'bg-emerald-500'
+                        }`}
+                        style={{ width: `${Math.min(monthlyThreshold.porcentaje_consumido, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {!isAdmin && monthlyThreshold.disponible <= 0 && (
+                <div className="mt-3 pt-2.5 border-t border-slate-800 text-[11px] text-amber-300/90 flex items-center gap-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                  <span>El cupo mensual del 80% está cubierto. Toda nueva orden de compra o confirmación que exceda el tope requiere autorización de Administración.</span>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="card p-4 bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3 flex-1">
               <div className="relative w-full sm:w-64">
@@ -5158,6 +5256,7 @@ export default function PurchasesPage() {
               >
                 <option value="todos">Todos los Estados</option>
                 <option value="borrador">Borrador</option>
+                <option value="pendiente_autorizacion">Pendiente Autorización</option>
                 <option value="confirmado">Confirmada</option>
                 <option value="enviada">Enviada a Proveedor</option>
                 <option value="parcial">Entrega Parcial</option>
@@ -5320,12 +5419,50 @@ export default function PurchasesPage() {
 
                               {po.estado === "borrador" && po.id && (
                                 <button
-                                  onClick={() => handleConfirmPO(po.id!)}
-                                  className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors font-bold text-[10px] flex items-center gap-1"
-                                  title="Confirmar Orden"
+                                  onClick={() => {
+                                    const exceeds = monthlyThreshold && ((po.total || 0) > monthlyThreshold.disponible)
+                                    if (exceeds && !isAdmin) {
+                                      handleRequestPOAuth(po.id!)
+                                    } else {
+                                      handleConfirmPO(po.id!)
+                                    }
+                                  }}
+                                  className={`p-1.5 rounded-lg transition-colors font-bold text-[10px] flex items-center gap-1 ${
+                                    monthlyThreshold && ((po.total || 0) > monthlyThreshold.disponible) && !isAdmin
+                                      ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950/60 dark:text-amber-300"
+                                      : "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-400"
+                                  }`}
+                                  title={
+                                    monthlyThreshold && ((po.total || 0) > monthlyThreshold.disponible) && !isAdmin
+                                      ? "Excede el 80% del mes: Solicitar Autorización de Administración"
+                                      : "Confirmar Orden"
+                                  }
                                 >
-                                  <Check className="w-3.5 h-3.5" />
+                                  {monthlyThreshold && ((po.total || 0) > monthlyThreshold.disponible) && !isAdmin ? (
+                                    <ShieldAlert className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <Check className="w-3.5 h-3.5" />
+                                  )}
                                 </button>
+                              )}
+
+                              {po.estado === "pendiente_autorizacion" && po.id && (
+                                isAdmin ? (
+                                  <button
+                                    onClick={() => handleConfirmPO(po.id!)}
+                                    className="p-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors font-bold text-[10px] flex items-center gap-1 shadow-sm"
+                                    title="Autorizar y Confirmar Orden (Excede umbral 80%)"
+                                  >
+                                    <ShieldCheck className="w-3.5 h-3.5" />
+                                  </button>
+                                ) : (
+                                  <span
+                                    className="p-1.5 rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 text-[10px] flex items-center gap-1 cursor-not-allowed"
+                                    title="Pendiente de Autorización por Administración"
+                                  >
+                                    <Clock className="w-3.5 h-3.5" />
+                                  </span>
+                                )
                               )}
 
                               {po.estado === "confirmado" && po.id && (
@@ -7948,11 +8085,44 @@ export default function PurchasesPage() {
                     )}
                     {selectedPO.estado === "borrador" && selectedPO.id && (
                       <button
-                        onClick={() => handleConfirmPO(selectedPO.id!)}
-                        className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5"
+                        onClick={() => {
+                          const exceeds = monthlyThreshold && ((selectedPO.total || 0) > monthlyThreshold.disponible)
+                          if (exceeds && !isAdmin) {
+                            handleRequestPOAuth(selectedPO.id!)
+                          } else {
+                            handleConfirmPO(selectedPO.id!)
+                          }
+                        }}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-sm transition-colors ${
+                          monthlyThreshold && ((selectedPO.total || 0) > monthlyThreshold.disponible) && !isAdmin
+                            ? "bg-amber-600 hover:bg-amber-700 shadow-amber-600/20"
+                            : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20"
+                        }`}
                       >
-                        <Check className="w-4 h-4" /> Confirmar Orden
+                        {monthlyThreshold && ((selectedPO.total || 0) > monthlyThreshold.disponible) && !isAdmin ? (
+                          <>
+                            <ShieldAlert className="w-4 h-4" /> Solicitar Autorización (Excede 80%)
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-4 h-4" /> Confirmar Orden
+                          </>
+                        )}
                       </button>
+                    )}
+                    {selectedPO.estado === "pendiente_autorizacion" && selectedPO.id && (
+                      isAdmin ? (
+                        <button
+                          onClick={() => handleConfirmPO(selectedPO.id!)}
+                          className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white flex items-center gap-1.5 shadow-lg shadow-amber-600/20"
+                        >
+                          <ShieldCheck className="w-4 h-4" /> Autorizar y Confirmar Orden
+                        </button>
+                      ) : (
+                        <div className="px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 flex items-center gap-1.5 border border-amber-200 dark:border-amber-800">
+                          <Clock className="w-4 h-4 text-amber-600" /> Pendiente de Autorización por Administración
+                        </div>
+                      )
                     )}
                     {selectedPO.estado === "confirmado" && selectedPO.id && (
                       <button

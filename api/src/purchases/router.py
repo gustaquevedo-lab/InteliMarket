@@ -174,6 +174,15 @@ async def create_purchase_order(body: POCreate, db: AsyncSession = Depends(get_d
     return await service.create_purchase_order(db, body)
 
 
+@router.get("/companies/{company_id}/monthly-threshold")
+async def get_monthly_purchase_threshold(
+    company_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    return await service.get_monthly_purchase_threshold(db, company_id)
+
+
 @router.get("/companies/{company_id}/purchase-orders", response_model=list[POResponse])
 async def list_purchase_orders(
     company_id: str,
@@ -221,11 +230,37 @@ async def confirm_purchase_order(
     user_id: str | None = Query(None),
     user_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
-    result = await service.confirm_purchase_order(db, po_id, user_id, user_name)
-    if not result:
-        raise HTTPException(status_code=400, detail="No se pudo confirmar. Verifique que tenga items y esté en borrador")
-    return result
+    auth_user_id = str(user.get("id")) if user and user.get("id") else user_id
+    auth_user_name = (user.get("nombre") or user.get("email")) if user else user_name
+    auth_user_rol = (user.get("rol") or "").lower() if user else ""
+    is_admin = bool(user.get("is_superadmin")) or auth_user_rol in ("admin", "administrador", "superadmin")
+
+    order, error_msg, needs_auth = await service.confirm_purchase_order(
+        db, po_id, auth_user_id, auth_user_name, is_admin=is_admin
+    )
+    if error_msg:
+        status_code = status.HTTP_403_FORBIDDEN if needs_auth else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=status_code, detail=error_msg)
+    return order
+
+
+@router.post("/purchase-orders/{po_id}/request-authorization", response_model=POResponse)
+async def request_po_authorization(
+    po_id: str,
+    motivo: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    auth_user_id = str(user.get("id")) if user and user.get("id") else None
+    auth_user_name = (user.get("nombre") or user.get("email")) if user else None
+    order, error_msg = await service.request_po_authorization(
+        db, po_id, auth_user_id, auth_user_name, motivo=motivo
+    )
+    if error_msg:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+    return order
 
 
 @router.post("/purchase-orders/{po_id}/send", response_model=POResponse)

@@ -581,20 +581,156 @@ async def delete_purchase_order(db: AsyncSession, po_id: str, force: bool = Fals
     return {"ok": True, "message": f"Orden de compra {numero} eliminada exitosamente", "numero": numero}
 
 
-async def confirm_purchase_order(db: AsyncSession, po_id: str, user_id: str | None = None, user_name: str | None = None) -> PurchaseOrder | None:
+async def get_monthly_purchase_threshold(db: AsyncSession, company_id: str) -> dict:
+    """Calcula el umbral de compras mensual basado en el 80% de las ventas del mes calendario anterior,
+    respetando estrictamente la zona horaria America/Asuncion."""
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("America/Asuncion")
+    now_asuncion = datetime.now(tz)
+
+    curr_year = now_asuncion.year
+    curr_month = now_asuncion.month
+
+    # Mes anterior
+    if curr_month == 1:
+        prev_month = 12
+        prev_year = curr_year - 1
+    else:
+        prev_month = curr_month - 1
+        prev_year = curr_year
+
+    # Siguiente mes
+    if curr_month == 12:
+        next_month = 1
+        next_year = curr_year + 1
+    else:
+        next_month = curr_month + 1
+        next_year = curr_year
+
+    d_prev = date(prev_year, prev_month, 1)
+    d_curr = date(curr_year, curr_month, 1)
+    d_next = date(next_year, next_month, 1)
+
+    MESES_ES = [
+        "", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Setiembre", "Octubre", "Noviembre", "Diciembre"
+    ]
+    mes_anterior_label = f"{MESES_ES[prev_month]} {prev_year}"
+    mes_actual_label = f"{MESES_ES[curr_month]} {curr_year}"
+
+    # 1. Ventas del mes anterior (estado != 'cancelado')
+    stmt_sales = text("""
+        SELECT COALESCE(SUM(total), 0)
+        FROM sales
+        WHERE company_id = :cid
+          AND estado <> 'cancelado'
+          AND (fecha AT TIME ZONE 'America/Asuncion') >= :start_prev
+          AND (fecha AT TIME ZONE 'America/Asuncion') < :start_curr
+    """)
+    res_sales = await db.execute(stmt_sales, {
+        "cid": uuid.UUID(company_id),
+        "start_prev": d_prev,
+        "start_curr": d_curr,
+    })
+    ventas_mes_anterior = Decimal(str(res_sales.scalar() or 0))
+
+    # Umbral 80%
+    umbral_compras = (ventas_mes_anterior * Decimal("0.80")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+    # 2. Compras acumuladas del mes en curso (órdenes en confirmado, enviado, parcial, completado)
+    stmt_pos = text("""
+        SELECT COALESCE(SUM(total), 0)
+        FROM purchase_orders
+        WHERE company_id = :cid
+          AND estado IN ('confirmado', 'enviado', 'parcial', 'completado')
+          AND (fecha AT TIME ZONE 'America/Asuncion') >= :start_curr
+          AND (fecha AT TIME ZONE 'America/Asuncion') < :start_next
+    """)
+    res_pos = await db.execute(stmt_pos, {
+        "cid": uuid.UUID(company_id),
+        "start_curr": d_curr,
+        "start_next": d_next,
+    })
+    compras_mes_actual = Decimal(str(res_pos.scalar() or 0)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+    disponible = umbral_compras - compras_mes_actual
+    pct_consumido = (
+        round(float(compras_mes_actual) / float(umbral_compras) * 100, 2)
+        if umbral_compras > 0 else (100.0 if compras_mes_actual > 0 else 0.0)
+    )
+
+    return {
+        "company_id": company_id,
+        "mes_anterior_label": mes_anterior_label,
+        "mes_actual_label": mes_actual_label,
+        "ventas_mes_anterior": int(ventas_mes_anterior),
+        "porcentaje_umbral": 80,
+        "umbral_compras": int(umbral_compras),
+        "compras_mes_actual": int(compras_mes_actual),
+        "disponible": int(disponible),
+        "porcentaje_consumido": pct_consumido,
+        "excedido": bool(compras_mes_actual > umbral_compras),
+    }
+
+
+async def confirm_purchase_order(
+    db: AsyncSession,
+    po_id: str,
+    user_id: str | None = None,
+    user_name: str | None = None,
+    is_admin: bool = False,
+) -> tuple[PurchaseOrder | None, str | None, bool]:
     result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == uuid.UUID(po_id)))
     order = result.scalar_one_or_none()
-    if not order or order.estado != "borrador":
-        return None
+    if not order:
+        return None, "Orden de compra no encontrada", False
+
+    if order.estado not in ("borrador", "pendiente_autorizacion"):
+        return None, f"La orden no se puede confirmar en estado '{order.estado}'", False
+
+    if order.estado == "pendiente_autorizacion" and not is_admin:
+        return None, "Esta orden superó el umbral mensual del 80% y requiere autorización de Administración para ser confirmada.", True
 
     items_result = await db.execute(select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == order.id))
     items = list(items_result.scalars().all())
     if not items:
-        return None
+        return None, "La orden no tiene ítems cargados", False
 
+    # Verificación del umbral del 80% de ventas del mes anterior si no es administrador
+    threshold = await get_monthly_purchase_threshold(db, str(order.company_id))
+    monto_orden = Decimal(str(order.total or 0))
+    nuevo_acumulado = Decimal(str(threshold["compras_mes_actual"])) + monto_orden
+    umbral_80 = Decimal(str(threshold["umbral_compras"]))
+
+    if nuevo_acumulado > umbral_80 and not is_admin:
+        # El gerente no confirma cuando excedió el umbral: pasa a 'pendiente_autorizacion'
+        old_estado = order.estado
+        order.estado = "pendiente_autorizacion"
+        exceso = nuevo_acumulado - umbral_80
+        msg_historial = (
+            f"Supera umbral del 80% de ventas del mes anterior "
+            f"(Compras proyectadas: {nuevo_acumulado:,.0f} > Límite 80%: {umbral_80:,.0f}, exceso: {exceso:,.0f}). "
+            f"Enviada a autorización de Administración."
+        )
+        await add_po_history(db, po_id, old_estado, "pendiente_autorizacion", user_id, user_name, msg_historial)
+        await db.flush()
+        await db.refresh(order)
+        await _attach_suppliers(db, [order])
+        return order, f"La orden supera el umbral mensual del 80% de compras (Total proyectado: {nuevo_acumulado:,.0f} / Límite: {umbral_80:,.0f}). Ha sido enviada a Administración para su autorización.", True
+
+    # Confirmación autorizada (por entrar en el umbral o por ser Administración)
     old_estado = order.estado
     order.estado = "confirmado"
-    await add_po_history(db, po_id, old_estado, "confirmado", user_id, user_name, "Orden confirmada")
+    if is_admin:
+        order.aprobado_por = uuid.UUID(user_id) if user_id else None
+        order.fecha_aprobacion = datetime.now(timezone.utc)
+
+    obs_historial = (
+        "Orden autorizada y confirmada por Administración (Excede umbral mensual 80%)"
+        if old_estado == "pendiente_autorizacion" or nuevo_acumulado > umbral_80
+        else "Orden confirmada"
+    )
+    await add_po_history(db, po_id, old_estado, "confirmado", user_id, user_name, obs_historial)
 
     try:
         from api.src.commercial_agreements.service import update_volume_tracking
@@ -610,7 +746,32 @@ async def confirm_purchase_order(db: AsyncSession, po_id: str, user_id: str | No
     await db.flush()
     await db.refresh(order)
     await _attach_suppliers(db, [order])
-    return order
+    return order, None, False
+
+
+async def request_po_authorization(
+    db: AsyncSession,
+    po_id: str,
+    user_id: str | None = None,
+    user_name: str | None = None,
+    motivo: str | None = None,
+) -> tuple[PurchaseOrder | None, str | None]:
+    result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == uuid.UUID(po_id)))
+    order = result.scalar_one_or_none()
+    if not order:
+        return None, "Orden de compra no encontrada"
+
+    if order.estado != "borrador":
+        return None, f"Solo órdenes en borrador pueden solicitar autorización (estado actual: '{order.estado}')"
+
+    old_estado = order.estado
+    order.estado = "pendiente_autorizacion"
+    nota = motivo or "Solicitud de autorización enviada a Administración por exceder umbral presupuestario"
+    await add_po_history(db, po_id, old_estado, "pendiente_autorizacion", user_id, user_name, nota)
+    await db.flush()
+    await db.refresh(order)
+    await _attach_suppliers(db, [order])
+    return order, None
 
 
 async def send_purchase_order(db: AsyncSession, po_id: str, seguimiento_numero: str | None = None,

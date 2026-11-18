@@ -467,7 +467,20 @@ export interface Role { id: string; name?: string; description?: string | null; 
 // trae role_id/role_name porque es la fila de la tabla puente rbac_user_roles, no el rol en si)
 export interface UserRoleAssignment { user_id: string; tenant_id: string; role_id: string; role_name: string; created_at: string }
 export interface TenantUser { id: string; email: string; nombre: string; telefono?: string | null; rol: string; activo: boolean; is_superadmin: boolean; foto_url?: string | null; last_login?: string | null; created_at: string; tenant_rol: string; role_names: string[] }
-export interface PurchaseOrder { id: string; company_id?: string; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; tipo_cambio?: number; fecha_entrega_estimada?: string | null; prioridad?: string; condiciones_pago?: string; created_by_name?: string; user_id?: string; descuento_total?: number; iva_10?: number; iva_5?: number; observaciones?: string | null; items?: PurchaseOrderItem[]; created_at?: string; updated_at?: string }
+export interface PurchaseOrder { id: string; company_id?: string; supplier_id?: string; supplier?: Supplier; numero?: string; fecha?: string; fecha_entrega?: string; estado?: string; subtotal?: number; total_iva?: number; total?: number; moneda?: string; tipo_cambio?: number; fecha_entrega_estimada?: string | null; prioridad?: string; condiciones_pago?: string; created_by_name?: string; user_id?: string; descuento_total?: number; iva_10?: number; iva_5?: number; observaciones?: string | null; items?: PurchaseOrderItem[]; aprobado_por?: string | null; fecha_aprobacion?: string | null; rechazado_motivo?: string | null; created_at?: string; updated_at?: string }
+
+export interface MonthlyPurchaseThreshold {
+  company_id: string
+  mes_anterior_label: string
+  mes_actual_label: string
+  ventas_mes_anterior: number
+  porcentaje_umbral: number
+  umbral_compras: number
+  compras_mes_actual: number
+  disponible: number
+  porcentaje_consumido: number
+  excedido: boolean
+}
 export interface PurchaseRequisitionItem { id: string; requisition_id: string; product_id: string; variant_id?: string | null; descripcion?: string | null; cantidad_solicitada: number; cantidad_aprobada?: number | null; precio_estimado?: number | null; total_estimado?: number | null; observaciones?: string | null; created_at: string }
 export interface PurchaseRequisition { id: string; company_id: string; numero: string; fecha: string; fecha_necesidad?: string | null; departamento?: string | null; solicitante_id?: string | null; solicitante_nombre?: string | null; estado: string; prioridad?: string | null; moneda?: string | null; subtotal?: number | null; total?: number | null; motivo?: string | null; observaciones?: string | null; aprobado_por?: string | null; fecha_aprobacion?: string | null; rechazado_motivo?: string | null; purchase_order_id?: string | null; user_id?: string | null; created_at: string; items?: PurchaseRequisitionItem[] }
 export interface PurchaseOrderItem { id?: string; orden_id?: string; producto_id?: string; producto?: Product; sku?: string | null; codigo_barra?: string | null; unidad_medida?: string | null; cantidad?: number; precio_unitario?: number; subtotal?: number; iva_tasa?: number; recibido?: number; pendiente?: number; created_at?: string }
@@ -3175,6 +3188,7 @@ export const api = {
 
     orders: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
     listPOs: () => client.get<PurchaseOrder[]>(`/v1/companies/${COMPANY_ID}/purchase-orders`),
+    getMonthlyThreshold: () => client.get<MonthlyPurchaseThreshold>(`/v1/companies/${COMPANY_ID}/monthly-threshold`),
     getOrder: (id: string) => client.get<PurchaseOrder>(`/v1/purchase-orders/${id}`),
     getOrderItems: (id: string) => client.get<PurchaseOrderItem[]>(`/v1/purchase-orders/${id}/items`),
     createOrder: (data: Partial<PurchaseOrder>) => client.post<PurchaseOrder>("/v1/purchase-orders", { ...data, company_id: COMPANY_ID }),
@@ -3182,6 +3196,7 @@ export const api = {
     updateOrder: (id: string, data: Partial<PurchaseOrder>, force: boolean = false) => client.put<PurchaseOrder>(`/v1/purchase-orders/${id}${force ? '?force=true' : ''}`, data),
     confirmOrder: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/confirm`),
     confirmPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/confirm`),
+    requestPOAuthorization: (id: string, motivo?: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/request-authorization${motivo ? `?motivo=${encodeURIComponent(motivo)}` : ''}`),
     sendPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/send`),
     cancelPO: (id: string) => client.post<PurchaseOrder>(`/v1/purchase-orders/${id}/cancel`),
     deletePO: (id: string, force: boolean = false) => client.delete<{ ok: boolean; message: string; numero: string }>(`/v1/purchase-orders/${id}${force ? '?force=true' : ''}`),
