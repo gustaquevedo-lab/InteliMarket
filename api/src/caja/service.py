@@ -6390,23 +6390,6 @@ async def update_payment_method_bank_mapping(
             db.add(p_tx)
             recalculated_txs_count += 1
 
-    # Recalcular saldos de cuentas afectadas
-    for acc_id in accounts_to_recalc:
-        if not acc_id:
-            continue
-        bal_res = await db.execute(
-            select(
-                func.coalesce(func.sum(case((BankTransaction.tipo == 'credito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("creditos"),
-                func.coalesce(func.sum(case((BankTransaction.tipo == 'debito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("debitos"),
-            ).where(BankTransaction.bank_account_id == acc_id)
-        )
-        b_row = bal_res.fetchone()
-        acc_q = await db.execute(select(BankAccount).where(BankAccount.id == acc_id))
-        acc_obj = acc_q.scalar_one_or_none()
-        if acc_obj:
-            acc_obj.saldo_actual = (acc_obj.saldo_inicial or Decimal("0")) + b_row.creditos - b_row.debitos
-            db.add(acc_obj)
-
     await db.commit()
     await db.refresh(mapping)
 
@@ -7034,19 +7017,9 @@ async def incorporate_session_to_vault_and_banks(
                     "periodo": periodo_str,
                 }
 
-    # 2b. Recalcular saldo_actual dinámico de las cuentas bancarias afectadas
-    affected_acc_ids = {uuid.UUID(m["bank_account_id"]) for m in mapping_by_key.values() if m.get("bank_account_id")}
-    for b_acc_id in affected_acc_ids:
-        row_sum = await db.execute(
-            select(
-                func.coalesce(func.sum(case((BankTransaction.tipo == "credito", BankTransaction.monto), else_=0)), 0),
-                func.coalesce(func.sum(case((BankTransaction.tipo == "debito", BankTransaction.monto), else_=0)), 0),
-            ).where(BankTransaction.bank_account_id == b_acc_id)
-        )
-        c_tot, d_tot = row_sum.one()
-        b_acc = await db.get(BankAccount, b_acc_id)
-        if b_acc:
-            b_acc.saldo_actual = (b_acc.saldo_inicial or Decimal("0")) + Decimal(str(c_tot)) - Decimal(str(d_tot))
+    # 2b. Las transacciones bancarias de ventas POS se registran como proyecciones
+    # pendientes de conciliación (conciliado=False). No se altera saldo_actual aquí para
+    # no corromper la cuenta con sumas históricas ciegas; el saldo se consolida con el extracto bancario.
 
     now_py = datetime.now(TZ_ASUNCION).strftime("%d/%m/%Y %H:%M")
     nota = f"\n[ASENTAMIENTO BÓVEDA & BANCOS ({now_py}) por {user_nombre}]: Bóveda ({len(vault_entries_creados)} entradas), Bancos ({len(bank_transactions_creadas)} transacciones)."

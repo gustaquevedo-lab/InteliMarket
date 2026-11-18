@@ -2174,25 +2174,8 @@ async def delete_bank_transaction(db: AsyncSession, company_id: str, transaction
         for crm in crm_res.scalars().all():
             await db.delete(crm)
 
-    acc_id = bt.bank_account_id
     await db.delete(bt)
     await db.flush()
-
-    # Recálculo canónico de saldo bancario exacto (evita desfases por borrado incremental)
-    if acc_id:
-        acc_res = await db.execute(select(BankAccount).where(BankAccount.id == acc_id))
-        acc = acc_res.scalar_one_or_none()
-        if acc:
-            bal_res = await db.execute(
-                select(
-                    func.coalesce(func.sum(case((BankTransaction.tipo == 'credito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("creditos"),
-                    func.coalesce(func.sum(case((BankTransaction.tipo == 'debito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("debitos"),
-                ).where(BankTransaction.bank_account_id == acc.id)
-            )
-            b_row = bal_res.fetchone()
-            acc.saldo_actual = (acc.saldo_inicial or Decimal("0")) + (b_row.creditos if b_row else Decimal("0")) - (b_row.debitos if b_row else Decimal("0"))
-            db.add(acc)
-            await db.flush()
 
     return True
 
@@ -2296,9 +2279,12 @@ def _match_single_statement_transaction(
             matched_boveda = next((tx for tx in cands if tx.categoria == "deposito_recaudacion_caja" and abs((tx.fecha - t_fecha).days) <= 4), None)
         matched_trf = None
         if not matched_boveda:
-            matched_trf = next((tx for tx in cands if tx.categoria == "transferencia_interna" and abs((tx.fecha - t_fecha).days) <= 4), None)
+            matched_trf = next((tx for tx in cands if tx.categoria == "transferencia_interna" and abs((tx.fecha - t_fecha).days) <= 7), None)
+        matched_pos = None
+        if not matched_boveda and not matched_trf:
+            matched_pos = next((tx for tx in cands if tx.categoria in ("ventas_pos", "cobranzas") and abs((tx.fecha - t_fecha).days) <= 7), None)
 
-        target_cred = matched_boveda or matched_trf
+        target_cred = matched_boveda or matched_trf or matched_pos
         if target_cred:
             used_tx_ids.add(target_cred.id)
             if target_cred.conciliado:
@@ -2313,8 +2299,15 @@ def _match_single_statement_transaction(
                     "desc_val": desc_val,
                 }
             else:
-                m_tipo = "deposito_boveda" if target_cred == matched_boveda else "transferencia_interna"
-                m_det = f"Depósito Bóveda ({target_cred.referencia or 'Boleta'})" if m_tipo == "deposito_boveda" else f"Transf. Interna: {target_cred.descripcion[:30]}"
+                if target_cred == matched_boveda:
+                    m_tipo = "deposito_boveda"
+                    m_det = f"Depósito Bóveda ({target_cred.referencia or 'Boleta'})"
+                elif target_cred == matched_trf:
+                    m_tipo = "transferencia_interna"
+                    m_det = f"Transf. Interna: {target_cred.descripcion[:30]}"
+                else:
+                    m_tipo = target_cred.categoria or "ventas_pos"
+                    m_det = f"Recaudación POS / SIPAP: {target_cred.descripcion[:30]}"
                 return {
                     "status": "conciliable",
                     "match_tipo": m_tipo,
@@ -2375,11 +2368,11 @@ def _match_single_statement_transaction(
             )
         ), None)
 
-        # Prioridad 2: Monto exacto dentro de ±4 días
+        # Prioridad 2: Monto exacto dentro de ±10 días
         if not matched_deb:
             matched_deb = next((
                 tx for tx in cands
-                if tx.fecha and abs((tx.fecha - t_fecha).days) <= 4
+                if tx.fecha and abs((tx.fecha - t_fecha).days) <= 10
             ), None)
 
         # Prioridad 3: Tolerancia de ±100 Gs. por redondeo bancario dentro de ±3 días
@@ -2745,6 +2738,7 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
                         break
 
     nuevas = 0
+    delta_nuevas = Decimal("0")
     auto_conciliadas = 0
     used_tx_ids = set()
     used_chq_ids = set()
@@ -2859,6 +2853,7 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
         exact_map[key] = bt
         amount_map[(t["tipo"], t_monto)].append(bt)
         nuevas += 1
+        delta_nuevas += t_monto if t["tipo"] == "credito" else -t_monto
 
     if nuevas > 0 or auto_conciliadas > 0:
         account.saldo_verificado_manualmente = False
@@ -2885,14 +2880,8 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
         account.saldo_verificado_manualmente = True
         account.saldo_verificado_at = datetime.now(timezone.utc)
     else:
-        bal_res = await db.execute(
-            select(
-                func.coalesce(func.sum(case((BankTransaction.tipo == 'credito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("creditos"),
-                func.coalesce(func.sum(case((BankTransaction.tipo == 'debito', BankTransaction.monto), else_=Decimal('0'))), Decimal('0')).label("debitos"),
-            ).where(BankTransaction.bank_account_id == account.id)
-        )
-        b_row = bal_res.fetchone()
-        account.saldo_actual = (account.saldo_inicial or Decimal("0")) + b_row.creditos - b_row.debitos
+        # Aplica el impacto directo de las nuevas transacciones sin recalcular toda la historia
+        account.saldo_actual = (account.saldo_actual or Decimal("0")) + delta_nuevas
 
     db.add(account)
     await db.flush()
