@@ -1557,6 +1557,7 @@ export default function PurchasesPage() {
     setManualPOPrioridad(po.prioridad || "normal")
     setManualPOCondiciones(po.condiciones_pago || "30 Días")
     setManualPOObservaciones(po.observaciones || "")
+    setManualPOEstado(po.estado || "confirmado")
     setSearchProductPO("")
     setProductSearchResultsPO([])
     setShowManualPOModal(true)
@@ -1677,7 +1678,7 @@ export default function PurchasesPage() {
           supplier_id: manualPOSupplierId as any,
           fecha_entrega_estimada: manualPOFechaEntrega ? manualPOFechaEntrega as any : undefined,
           prioridad: manualPOPrioridad,
-          estado: manualPOEstado,
+          estado: (editingPO?.estado === "completado" && manualPOEstado === "confirmado") ? "completado" : manualPOEstado,
           condiciones_pago: manualPOCondiciones,
           observaciones: manualPOObservaciones || undefined,
           update_default_supplier: manualPOUpdateDefaultSupplier,

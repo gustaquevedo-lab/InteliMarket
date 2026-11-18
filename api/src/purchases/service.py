@@ -435,13 +435,32 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate, fo
         setattr(order, key, value)
 
     if data.items is not None:
+        # Preservar las cantidades ya recibidas de recepciones activas para esta orden
+        received_by_product: dict[str, Decimal] = {}
+        rec_items_res = await db.execute(
+            select(PurchaseReceiptItem.product_id, func.sum(PurchaseReceiptItem.cantidad_recibida))
+            .join(PurchaseReceipt, PurchaseReceipt.id == PurchaseReceiptItem.receipt_id)
+            .where(PurchaseReceipt.purchase_order_id == order.id, PurchaseReceipt.estado != "cancelado")
+            .group_by(PurchaseReceiptItem.product_id)
+        )
+        for pid, qty_rec in rec_items_res.all():
+            if pid:
+                received_by_product[str(pid)] = Decimal(str(qty_rec or 0))
+
         existing = await db.execute(
             select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == order.id)
         )
         for item in existing.scalars().all():
+            if item.product_id and (item.cantidad_recibida or Decimal("0")) > Decimal("0"):
+                pid_str = str(item.product_id)
+                received_by_product[pid_str] = max(
+                    received_by_product.get(pid_str, Decimal("0")),
+                    Decimal(str(item.cantidad_recibida or 0))
+                )
             await db.delete(item)
 
         subtotal = descuento_total = iva_10 = iva_5 = Decimal("0")
+        newly_added_items = []
         for item_data in data.items:
             iva_tasa = item_data.iva_tasa or Decimal("10")
             taxes = calculate_taxes(item_data.precio_unitario, item_data.cantidad, item_data.descuento_pct, iva_tasa)
@@ -452,12 +471,14 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate, fo
             subtotal += taxes["subtotal_bruto"]
             descuento_total += taxes["descuento_monto"]
 
+            cant_rec = received_by_product.get(str(item_data.product_id), Decimal("0"))
             item = PurchaseOrderItem(
                 purchase_order_id=order.id,
                 product_id=item_data.product_id,
                 variant_id=item_data.variant_id,
                 descripcion=item_data.descripcion,
                 cantidad=item_data.cantidad,
+                cantidad_recibida=cant_rec,
                 precio_unitario=item_data.precio_unitario,
                 descuento_pct=item_data.descuento_pct,
                 iva_tasa=iva_tasa,
@@ -466,6 +487,27 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate, fo
                 fecha_entrega_esperada=item_data.fecha_entrega_esperada,
             )
             db.add(item)
+            newly_added_items.append(item)
+
+        # Si la orden ya cuenta con recepciones previas, el estado debe reflejar lo recibido
+        if received_by_product:
+            all_received = all(
+                (it.cantidad_recibida or Decimal("0")) >= it.cantidad
+                for it in newly_added_items
+            )
+            any_received = any(
+                (it.cantidad_recibida or Decimal("0")) > Decimal("0")
+                for it in newly_added_items
+            )
+            if all_received and newly_added_items:
+                order.estado = "completado"
+            elif any_received and order.estado not in ("cancelado", "facturado"):
+                order.estado = "parcial"
+    elif order.id:
+        items_check = (await db.execute(select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == order.id))).scalars().all()
+        if items_check and all((it.cantidad_recibida or Decimal("0")) >= it.cantidad for it in items_check):
+            if order.estado not in ("cancelado", "facturado"):
+                order.estado = "completado"
 
         shipping = (order.shipping_cost or Decimal("0")) + (order.insurance_cost or Decimal("0")) + (order.customs_cost or Decimal("0")) + (order.otros_costos or Decimal("0"))
         order.subtotal = subtotal.quantize(Decimal("1"))
@@ -874,6 +916,17 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
     if data.purchase_order_id:
         po_res = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == data.purchase_order_id))
         po = po_res.scalar_one_or_none()
+        if po:
+            if po.estado == "completado":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La orden de compra #{po.numero} ya se encuentra completada y recepcionada en su totalidad."
+                )
+            if po.estado == "cancelado":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"La orden de compra #{po.numero} se encuentra cancelada."
+                )
 
     company_id = data.company_id or (po.company_id if po else None) or UUID("00000000-0000-0000-0000-000000000010")
     supplier_id = data.supplier_id or (po.supplier_id if po else None)
