@@ -28,7 +28,7 @@ cd "$API_DIR"
 "$VENV/bin/alembic" upgrade head
 
 echo "==> [2/4] Reiniciando instancia 1 (puerto 8000)..."
-sudo -n /usr/bin/systemctl restart intelimarket-api.service
+sudo -n /usr/bin/systemctl restart intelimarket-api
 wait_healthy 8000 "Instancia 1"
 
 echo "==> [3/4] Instancia 1 ya sirve el codigo nuevo. Margen de seguridad antes de tocar la instancia 2..."
