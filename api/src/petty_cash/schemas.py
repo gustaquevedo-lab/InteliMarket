@@ -10,6 +10,7 @@ class NaturalezaEconomica(str, Enum):
     OPEX_GASTO_OPERATIVO = "OPEX_GASTO_OPERATIVO"
     CMV_REVENTA = "CMV_REVENTA"
     CMV_MATERIA_PRIMA = "CMV_MATERIA_PRIMA"
+    CAPEX_ACTIVO_FIJO = "CAPEX_ACTIVO_FIJO"
     ANTICIPO_PERSONAL = "ANTICIPO_PERSONAL"
     PASIVO_PERIODO_ANTERIOR = "PASIVO_PERIODO_ANTERIOR"
     GASTO_DIFERIDO_CUOTAS = "GASTO_DIFERIDO_CUOTAS"
@@ -20,6 +21,9 @@ class ProductionArea(str, Enum):
     ROTISERIA = "rotiseria"
     CARNICERIA = "carniceria"
     VERDULERIA = "verduleria"
+    FLV = "flv"
+    PRE_PACK = "pre_pack"
+    OTROS = "otros"
     SALON_GENERAL = "salon_general"
 
 
@@ -387,8 +391,8 @@ class ExpenseResponse(BaseModel):
     pagado_at: Optional[datetime] = None
     forma_pago_resumen: Optional[str] = None
     # Clasificación Contable Multinaturaleza
-    naturaleza_economica: Optional[NaturalezaEconomica] = NaturalezaEconomica.OPEX_GASTO_OPERATIVO
-    production_area: Optional[ProductionArea] = None
+    naturaleza_economica: Optional[str] = NaturalezaEconomica.OPEX_GASTO_OPERATIVO.value
+    production_area: Optional[str] = None
     periodo_devengado: Optional[str] = None
     cuota_actual: Optional[int] = None
     total_cuotas: Optional[int] = None

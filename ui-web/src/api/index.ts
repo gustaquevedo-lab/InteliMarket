@@ -1598,8 +1598,8 @@ export interface Expense {
   pagado_por?: string;
   forma_pago_resumen?: string;
   // Clasificación Contable Multinaturaleza (Cierre P&L / Balances)
-  naturaleza_economica?: "OPEX_GASTO_OPERATIVO" | "CMV_REVENTA" | "CMV_MATERIA_PRIMA" | "ANTICIPO_PERSONAL" | "PASIVO_PERIODO_ANTERIOR" | "GASTO_DIFERIDO_CUOTAS";
-  production_area?: "panaderia" | "rotiseria" | "carniceria" | "verduleria" | "salon_general" | null;
+  naturaleza_economica?: "OPEX_GASTO_OPERATIVO" | "CMV_REVENTA" | "CMV_MATERIA_PRIMA" | "CAPEX_ACTIVO_FIJO" | "ANTICIPO_PERSONAL" | "PASIVO_PERIODO_ANTERIOR" | "GASTO_DIFERIDO_CUOTAS" | string;
+  production_area?: "panaderia" | "rotiseria" | "carniceria" | "verduleria" | "flv" | "pre_pack" | "otros" | "salon_general" | string | null;
   periodo_devengado?: string | null;
   cuota_actual?: number | null;
   total_cuotas?: number | null;

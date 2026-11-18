@@ -792,8 +792,15 @@ export default function ExpensesPage() {
           api.expenses.list({
             estado: filterEstado || undefined,
             category_id: filterCategory || undefined,
-          }).catch(() => []),
-          api.expenses.rendiciones.list().catch(() => []),
+          }).catch((err) => {
+            console.error("Error al cargar lista de comprobantes de gastos:", err)
+            toast.error("Error al cargar comprobantes de gastos", err?.message || String(err))
+            return []
+          }),
+          api.expenses.rendiciones.list().catch((err) => {
+            console.error("Error al cargar rendiciones de fondos:", err)
+            return []
+          }),
         ])
         setExpenses(e)
         if (Array.isArray(r) && r.length > 0) {
@@ -2917,6 +2924,7 @@ export default function ExpensesPage() {
                       <option value="OPEX_GASTO_OPERATIVO">🏢 Gasto Operativo (OPEX)</option>
                       <option value="CMV_MATERIA_PRIMA">🥖 Materia Prima (Producción)</option>
                       <option value="CMV_REVENTA">📦 Mercadería Reventa (Salón)</option>
+                      <option value="CAPEX_ACTIVO_FIJO">🏗️ Activo Fijo / Inversión (CAPEX)</option>
                       <option value="ANTICIPO_PERSONAL">👤 Anticipo al Personal</option>
                       <option value="PASIVO_PERIODO_ANTERIOR">⏳ Pasivo Anterior</option>
                       <option value="GASTO_DIFERIDO_CUOTAS">📅 Póliza / En Cuotas</option>
@@ -3196,6 +3204,10 @@ export default function ExpensesPage() {
                                 {e.naturaleza_economica === "CMV_MATERIA_PRIMA" ? (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border border-amber-300 dark:border-amber-700/60">
                                     <ChefHat className="w-2.5 h-2.5 text-amber-600" /> Materia Prima ({e.production_area || "Panadería"})
+                                  </span>
+                                ) : e.naturaleza_economica === "CAPEX_ACTIVO_FIJO" || e.es_inversion ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700/60">
+                                    <Sparkles className="w-2.5 h-2.5 text-emerald-600" /> Activo Fijo / CAPEX
                                   </span>
                                 ) : e.naturaleza_economica === "CMV_REVENTA" || (!e.naturaleza_economica && e.es_pago_proveedor) ? (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
