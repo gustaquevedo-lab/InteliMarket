@@ -3270,7 +3270,7 @@ async def get_bank_dashboard(db: AsyncSession, company_id: str) -> dict:
         "accounts": [
             {
                 "id": str(a.id), "banco": a.banco, "tipo": a.tipo, "moneda": a.moneda, "saldo_actual": a.saldo_actual,
-                "saldo_conciliado": (a.saldo_inicial or Decimal("0")) + conc_neto_por_cuenta.get(a.id, Decimal("0")),
+                "saldo_conciliado": (a.saldo_actual or Decimal("0")) - pend_neto_por_cuenta.get(a.id, Decimal("0")),
                 "saldo_pendiente_neto": pend_neto_por_cuenta.get(a.id, Decimal("0")),
                 "conciliadas": conciliadas_por_cuenta.get(a.id, 0),
                 "pendientes": pendientes_por_cuenta.get(a.id, 0),
@@ -3376,12 +3376,12 @@ async def get_cash_position(db: AsyncSession, company_id: str) -> dict:
             .order_by(BankTransaction.fecha)
         )
         movimientos = mov_result.all()
-        saldo_inicial_pyg = sum((a.saldo_inicial or Decimal("0")) for a in accounts if a.moneda == "PYG")
-        saldo_corriente = Decimal(str(saldo_inicial_pyg))
-        for fecha, neto in movimientos:
+        ultimos_movs = list(movimientos)[-90:]
+        neto_periodo = sum((Decimal(str(neto or 0)) for _, neto in ultimos_movs), Decimal("0"))
+        saldo_corriente = total_pyg - neto_periodo
+        for fecha, neto in ultimos_movs:
             saldo_corriente += Decimal(str(neto or 0))
             tendencia.append({"fecha": fecha.isoformat(), "saldo": saldo_corriente})
-        tendencia = tendencia[-90:]  # ultimos ~90 dias con movimiento
 
     return {
         "total_pyg_equivalente": total_pyg,
