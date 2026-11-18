@@ -713,7 +713,7 @@ async def confirm_purchase_order(
             f"Enviada a autorización de Administración."
         )
         await add_po_history(db, po_id, old_estado, "pendiente_autorizacion", user_id, user_name, msg_historial)
-        await db.flush()
+        await db.commit()
         await db.refresh(order)
         await _attach_suppliers(db, [order])
         return order, f"La orden supera el umbral mensual del 80% de compras (Total proyectado: {nuevo_acumulado:,.0f} / Límite: {umbral_80:,.0f}). Ha sido enviada a Administración para su autorización.", True
@@ -768,7 +768,7 @@ async def request_po_authorization(
     order.estado = "pendiente_autorizacion"
     nota = motivo or "Solicitud de autorización enviada a Administración por exceder umbral presupuestario"
     await add_po_history(db, po_id, old_estado, "pendiente_autorizacion", user_id, user_name, nota)
-    await db.flush()
+    await db.commit()
     await db.refresh(order)
     await _attach_suppliers(db, [order])
     return order, None
