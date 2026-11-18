@@ -3155,6 +3155,23 @@ async def reconcile_transaction(
         ve_res = await db.execute(select(VaultEntry).where(VaultEntry.id == uuid.UUID(matched_id)))
         ve = ve_res.scalar_one_or_none()
         if ve:
+            # Si la transacción bancaria es en PYG y la entrada de bóveda contenía divisas (BRL o USD),
+            # salvaguardar la divisa en una nueva entrada para que no se pierda de bóveda.
+            if (ve.monto_brl and ve.monto_brl > 0) or (ve.monto_usd and ve.monto_usd > 0):
+                db.add(VaultEntry(
+                    company_id=ve.company_id,
+                    branch_id=ve.branch_id,
+                    origen=ve.origen,
+                    handoff_id=ve.handoff_id,
+                    monto_pyg=Decimal("0"),
+                    monto_usd=ve.monto_usd or Decimal("0"),
+                    monto_brl=ve.monto_brl or Decimal("0"),
+                    estado="en_boveda",
+                    registrado_por=ve.registrado_por,
+                    observaciones=f"Remanente divisa en bóveda tras conciliación bancaria PYG (Ref: {ve.id})",
+                ))
+                ve.monto_brl = Decimal("0")
+                ve.monto_usd = Decimal("0")
             ve.estado = "depositado"
             ve.bank_transaction_id = bt.id
             ve.fecha_deposito = bt.fecha_conciliacion or _now()
@@ -3205,8 +3222,16 @@ async def unreconcile_transaction(db: AsyncSession, transaction_id: str) -> Bank
     bt = result.scalar_one_or_none()
     if not bt:
         return None
+    # Si estaba vinculado a entradas de bóveda, devolverlas a estado 'en_boveda'
+    from api.src.caja.models import VaultEntry
+    ve_res = await db.execute(select(VaultEntry).where(VaultEntry.bank_transaction_id == bt.id))
+    for ve in ve_res.scalars().all():
+        ve.estado = "en_boveda"
+        ve.bank_transaction_id = None
+        ve.fecha_deposito = None
     bt.conciliado = False
     bt.fecha_conciliacion = None
+    bt.categoria = "pendiente_conciliacion"
     await db.flush()
     await db.refresh(bt)
     return bt
