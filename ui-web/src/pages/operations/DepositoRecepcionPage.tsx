@@ -661,10 +661,13 @@ export default function DepositoRecepcionPage() {
       setItemsDraft((prev) =>
         prev.map((it) => ({
           ...it,
-          cantidad_recibir: it.cantidad_ordenada > 0 ? it.cantidad_ordenada : it.cantidad_recibir,
+          cantidad_recibir:
+            it.cantidad_ordenada > 0
+              ? Math.max(0, it.cantidad_ordenada - (it.cantidad_rechazada || 0))
+              : it.cantidad_recibir,
         }))
       )
-      toast.success("Cantidades Actualizadas", "Todos los ítems han sido marcados con su cantidad ordenada.")
+      toast.success("Cantidades Actualizadas", "Todos los ítems han sido marcados con su cantidad neta a recibir.")
     }
   }
 
@@ -2042,13 +2045,18 @@ export default function DepositoRecepcionPage() {
                           type="button"
                           onClick={() => {
                             soundAlerts.playScanSuccess()
-                            updateDraftItem(it.draft_id, { cantidad_recibir: it.cantidad_ordenada })
-                            toast.success("Cantidad asignada", `${it.cantidad_ordenada} un. marcadas como recibidas`)
+                            const target = Math.max(0, it.cantidad_ordenada - (it.cantidad_rechazada || 0))
+                            updateDraftItem(it.draft_id, { cantidad_recibir: target })
+                            toast.success("Cantidad asignada", `${target} un. marcadas como recibidas`)
                           }}
                           className="text-xs font-bold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
                         >
                           <CheckCheck className="w-3.5 h-3.5" />
-                          <span>Recibir cantidad completa ({it.cantidad_ordenada} un.)</span>
+                          <span>
+                            {it.cantidad_rechazada > 0
+                              ? `Recibir neto sin averías (${Math.max(0, it.cantidad_ordenada - it.cantidad_rechazada)} un.)`
+                              : `Recibir cantidad completa (${it.cantidad_ordenada} un.)`}
+                          </span>
                         </button>
                       </div>
                     )}
@@ -2266,7 +2274,13 @@ export default function DepositoRecepcionPage() {
                   <button
                     type="button"
                     onClick={() => {
+                      const restoredRecibir = (activeItem.cantidad_recibir || 0) + (activeItem.cantidad_rechazada || 0)
+                      const targetRecibir =
+                        activeItem.cantidad_ordenada > 0
+                          ? Math.min(activeItem.cantidad_ordenada, restoredRecibir)
+                          : restoredRecibir
                       updateDraftItem(averiaModalDraftId, {
+                        cantidad_recibir: targetRecibir,
                         cantidad_rechazada: 0,
                         motivo_rechazo: "Ninguno",
                       })
@@ -2282,7 +2296,13 @@ export default function DepositoRecepcionPage() {
                   type="button"
                   onClick={() => {
                     const cant = Math.max(1, parseInt(averiaCantInput) || 1)
+                    const prevRechazada = activeItem?.cantidad_rechazada || 0
+                    const currentRecibir = activeItem?.cantidad_recibir || 0
+                    const diffRechazo = cant - prevRechazada
+                    const newRecibir = Math.max(0, currentRecibir - diffRechazo)
+
                     updateDraftItem(averiaModalDraftId, {
+                      cantidad_recibir: newRecibir,
                       cantidad_rechazada: cant,
                       motivo_rechazo: averiaMotivoInput.trim() || "Mercadería dañada",
                     })

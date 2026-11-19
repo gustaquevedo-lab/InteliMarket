@@ -233,6 +233,11 @@ async def perform_3way_match(
 
                 if receipt:
                     diff_cant_rec = cant_facturada - cant_recibida
+                    # Salvaguarda: Si hubo rechazo/avería en muelle pero cant_recibida se registró igual a facturada,
+                    # forzar que la discrepancia física compute las unidades rechazadas para exigir la SNC.
+                    if cant_rechazada > Decimal("0.001") and diff_cant_rec <= Decimal("0.001"):
+                        diff_cant_rec = cant_rechazada
+
                     if diff_cant_rec > Decimal("0.001"):
                         linea_estado = "discrepancia_cantidad"
                         monto_dif_cant = diff_cant_rec * precio_facturado
