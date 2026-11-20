@@ -2240,7 +2240,7 @@ def _match_single_statement_transaction(
             for cand in amount_map.get((t["tipo"], t_monto), []):
                 if cand.id in used_tx_ids:
                     continue
-                if cand.fecha and abs((cand.fecha - t_fecha).days) <= 7:
+                if cand.fecha and abs((cand.fecha - t_fecha).days) <= 45:
                     if t_tokens & tokens_map.get(cand.id, set()):
                         matched_tx = cand
                         break
@@ -2360,10 +2360,10 @@ def _match_single_statement_transaction(
         t_tokens = set(re.findall(r'\b\d{6,}\b', f"{ref_val} {desc_val}"))
         cands = [tx for tx in amount_map.get(("debito", t_monto), []) if tx.id not in used_tx_ids]
 
-        # Prioridad 1: Token de referencia común (SIPAP / número de operación) dentro de ±7 días
+        # Prioridad 1: Token de referencia común (SIPAP / número de operación) dentro de ±45 días
         matched_deb = next((
             tx for tx in cands
-            if tx.fecha and abs((tx.fecha - t_fecha).days) <= 7 and (
+            if tx.fecha and abs((tx.fecha - t_fecha).days) <= 45 and (
                 t_tokens & tokens_map.get(tx.id, set())
             )
         ), None)
@@ -2495,7 +2495,7 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
     # ── Cobros AR recientes para detección de cobros mal imputados (otra cuenta o efectivo) ──
     res_ar = await db.execute(
         text("""
-            SELECT rp.id, rp.numero_recibo, rp.monto_total, rp.forma_pago, rp.bank_account_id,
+            SELECT rp.id, rp.numero_recibo, rp.monto_total, rp.monto_efectivo_recibido, rp.forma_pago, rp.bank_account_id,
                    rp.referencia, rp.referencia_transferencia, rp.fecha, c.razon_social as customer_name,
                    ba.banco as banco_nombre
             FROM receivable_payments rp
@@ -2508,6 +2508,44 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
     )
     ar_payments = [dict(r._mapping) for r in res_ar.fetchall()]
     used_ar_ids = set()
+
+    # ── Ventas POS cobradas por transferencia bancaria ────────────────────────
+    res_pos = await db.execute(
+        text("""
+            SELECT sp.id, sp.sale_id, sp.forma_pago, sp.monto, sp.fecha, sp.referencia,
+                   s.numero, s.tipo_comprobante
+            FROM sale_payments sp
+            JOIN sales s ON s.id = sp.sale_id
+            WHERE sp.company_id = :cid
+              AND sp.fecha >= :w_start AND sp.fecha <= :w_end
+              AND (
+                  UPPER(sp.forma_pago) LIKE '%TRAN%'
+                  OR UPPER(sp.forma_pago) LIKE '%TRANSF%'
+                  OR UPPER(sp.forma_pago) LIKE '%BANCO%'
+                  OR UPPER(sp.forma_pago) LIKE '%SIPAP%'
+              )
+        """),
+        {"cid": account.company_id, "w_start": w_start, "w_end": w_end},
+    )
+    pos_sale_payments = [dict(r._mapping) for r in res_pos.fetchall()]
+    used_pos_ids = set()
+
+    # ── Facturas de crédito AR pendientes (con o sin retención legal de IVA) ──
+    w_start_ar = w_start - timedelta(days=30)
+    res_open_ar = await db.execute(
+        text("""
+            SELECT ar.id, ar.numero_documento, ar.monto_original, ar.saldo_pendiente, ar.fecha_emision,
+                   ar.customer_id, c.razon_social as customer_name, c.ruc as customer_ruc
+            FROM accounts_receivable ar
+            JOIN customers c ON c.id = ar.customer_id
+            WHERE ar.company_id = :cid
+              AND ar.saldo_pendiente > 0
+              AND ar.fecha_emision >= :w_start_ar
+        """),
+        {"cid": account.company_id, "w_start_ar": w_start_ar},
+    )
+    open_ar_docs = [dict(r._mapping) for r in res_open_ar.fetchall()]
+    used_open_ar_ids = set()
 
     # ── Pre-agrupación N-a-1 de boletas de depósito fraccionadas (efectivo + cheque 24hs) ──
     slip_to_indices = defaultdict(list)
@@ -2569,24 +2607,83 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
             if res["status"] == "solo_extracto" and t["tipo"] == "credito":
                 t_monto = Decimal(str(t["monto"]))
                 t_tokens = set(re.findall(r'\b\d{6,}\b', f"{t.get('referencia', '')} {t.get('descripcion', '')}"))
-                for ar in ar_payments:
-                    if ar["id"] in used_ar_ids:
-                        continue
-                    if abs(Decimal(str(ar["monto_total"])) - t_monto) <= Decimal("100"):
-                        ar_ref_str = f"{ar.get('referencia') or ''} {ar.get('referencia_transferencia') or ''}"
-                        ar_tokens = set(re.findall(r'\b\d{6,}\b', ar_ref_str))
-                        voucher_match = bool(t_tokens & ar_tokens)
-                        date_close = abs((ar["fecha"] - t["fecha"]).days) <= 4 if ar.get("fecha") else False
 
-                        if voucher_match or date_close:
-                            used_ar_ids.add(ar["id"])
-                            b_name = ar["banco_nombre"] or (ar["forma_pago"].upper() if ar.get("forma_pago") else "OTRO")
-                            res["match_tipo"] = "cobro_mal_imputado"
-                            res["match_detalle"] = f"Existe cobro Recibo #{ar['numero_recibo']} ({ar['customer_name'] or 'Cliente'}) imputado a {b_name}"
-                            res["ar_payment_id"] = str(ar["id"])
-                            res["ar_numero_recibo"] = ar["numero_recibo"]
-                            res["ar_banco_actual"] = b_name
+                # A. Ventas POS cobradas por transferencia bancaria
+                for sp in pos_sale_payments:
+                    if sp["id"] in used_pos_ids:
+                        continue
+                    sp_monto = Decimal(str(sp["monto"]))
+                    if abs(sp_monto - t_monto) <= Decimal("100"):
+                        sp_fecha = sp["fecha"].date() if hasattr(sp["fecha"], "date") else sp["fecha"]
+                        sp_tokens = set(re.findall(r'\b\d{6,}\b', str(sp.get("referencia") or "")))
+                        token_match = bool(t_tokens & sp_tokens)
+                        date_close = abs((sp_fecha - t["fecha"]).days) <= 7
+                        if token_match or date_close:
+                            used_pos_ids.add(sp["id"])
+                            res["status"] = "conciliable"
+                            res["match_tipo"] = "ventas_pos"
+                            doc_num = sp.get("numero") or "Caja"
+                            res["match_detalle"] = f"Venta POS Ticket/Fac #{doc_num} (₲ {int(sp_monto):,})"
+                            res["pos_payment_id"] = str(sp["id"])
+                            res["target"] = sp
                             break
+
+                # B. Facturas Crédito AR pendientes (nominal o neto de retención IVA 70%/30%)
+                if res["status"] == "solo_extracto":
+                    for ar in open_ar_docs:
+                        if ar["id"] in used_open_ar_ids:
+                            continue
+                        m_orig = Decimal(str(ar["monto_original"]))
+                        neto_70 = (m_orig - (m_orig / Decimal("11") * Decimal("0.70"))).quantize(Decimal("1"))
+                        neto_30 = (m_orig - (m_orig / Decimal("11") * Decimal("0.30"))).quantize(Decimal("1"))
+
+                        match_ret = None
+                        if abs(m_orig - t_monto) <= Decimal("100"):
+                            match_ret = "exacto"
+                        elif abs(neto_70 - t_monto) <= Decimal("100"):
+                            match_ret = "retencion_70"
+                        elif abs(neto_30 - t_monto) <= Decimal("100"):
+                            match_ret = "retencion_30"
+
+                        if match_ret:
+                            ar_fecha = ar["fecha_emision"].date() if hasattr(ar["fecha_emision"], "date") else ar["fecha_emision"]
+                            date_close = abs((ar_fecha - t["fecha"]).days) <= 25
+                            ar_tokens = set(re.findall(r'\b\d{5,}\b', str(ar.get("numero_documento") or "")))
+                            doc_match = bool(t_tokens & ar_tokens)
+                            cust_match = (ar["customer_name"] or "").upper() in (t.get("descripcion") or "").upper()
+                            if date_close or doc_match or cust_match:
+                                used_open_ar_ids.add(ar["id"])
+                                res["status"] = "conciliable"
+                                res["match_tipo"] = "cobro_factura_credito"
+                                ret_str = " (Neto Ret. IVA 70%)" if match_ret == "retencion_70" else (" (Neto Ret. IVA 30%)" if match_ret == "retencion_30" else "")
+                                res["match_detalle"] = f"Factura #{ar['numero_documento']} ({ar['customer_name']}){ret_str}"
+                                res["open_ar_id"] = str(ar["id"])
+                                res["match_retencion"] = match_ret
+                                res["target"] = ar
+                                break
+
+                # C. Cobros AR ya registrados en otra cuenta o efectivo
+                if res["status"] == "solo_extracto":
+                    for ar in ar_payments:
+                        if ar["id"] in used_ar_ids:
+                            continue
+                        m_tot = Decimal(str(ar["monto_total"]))
+                        m_efec = Decimal(str(ar.get("monto_efectivo_recibido") or ar["monto_total"]))
+                        if abs(m_tot - t_monto) <= Decimal("100") or abs(m_efec - t_monto) <= Decimal("100"):
+                            ar_ref_str = f"{ar.get('referencia') or ''} {ar.get('referencia_transferencia') or ''}"
+                            ar_tokens = set(re.findall(r'\b\d{6,}\b', ar_ref_str))
+                            voucher_match = bool(t_tokens & ar_tokens)
+                            date_close = abs((ar["fecha"] - t["fecha"]).days) <= 4 if ar.get("fecha") else False
+
+                            if voucher_match or date_close:
+                                used_ar_ids.add(ar["id"])
+                                b_name = ar["banco_nombre"] or (ar["forma_pago"].upper() if ar.get("forma_pago") else "OTRO")
+                                res["match_tipo"] = "cobro_mal_imputado"
+                                res["match_detalle"] = f"Existe cobro Recibo #{ar['numero_recibo']} ({ar['customer_name'] or 'Cliente'}) imputado a {b_name}"
+                                res["ar_payment_id"] = str(ar["id"])
+                                res["ar_numero_recibo"] = ar["numero_recibo"]
+                                res["ar_banco_actual"] = b_name
+                                break
 
         st = res["status"]
         if st == "ya_importado":
@@ -2704,7 +2801,7 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
     # ── Cobros AR recientes para detección de cobros mal imputados (otra cuenta o efectivo) ──
     res_ar = await db.execute(
         text("""
-            SELECT rp.id, rp.numero_recibo, rp.monto_total, rp.forma_pago, rp.bank_account_id,
+            SELECT rp.id, rp.numero_recibo, rp.monto_total, rp.monto_efectivo_recibido, rp.forma_pago, rp.bank_account_id,
                    rp.referencia, rp.referencia_transferencia, rp.fecha, c.razon_social as customer_name,
                    ba.banco as banco_nombre
             FROM receivable_payments rp
@@ -2717,6 +2814,44 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
     )
     ar_payments = [dict(r._mapping) for r in res_ar.fetchall()]
     used_ar_ids = set()
+
+    # ── Ventas POS cobradas por transferencia bancaria ────────────────────────
+    res_pos = await db.execute(
+        text("""
+            SELECT sp.id, sp.sale_id, sp.forma_pago, sp.monto, sp.fecha, sp.referencia,
+                   s.numero, s.tipo_comprobante
+            FROM sale_payments sp
+            JOIN sales s ON s.id = sp.sale_id
+            WHERE sp.company_id = :cid
+              AND sp.fecha >= :w_start AND sp.fecha <= :w_end
+              AND (
+                  UPPER(sp.forma_pago) LIKE '%TRAN%'
+                  OR UPPER(sp.forma_pago) LIKE '%TRANSF%'
+                  OR UPPER(sp.forma_pago) LIKE '%BANCO%'
+                  OR UPPER(sp.forma_pago) LIKE '%SIPAP%'
+              )
+        """),
+        {"cid": account.company_id, "w_start": w_start, "w_end": w_end},
+    )
+    pos_sale_payments = [dict(r._mapping) for r in res_pos.fetchall()]
+    used_pos_ids = set()
+
+    # ── Facturas de crédito AR pendientes (con o sin retención legal de IVA) ──
+    w_start_ar = w_start - timedelta(days=30)
+    res_open_ar = await db.execute(
+        text("""
+            SELECT ar.id, ar.numero_documento, ar.monto_original, ar.saldo_pendiente, ar.fecha_emision,
+                   ar.customer_id, c.razon_social as customer_name, c.ruc as customer_ruc
+            FROM accounts_receivable ar
+            JOIN customers c ON c.id = ar.customer_id
+            WHERE ar.company_id = :cid
+              AND ar.saldo_pendiente > 0
+              AND ar.fecha_emision >= :w_start_ar
+        """),
+        {"cid": account.company_id, "w_start_ar": w_start_ar},
+    )
+    open_ar_docs = [dict(r._mapping) for r in res_open_ar.fetchall()]
+    used_open_ar_ids = set()
 
     # ── Pre-agrupación N-a-1 de boletas de depósito fraccionadas (efectivo + cheque 24hs) ──
     slip_to_indices = defaultdict(list)
@@ -2757,6 +2892,66 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
         res = _match_single_statement_transaction(
             t, exact_map, amount_map, tokens_map, chq_by_num_monto, chq_by_num, chq_by_monto, account.id, used_tx_ids, used_chq_ids
         )
+
+        # Detectar si corresponde a ventas POS cobradas por transferencia o facturas AR pendientes
+        if res["status"] == "solo_extracto" and t["tipo"] == "credito":
+            t_monto_check = Decimal(str(t["monto"]))
+            t_tokens_check = set(re.findall(r'\b\d{6,}\b', f"{t.get('referencia', '')} {t.get('descripcion', '')}"))
+
+            # A. Ventas POS cobradas por transferencia bancaria
+            for sp in pos_sale_payments:
+                if sp["id"] in used_pos_ids:
+                    continue
+                sp_monto = Decimal(str(sp["monto"]))
+                if abs(sp_monto - t_monto_check) <= Decimal("100"):
+                    sp_fecha = sp["fecha"].date() if hasattr(sp["fecha"], "date") else sp["fecha"]
+                    sp_tokens = set(re.findall(r'\b\d{6,}\b', str(sp.get("referencia") or "")))
+                    token_match = bool(t_tokens_check & sp_tokens)
+                    date_close = abs((sp_fecha - t["fecha"]).days) <= 7
+                    if token_match or date_close:
+                        used_pos_ids.add(sp["id"])
+                        res["status"] = "conciliable"
+                        res["match_tipo"] = "ventas_pos"
+                        doc_num = sp.get("numero") or "Caja"
+                        res["match_detalle"] = f"Venta POS Ticket/Fac #{doc_num} (₲ {int(sp_monto):,})"
+                        res["pos_payment_id"] = str(sp["id"])
+                        res["target"] = sp
+                        break
+
+            # B. Facturas Crédito AR pendientes (nominal o neto de retención IVA 70%/30%)
+            if res["status"] == "solo_extracto":
+                for ar in open_ar_docs:
+                    if ar["id"] in used_open_ar_ids:
+                        continue
+                    m_orig = Decimal(str(ar["monto_original"]))
+                    neto_70 = (m_orig - (m_orig / Decimal("11") * Decimal("0.70"))).quantize(Decimal("1"))
+                    neto_30 = (m_orig - (m_orig / Decimal("11") * Decimal("0.30"))).quantize(Decimal("1"))
+
+                    match_ret = None
+                    if abs(m_orig - t_monto_check) <= Decimal("100"):
+                        match_ret = "exacto"
+                    elif abs(neto_70 - t_monto_check) <= Decimal("100"):
+                        match_ret = "retencion_70"
+                    elif abs(neto_30 - t_monto_check) <= Decimal("100"):
+                        match_ret = "retencion_30"
+
+                    if match_ret:
+                        ar_fecha = ar["fecha_emision"].date() if hasattr(ar["fecha_emision"], "date") else ar["fecha_emision"]
+                        date_close = abs((ar_fecha - t["fecha"]).days) <= 25
+                        ar_tokens = set(re.findall(r'\b\d{5,}\b', str(ar.get("numero_documento") or "")))
+                        doc_match = bool(t_tokens_check & ar_tokens)
+                        cust_match = (ar["customer_name"] or "").upper() in (t.get("descripcion") or "").upper()
+                        if date_close or doc_match or cust_match:
+                            used_open_ar_ids.add(ar["id"])
+                            res["status"] = "conciliable"
+                            res["match_tipo"] = "cobro_factura_credito"
+                            ret_str = " (Neto Ret. IVA 70%)" if match_ret == "retencion_70" else (" (Neto Ret. IVA 30%)" if match_ret == "retencion_30" else "")
+                            res["match_detalle"] = f"Factura #{ar['numero_documento']} ({ar['customer_name']}){ret_str}"
+                            res["open_ar_id"] = str(ar["id"])
+                            res["match_retencion"] = match_ret
+                            res["target"] = ar
+                            break
+
         st = res["status"]
         key = res["key"]
         t_monto = res["t_monto"]
@@ -2784,6 +2979,54 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
                     target.fecha_conciliacion = _now()
                     db.add(target)
                     auto_conciliadas += 1
+                continue
+
+            elif match_tipo == "ventas_pos" and isinstance(target, dict):
+                doc_num = target.get("numero") or "Caja"
+                desc_enriquecida = f"Recaudación POS Transferencia - Ticket/Fac #{doc_num}"
+                bt = BankTransaction(
+                    company_id=uuid.UUID(company_id),
+                    bank_account_id=account.id,
+                    fecha=t["fecha"],
+                    tipo="credito",
+                    monto=t_monto,
+                    moneda=account.moneda,
+                    descripcion=desc_enriquecida,
+                    referencia=ref_val or target.get("referencia"),
+                    categoria="ventas_pos",
+                    conciliado=True,
+                    fecha_conciliacion=_now(),
+                )
+                db.add(bt)
+                auto_conciliadas += 1
+                nuevas += 1
+                exact_map[key] = bt
+                amount_map[("credito", t_monto)].append(bt)
+                continue
+
+            elif match_tipo == "cobro_factura_credito" and isinstance(target, dict):
+                doc_num = target.get("numero_documento") or "S/N"
+                cli_name = target.get("customer_name") or "Cliente"
+                ret_info = " (Neto Ret. IVA 70%)" if res.get("match_retencion") == "retencion_70" else ""
+                desc_enriquecida = f"Cobro Factura #{doc_num} - {cli_name}{ret_info}"
+                bt = BankTransaction(
+                    company_id=uuid.UUID(company_id),
+                    bank_account_id=account.id,
+                    fecha=t["fecha"],
+                    tipo="credito",
+                    monto=t_monto,
+                    moneda=account.moneda,
+                    descripcion=desc_enriquecida,
+                    referencia=ref_val,
+                    categoria="cobranzas",
+                    conciliado=True,
+                    fecha_conciliacion=_now(),
+                )
+                db.add(bt)
+                auto_conciliadas += 1
+                nuevas += 1
+                exact_map[key] = bt
+                amount_map[("credito", t_monto)].append(bt)
                 continue
 
             elif match_tipo == "cheque":
@@ -3295,7 +3538,7 @@ async def get_bank_dashboard(db: AsyncSession, company_id: str) -> dict:
         "accounts": [
             {
                 "id": str(a.id), "banco": a.banco, "tipo": a.tipo, "moneda": a.moneda, "saldo_actual": a.saldo_actual,
-                "saldo_conciliado": (a.saldo_actual or Decimal("0")) - pend_neto_por_cuenta.get(a.id, Decimal("0")),
+                "saldo_conciliado": a.saldo_actual if (a.saldo_verificado_manualmente or pendientes_por_cuenta.get(a.id, 0) == 0) else ((a.saldo_inicial or Decimal("0")) + conc_neto_por_cuenta.get(a.id, Decimal("0"))),
                 "saldo_pendiente_neto": pend_neto_por_cuenta.get(a.id, Decimal("0")),
                 "conciliadas": conciliadas_por_cuenta.get(a.id, 0),
                 "pendientes": pendientes_por_cuenta.get(a.id, 0),
