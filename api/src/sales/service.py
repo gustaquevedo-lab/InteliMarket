@@ -1513,7 +1513,12 @@ async def build_sale_receipt_escpos(
     lines.append("Medios de Pago Utilizados:")
     if nueva_forma_pago and nueva_forma_pago.upper() != "MIXTO":
         v_tag = f" ({voucher.strip()})" if voucher else ""
-        lines.append(pad_two_col(f"  {nueva_forma_pago.upper()}{v_tag}:", f"GS. {fmt_gs(sale.total)}"))
+        if payments and payments[0].moneda == "BRL":
+            lines.append(pad_two_col(f"  EFECTIVO R${v_tag}:", f"R$ {float(payments[0].monto):.2f} ({fmt_gs(sale.total)})"))
+        elif payments and payments[0].moneda == "USD":
+            lines.append(pad_two_col(f"  EFECTIVO US${v_tag}:", f"US$ {float(payments[0].monto):.2f} ({fmt_gs(sale.total)})"))
+        else:
+            lines.append(pad_two_col(f"  {nueva_forma_pago.upper()}{v_tag}:", f"GS. {fmt_gs(sale.total)}"))
     elif payments:
         for p in payments:
             fp = p.forma_pago or "EFECTIVO"
@@ -1689,26 +1694,40 @@ async def reopen_sale_payment(
         else:
             sale.condicion = "contado"
 
+        mon_final = (moneda or "PYG").upper()
+        if nueva_forma_pago.upper() == "EFECTIVO_BRL" and mon_final == "PYG":
+            mon_final = "BRL"
+        elif nueva_forma_pago.upper() == "EFECTIVO_USD" and mon_final == "PYG":
+            mon_final = "USD"
+
         values_to_update: dict[str, Any] = {
             "forma_pago": nueva_forma_pago.upper(),
-            "moneda": moneda or "PYG",
+            "moneda": mon_final,
         }
+        if monto_moneda and mon_final != "PYG":
+            values_to_update["monto"] = Decimal(str(monto_moneda))
+            values_to_update["monto_pyg"] = sale.total
+        else:
+            values_to_update["monto"] = sale.total
+            values_to_update["monto_pyg"] = sale.total
 
         if existing_payments:
-            await db.execute(
-                update(SalePayment)
-                .where(SalePayment.sale_id == sale.id)
-                .values(**values_to_update)
-            )
+            for ep in existing_payments:
+                for k, v in values_to_update.items():
+                    setattr(ep, k, v)
+            await db.flush()
         else:
+            monto_val = Decimal(str(monto_moneda)) if (monto_moneda and mon_final != "PYG") else sale.total
             db.add(SalePayment(
                 company_id=sale.company_id,
                 sale_id=sale.id,
                 forma_pago=nueva_forma_pago.upper(),
-                monto=sale.total,
-                moneda=moneda or "PYG",
+                monto=monto_val,
+                moneda=mon_final,
+                monto_pyg=sale.total,
                 fecha=sale.fecha or datetime.now(timezone.utc),
             ))
+            await db.flush()
 
     # Actualizar crédito del socio si corresponde
     was_credit = forma_pago_anterior in ("EXTRA_CLUB", "CREDITO")
