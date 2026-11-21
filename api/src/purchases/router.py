@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
-from sqlalchemy import text, select
+from sqlalchemy import text, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -1313,13 +1313,58 @@ async def receive_invoice_for_order(
                 invoice = ex_inv
                 if saved_scan_url:
                     invoice.comprobante_url = saved_scan_url
-                if total_factura_impreso and total_factura_impreso > 0:
-                    diff_redondeo = (total_factura_impreso - (invoice.total or Decimal("0"))).quantize(Decimal("1"))
-                    if abs(diff_redondeo) <= Decimal("20000"):
-                        diff_redondeo_aplicado = diff_redondeo
-                        invoice.total = total_factura_impreso.quantize(Decimal("1"))
-                        invoice.saldo_pendiente = total_factura_impreso.quantize(Decimal("1"))
-                        invoice.notas = f"{(invoice.notas or '').strip()} [Ajuste de redondeo impreso: {diff_redondeo:+,} ₲]".strip()
+
+                is_manual_or_draft = not getattr(invoice, "xml_sifen_url", None) and not getattr(invoice, "cdc", None)
+                if is_manual_or_draft:
+                    target_total = (total_factura_impreso if (total_factura_impreso and total_factura_impreso > 0) else po.total or Decimal("0")).quantize(Decimal("1"))
+                    invoice.total = target_total
+                    invoice.saldo_pendiente = target_total
+                    subtot = (target_total / Decimal("1.1")).quantize(Decimal("1"))
+                    invoice.subtotal = subtot
+                    invoice.iva_10 = target_total - subtot
+                    if timbrado and timbrado.strip():
+                        invoice.timbrado = timbrado.strip()
+                    if fecha_emision:
+                        try:
+                            invoice.fecha_emision = datetime.strptime(fecha_emision, "%Y-%m-%d").date()
+                        except Exception:
+                            pass
+
+                    # Sincronizar renglones con los de la Orden de Compra pactada para no mantener costos viejos/estimados
+                    po_items_q = select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == po.id)
+                    po_items_res = await db.execute(po_items_q)
+                    po_items = po_items_res.scalars().all()
+                    if po_items:
+                        await db.execute(delete(SupplierInvoiceItem).where(SupplierInvoiceItem.invoice_id == invoice.id))
+                        prod_ids = [poi.product_id for poi in po_items if poi.product_id]
+                        prod_codes = {}
+                        if prod_ids:
+                            from api.src.products.models import Product
+                            prods_res = await db.execute(select(Product.id, Product.codigo_barra, Product.sku).where(Product.id.in_(prod_ids)))
+                            for p_id, p_barcode, p_sku in prods_res.all():
+                                prod_codes[p_id] = p_barcode or p_sku
+
+                        for poi in po_items:
+                            inv_item = SupplierInvoiceItem(
+                                invoice_id=invoice.id,
+                                product_id=poi.product_id,
+                                codigo_proveedor=prod_codes.get(poi.product_id),
+                                descripcion=poi.descripcion or "Item",
+                                cantidad=poi.cantidad,
+                                precio_unitario=poi.precio_unitario,
+                                descuento=poi.descuento_pct or Decimal("0"),
+                                iva_tasa=poi.iva_tasa or Decimal("10"),
+                                total=poi.total,
+                            )
+                            db.add(inv_item)
+                else:
+                    if total_factura_impreso and total_factura_impreso > 0:
+                        diff_redondeo = (total_factura_impreso - (invoice.total or Decimal("0"))).quantize(Decimal("1"))
+                        if abs(diff_redondeo) <= Decimal("20000"):
+                            diff_redondeo_aplicado = diff_redondeo
+                            invoice.total = total_factura_impreso.quantize(Decimal("1"))
+                            invoice.saldo_pendiente = total_factura_impreso.quantize(Decimal("1"))
+                            invoice.notas = f"{(invoice.notas or '').strip()} [Ajuste de redondeo impreso: {diff_redondeo:+,} ₲]".strip()
                 invoice.purchase_order_id = po_uuid
                 await db.commit()
                 match_res = await matching_service.perform_3way_match(db, str(invoice.id), user_id)

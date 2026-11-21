@@ -571,6 +571,11 @@ async def perform_3way_match(
         invoice.monto_retenido_nc = Decimal("0")
         invoice.requiere_nc = False
         invoice.motivo_bloqueo = "Valores y precios conformes con el Pedido. Pendiente de recepción física en muelle para autorizar pago."
+        # Cancelar cualquier solicitud de NC pendiente previa si la factura ahora está 100% conforme
+        for s in all_inv_sncs:
+            if s.estado in ("pendiente_entrega", "entregada_parcial"):
+                s.estado = "cancelada"
+                s.observaciones = f"Cancelada automáticamente: factura conforme con el Pedido N° {po.numero if po else ''} sin discrepancias."
     elif receipt:
         # Match 100% triple conciliado
         estado_match = "conciliado_100"
@@ -579,6 +584,10 @@ async def perform_3way_match(
         invoice.monto_retenido_nc = Decimal("0")
         invoice.motivo_bloqueo = None
         invoice.requiere_nc = False
+        for s in all_inv_sncs:
+            if s.estado in ("pendiente_entrega", "entregada_parcial"):
+                s.estado = "cancelada"
+                s.observaciones = f"Cancelada automáticamente: factura conforme con el Pedido N° {po.numero if po else ''} y Recepción N° {receipt.numero if receipt else ''} sin discrepancias."
     else:
         # Sin orden ni recepción
         estado_match = "sin_orden_ni_recepcion"
