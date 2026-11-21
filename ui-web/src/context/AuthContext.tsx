@@ -72,14 +72,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false)
       } catch (err: any) {
         if (cancelado) return
-        if (esEstacion) {
+
+        const errMsg = String(err?.message || err?.detail || "").toLowerCase()
+        const isAuthRejection =
+          errMsg.includes("invalid token") ||
+          errMsg.includes("not enough segments") ||
+          errMsg.includes("token expir") ||
+          errMsg.includes("token vencid") ||
+          errMsg.includes("401") ||
+          errMsg.includes("403") ||
+          errMsg.includes("no hay sesión activa")
+
+        if (esEstacion && !isAuthRejection) {
           reintento = setTimeout(identificar, 5000)
+          return
+        }
+
+        if (esEstacion && isAuthRejection) {
+          console.warn("[Auth] Token de estación formalmente rechazado por el servidor:", errMsg)
+          localStorage.removeItem("access_token")
+          localStorage.removeItem("station_token")
+          setUser(null)
+          setLoading(false)
           return
         }
 
         // Si el fallo es por caída de red, reinicio del backend o 502/503/504:
         // Mantener la sesión local activa con los claims locales
-        const errMsg = String(err?.message || "").toLowerCase()
         const isTransientError =
           errMsg.includes("conexión") ||
           errMsg.includes("servidor central") ||

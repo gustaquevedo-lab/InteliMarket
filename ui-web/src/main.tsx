@@ -13,23 +13,37 @@ import "./index.css"
 // a guardar el token -- el enlace de configuracion no serviria.
 ;(() => {
   try {
+    const isValidJwt = (t: string | null | undefined): t is string => {
+      if (!t || typeof t !== "string") return false
+      const parts = t.trim().split(".")
+      return parts.length === 3 && parts.every((p) => p.length > 0)
+    }
+
     const url = new URL(window.location.href)
     const token = url.searchParams.get("token")
     if (token) {
-      localStorage.setItem("access_token", token)
-      // Copia permanente. La credencial de estacion no tiene refresh_token, y
-      // el cliente borra access_token ante cualquier 401 --incluso uno pasajero,
-      // como el de un reinicio del API a mitad de un pedido--. Sin esta copia,
-      // un 401 de un segundo destruye para siempre una credencial de 5 anios y
-      // el gondolero se encuentra con una pantalla de login.
-      localStorage.setItem("station_token", token)
+      if (isValidJwt(token)) {
+        localStorage.setItem("access_token", token)
+        // Copia permanente. La credencial de estacion no tiene refresh_token, y
+        // el cliente borra access_token ante cualquier 401 --incluso uno pasajero,
+        // como el de un reinicio del API a mitad de un pedido--. Sin esta copia,
+        // un 401 de un segundo destruye para siempre una credencial de 5 anios y
+        // el gondolero se encuentra con una pantalla de login.
+        localStorage.setItem("station_token", token)
+      } else {
+        console.warn("[Station] Token en URL inválido o truncado. Se ignora para no dañar la estación.")
+      }
       url.searchParams.delete("token")
       window.history.replaceState({}, "", url.pathname + url.search + url.hash)
     }
     // Al arrancar: si la sesion se perdio pero esta maquina es una estacion,
-    // se restaura sola. Nadie tiene que escribir una contrasena.
+    // se restaura sola si el token almacenado es estructuralmente valido.
     const estacion = localStorage.getItem("station_token")
-    if (!localStorage.getItem("access_token") && estacion) {
+    if (estacion && !isValidJwt(estacion)) {
+      console.warn("[Station] station_token en localStorage corrupto o truncado. Purgando.")
+      localStorage.removeItem("station_token")
+      localStorage.removeItem("access_token")
+    } else if (!localStorage.getItem("access_token") && estacion) {
       localStorage.setItem("access_token", estacion)
     }
   } catch {
