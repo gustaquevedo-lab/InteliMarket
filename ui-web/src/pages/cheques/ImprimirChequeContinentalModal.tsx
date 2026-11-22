@@ -524,13 +524,14 @@ export default function ImprimirChequeContinentalModal({
                 {/* Offset Vertical Y */}
                 <div>
                   <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                    Offset Y (Líneas a 6 LPI)
+                    Offset Y (Vertical: <span className="text-emerald-400 font-bold">- Sube</span> / <span className="text-amber-400 font-bold">+ Baja</span>)
                   </label>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => guardarConfiguracion(selectedPrinter, offsetX, offsetY - 1, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                       className="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-white font-black"
+                      title="Subir texto hacia el tope del cheque"
                     >
                       -
                     </button>
@@ -544,6 +545,7 @@ export default function ImprimirChequeContinentalModal({
                       type="button"
                       onClick={() => guardarConfiguracion(selectedPrinter, offsetX, offsetY + 1, imprimirTalon, plaza, colTalon, colCheque, colMonto, colFechasEmi, colFechasPago)}
                       className="w-8 h-8 rounded bg-slate-800 hover:bg-slate-700 text-white font-black"
+                      title="Bajar texto"
                     >
                       +
                     </button>
@@ -620,7 +622,13 @@ export default function ImprimirChequeContinentalModal({
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>¿El sistema dice &quot;Enviado&quot; pero la Epson LX-300+ no se mueve ni imprime?</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[11px] text-slate-300">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 text-[11px] text-slate-300">
+                  <div className="p-2 bg-slate-900/80 rounded-lg border border-slate-800">
+                    <p className="font-bold text-emerald-400 mb-1">0. ¿Imprime muy abajo o muy arriba?</p>
+                    <p className="text-slate-400 leading-normal">
+                      <strong>Micro-Feed de la Epson:</strong> Con la impresora prendida, mantén <strong>PAUSE</strong> presionado 3 seg hasta que pite. Con <strong>Load/Eject</strong> subes el papel; con <strong>LF/FF</strong> lo bajas. Vuelve a presionar <strong>PAUSE</strong> para guardar el tope permanente.
+                    </p>
+                  </div>
                   <div className="p-2 bg-slate-900/80 rounded-lg border border-slate-800">
                     <p className="font-bold text-amber-300 mb-1">1. Botón PAUSE en la Epson</p>
                     <p className="text-slate-400 leading-normal">

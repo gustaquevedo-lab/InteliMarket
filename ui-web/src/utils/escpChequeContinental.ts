@@ -205,8 +205,7 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
   // Helper de escritura seguro con límite estricto de 94 columnas (carro 12 CPI = 96 col)
   const MAX_COL = 93
   function escribir(lineaIdx: number, col: number, texto: string) {
-    const lActual = lineaIdx + offY
-    if (lActual < 0 || lActual >= TOTAL_LINEAS) return
+    const lActual = Math.max(0, Math.min(TOTAL_LINEAS - 1, lineaIdx + offY))
     const cActual = Math.max(0, Math.min(MAX_COL - texto.length, col + offX))
     let cur = lineas[lActual]
     if (cur.length < cActual) {
@@ -218,51 +217,51 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
 
   // ── 1. TALÓN IZQUIERDO DE CONTROL (COLUMNAS 1 A 22) ──
   if (imprimirTalon) {
-    // Línea 2: Vencimiento (si es diferido)
+    // Línea 1: Vencimiento (si es diferido)
     if (data.esDiferido) {
-      escribir(2, cTalon, `Venc:${fPago.dd}/${fPago.mm}/${fPago.aaaa}`)
+      escribir(1, cTalon, `Venc:${fPago.dd}/${fPago.mm}/${fPago.aaaa}`)
     }
-    // Línea 3: Fecha de emisión
-    escribir(3, cTalon, `Fec:${fEmi.dd}/${fEmi.mm}/${fEmi.aaaa}`)
-    // Línea 4: Orden (proveedor/beneficiario corto)
+    // Línea 2: Fecha de emisión
+    escribir(2, cTalon, `Fec:${fEmi.dd}/${fEmi.mm}/${fEmi.aaaa}`)
+    // Línea 3: Orden (proveedor/beneficiario corto)
     const beneTalon = data.beneficiario.toUpperCase().trim().slice(0, 16)
-    escribir(4, cTalon, `Ord:${beneTalon}`)
-    // Línea 5: Concepto
+    escribir(3, cTalon, `Ord:${beneTalon}`)
+    // Línea 4: Concepto
     if (data.concepto) {
-      escribir(5, cTalon, `Cpto:${data.concepto.slice(0, 15)}`)
+      escribir(4, cTalon, `Cpto:${data.concepto.slice(0, 15)}`)
     }
-    // Línea 7 y 8: Este Cheque
-    escribir(7, cTalon, `Este Chq:`)
-    escribir(8, cTalon, montoNumStr.slice(0, 18))
+    // Línea 6 y 7: Este Cheque
+    escribir(6, cTalon, `Este Chq:`)
+    escribir(7, cTalon, montoNumStr.slice(0, 18))
   }
 
   // ── 2. CUERPO DEL CHEQUE BANCO CONTINENTAL ──
-  // Renglón 1: Cruzado // a la izquierda + Monto numérico en recuadro ₲ a la derecha
+  // Renglón 0: Cruzado // a la izquierda + Monto numérico en recuadro ₲ a la derecha (SIN renglón previo vacío)
   if (data.cruzado) {
-    escribir(1, cCheque, "//")
+    escribir(0, cCheque, "//")
   }
-  escribir(1, cMonto, montoNumStr)
+  escribir(0, cMonto, montoNumStr)
 
-  // Renglón 2: Fechas en casillas superiores
+  // Renglón 1: Fechas en casillas superiores
   // FECHA DE EMISIÓN: DD  MM  AA
   // FECHA DE PAGO (Diferido): DD  MM  AA
-  escribir(2, cFechasEmi, `${fEmi.dd}   ${fEmi.mm}   ${fEmi.aa}`)
+  escribir(1, cFechasEmi, `${fEmi.dd}   ${fEmi.mm}   ${fEmi.aa}`)
   if (data.esDiferido) {
-    escribir(2, cFechasPago, `${fPago.dd}   ${fPago.mm}   ${fPago.aa}`)
+    escribir(1, cFechasPago, `${fPago.dd}   ${fPago.mm}   ${fPago.aa}`)
   }
 
-  // Renglón 4: "Páguese a la orden de"
-  escribir(4, cCheque, beneText)
+  // Renglón 3: "Páguese a la orden de"
+  escribir(3, cCheque, beneText)
 
-  // Renglón 5 y 6: "La suma de Guaraníes" (Sin redundancia "GUARANÍES")
-  escribir(5, cCheque, letrasL1)
+  // Renglón 4 y 5: "La suma de Guaraníes" (Sin redundancia "GUARANÍES")
+  escribir(4, cCheque, letrasL1)
   if (letrasL2) {
-    escribir(6, cCheque, letrasL2)
+    escribir(5, cCheque, letrasL2)
   }
 
-  // Renglón 8: Plaza y fecha (solo si es a la vista)
+  // Renglón 7: Plaza y fecha (solo si es a la vista)
   if (!data.esDiferido) {
-    escribir(8, cCheque + 8, `${plaza}, ${fEmi.dd} de ${mesEmiNombre} de ${fEmi.aaaa}`)
+    escribir(7, cCheque + 8, `${plaza}, ${fEmi.dd} de ${mesEmiNombre} de ${fEmi.aaaa}`)
   }
 
   // ── 3. COMPILACIÓN DE COMANDOS ESC/P ──
@@ -315,10 +314,8 @@ export function generarEscpReglaCalibracion(): string {
   escp += `${ESC}C\x11` // 17 líneas (2.75 pulgadas)
   escp += `${ESC}M` // 12 CPI (96 columnas)
 
-  escp += "REGLA 12 CPI (TALON + CHEQUE CONTINENTAL)\r\n"
-  escp += "   ...+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8....+....9\r\n"
-  
-  for (let i = 1; i <= 8; i++) {
+  // Cada renglón físico se rotula desde L0 sin encabezados que empujen el texto hacia abajo
+  for (let i = 0; i <= 8; i++) {
     escp += `L${i}: ...+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8....+....9\r\n`
   }
 
