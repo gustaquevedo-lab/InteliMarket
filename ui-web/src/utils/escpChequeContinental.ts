@@ -191,16 +191,20 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
     beneText = beneText.slice(0, 55)
   }
 
-  // Matriz de 12 líneas útiles (cubre exactamente las casillas físicas del cheque)
-  const TOTAL_LINEAS = 12
+  // Matriz de 17 líneas físicas (cubre exactamente las 2.75 pulgadas = 70 mm del cheque a 6 LPI)
+  const TOTAL_LINEAS = 17
   const lineas: string[] = Array(TOTAL_LINEAS).fill("")
 
-  // Posiciones de columna calibradas (en modo 12 CPI, ancho máximo seguro = 92 cols)
-  const cTalon = Math.max(0, (data.colTalon ?? 1))
-  const cCheque = Math.max(cTalon + (imprimirTalon ? 22 : 0), (data.colCheque ?? (imprimirTalon ? 26 : 4)))
-  const cMonto = Math.min(92 - montoNumStr.length, (data.colMonto ?? 76))
-  const cFechasEmi = data.colFechasEmi ?? (imprimirTalon ? 48 : 28)
-  const cFechasPago = data.colFechasPago ?? (imprimirTalon ? 68 : 48)
+  // Posiciones de columna calibradas (en modo 12 CPI, 96 columnas físicas)
+  // Medidas directas sobre formulario continuo Banco Continental (70 mm alto x 235 mm ancho)
+  const cTalon = Math.max(0, (data.colTalon ?? 2)) // Talón arranca en col 2 (5 mm)
+  const cCheque = Math.max(cTalon + (imprimirTalon ? 22 : 0), (data.colCheque ?? 26)) // Cheque tras troquel col 24
+  const cMonto = Math.min(92 - montoNumStr.length, (data.colMonto ?? 76)) // Recuadro ₲ a la derecha
+  const cFechasEmi = data.colFechasEmi ?? 58 // Casillero FECHA DE EMISIÓN
+  const cFechasPago = data.colFechasPago ?? 78 // Casillero FECHA DE PAGO (Diferido)
+  // Las líneas impresas arrancan tras los textos preimpresos "Páguese a la orden de" y "La suma de Guaraníes"
+  const cBeneInicio = cCheque + 18 // Columna ~44 (después de "de ")
+  const cLetrasInicio = cCheque + 18 // Columna ~44 (después de "Guaraníes ")
 
   // Helper de escritura seguro con límite estricto de 94 columnas (carro 12 CPI = 96 col)
   const MAX_COL = 93
@@ -215,53 +219,57 @@ export function generarEscpChequeContinental(data: ChequeContinentalData): strin
     lineas[lActual] = nueva.slice(0, MAX_COL) // NUNCA excede MAX_COL
   }
 
-  // ── 1. TALÓN IZQUIERDO DE CONTROL (COLUMNAS 1 A 22) ──
+  // ── 1. TALÓN IZQUIERDO DE CONTROL (COLUMNAS 2 A 22) ──
   if (imprimirTalon) {
-    // Línea 1: Vencimiento (si es diferido)
+    // Línea 3: Vencimiento (12.7 mm desde el borde superior)
     if (data.esDiferido) {
-      escribir(1, cTalon, `Venc:${fPago.dd}/${fPago.mm}/${fPago.aaaa}`)
+      escribir(3, cTalon, `Venc:${fPago.dd}/${fPago.mm}/${fPago.aaaa}`)
     }
-    // Línea 2: Fecha de emisión
-    escribir(2, cTalon, `Fec:${fEmi.dd}/${fEmi.mm}/${fEmi.aaaa}`)
-    // Línea 3: Orden (proveedor/beneficiario corto)
+    // Línea 4: Fecha de emisión (16.9 mm)
+    escribir(4, cTalon, `Fec:${fEmi.dd}/${fEmi.mm}/${fEmi.aaaa}`)
+    // Línea 5: Orden (21.1 mm, beneficiario corto máx 16 letras)
     const beneTalon = data.beneficiario.toUpperCase().trim().slice(0, 16)
-    escribir(3, cTalon, `Ord:${beneTalon}`)
-    // Línea 4: Concepto
+    escribir(5, cTalon, `Ord:${beneTalon}`)
+    // Línea 6: Concepto (25.4 mm)
     if (data.concepto) {
-      escribir(4, cTalon, `Cpto:${data.concepto.slice(0, 15)}`)
+      escribir(6, cTalon, `Cpto:${data.concepto.slice(0, 15)}`)
     }
-    // Línea 6 y 7: Este Cheque
-    escribir(6, cTalon, `Este Chq:`)
-    escribir(7, cTalon, montoNumStr.slice(0, 18))
+    // Línea 12: Este Cheque (50.8 mm)
+    escribir(12, cTalon, `Chq:${montoNumStr.slice(0, 16)}`)
   }
 
-  // ── 2. CUERPO DEL CHEQUE BANCO CONTINENTAL ──
-  // Renglón 0: Cruzado // a la izquierda + Monto numérico en recuadro ₲ a la derecha (SIN renglón previo vacío)
+  // ── 2. CUERPO DEL CHEQUE BANCO CONTINENTAL (70 mm de alto) ──
+  // Renglón 1 (4.2 mm): Cruzado // a la izquierda + Monto numérico en recuadro ₲ a la derecha
   if (data.cruzado) {
-    escribir(0, cCheque, "//")
+    escribir(1, cCheque, "//")
   }
-  escribir(0, cMonto, montoNumStr)
+  escribir(1, cMonto, montoNumStr)
 
-  // Renglón 1: Fechas en casillas superiores
-  // FECHA DE EMISIÓN: DD  MM  AA
-  // FECHA DE PAGO (Diferido): DD  MM  AA
-  escribir(1, cFechasEmi, `${fEmi.dd}   ${fEmi.mm}   ${fEmi.aa}`)
+  // Renglón 5 (21.1 mm): Fechas en casillas superiores
+  // FECHA DE EMISIÓN: DD   MM   AA
+  // FECHA DE PAGO (Diferido): DD   MM   AA
+  escribir(5, cFechasEmi, `${fEmi.dd}   ${fEmi.mm}   ${fEmi.aa}`)
   if (data.esDiferido) {
-    escribir(1, cFechasPago, `${fPago.dd}   ${fPago.mm}   ${fPago.aa}`)
+    escribir(5, cFechasPago, `${fPago.dd}   ${fPago.mm}   ${fPago.aa}`)
   }
 
-  // Renglón 3: "Páguese a la orden de"
-  escribir(3, cCheque, beneText)
+  // Renglón 8 (33.8 mm): "Páguese a la orden de"
+  // Escribe sobre la línea punteada arrancando a partir de la columna 44 (después de "de ")
+  escribir(8, cBeneInicio, beneText)
 
-  // Renglón 4 y 5: "La suma de Guaraníes" (Sin redundancia "GUARANÍES")
-  escribir(4, cCheque, letrasL1)
+  // Renglón 10 (42.3 mm): "La suma de Guaraníes" Línea 1
+  // Escribe sobre la primera línea punteada arrancando tras "Guaraníes " (col 44)
+  escribir(10, cLetrasInicio, letrasL1)
+
+  // Renglón 12 (50.8 mm): "La suma de Guaraníes" Línea 2 (si el monto es largo)
+  // Escribe en la segunda línea punteada desde el margen del cheque (col 26)
   if (letrasL2) {
-    escribir(5, cCheque, letrasL2)
+    escribir(12, cCheque, letrasL2)
   }
 
-  // Renglón 7: Plaza y fecha (solo si es a la vista)
+  // Renglón 13 (55.0 mm): Plaza y fecha (solo si es a la vista)
   if (!data.esDiferido) {
-    escribir(7, cCheque + 8, `${plaza}, ${fEmi.dd} de ${mesEmiNombre} de ${fEmi.aaaa}`)
+    escribir(13, cCheque + 8, `${plaza}, ${fEmi.dd} de ${mesEmiNombre} de ${fEmi.aaaa}`)
   }
 
   // ── 3. COMPILACIÓN DE COMANDOS ESC/P ──
@@ -310,13 +318,15 @@ export function generarEscpReglaCalibracion(): string {
 
   let escp = ""
   escp += `${ESC}@`
-  escp += `${ESC}2` // 6 LPI
-  escp += `${ESC}C\x11` // 17 líneas (2.75 pulgadas)
+  escp += `${ESC}2` // 6 LPI (4.23 mm por línea)
+  escp += `${ESC}C\x11` // 17 líneas = 2.75 pulgadas (70 mm)
   escp += `${ESC}M` // 12 CPI (96 columnas)
 
-  // Cada renglón físico se rotula desde L0 sin encabezados que empujen el texto hacia abajo
-  for (let i = 0; i <= 8; i++) {
-    escp += `L${i}: ...+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8....+....9\r\n`
+  // Grilla física completa de 17 líneas (L00..L16)
+  // Cada línea corresponde exactamente a la posición milimétrica en el cheque de 70 mm
+  for (let i = 0; i < 17; i++) {
+    const num = String(i).padStart(2, "0")
+    escp += `L${num}: ...+....1....+....2....+....3....+....4....+....5....+....6....+....7....+....8....+....9\r\n`
   }
 
   escp += FF

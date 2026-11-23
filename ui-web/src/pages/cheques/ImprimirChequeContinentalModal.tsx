@@ -429,10 +429,10 @@ export default function ImprimirChequeContinentalModal({
                     onClick={handleImprimirRegla}
                     disabled={imprimiendo || !selectedPrinter}
                     className="px-3.5 py-2.5 rounded-xl text-xs font-black bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-950/50 disabled:opacity-50 transition flex items-center justify-center gap-2 border border-purple-400/40"
-                    title="Imprime la regla milimétrica de 96 columnas numeradas L0..L8"
+                    title="Imprime la regla milimétrica de 96 columnas y 17 líneas físicas (L00..L16) para el formulario de 70 mm"
                   >
                     <Sliders className="w-4 h-4" />
-                    <span>📐 Imprimir Regla L0..L8 (Grid)</span>
+                    <span>📐 Imprimir Regla L00..L16 (Grid 70 mm)</span>
                   </button>
 
                   <button
@@ -440,7 +440,7 @@ export default function ImprimirChequeContinentalModal({
                     onClick={handleImprimirPrueba}
                     disabled={imprimiendo || !selectedPrinter}
                     className="px-3.5 py-2.5 rounded-xl text-xs font-black bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/30 disabled:opacity-50 transition flex items-center justify-center gap-2"
-                    title="Imprime un cheque con marcas completas (talón + cheque) en papel borrador"
+                    title="Imprime un cheque con marcas completas (talón + cheque) distribuido en los 70 mm"
                   >
                     <FileText className="w-4 h-4" />
                     <span>📄 Imprimir Cheque de Prueba</span>
@@ -459,7 +459,11 @@ export default function ImprimirChequeContinentalModal({
                 </div>
 
                 <p className="text-[10px] text-purple-200/70 pt-1 leading-relaxed">
-                  💡 <strong>¿Cómo calibrar?</strong> Presiona <em>&quot;Imprimir Regla L0..L8&quot;</em> sobre papel continuo borrador. Superpón tu cheque Continental a trasluz y observa en qué línea (L0..L8) y columna (0..90) cae cada recuadro para ajustar los casilleros de abajo.
+                  💡 <strong>Distribución calibrada sobre los 70 mm del cheque Continental:</strong>
+                  <br />
+                  • <strong>L01:</strong> Recuadro ₲ (Monto) y // Cruzado | • <strong>L03 a L06:</strong> Talón (Vencimiento, Fecha, Orden, Concepto)
+                  <br />
+                  • <strong>L05:</strong> Casilleros Fechas de Emisión y Pago | • <strong>L08:</strong> Páguese a la orden de | • <strong>L10 y L12:</strong> La suma de Guaraníes | • <strong>L12:</strong> Este Cheque en talón.
                 </p>
               </div>
 
@@ -561,7 +565,7 @@ export default function ImprimirChequeContinentalModal({
                   </span>
                   <button
                     type="button"
-                    onClick={() => guardarConfiguracion(selectedPrinter, 0, 0, true, "Pedro Juan Caballero", 1, 26, 76, 48, 68)}
+                    onClick={() => guardarConfiguracion(selectedPrinter, 0, 0, true, "Pedro Juan Caballero", 2, 26, 76, 58, 78)}
                     className="text-[10px] text-purple-400 hover:text-purple-300 underline font-semibold"
                   >
                     Valores Canónicos Continental (12 CPI)
@@ -1104,10 +1108,10 @@ export default function ImprimirChequeContinentalModal({
               onClick={handleImprimirRegla}
               disabled={imprimiendo || !selectedPrinter}
               className="px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-800 hover:bg-purple-100 dark:hover:bg-purple-900/60 transition flex items-center gap-1.5"
-              title="Imprime la regla milimétrica de coordenadas L0..L8 en papel continuo para superponer al cheque Continental"
+              title="Imprime la regla milimétrica de coordenadas L00..L16 (70 mm) en papel continuo para superponer al cheque Continental"
             >
               <Sliders className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-              <span>Imprimir Regla L0..L8 (Grid)</span>
+              <span>Imprimir Regla L00..L16 (70 mm)</span>
             </button>
             <button
               type="button"
