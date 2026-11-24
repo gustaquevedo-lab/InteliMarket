@@ -161,7 +161,7 @@ async def cancel_return(return_id: UUID, user_id: Optional[UUID], db: AsyncSessi
         r.motivo_rechazo = motivo or "Anulado/Archivado manualmente desde Gestión Financiera"
         r.observaciones = f"{(r.observaciones or '').strip()} [Archivado/Anulado manualmente]".strip()
         await db.commit()
-        return _enrich_return(r, prov_nom)
+        return await get_return(r.id, db)
 
     # 2. Si no está en supermer_supplier_returns, buscar en supplier_returns (financiero)
     res_fin = await db.execute(
@@ -289,7 +289,7 @@ async def add_return_credit_note(return_id: UUID, data, company_id: UUID, db: As
             db.add(new_scn)
 
         await db.commit()
-        return _enrich_return(r, prov_nom)
+        return await get_return(r.id, db)
 
     # 2. Si no es de supermer_supplier_returns, verificar en supplier_returns (financiero)
     res_fin = await db.execute(
