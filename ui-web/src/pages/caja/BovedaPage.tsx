@@ -113,6 +113,17 @@ export default function BovedaPage() {
   const [returnObs, setReturnObs] = useState("")
   const [returnLoading, setReturnLoading] = useState(false)
 
+  // Modal de Canje / Transferencia de Divisas en Bóveda
+  const [showExchangeModal, setShowExchangeModal] = useState(false)
+  const [exchangeMonedaOrigen, setExchangeMonedaOrigen] = useState<"BRL" | "USD" | "PYG">("BRL")
+  const [exchangeMonedaDestino, setExchangeMonedaDestino] = useState<"BRL" | "USD" | "PYG">("PYG")
+  const [exchangeMontoOrigen, setExchangeMontoOrigen] = useState<number>(0)
+  const [exchangeCotizacion, setExchangeCotizacion] = useState<number>(1035)
+  const [exchangeMontoDestino, setExchangeMontoDestino] = useState<number>(0)
+  const [exchangeEntidad, setExchangeEntidad] = useState("Cambios Chaco")
+  const [exchangeObs, setExchangeObs] = useState("")
+  const [exchangeLoading, setExchangeLoading] = useState(false)
+
   type VaultCurrency = "PYG" | "BRL" | "USD" | "CHEQUE"
   const [kardexMoneda, setKardexMoneda] = useState<VaultCurrency>("PYG")
   const [kardexDesde, setKardexDesde] = useState(() => getInitialBovedaDates().desde)
@@ -629,11 +640,116 @@ export default function BovedaPage() {
     }
   }
 
+  // Manejadores para Canje de Divisas en Bóveda
+  const handleOpenExchangeModal = (origen: "BRL" | "USD" | "PYG" = "BRL", destino: "BRL" | "USD" | "PYG" = "PYG") => {
+    setExchangeMonedaOrigen(origen)
+    setExchangeMonedaDestino(destino)
+    let cotiz = 1035
+    if (origen === "USD" || destino === "USD") {
+      cotiz = 6175
+    } else if (origen === "BRL" || destino === "BRL") {
+      cotiz = 1035
+    }
+    setExchangeCotizacion(cotiz)
+    setExchangeMontoOrigen(0)
+    setExchangeMontoDestino(0)
+    setExchangeEntidad("Cambios Chaco")
+    setExchangeObs("")
+    setShowExchangeModal(true)
+  }
+
+  const handleSelectExchangePair = (origen: "BRL" | "USD" | "PYG", destino: "BRL" | "USD" | "PYG") => {
+    setExchangeMonedaOrigen(origen)
+    setExchangeMonedaDestino(destino)
+    let cotiz = 1035
+    if (origen === "USD" || destino === "USD") {
+      cotiz = 6175
+    } else if (origen === "BRL" || destino === "BRL") {
+      cotiz = 1035
+    }
+    setExchangeCotizacion(cotiz)
+  }
+
+  useEffect(() => {
+    if (exchangeMontoOrigen <= 0 || exchangeCotizacion <= 0) {
+      setExchangeMontoDestino(0)
+      return
+    }
+    let res = 0
+    if (exchangeMonedaDestino === "PYG") {
+      res = Math.round(exchangeMontoOrigen * exchangeCotizacion)
+    } else if (exchangeMonedaOrigen === "PYG") {
+      res = Number((exchangeMontoOrigen / exchangeCotizacion).toFixed(2))
+    } else if (exchangeMonedaOrigen === "USD" && exchangeMonedaDestino === "BRL") {
+      res = Number((exchangeMontoOrigen * exchangeCotizacion).toFixed(2))
+    } else if (exchangeMonedaOrigen === "BRL" && exchangeMonedaDestino === "USD") {
+      res = Number((exchangeMontoOrigen / exchangeCotizacion).toFixed(2))
+    } else {
+      res = Math.round(exchangeMontoOrigen * exchangeCotizacion)
+    }
+    setExchangeMontoDestino(res)
+  }, [exchangeMonedaOrigen, exchangeMonedaDestino, exchangeMontoOrigen, exchangeCotizacion])
+
   // Cálculos
   const saldoTotalPYG = banks.filter(b => b.moneda === "PYG").reduce((s, b) => s + Number(b.saldo_actual || 0), 0)
   const saldoBovedaPYG = vault?.saldo_en_boveda_pyg || 0
   const saldoBovedaUSD = vault?.saldo_en_boveda_usd || 0
   const saldoBovedaBRL = vault?.saldo_en_boveda_brl || 0
+
+  const getSaldoDisponibleOrigen = () => {
+    if (exchangeMonedaOrigen === "BRL") return saldoBovedaBRL
+    if (exchangeMonedaOrigen === "USD") return saldoBovedaUSD
+    return saldoBovedaPYG
+  }
+
+  const getSaldoDestinoActual = () => {
+    if (exchangeMonedaDestino === "BRL") return saldoBovedaBRL
+    if (exchangeMonedaDestino === "USD") return saldoBovedaUSD
+    return saldoBovedaPYG
+  }
+
+  const handleConfirmExchange = async () => {
+    const saldoDisp = getSaldoDisponibleOrigen()
+    if (exchangeMontoOrigen <= 0) {
+      toast.warning("Monto inválido", "El monto de origen a transferir debe ser mayor a 0.")
+      return
+    }
+    if (exchangeMontoOrigen > saldoDisp) {
+      toast.warning(
+        "Saldo insuficiente",
+        `El monto a canjear (${exchangeMonedaOrigen} ${exchangeMontoOrigen.toLocaleString("es-PY")}) supera el saldo disponible en bóveda (${exchangeMonedaOrigen} ${saldoDisp.toLocaleString("es-PY")}).`
+      )
+      return
+    }
+    if (exchangeCotizacion <= 0) {
+      toast.warning("Cotización inválida", "La cotización pactada debe ser mayor a 0.")
+      return
+    }
+
+    setExchangeLoading(true)
+    try {
+      const res = await api.vault.exchange({
+        moneda_origen: exchangeMonedaOrigen,
+        monto_origen: exchangeMontoOrigen,
+        moneda_destino: exchangeMonedaDestino,
+        cotizacion: exchangeCotizacion,
+        monto_destino: exchangeMontoDestino,
+        entidad_motivo: exchangeEntidad.trim() || undefined,
+        observaciones: exchangeObs.trim() || undefined,
+      })
+      toast.success(
+        "Canje de divisas procesado con éxito",
+        res.message || `Se traspasaron ${exchangeMontoOrigen.toLocaleString("es-PY")} ${exchangeMonedaOrigen} a ${exchangeMontoDestino.toLocaleString("es-PY")} ${exchangeMonedaDestino}.`
+      )
+      setShowExchangeModal(false)
+      load()
+      loadKardex(kardexMoneda)
+    } catch (e: any) {
+      toast.error("Error al procesar canje", e?.message || "No se pudo realizar el canje en bóveda.")
+    } finally {
+      setExchangeLoading(false)
+    }
+  }
 
   const bankName = (id?: string) => {
     const b = banks.find(x => x.id === id)
@@ -758,6 +874,14 @@ export default function BovedaPage() {
             >
               {exportingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4 text-emerald-400" />}
               <span>Libro PDF</span>
+            </button>
+            <button
+              onClick={() => handleOpenExchangeModal("BRL", "PYG")}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-md shadow-emerald-950/20"
+              title="Transferir o canjear divisas entre saldos de bóveda con cotización pactada"
+            >
+              <ArrowLeftRight className="w-4 h-4 text-emerald-200" />
+              <span>Canje de Divisas</span>
             </button>
           </div>
         </div>
@@ -1136,6 +1260,15 @@ export default function BovedaPage() {
                     <span>Remesar {selectedEntries.length} seleccionada(s)</span>
                   </button>
                 )}
+
+                <button
+                  onClick={() => handleOpenExchangeModal("BRL", "PYG")}
+                  className="btn-outline !text-teal-600 dark:!text-teal-400 border-teal-200 dark:border-teal-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-xs flex items-center gap-1.5 font-bold"
+                  title="Transferir o canjear divisas (R$ / USD a Gs.) en bóveda"
+                >
+                  <ArrowLeftRight className="w-3.5 h-3.5 text-teal-500" />
+                  <span>Canje de Divisas</span>
+                </button>
 
                 <button
                   onClick={handleOpenAmountDepositModal}
@@ -3188,6 +3321,281 @@ export default function BovedaPage() {
               >
                 {returnLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                 <span>Confirmar Reingreso a Bóveda</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 💱 MODAL: CANJE DE DIVISAS / TRANSFERENCIA ENTRE BÓVEDAS */}
+      {showExchangeModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="card max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden rounded-3xl shadow-2xl border border-teal-500/30 bg-white dark:bg-slate-900">
+            {/* Header Shrink-0 */}
+            <div className="shrink-0 p-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gradient-to-r from-teal-500/10 via-emerald-500/10 to-transparent">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-gradient-to-tr from-teal-600 to-emerald-500 text-white rounded-2xl shadow-md shadow-emerald-600/20">
+                  <ArrowLeftRight className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                    Canje de Divisas en Bóveda Central
+                  </h3>
+                  <p className="text-[11px] text-gray-400">
+                    Traspaso entre saldos declarando cotización pactada
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExchangeModal(false)}
+                className="p-1.5 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Body Overflow-Y-Auto */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              {/* 1. Selector de Pares Frecuentes */}
+              <div>
+                <label className="input-label font-bold mb-1.5 block">Par de Canje / Transferencia</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { orig: "BRL" as const, dest: "PYG" as const, label: "🇧🇷 R$ ➔ 🇵🇾 Gs.", cot: 1035 },
+                    { orig: "USD" as const, dest: "PYG" as const, label: "🇺🇸 US$ ➔ 🇵🇾 Gs.", cot: 6175 },
+                    { orig: "PYG" as const, dest: "BRL" as const, label: "🇵🇾 Gs. ➔ 🇧🇷 R$", cot: 1035 },
+                    { orig: "PYG" as const, dest: "USD" as const, label: "🇵🇾 Gs. ➔ 🇺🇸 US$", cot: 6175 },
+                  ].map((p) => {
+                    const active = exchangeMonedaOrigen === p.orig && exchangeMonedaDestino === p.dest
+                    return (
+                      <button
+                        key={`${p.orig}-${p.dest}`}
+                        type="button"
+                        onClick={() => handleSelectExchangePair(p.orig, p.dest)}
+                        className={`p-2 rounded-xl text-[11px] font-bold border transition text-center flex flex-col items-center justify-center gap-0.5 ${
+                          active
+                            ? "bg-teal-500/15 border-teal-500 text-teal-600 dark:text-teal-300 ring-2 ring-teal-500/20"
+                            : "border-gray-200 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800 text-gray-600 dark:text-gray-400"
+                        }`}
+                      >
+                        <span>{p.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Monto a Retirar (Origen) + Saldo Disponible */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-gray-100 dark:border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="input-label font-bold flex items-center gap-1.5 !mb-0">
+                    <span>Monto a Entregar ({exchangeMonedaOrigen})</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                      Saldo en Bóveda:{" "}
+                      <strong className="text-teal-600 dark:text-teal-400 font-mono">
+                        {exchangeMonedaOrigen === "PYG"
+                          ? formatPYG(saldoBovedaPYG)
+                          : exchangeMonedaOrigen === "BRL"
+                          ? formatBRL(saldoBovedaBRL)
+                          : formatUSD(saldoBovedaUSD)}
+                      </strong>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setExchangeMontoOrigen(getSaldoDisponibleOrigen())}
+                      className="px-2 py-0.5 text-[10px] bg-teal-500/20 hover:bg-teal-500/30 text-teal-700 dark:text-teal-300 rounded font-bold transition"
+                      title="Utilizar el 100% del saldo disponible"
+                    >
+                      Máx
+                    </button>
+                  </div>
+                </div>
+
+                <CurrencyInput
+                  value={exchangeMontoOrigen}
+                  onChangeValue={(val) => setExchangeMontoOrigen(val)}
+                  currency={exchangeMonedaOrigen}
+                  className="w-full text-base font-mono font-bold bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl px-3 py-2 text-gray-900 dark:text-white focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              {/* 3. Cotización Acordada */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-gray-100 dark:border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="input-label font-bold !mb-0">
+                    Cotización Pactada ({exchangeMonedaOrigen === "USD" || exchangeMonedaDestino === "USD" ? "PYG / USD" : "PYG / BRL"})
+                  </label>
+                  <span className="text-[10px] text-gray-400">Editable según comprobante</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    step="any"
+                    min="1"
+                    className="input-field font-mono font-bold text-sm"
+                    value={exchangeCotizacion || ""}
+                    onChange={(e) => setExchangeCotizacion(parseFloat(e.target.value) || 0)}
+                    placeholder="Ej: 1035"
+                  />
+                  <div className="flex gap-1">
+                    {exchangeMonedaOrigen === "USD" || exchangeMonedaDestino === "USD" ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setExchangeCotizacion(6175)}
+                          className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-slate-700 text-[10px] font-bold hover:bg-gray-100 dark:hover:bg-slate-700"
+                        >
+                          6.175
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setExchangeCotizacion(6200)}
+                          className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-slate-700 text-[10px] font-bold hover:bg-gray-100 dark:hover:bg-slate-700"
+                        >
+                          6.200
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setExchangeCotizacion(1035)}
+                          className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-slate-700 text-[10px] font-bold hover:bg-gray-100 dark:hover:bg-slate-700"
+                        >
+                          1.035
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setExchangeCotizacion(1040)}
+                          className="px-2 py-1.5 rounded-lg border border-gray-200 dark:border-slate-700 text-[10px] font-bold hover:bg-gray-100 dark:hover:bg-slate-700"
+                        >
+                          1.040
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. Contravalor Resultante a Recibir (Destino) */}
+              <div className="p-4 bg-gradient-to-br from-emerald-500/15 via-teal-500/10 to-slate-900/40 rounded-2xl border border-emerald-500/30 space-y-1.5">
+                <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-300 font-extrabold">
+                  <span className="flex items-center gap-1.5 text-xs">
+                    <ArrowDownRight className="w-4 h-4 text-emerald-500" />
+                    Contravalor a Ingresar en Bóveda ({exchangeMonedaDestino})
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono">
+                    Resultado Automático
+                  </span>
+                </div>
+                <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+                  {exchangeMonedaDestino === "PYG"
+                    ? formatPYG(exchangeMontoDestino)
+                    : exchangeMonedaDestino === "BRL"
+                    ? formatBRL(exchangeMontoDestino)
+                    : formatUSD(exchangeMontoDestino)}
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  {exchangeMontoOrigen > 0
+                    ? `Equivalente exacto por ${exchangeMontoOrigen.toLocaleString("es-PY")} ${exchangeMonedaOrigen} a cotización ${exchangeCotizacion.toLocaleString("es-PY")}`
+                    : "Ingrese el monto de origen para calcular el contravalor"}
+                </p>
+              </div>
+
+              {/* 5. Entidad / Casa de Cambios */}
+              <div>
+                <label className="input-label font-bold mb-1 block">Entidad / Casa de Cambios / Motivo</label>
+                <div className="flex gap-2 mb-2 flex-wrap">
+                  {["Cambios Chaco", "MaxiCambios", "Mundial Cambios", "Canje Interno"].map((ent) => (
+                    <button
+                      key={ent}
+                      type="button"
+                      onClick={() => setExchangeEntidad(ent)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition ${
+                        exchangeEntidad === ent
+                          ? "bg-teal-500/15 border-teal-500 text-teal-600 dark:text-teal-300"
+                          : "border-gray-200 dark:border-slate-800 text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-800"
+                      }`}
+                    >
+                      {ent}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  className="input-field text-xs"
+                  value={exchangeEntidad}
+                  onChange={(e) => setExchangeEntidad(e.target.value)}
+                  placeholder="Ej: Cambios Chaco Boleta #12345..."
+                />
+              </div>
+
+              {/* 6. Observaciones */}
+              <div>
+                <label className="input-label font-bold mb-1 block">Observaciones Adicionales (Opcional)</label>
+                <textarea
+                  className="input-field text-xs resize-none"
+                  rows={2}
+                  value={exchangeObs}
+                  onChange={(e) => setExchangeObs(e.target.value)}
+                  placeholder="Ej: Cambio de billetes de 100 R$ por guaraníes para cobertura de proveedores..."
+                />
+              </div>
+
+              {/* 7. Impacto Proyectado en Bóveda */}
+              <div className="p-3 bg-gray-50 dark:bg-slate-800/40 rounded-xl border border-gray-100 dark:border-slate-800 grid grid-cols-2 gap-3 text-[11px]">
+                <div>
+                  <span className="text-gray-400 block">Saldo {exchangeMonedaOrigen} Proyectado:</span>
+                  <span className="font-mono font-bold text-gray-700 dark:text-gray-300">
+                    {exchangeMonedaOrigen === "PYG"
+                      ? formatPYG(Math.max(0, saldoBovedaPYG - exchangeMontoOrigen))
+                      : exchangeMonedaOrigen === "BRL"
+                      ? formatBRL(Math.max(0, saldoBovedaBRL - exchangeMontoOrigen))
+                      : formatUSD(Math.max(0, saldoBovedaUSD - exchangeMontoOrigen))}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-gray-400 block">Saldo {exchangeMonedaDestino} Proyectado:</span>
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                    {exchangeMonedaDestino === "PYG"
+                      ? formatPYG(saldoBovedaPYG + exchangeMontoDestino)
+                      : exchangeMonedaDestino === "BRL"
+                      ? formatBRL(saldoBovedaBRL + exchangeMontoDestino)
+                      : formatUSD(saldoBovedaUSD + exchangeMontoDestino)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Shrink-0 */}
+            <div className="shrink-0 p-4 bg-slate-50 dark:bg-slate-900 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowExchangeModal(false)}
+                className="btn-outline text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmExchange}
+                disabled={
+                  exchangeLoading ||
+                  exchangeMontoOrigen <= 0 ||
+                  exchangeMontoOrigen > getSaldoDisponibleOrigen() ||
+                  exchangeCotizacion <= 0
+                }
+                className="btn-primary !bg-emerald-600 hover:!bg-emerald-500 disabled:opacity-50 text-xs flex items-center gap-1.5 font-bold shadow-md"
+              >
+                {exchangeLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ArrowLeftRight className="w-3.5 h-3.5" />
+                )}
+                <span>Confirmar Canje de Divisas</span>
               </button>
             </div>
           </div>

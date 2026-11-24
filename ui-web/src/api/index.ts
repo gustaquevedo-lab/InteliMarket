@@ -2963,6 +2963,33 @@ export const api = {
     deposit: (data: { entry_ids: string[]; bank_transaction_id?: string }) => client.post<{ deposited?: boolean; depositadas?: number; pending_approval?: boolean; request_id?: string; monto_total_pyg?: number }>("/v1/vault/deposit", data),
     depositToBank: (data: { entry_ids: string[]; bank_account_id: string; numero_boleta: string; transportadora?: string; fecha_deposito?: string; observaciones?: string }) => client.post<any>("/v1/vault/deposit-to-bank", data),
     depositAmountToBank: (data: { monto_pyg: number; bank_account_id: string; numero_boleta: string; transportadora?: string; fecha_deposito?: string; observaciones?: string }) => client.post<any>("/v1/vault/deposit-amount-to-bank", data),
+    exchange: (data: {
+      moneda_origen: string
+      monto_origen: number
+      moneda_destino: string
+      cotizacion: number
+      monto_destino?: number
+      entidad_motivo?: string
+      observaciones?: string
+    }) => client.post<{
+      success: boolean
+      message: string
+      canje: {
+        moneda_origen: string
+        monto_origen: number
+        moneda_destino: string
+        monto_destino: number
+        cotizacion: number
+        entidad_motivo?: string
+        fecha: string
+        usuario: string
+      }
+      saldos_actualizados: {
+        pyg: number
+        brl: number
+        usd: number
+      }
+    }>("/v1/vault/exchange", data),
     depositApprovals: {
       list: (estado?: string) => client.get<{ id: string; entry_ids: string[]; monto_total_pyg: number; estado: string; aprobado_supervisor_id: string | null; aprobado_gerente_id: string | null; created_at: string }[]>("/v1/vault/deposit-approvals", estado ? { estado } : undefined),
       approve: (id: string) => client.post<{ success: boolean; completo: boolean }>(`/v1/vault/deposit-approvals/${id}/approve`, {}),

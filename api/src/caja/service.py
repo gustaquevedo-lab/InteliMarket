@@ -7246,6 +7246,7 @@ async def get_vault_kardex(
                 "entrega_cajero": "Recaudación Cierre de Caja",
                 "cobranza_ar": "Cobranza CxC Clientes",
                 "ajuste": "Ajuste / Ingreso Inicial Bóveda",
+                "canje_divisa": "Ingreso por Canje de Divisa",
                 "cheque_caja": "Cheques de Caja",
                 "devolucion_cajero": "Devolución Fondo Cajera",
                 "reintegro_sencillo": "Reintegro desde Fondo Sencillo",
@@ -7271,8 +7272,8 @@ async def get_vault_kardex(
                 "observaciones": e.observaciones or "",
             })
 
-            # 2. Egreso si ya salió físicamente de Bóveda (depositado, pagado a proveedor, gasto o ajuste)
-            if e.estado in ("depositado", "pagado_proveedor", "egreso_gasto", "ajuste", "asignado_cajero", "fondo_sencillo"):
+            # 2. Egreso si ya salió físicamente de Bóveda (depositado, pagado a proveedor, gasto, ajuste o canje de divisas)
+            if e.estado in ("depositado", "pagado_proveedor", "egreso_gasto", "ajuste", "asignado_cajero", "fondo_sencillo", "canje_divisa_egreso"):
                 f_egr = e.fecha_deposito or e.created_at
                 ref_txt = str(e.bank_transaction_id)[:8].upper() if e.bank_transaction_id else str(e.id)[:8].upper()
                 if e.estado == "depositado":
@@ -7290,6 +7291,9 @@ async def get_vault_kardex(
                 elif e.estado == "asignado_cajero":
                     egreso_concepto = "Salida por Dotación Fondo Cajera" + (f" ({e.observaciones})" if e.observaciones else "")
                     origen_egr = "asignado_cajero"
+                elif e.estado == "canje_divisa_egreso":
+                    egreso_concepto = "Salida por Canje de Divisas" + (f" ({e.observaciones})" if e.observaciones else "")
+                    origen_egr = "canje_divisa"
                 else:
                     egreso_concepto = "Traspaso a Fondo de Sencillo" + (f" ({e.observaciones})" if e.observaciones else "")
                     origen_egr = "fondo_sencillo"
@@ -8068,6 +8072,247 @@ async def list_surprise_audits(
         }
         for a in items
     ]
+
+
+async def exchange_vault_currency(
+    db: AsyncSession,
+    company_id: str,
+    user_id: str | None,
+    moneda_origen: str,
+    monto_origen: Decimal,
+    moneda_destino: str,
+    cotizacion: Decimal,
+    monto_destino: Decimal | None = None,
+    entidad_motivo: str | None = None,
+    observaciones: str | None = None,
+) -> dict:
+    """Canje / Transferencia de divisas entre saldos de Bóveda Central con cotización pactada."""
+    cid = uuid.UUID(company_id)
+    uid = uuid.UUID(user_id) if user_id else None
+    mon_orig = moneda_origen.upper().strip()
+    mon_dest = moneda_destino.upper().strip()
+
+    valid_currencies = {"PYG", "BRL", "USD"}
+    if mon_orig not in valid_currencies or mon_dest not in valid_currencies:
+        raise HTTPException(status_code=400, detail="Monedas soportadas: PYG, BRL, USD")
+    if mon_orig == mon_dest:
+        raise HTTPException(status_code=400, detail="La moneda origen y destino deben ser distintas")
+    if monto_origen <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="El monto origen debe ser mayor a 0")
+    if cotizacion <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="La cotización debe ser mayor a 0")
+
+    # Redondeo de montos según moneda
+    if mon_orig == "PYG":
+        monto_origen = Decimal(int(monto_origen))
+    else:
+        monto_origen = Decimal(str(round(float(monto_origen), 2)))
+
+    # Cálculo automático de monto_destino si no se especifica o es <= 0
+    if not monto_destino or monto_destino <= Decimal("0"):
+        if mon_dest == "PYG":
+            # BRL -> PYG o USD -> PYG: monto_destino = round(monto_origen * cotizacion)
+            monto_destino = Decimal(int(round(float(monto_origen) * float(cotizacion))))
+        elif mon_orig == "PYG":
+            # PYG -> BRL o PYG -> USD: monto_destino = round(monto_origen / cotizacion, 2)
+            monto_destino = Decimal(str(round(float(monto_origen) / float(cotizacion), 2)))
+        elif mon_orig == "USD" and mon_dest == "BRL":
+            monto_destino = Decimal(str(round(float(monto_origen) * float(cotizacion), 2)))
+        elif mon_orig == "BRL" and mon_dest == "USD":
+            monto_destino = Decimal(str(round(float(monto_origen) / float(cotizacion), 2)))
+        else:
+            monto_destino = Decimal(str(round(float(monto_origen) * float(cotizacion), 2)))
+    else:
+        if mon_dest == "PYG":
+            monto_destino = Decimal(int(monto_destino))
+        else:
+            monto_destino = Decimal(str(round(float(monto_destino), 2)))
+
+    if monto_destino <= Decimal("0"):
+        raise HTTPException(status_code=400, detail="El monto resultante en moneda destino debe ser mayor a 0")
+
+    # 1. Verificar saldo disponible en Bóveda para la moneda origen
+    col_map = {
+        "PYG": VaultEntry.monto_pyg,
+        "BRL": VaultEntry.monto_brl,
+        "USD": VaultEntry.monto_usd,
+    }
+    target_col = col_map[mon_orig]
+
+    saldo_res = await db.execute(
+        select(func.coalesce(func.sum(target_col), 0))
+        .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+    )
+    saldo_disponible = Decimal(str(saldo_res.scalar() or 0))
+
+    if monto_origen > saldo_disponible:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Saldo insuficiente en Bóveda Central para {mon_orig}. Disponible: {saldo_disponible:,.2f} | Solicitado: {monto_origen:,.2f}"
+        )
+
+    # 2. Consumir entradas FIFO de Bóveda para moneda origen
+    entries_res = await db.execute(
+        select(VaultEntry)
+        .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda", target_col > 0)
+        .order_by(VaultEntry.created_at.asc())
+    )
+    entries = entries_res.scalars().all()
+    remaining = monto_origen
+    now_dt = datetime.now(timezone.utc)
+    obs_egreso = f"Canje a {mon_dest} (Cotiz: {cotizacion} | {entidad_motivo or 'Canje interno'})"
+    if observaciones:
+        obs_egreso += f" - {observaciones}"
+
+    branch_id_default = None
+
+    for e in entries:
+        if remaining <= Decimal("0"):
+            break
+        if not branch_id_default and e.branch_id:
+            branch_id_default = e.branch_id
+
+        e_monto = Decimal(str(getattr(e, f"monto_{mon_orig.lower()}") or 0))
+        if e_monto <= remaining:
+            # Si el registro tiene saldo en otras monedas, preservamos el registro en_boveda y creamos el egreso desdoblado
+            has_other_currencies = any(
+                Decimal(str(getattr(e, f"monto_{cur.lower()}") or 0)) > 0
+                for cur in ("PYG", "BRL", "USD") if cur != mon_orig
+            )
+            if has_other_currencies:
+                db.add(VaultEntry(
+                    company_id=cid,
+                    branch_id=e.branch_id,
+                    origen=e.origen,
+                    handoff_id=e.handoff_id,
+                    monto_pyg=e_monto if mon_orig == "PYG" else Decimal("0"),
+                    monto_usd=e_monto if mon_orig == "USD" else Decimal("0"),
+                    monto_brl=e_monto if mon_orig == "BRL" else Decimal("0"),
+                    estado="canje_divisa_egreso",
+                    fecha_deposito=now_dt,
+                    registrado_por=uid or e.registrado_por,
+                    observaciones=obs_egreso,
+                ))
+                setattr(e, f"monto_{mon_orig.lower()}", Decimal("0"))
+            else:
+                e.estado = "canje_divisa_egreso"
+                e.fecha_deposito = now_dt
+                e.observaciones = f"{obs_egreso} -- {e.observaciones or ''}".strip(" -")
+                if uid:
+                    e.registrado_por = uid
+            remaining -= e_monto
+        else:
+            # Fraccionamiento: e_monto > remaining
+            db.add(VaultEntry(
+                company_id=cid,
+                branch_id=e.branch_id,
+                origen=e.origen,
+                handoff_id=e.handoff_id,
+                monto_pyg=remaining if mon_orig == "PYG" else Decimal("0"),
+                monto_usd=remaining if mon_orig == "USD" else Decimal("0"),
+                monto_brl=remaining if mon_orig == "BRL" else Decimal("0"),
+                estado="canje_divisa_egreso",
+                fecha_deposito=now_dt,
+                registrado_por=uid or e.registrado_por,
+                observaciones=obs_egreso,
+            ))
+            setattr(e, f"monto_{mon_orig.lower()}", e_monto - remaining)
+            remaining = Decimal("0")
+            break
+
+    # 3. Registrar entrada de Bóveda para la moneda destino
+    obs_ingreso = f"Canje desde {monto_origen} {mon_orig} (Cotiz: {cotizacion} | {entidad_motivo or 'Canje interno'})"
+    if observaciones:
+        obs_ingreso += f" - {observaciones}"
+
+    entry_ingreso = VaultEntry(
+        company_id=cid,
+        branch_id=branch_id_default,
+        origen="canje_divisa",
+        handoff_id=None,
+        monto_pyg=monto_destino if mon_dest == "PYG" else Decimal("0"),
+        monto_usd=monto_destino if mon_dest == "USD" else Decimal("0"),
+        monto_brl=monto_destino if mon_dest == "BRL" else Decimal("0"),
+        estado="en_boveda",
+        fecha_deposito=None,
+        registrado_por=uid,
+        observaciones=obs_ingreso,
+    )
+    db.add(entry_ingreso)
+
+    # 4. Registrar asientos contables en CashRegisterMovement (Libro Diario de Bóveda)
+    reg_res = await db.execute(
+        select(CashRegister).where(CashRegister.company_id == cid).order_by(CashRegister.activo.desc()).limit(1)
+    )
+    main_reg = reg_res.scalar_one_or_none()
+
+    user_name = "Tesorería"
+    if uid:
+        u_res = await db.execute(select(User).where(User.id == uid))
+        u_obj = u_res.scalar_one_or_none()
+        if u_obj:
+            user_name = u_obj.nombre or u_obj.email or "Tesorería"
+
+    if main_reg:
+        # Movimiento de retiro (moneda origen)
+        db.add(CashRegisterMovement(
+            company_id=cid,
+            register_id=main_reg.id,
+            tipo="retiro",
+            monto=monto_origen,
+            moneda=mon_orig,
+            fecha=now_dt,
+            usuario=user_name,
+            observaciones=obs_egreso,
+        ))
+        # Movimiento de entrada (moneda destino)
+        db.add(CashRegisterMovement(
+            company_id=cid,
+            register_id=main_reg.id,
+            tipo="entrada",
+            monto=monto_destino,
+            moneda=mon_dest,
+            fecha=now_dt,
+            usuario=user_name,
+            observaciones=obs_ingreso,
+        ))
+
+    await db.flush()
+
+    # 5. Obtener saldos finales consolidados de Bóveda
+    sal_pyg = await db.execute(
+        select(func.coalesce(func.sum(VaultEntry.monto_pyg), 0))
+        .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+    )
+    sal_brl = await db.execute(
+        select(func.coalesce(func.sum(VaultEntry.monto_brl), 0))
+        .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+    )
+    sal_usd = await db.execute(
+        select(func.coalesce(func.sum(VaultEntry.monto_usd), 0))
+        .where(VaultEntry.company_id == cid, VaultEntry.estado == "en_boveda")
+    )
+
+    return {
+        "success": True,
+        "message": f"Canje exitoso de {monto_origen:,.2f} {mon_orig} por {monto_destino:,.2f} {mon_dest} a cotización {cotizacion}",
+        "canje": {
+            "moneda_origen": mon_orig,
+            "monto_origen": float(monto_origen),
+            "moneda_destino": mon_dest,
+            "monto_destino": float(monto_destino),
+            "cotizacion": float(cotizacion),
+            "entidad_motivo": entidad_motivo,
+            "fecha": now_dt.isoformat(),
+            "usuario": user_name,
+        },
+        "saldos_actualizados": {
+            "pyg": int(sal_pyg.scalar() or 0),
+            "brl": float(sal_brl.scalar() or 0),
+            "usd": float(sal_usd.scalar() or 0),
+        }
+    }
+
 
 
 

@@ -155,6 +155,16 @@ class DepositVaultAmountToBankRequest(BaseModel):
     observaciones: Optional[str] = None
 
 
+class VaultCurrencyExchangeRequest(BaseModel):
+    moneda_origen: str  # BRL | USD | PYG
+    monto_origen: Decimal
+    moneda_destino: str  # PYG | BRL | USD
+    cotizacion: Decimal
+    monto_destino: Optional[Decimal] = None
+    entidad_motivo: Optional[str] = None
+    observaciones: Optional[str] = None
+
+
 
 class TreasuryRemittanceItemResponse(BaseModel):
     id: UUID

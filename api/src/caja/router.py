@@ -29,6 +29,7 @@ from api.src.caja.schemas import (
     CashierFundAssignmentResponse, CashierFundAssignRequest, CashierFundReturnRequest,
     VaultPettyFundResponse, VaultPettyFundAdjustRequest,
     VaultPettyFundAuditCreate, CashSurpriseAuditCreate,
+    VaultCurrencyExchangeRequest,
 )
 from api.src.caja import service
 from api.src.caja import pdf_reports
@@ -921,6 +922,37 @@ async def deposit_vault_amount_to_bank(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/vault/exchange")
+async def exchange_vault_currency(
+    body: VaultCurrencyExchangeRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Canje / Transferencia de divisas entre saldos de Bóveda Central (R$ <-> Gs, USD <-> Gs)."""
+    user_rol = (user.get("rol") or "").lower()
+    if user_rol not in ("admin", "superadmin", "gerente", "tesorero", "cajero_supervisor"):
+        raise HTTPException(status_code=403, detail="No tiene permisos para realizar canjes de divisas en bóveda")
+    try:
+        return await service.exchange_vault_currency(
+            db=db,
+            company_id=user["company_id"],
+            user_id=user.get("id"),
+            moneda_origen=body.moneda_origen,
+            monto_origen=body.monto_origen,
+            moneda_destino=body.moneda_destino,
+            cotizacion=body.cotizacion,
+            monto_destino=body.monto_destino,
+            entidad_motivo=body.entidad_motivo,
+            observaciones=body.observaciones,
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al procesar el canje de divisas: {str(e)}")
 
 
 
