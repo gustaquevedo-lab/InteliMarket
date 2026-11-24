@@ -8094,13 +8094,13 @@ async def exchange_vault_currency(
 
     valid_currencies = {"PYG", "BRL", "USD"}
     if mon_orig not in valid_currencies or mon_dest not in valid_currencies:
-        raise HTTPException(status_code=400, detail="Monedas soportadas: PYG, BRL, USD")
+        raise ValueError("Monedas soportadas: PYG, BRL, USD")
     if mon_orig == mon_dest:
-        raise HTTPException(status_code=400, detail="La moneda origen y destino deben ser distintas")
+        raise ValueError("La moneda origen y destino deben ser distintas")
     if monto_origen <= Decimal("0"):
-        raise HTTPException(status_code=400, detail="El monto origen debe ser mayor a 0")
+        raise ValueError("El monto origen debe ser mayor a 0")
     if cotizacion <= Decimal("0"):
-        raise HTTPException(status_code=400, detail="La cotización debe ser mayor a 0")
+        raise ValueError("La cotización debe ser mayor a 0")
 
     # Redondeo de montos según moneda
     if mon_orig == "PYG":
@@ -8129,7 +8129,7 @@ async def exchange_vault_currency(
             monto_destino = Decimal(str(round(float(monto_destino), 2)))
 
     if monto_destino <= Decimal("0"):
-        raise HTTPException(status_code=400, detail="El monto resultante en moneda destino debe ser mayor a 0")
+        raise ValueError("El monto resultante en moneda destino debe ser mayor a 0")
 
     # 1. Verificar saldo disponible en Bóveda para la moneda origen
     col_map = {
@@ -8146,9 +8146,8 @@ async def exchange_vault_currency(
     saldo_disponible = Decimal(str(saldo_res.scalar() or 0))
 
     if monto_origen > saldo_disponible:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Saldo insuficiente en Bóveda Central para {mon_orig}. Disponible: {saldo_disponible:,.2f} | Solicitado: {monto_origen:,.2f}"
+        raise ValueError(
+            f"Saldo insuficiente en Bóveda Central para {mon_orig}. Disponible: {saldo_disponible:,.2f} | Solicitado: {monto_origen:,.2f}"
         )
 
     # 2. Consumir entradas FIFO de Bóveda para moneda origen
