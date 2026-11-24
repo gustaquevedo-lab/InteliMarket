@@ -3538,7 +3538,7 @@ async def get_bank_dashboard(db: AsyncSession, company_id: str) -> dict:
         "accounts": [
             {
                 "id": str(a.id), "banco": a.banco, "tipo": a.tipo, "moneda": a.moneda, "saldo_actual": a.saldo_actual,
-                "saldo_conciliado": a.saldo_actual if (a.saldo_verificado_manualmente or pendientes_por_cuenta.get(a.id, 0) == 0) else ((a.saldo_inicial or Decimal("0")) + conc_neto_por_cuenta.get(a.id, Decimal("0"))),
+                "saldo_conciliado": a.saldo_actual or Decimal("0"),
                 "saldo_pendiente_neto": pend_neto_por_cuenta.get(a.id, Decimal("0")),
                 "conciliadas": conciliadas_por_cuenta.get(a.id, 0),
                 "pendientes": pendientes_por_cuenta.get(a.id, 0),

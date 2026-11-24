@@ -890,38 +890,13 @@ async def sync_bank_transactions(db: AsyncSession, company_id: str, since: date 
 # si no es así, falta un saldo inicial que solo el cliente puede confirmar
 # (ver pendiente de conciliación bancaria con el cliente).
 async def sync_bank_balances(db: AsyncSession, company_id: str, since: date | None) -> int:
-    from api.src.financial.service import check_balance_divergence
-
-    accounts = (
-        await db.execute(select(BankAccount).where(BankAccount.company_id == company_id))
-    ).scalars().all()
-
-    count = 0
-    for acc in accounts:
-        row = await db.execute(
-            select(
-                func.coalesce(func.sum(case((BankTransaction.tipo == "credito", BankTransaction.monto), else_=0)), 0),
-                func.coalesce(func.sum(case((BankTransaction.tipo == "debito", BankTransaction.monto), else_=0)), 0),
-            ).where(BankTransaction.bank_account_id == acc.id)
-        )
-        creditos, debitos = row.one()
-        saldo_calculado = acc.saldo_inicial + Decimal(str(creditos)) - Decimal(str(debitos))
-
-        # Si la cuenta tiene un saldo verificado a mano y el recalculo automatico
-        # diverge mas alla de tolerancia, no lo pisamos a ciegas -- se genera una
-        # solicitud de correccion con doble aprobacion en su lugar (Bancos Fase 5,
-        # endurece el mismo tipo de bug de saldo corrupto ya corregido dos veces
-        # a mano esta sesion).
-        if await check_balance_divergence(db, acc, saldo_calculado):
-            count += 1
-            continue
-
-        acc.saldo_actual = saldo_calculado
-        db.add(acc)
-        count += 1
-
-    await db.flush()
-    return count
+    """REGLA CANÓNICA (Anti-corrupción de saldos):
+    Los saldos bancarios de Extra Supermercado NO se recalculan sumando ciegamente
+    saldo_inicial + creditos - debitos históricos, ya que esto ignora los saldos reales
+    certificados por extracto bancario oficial y genera saldos negativos ficticios.
+    Esta función es un no-op seguro para no alterar los saldos fijados por conciliación.
+    """
+    return 0
 
 
 # ── Gastos menores (fin_gasto, sí es caja chica de verdad) y arqueo de caja
