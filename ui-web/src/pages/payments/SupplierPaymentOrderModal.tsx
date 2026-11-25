@@ -149,14 +149,22 @@ export default function SupplierPaymentOrderModal({
       const map: Record<string, any> = {}
       if (existingOrder.allocations && Array.isArray(existingOrder.allocations)) {
         existingOrder.allocations.forEach((a: any) => {
-        const numAplicado = Number(a.monto_aplicado) || 0
+        const rawAplicado = Number(a.monto_aplicado) || 0
         const saldoAnt = Number(a.saldo_anterior) || 0
         const sumNc = (a.notas_credito && Array.isArray(a.notas_credito))
           ? a.notas_credito.reduce((acc: number, nc: any) => acc + (Number(nc.monto_aplicado) || 0), 0)
           : Number(a.total_nc_aplicadas || 0)
         const mFacturaOriginal = a.monto_factura_original != null && Number(a.monto_factura_original) > 0
           ? Number(a.monto_factura_original)
-          : (saldoAnt > 0 ? saldoAnt + sumNc : numAplicado + sumNc)
+          : (saldoAnt > 0 ? saldoAnt + sumNc : rawAplicado + sumNc)
+        
+        // Si la orden aún no está pagada y la factura tiene NCs aplicadas, el monto neto exigible
+        // a liquidar nunca puede superar el saldo nominal original menos las NCs.
+        const saldoExigible = Math.max(0, mFacturaOriginal - sumNc)
+        const numAplicado = existingOrder.estado === "pagado"
+          ? rawAplicado
+          : Math.min(rawAplicado, saldoExigible)
+
         map[a.invoice_id] = {
           inv: {
             id: a.invoice_id,
@@ -165,7 +173,7 @@ export default function SupplierPaymentOrderModal({
             fecha_emision: a.fecha_emision,
             fecha_vencimiento: a.fecha_vencimiento,
             total: mFacturaOriginal,
-            saldo_pendiente: saldoAnt > 0 ? saldoAnt : numAplicado,
+            saldo_pendiente: existingOrder.estado === "pagado" ? (saldoAnt > 0 ? saldoAnt : numAplicado) : saldoExigible,
             notas_credito: a.notas_credito || [],
             total_nc_aplicadas: sumNc,
             supplier_id: supplier.id,
