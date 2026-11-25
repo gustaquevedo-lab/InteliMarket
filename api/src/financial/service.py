@@ -752,6 +752,82 @@ async def approve_invoice(db: AsyncSession, invoice_id: str, user_id: str | None
     return invoice
 
 
+async def rollback_supplier_payment_order_disbursements(
+    db: AsyncSession,
+    order: SupplierPaymentOrder,
+    company_id: uuid.UUID,
+    user_id: str | None = None,
+) -> None:
+    """Revierte de forma atómica y completa todos los desembolsos de una Orden de Pago
+    (notas de crédito, transferencias bancarias, fondo fijo, cheques y bóveda)."""
+    num_orden = order.numero_orden
+    disb_res = await db.execute(
+        select(SupplierPaymentOrderDisbursement).where(SupplierPaymentOrderDisbursement.payment_order_id == order.id)
+    )
+    for d in disb_res.scalars().all():
+        fp = d.forma_pago
+        m_pyg = d.monto_pyg or d.monto
+        if fp == "fondo_fijo" and d.petty_cash_fund_id:
+            fund = await db.get(PettyCashFund, d.petty_cash_fund_id)
+            if fund:
+                s_ant = fund.saldo_actual
+                fund.saldo_actual += m_pyg
+                db.add(PettyCashFundMovement(
+                    fund_id=fund.id,
+                    tipo="ingreso",
+                    monto=m_pyg,
+                    saldo_anterior=s_ant,
+                    saldo_nuevo=fund.saldo_actual,
+                    referencia_type="payment_order_reversal",
+                    referencia_id=order.id,
+                    observaciones=f"Reversión por anulación de OP {num_orden}",
+                    created_by=uuid.UUID(user_id) if user_id else None,
+                ))
+        elif fp == "transferencia" and d.bank_account_id:
+            bank_acc = await db.get(BankAccount, d.bank_account_id)
+            if bank_acc:
+                bank_acc.saldo_actual += m_pyg
+                await db.execute(
+                    delete(BankTransaction).where(
+                        BankTransaction.bank_account_id == bank_acc.id,
+                        BankTransaction.descripcion.ilike(f"%{num_orden}%")
+                    )
+                )
+        elif fp == "nota_credito" and d.credit_note_id:
+            nc = await db.get(SupplierCreditNote, d.credit_note_id)
+            if nc:
+                nc.saldo_disponible = (nc.saldo_disponible or Decimal("0")) + m_pyg
+                await db.execute(
+                    delete(SupplierCreditNoteApplication).where(
+                        SupplierCreditNoteApplication.credit_note_id == nc.id,
+                        SupplierCreditNoteApplication.observaciones.ilike(f"%{num_orden}%")
+                    )
+                )
+        elif fp == "cheque" and d.cheque_id:
+            ch = await db.get(Cheque, d.cheque_id)
+            if ch:
+                if f"OP {num_orden}" in (ch.concepto or "") or f"{num_orden}" in (ch.notas or ""):
+                    ch.estado = "anulado"
+                    db.add(ChequeHistorial(
+                        cheque_id=ch.id,
+                        estado_anterior="pendiente",
+                        estado_nuevo="anulado",
+                        user_id=uuid.UUID(user_id) if user_id else None,
+                        notas=f"Cheque anulado por eliminación de OP {num_orden}",
+                    ))
+        elif fp == "boveda":
+            vault_entries_res = await db.execute(
+                select(VaultEntry).where(
+                    VaultEntry.company_id == company_id,
+                    VaultEntry.observaciones.ilike(f"%{num_orden}%"),
+                    VaultEntry.estado == "pagado_proveedor"
+                )
+            )
+            for ve in vault_entries_res.scalars().all():
+                ve.estado = "en_boveda"
+                ve.observaciones = f"Restaurado por eliminación de OP {num_orden}"
+
+
 async def revert_supplier_invoice_payment(
     db: AsyncSession,
     company_id: str,
@@ -760,7 +836,7 @@ async def revert_supplier_invoice_payment(
     motivo: str | None = None,
 ) -> SupplierInvoice:
     """Revierte una factura de proveedor de estado 'pagada' a 'pendiente',
-    restaurando su saldo_pendiente al total original para permitir procesarla
+    restaurando su saldo_pendiente al saldo exigible real para permitir procesarla
     con órdenes de pago de InteliMarket o vincularla a gastos/rendiciones."""
     cid = uuid.UUID(company_id)
     iid = uuid.UUID(invoice_id)
@@ -799,6 +875,7 @@ async def revert_supplier_invoice_payment(
         if (rem_allocs.scalar() or 0) == 0:
             po_obj = await db.get(SupplierPaymentOrder, po_id)
             if po_obj and po_obj.estado != "anulado":
+                await rollback_supplier_payment_order_disbursements(db, po_obj, cid, user_id)
                 po_obj.estado = "anulado"
                 po_obj.observaciones = (po_obj.observaciones or "") + f"\n[ANULADA por reversión de factura {inv.numero_factura}]"
                 # Anular cualquier Expense generado por esta OP
@@ -813,8 +890,14 @@ async def revert_supplier_invoice_payment(
                     exp_item.anulado = True
                     exp_item.descripcion = (exp_item.descripcion or "") + " [ANULADO: Reversión de Factura]"
 
-    inv.estado = "pendiente"
-    inv.saldo_pendiente = inv.total or Decimal("0")
+    # Recomputar saldo pendiente respetando las NCs directas que permanezcan asociadas a la factura
+    nc_sum_res = await db.execute(
+        select(func.coalesce(func.sum(SupplierCreditNoteApplication.monto_aplicado), Decimal("0")))
+        .where(SupplierCreditNoteApplication.invoice_id == iid)
+    )
+    total_nc_vigente = nc_sum_res.scalar() or Decimal("0")
+    inv.saldo_pendiente = max(Decimal("0"), (inv.total or Decimal("0")) - total_nc_vigente)
+    inv.estado = "pendiente" if total_nc_vigente == Decimal("0") else "parcial"
     if inv.total_brl:
         inv.saldo_pendiente_brl = inv.total_brl
 
@@ -7667,8 +7750,8 @@ async def delete_supplier_payment_order(
 
     num_orden = order.numero_orden
 
-    # Si estaba pagada, revertir todas las amortizaciones y desembolsos
-    if order.estado == "pagado":
+    # Si estaba pagada o en proceso, revertir todas las amortizaciones y desembolsos
+    if order.estado in ("pagado", "pagada", "parcial"):
         # 1. Revertir Facturas (SupplierInvoice)
         alloc_res = await db.execute(
             select(SupplierPaymentOrderAllocation).where(SupplierPaymentOrderAllocation.payment_order_id == order.id)
@@ -7680,72 +7763,8 @@ async def delete_supplier_payment_order(
                 if inv.estado in ("pagada", "pagado"):
                     inv.estado = "pendiente" if inv.saldo_pendiente >= (inv.total or Decimal("0")) else "parcial"
 
-        # 2. Revertir Desembolsos
-        disb_res = await db.execute(
-            select(SupplierPaymentOrderDisbursement).where(SupplierPaymentOrderDisbursement.payment_order_id == order.id)
-        )
-        for d in disb_res.scalars().all():
-            fp = d.forma_pago
-            m_pyg = d.monto_pyg or d.monto
-            if fp == "fondo_fijo" and d.petty_cash_fund_id:
-                fund = await db.get(PettyCashFund, d.petty_cash_fund_id)
-                if fund:
-                    s_ant = fund.saldo_actual
-                    fund.saldo_actual += m_pyg
-                    db.add(PettyCashFundMovement(
-                        fund_id=fund.id,
-                        tipo="ingreso",
-                        monto=m_pyg,
-                        saldo_anterior=s_ant,
-                        saldo_nuevo=fund.saldo_actual,
-                        referencia_type="payment_order_reversal",
-                        referencia_id=order.id,
-                        observaciones=f"Reversión por anulación de OP {num_orden}",
-                        created_by=uuid.UUID(user_id) if user_id else None,
-                    ))
-            elif fp == "transferencia" and d.bank_account_id:
-                bank_acc = await db.get(BankAccount, d.bank_account_id)
-                if bank_acc:
-                    bank_acc.saldo_actual += m_pyg
-                    await db.execute(
-                        delete(BankTransaction).where(
-                            BankTransaction.bank_account_id == bank_acc.id,
-                            BankTransaction.descripcion.ilike(f"%{num_orden}%")
-                        )
-                    )
-            elif fp == "nota_credito" and d.credit_note_id:
-                nc = await db.get(SupplierCreditNote, d.credit_note_id)
-                if nc:
-                    nc.saldo_disponible = (nc.saldo_disponible or Decimal("0")) + m_pyg
-                    await db.execute(
-                        delete(SupplierCreditNoteApplication).where(
-                            SupplierCreditNoteApplication.credit_note_id == nc.id,
-                            SupplierCreditNoteApplication.observaciones.ilike(f"%{num_orden}%")
-                        )
-                    )
-            elif fp == "cheque" and d.cheque_id:
-                ch = await db.get(Cheque, d.cheque_id)
-                if ch:
-                    if f"OP {num_orden}" in (ch.concepto or "") or f"{num_orden}" in (ch.notas or ""):
-                        ch.estado = "anulado"
-                        db.add(ChequeHistorial(
-                            cheque_id=ch.id,
-                            estado_anterior="pendiente",
-                            estado_nuevo="anulado",
-                            user_id=uuid.UUID(user_id) if user_id else None,
-                            notas=f"Cheque anulado por eliminación de OP {num_orden}",
-                        ))
-            elif fp == "boveda":
-                vault_entries_res = await db.execute(
-                    select(VaultEntry).where(
-                        VaultEntry.company_id == cid,
-                        VaultEntry.observaciones.ilike(f"%{num_orden}%"),
-                        VaultEntry.estado == "pagado_proveedor"
-                    )
-                )
-                for ve in vault_entries_res.scalars().all():
-                    ve.estado = "en_boveda"
-                    ve.observaciones = f"Restaurado por eliminación de OP {num_orden}"
+        # 2. Revertir Desembolsos de forma atómica y completa
+        await rollback_supplier_payment_order_disbursements(db, order, cid, user_id)
 
     # Eliminar Allocations, Disbursements y la Orden
     await db.execute(

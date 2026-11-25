@@ -255,7 +255,7 @@ export default function SupplierPaymentOrderModal({
         }
         if (cnRes.status === "fulfilled" && Array.isArray(cnRes.value)) {
           const validNCs = cnRes.value.filter((n: any) => {
-            const saldoDisp = Math.max(0, Number(n.saldo_disponible !== undefined && n.saldo_disponible !== null ? n.saldo_disponible : (n.numero_factura_origen ? 0 : n.monto || 0)))
+            const saldoDisp = Math.max(0, Number(n.saldo_disponible !== undefined && n.saldo_disponible !== null ? n.saldo_disponible : (n.monto || 0)))
             return saldoDisp > 0
           })
           setCreditNotes(validNCs)
@@ -276,7 +276,7 @@ export default function SupplierPaymentOrderModal({
             })
             const freeValid = validNCs.filter((n: any) => {
               const numStr = String(n.numero || "").trim().toLowerCase()
-              return !assignedNums.has(numStr) && !n.numero_factura_origen
+              return !assignedNums.has(numStr)
             })
             setSelectedCreditNoteIds(freeValid.map((n: any) => n.id))
           }
@@ -1375,9 +1375,17 @@ export default function SupplierPaymentOrderModal({
                           setSelectedInvoicesMap(prev => {
                             const next = { ...prev }
                             toAdd.forEach(inv => {
+                              const sPend = Number(inv.saldo_pendiente ?? inv.total ?? 0)
+                              const totalFac = Number(inv.total ?? sPend)
+                              const sumNC = (inv.notas_credito && Array.isArray(inv.notas_credito))
+                                ? inv.notas_credito.reduce((acc: number, nc: any) => acc + Number(nc.monto_aplicado || 0), 0)
+                                : Number(inv.total_nc_aplicadas || 0)
+                              const netoPendiente = (sPend >= totalFac && sumNC > 0)
+                                ? Math.max(0, sPend - sumNC)
+                                : sPend
                               next[inv.id] = {
                                 inv,
-                                monto_aplicado: inv.saldo_pendiente,
+                                monto_aplicado: netoPendiente,
                                 monto_retencion: 0,
                               }
                             })
@@ -1403,6 +1411,14 @@ export default function SupplierPaymentOrderModal({
                       .filter(i => !selectedInvoicesMap[i.id] && (!searchInvoice || (i.numero_factura || "").toLowerCase().includes(searchInvoice.toLowerCase()) || (i.timbrado || "").includes(searchInvoice)))
                       .map(inv => {
                         const isGasto = inv.tipo_comprobante === "gasto" || inv.tipo_comprobante === "insumo_gasto"
+                        const sPend = Number(inv.saldo_pendiente ?? inv.total ?? 0)
+                        const totalFac = Number(inv.total ?? sPend)
+                        const sumNC = (inv.notas_credito && Array.isArray(inv.notas_credito))
+                          ? inv.notas_credito.reduce((acc: number, nc: any) => acc + Number(nc.monto_aplicado || 0), 0)
+                          : Number(inv.total_nc_aplicadas || 0)
+                        const netoPendiente = (sPend >= totalFac && sumNC > 0)
+                          ? Math.max(0, sPend - sumNC)
+                          : sPend
                         return (
                           <button
                             key={inv.id}
@@ -1412,7 +1428,7 @@ export default function SupplierPaymentOrderModal({
                                 ...prev,
                                 [inv.id]: {
                                   inv,
-                                  monto_aplicado: inv.saldo_pendiente,
+                                  monto_aplicado: netoPendiente,
                                   monto_retencion: 0,
                                 }
                               }))
