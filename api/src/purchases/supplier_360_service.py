@@ -295,6 +295,7 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
         # NCs vinculadas a esta factura, SNCs y retenciones
         inv_apps = apps_by_invoice.get(inv.id, [])
         inv_sncs = sncs_by_invoice.get(inv.id, [])
+        inv_sncs_activas = [s for s in inv_sncs if s.get("estado") in ("pendiente_entrega", "entregada_parcial", "pendiente")]
         monto_nc_aplicado = sum(a["monto_aplicado"] for a in inv_apps)
         monto_snc_reclamado = sum(s["monto_reclamado"] for s in inv_sncs)
         monto_retenido = _dec_to_float(inv.monto_retenido_nc)
@@ -315,7 +316,7 @@ async def get_supplier_360(db: AsyncSession, company_id: uuid.UUID, supplier_id:
             fase_pago = "liquidada"
             fase_pago_label = "Fase 4: Liquidada / Cancelada 100%"
             fase_pago_color = "emerald"
-        elif inv.bloqueada_para_pago or inv.requiere_nc or (monto_retenido > 0) or (len(inv_sncs) > 0 and saldo > 0):
+        elif inv.bloqueada_para_pago or (inv.requiere_nc and monto_retenido > 0) or (monto_retenido > 0) or (len(inv_sncs_activas) > 0 and saldo > 0):
             fase_pago = "bloqueada_nc"
             fase_pago_label = "Fase 1: Retenida por NC / Reclamo en Trámite"
             fase_pago_color = "purple"

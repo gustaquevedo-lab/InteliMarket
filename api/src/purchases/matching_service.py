@@ -780,7 +780,8 @@ async def resolve_supplier_nc(
     nc_apps_q = select(func.coalesce(func.sum(SupplierCreditNoteApplication.monto_aplicado), 0)).where(
         SupplierCreditNoteApplication.invoice_id == invoice.id
     )
-    total_acumulado_ncs = Decimal(str((await db.execute(nc_apps_q)).scalar() or 0)) + total_monto_agregado
+    # SQLAlchemy autoflush ya sincronizó las aplicaciones recién agregadas en la sesión
+    total_acumulado_ncs = Decimal(str((await db.execute(nc_apps_q)).scalar() or 0))
 
     # Concatenar números de NC en nc_req.nc_recibida_numero
     numeros_existentes = [x.strip() for x in (nc_req.nc_recibida_numero or "").split(",") if x.strip()]
@@ -803,6 +804,7 @@ async def resolve_supplier_nc(
         nc_req.estado = "resuelta"
         invoice.monto_retenido_nc = Decimal("0")
         invoice.bloqueada_para_pago = False
+        invoice.requiere_nc = False
         invoice.estado = "aprobada" if invoice.saldo_pendiente > 0 else "pagada"
         invoice.motivo_bloqueo = f"Liberada para pago: Notas de Crédito ({nc_req.nc_recibida_numero}) aplicadas por total {total_acumulado_ncs:,.0f} Gs."
     else:

@@ -743,7 +743,14 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
             check_q = check_q.where(SupplierInvoice.timbrado == timb_clean)
         existing_inv = (await db.execute(check_q)).scalar_one_or_none()
 
-        is_pagado = bool(exp.fund_id or exp.estado == "pagado")
+        # Si el comprobante ingresó como contado, boleta, recibo, autofactura o con medio en efectivo/tarjeta/transferencia
+        # se considera pagado al contado (no genera deuda a crédito ficticia en cuentas a pagar)
+        tipo_comp = (exp.tipo_comprobante or "").strip().lower()
+        is_pagado = (
+            bool(exp.fund_id or exp.estado == "pagado")
+            or tipo_comp in ("factura_contado", "boleta", "recibo", "autofactura")
+            or (exp.tipo_pago in ("efectivo", "tarjeta", "transferencia") and tipo_comp != "factura_credito")
+        )
         if existing_inv:
             exp.supplier_invoice_id = existing_inv.id
             if is_pagado and (existing_inv.saldo_pendiente or Decimal("0")) > Decimal("0"):
@@ -754,11 +761,11 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
                     existing_inv.estado = "pagada"
                 db.add(SupplierInvoicePayment(
                     invoice_id=existing_inv.id,
-                    payment_method="fondo_fijo" if exp.fund_id else "efectivo",
+                    payment_method="fondo_fijo" if exp.fund_id else (exp.tipo_pago or "efectivo"),
                     monto=monto_aplicar,
                     moneda=existing_inv.moneda or "PYG",
                     fecha_pago=exp.fecha_gasto or date.today(),
-                    referencia=f"Gasto Fondo Fijo: {exp.descripcion or ''}"[:250],
+                    referencia=f"Gasto Comprobante: {exp.descripcion or ''}"[:250],
                     petty_cash_fund_id=exp.fund_id,
                     estado="conciliado",
                 ))
@@ -792,11 +799,11 @@ async def create_expense(db: AsyncSession, company_id: str, data: ExpenseCreate,
             if is_pagado:
                 db.add(SupplierInvoicePayment(
                     invoice_id=new_inv.id,
-                    payment_method="fondo_fijo" if exp.fund_id else "efectivo",
+                    payment_method="fondo_fijo" if exp.fund_id else (exp.tipo_pago or "efectivo"),
                     monto=exp.monto,
                     moneda="PYG",
                     fecha_pago=exp.fecha_gasto or date.today(),
-                    referencia=f"Gasto Fondo Fijo: {exp.descripcion or ''}"[:250],
+                    referencia=f"Gasto Comprobante: {exp.descripcion or ''}"[:250],
                     petty_cash_fund_id=exp.fund_id,
                     estado="conciliado",
                 ))
