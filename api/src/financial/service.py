@@ -2993,7 +2993,7 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
                     moneda=account.moneda,
                     descripcion=desc_enriquecida,
                     referencia=ref_val or target.get("referencia"),
-                    categoria="ventas_pos",
+                    categoria="transferencia_recibida",
                     conciliado=True,
                     fecha_conciliacion=_now(),
                 )
