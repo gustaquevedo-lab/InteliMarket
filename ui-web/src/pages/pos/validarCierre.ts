@@ -104,13 +104,18 @@ export function validarCierre(lineas: LineaCobro[], ctx: ContextoCierre): Result
     // El vuelto nunca puede superar el efectivo entregado.
     const efectivo = lineas.filter((l) => l.metodo === "cash").reduce((acc, l) => acc + l.montoPyg, 0)
     if (diferencia > efectivo) {
+      const sobrante = Math.round(diferencia).toLocaleString("es-PY")
       return rechazo(
         "suma_no_cuadra",
-        "Lo cobrado supera el total y el vuelto no puede ser mayor al efectivo recibido: ajustá los montos.",
+        `Lo cobrado supera el total por ₲ ${sobrante} y no hay suficiente efectivo para dar vuelto: ajustá los montos.`,
       )
     }
   } else if (-diferencia > TOLERANCIA_PAGOS_PYG) {
-    return rechazo("suma_no_cuadra", "Todavía falta cobrar: la suma de los pagos no llega al total.")
+    const faltante = Math.round(-diferencia).toLocaleString("es-PY")
+    return rechazo(
+      "suma_no_cuadra",
+      `Todavía faltan ₲ ${faltante} para cubrir el total de la venta.`,
+    )
   }
   return { ok: true }
 }

@@ -1050,7 +1050,12 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
         pos_res = await db.execute(
             select(PosTerminalTransaction).where(PosTerminalTransaction.sale_id.in_(sale_ids), PosTerminalTransaction.exitosa == True)
         )
-        pos_map = {r.sale_id: r for r in pos_res.scalars().all()}
+        pos_rows = list(pos_res.scalars().all())
+        pos_by_id = {r.id: r for r in pos_rows}
+        pos_by_sale: dict[uuid.UUID, list] = {}
+        for r in pos_rows:
+            pos_by_sale.setdefault(r.sale_id, []).append(r)
+        pos_map = {r.sale_id: r for r in pos_rows}
 
         try:
             plug_res = await db.execute(
@@ -1106,6 +1111,9 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     else:
         payments_rows = []
         sale_payments_map = {}
+        pos_rows = []
+        pos_by_id = {}
+        pos_by_sale = {}
         pos_map = {}
         plug_map = {}
 
@@ -1128,8 +1136,29 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     efectivo_brl = Decimal("0")
     efectivo_usd = Decimal("0")
 
+    # Mapeo no colisionable de pagos a su transaccion POS correspondiente
+    payment_to_pos: dict[uuid.UUID, PosTerminalTransaction] = {}
+    used_pos_ids: set[uuid.UUID] = set()
     for p in payments_rows:
-        pos = pos_map.get(p.sale_id)
+        pos_found = None
+        if p.terminal_transaction_id and p.terminal_transaction_id in pos_by_id:
+            pos_found = pos_by_id[p.terminal_transaction_id]
+            used_pos_ids.add(pos_found.id)
+        elif p.sale_id in pos_by_sale:
+            candidates = [r for r in pos_by_sale[p.sale_id] if r.id not in used_pos_ids]
+            m_p = Decimal(str(p.monto or 0))
+            matched = next((r for r in candidates if abs(Decimal(str(r.monto or 0)) - m_p) < Decimal("1.00")), None)
+            if matched:
+                pos_found = matched
+                used_pos_ids.add(pos_found.id)
+            elif candidates:
+                pos_found = candidates[0]
+                used_pos_ids.add(pos_found.id)
+        if pos_found:
+            payment_to_pos[p.id] = pos_found
+
+    for p in payments_rows:
+        pos = payment_to_pos.get(p.id) or pos_map.get(p.sale_id)
         plug = plug_map.get(p.sale_id)
         pos_op = pos.tipo_operacion if pos else None
         pos_nombre = pos.nombre_tarjeta if pos else None
@@ -1191,7 +1220,7 @@ async def get_session_reconciliation_data(db: AsyncSession, session_id: str | uu
     # Mapear pagos de cada venta para asociar a qué canal imputar cada devolución
     sale_to_channels: dict[uuid.UUID, list] = {}
     for p in payments_rows:
-        pos = pos_map.get(p.sale_id)
+        pos = payment_to_pos.get(p.id) or pos_map.get(p.sale_id)
         plug = plug_map.get(p.sale_id)
         pos_op = pos.tipo_operacion if pos else None
         pos_nom = pos.nombre_tarjeta if pos else None

@@ -156,3 +156,19 @@ test("extra club: saldo igual al monto cierra; tieneLinea false se rechaza", () 
 test("otrosCompleto undefined cuenta como completo", () => {
   assert.equal(codigo(validarCierre([linea({ metodo: "otros", montoPyg: 100000 })], ctx())), "ok")
 })
+
+test("mensaje de suma_no_cuadra incluye el monto faltante exacto", () => {
+  const r = validarCierre([linea({ metodo: "bancard", montoPyg: 85000 })], ctx({ totalPyg: 100000 }))
+  assert.equal(r.ok, false)
+  if (!r.ok) {
+    assert.match(r.mensaje, /15\.000/)
+  }
+})
+
+test("mensaje de suma_no_cuadra incluye el monto sobrante exacto cuando no hay efectivo", () => {
+  const r = validarCierre([linea({ metodo: "bancard", montoPyg: 120000 })], ctx({ totalPyg: 100000 }))
+  assert.equal(r.ok, false)
+  if (!r.ok) {
+    assert.match(r.mensaje, /20\.000/)
+  }
+})
