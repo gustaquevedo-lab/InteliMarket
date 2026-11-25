@@ -3,6 +3,7 @@ import logging
 from decimal import Decimal
 from datetime import datetime, timezone, date, timedelta
 from zoneinfo import ZoneInfo
+import re
 import uuid
 import json
 
@@ -194,7 +195,60 @@ async def get_accounts_receivable(
 
     result = await db.execute(query, params)
     rows = result.fetchall()
-    return [dict(row._mapping) for row in rows]
+    items = [dict(row._mapping) for row in rows]
+    if items:
+        sale_ids = [str(it["sale_id"]) for it in items if it.get("sale_id")]
+        doc_nums = [str(it["numero_documento"]) for it in items if it.get("numero_documento")]
+        ncs_by_sale: dict[str, list[dict]] = {}
+        ncs_by_doc: dict[str, list[dict]] = {}
+        if sale_ids or doc_nums:
+            q_nc = text("""
+                SELECT
+                    nc.id, nc.numero, nc.total, nc.created_at, nc.motivo, nc.sale_id,
+                    nc.timbrado_numero, s.numero as factura_numero
+                FROM notas_credito_debito nc
+                LEFT JOIN sales s ON s.id = nc.sale_id
+                WHERE (nc.sale_id = ANY(:sale_ids) OR s.numero = ANY(:doc_nums))
+                  AND nc.estado != 'anulado'
+                ORDER BY nc.created_at ASC
+            """)
+            nc_res = await db.execute(q_nc, {"sale_ids": sale_ids, "doc_nums": doc_nums})
+            for nc_row in nc_res.fetchall():
+                nc_dict = dict(nc_row._mapping)
+                nc_dict["id"] = str(nc_dict.get("id"))
+                nc_dict["total"] = float(nc_dict.get("total") or 0)
+                s_id = str(nc_dict.get("sale_id") or "")
+                f_num = str(nc_dict.get("factura_numero") or "")
+                if s_id:
+                    ncs_by_sale.setdefault(s_id, []).append(nc_dict)
+                if f_num:
+                    ncs_by_doc.setdefault(f_num, []).append(nc_dict)
+
+        for it in items:
+            s_id = str(it.get("sale_id") or "")
+            f_num = str(it.get("numero_documento") or "")
+            matched_dict = {str(nc["id"]): nc for nc in (ncs_by_sale.get(s_id, []) + ncs_by_doc.get(f_num, []))}
+            matched_ncs = list(matched_dict.values())
+            # Fallback regex notas_cobranza si no se encontró en notas_credito_debito
+            if not matched_ncs and it.get("notas_cobranza"):
+                for m in re.finditer(r"\[(?:Devolución\s+([A-Z0-9-]+)\s*-\s*)?NC\s*([0-9-]+)\]\s*-₲\s*([0-9\.,]+)(?:\s*\(([^)]+)\))?", it["notas_cobranza"]):
+                    nc_num = m.group(2) or m.group(1)
+                    nc_monto_str = m.group(3).replace(".", "").replace(",", ".")
+                    try:
+                        nc_monto = float(nc_monto_str)
+                    except Exception:
+                        nc_monto = 0.0
+                    matched_ncs.append({
+                        "id": f"fallback-{nc_num}",
+                        "numero": nc_num,
+                        "total": nc_monto,
+                        "created_at": m.group(4) or "",
+                        "motivo": "Devolución / NC",
+                    })
+            it["notas_credito"] = matched_ncs
+            it["total_nc"] = sum(nc["total"] for nc in matched_ncs)
+
+    return items
 
 
 async def count_accounts_receivable(db: AsyncSession, company_id: str, customer_id: str | None = None, estado: str | None = None) -> int:
@@ -1861,7 +1915,7 @@ async def get_deuda_detallada_data(
         SELECT
             ar.id, ar.customer_id, ar.sale_id, ar.numero_documento,
             ar.fecha_emision, ar.fecha_vencimiento, ar.moneda,
-            ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado,
+            ar.monto_original, ar.saldo_pendiente, ar.tipo, ar.estado, ar.notas_cobranza,
             COALESCE(c.razon_social, c.nombre_fantasia, 'Cliente') as customer_name,
             c.nombre_fantasia, c.ruc as customer_ruc,
             c.telefono as customer_telefono, c.empresa_vinculada_nombre, c.empresa_vinculada_ruc,
@@ -1891,6 +1945,54 @@ async def get_deuda_detallada_data(
 
     result = await db.execute(text(query), params)
     rows = result.fetchall()
+
+    sale_ids = [str(r.sale_id) for r in rows if r.sale_id]
+    doc_nums = [str(r.numero_documento) for r in rows if r.numero_documento]
+    ar_ids = [str(r.id) for r in rows if r.id]
+
+    ncs_by_sale: dict[str, list[dict]] = {}
+    ncs_by_doc: dict[str, list[dict]] = {}
+    if sale_ids or doc_nums:
+        q_nc = text("""
+            SELECT
+                nc.id, nc.numero, nc.total, nc.created_at, nc.motivo, nc.sale_id,
+                nc.timbrado_numero, s.numero as factura_numero
+            FROM notas_credito_debito nc
+            LEFT JOIN sales s ON s.id = nc.sale_id
+            WHERE (nc.sale_id = ANY(:sale_ids) OR s.numero = ANY(:doc_nums))
+              AND nc.estado != 'anulado'
+            ORDER BY nc.created_at ASC
+        """)
+        nc_res = await db.execute(q_nc, {"sale_ids": sale_ids, "doc_nums": doc_nums})
+        for nc_row in nc_res.fetchall():
+            nc_dict = dict(nc_row._mapping)
+            nc_dict["id"] = str(nc_dict.get("id"))
+            nc_dict["total"] = Decimal(str(nc_dict.get("total") or 0))
+            s_id = str(nc_dict.get("sale_id") or "")
+            f_num = str(nc_dict.get("factura_numero") or "")
+            if s_id:
+                ncs_by_sale.setdefault(s_id, []).append(nc_dict)
+            if f_num:
+                ncs_by_doc.setdefault(f_num, []).append(nc_dict)
+
+    pagos_by_ar: dict[str, list[dict]] = {}
+    if ar_ids:
+        q_alloc = text("""
+            SELECT
+                rpa.accounts_receivable_id, rpa.monto,
+                rp.id as payment_id, rp.fecha, rp.numero_recibo, rp.forma_pago, rp.referencia
+            FROM receivable_payment_allocations rpa
+            JOIN receivable_payments rp ON rp.id = rpa.receivable_payment_id
+            WHERE rpa.accounts_receivable_id = ANY(:ar_ids)
+            ORDER BY rp.fecha ASC, rp.created_at ASC
+        """)
+        alloc_res = await db.execute(q_alloc, {"ar_ids": ar_ids})
+        for al_row in alloc_res.fetchall():
+            al_dict = dict(al_row._mapping)
+            al_dict["monto"] = Decimal(str(al_dict.get("monto") or 0))
+            ar_id_str = str(al_dict.get("accounts_receivable_id") or "")
+            if ar_id_str:
+                pagos_by_ar.setdefault(ar_id_str, []).append(al_dict)
 
     clientes_dict: dict = {}
     total_general_saldo = Decimal("0")
@@ -1934,14 +2036,43 @@ async def get_deuda_detallada_data(
                 "limite_credito": Decimal(str(r.limite_credito or 0)),
                 "saldo_total": Decimal("0"),
                 "monto_original_total": Decimal("0"),
+                "total_nc_monto": Decimal("0"),
+                "total_nc_count": 0,
                 "facturas": [],
             }
 
         cl = clientes_dict[cid]
         cl["saldo_total"] += saldo
         cl["monto_original_total"] += orig
+
+        ar_id_str = str(r.id)
+        s_id = str(r.sale_id) if r.sale_id else ""
+        f_num = str(r.numero_documento) if r.numero_documento else ""
+        matched_dict = {str(nc["id"]): nc for nc in (ncs_by_sale.get(s_id, []) + ncs_by_doc.get(f_num, []))}
+        matched_ncs = list(matched_dict.values())
+        if not matched_ncs and r.notas_cobranza:
+            for m in re.finditer(r"\[(?:Devolución\s+([A-Z0-9-]+)\s*-\s*)?NC\s*([0-9-]+)\]\s*-₲\s*([0-9\.,]+)(?:\s*\(([^)]+)\))?", r.notas_cobranza):
+                nc_num = m.group(2) or m.group(1)
+                nc_monto_str = m.group(3).replace(".", "").replace(",", ".")
+                try:
+                    nc_monto = Decimal(nc_monto_str)
+                except Exception:
+                    nc_monto = Decimal("0")
+                matched_ncs.append({
+                    "id": f"fallback-{nc_num}",
+                    "numero": nc_num,
+                    "total": nc_monto,
+                    "created_at": m.group(4) or "",
+                    "motivo": "Devolución / NC",
+                })
+        matched_pagos = pagos_by_ar.get(ar_id_str, [])
+        f_nc_tot = sum(Decimal(str(nc.get("total") or 0)) for nc in matched_ncs)
+        cl["total_nc_monto"] += f_nc_tot
+        cl["total_nc_count"] += len(matched_ncs)
+
         cl["facturas"].append({
-            "id": str(r.id),
+            "id": ar_id_str,
+            "sale_id": s_id or None,
             "numero_documento": r.numero_documento or "S/N",
             "fecha_emision": r.fecha_emision,
             "fecha_vencimiento": r.fecha_vencimiento,
@@ -1949,6 +2080,11 @@ async def get_deuda_detallada_data(
             "saldo_pendiente": saldo,
             "dias_mora": dias,
             "estado": r.estado,
+            "notas_cobranza": r.notas_cobranza,
+            "notas_credito": matched_ncs,
+            "total_nc": f_nc_tot,
+            "pagos": matched_pagos,
+            "total_pagos": sum(Decimal(str(p.get("monto") or 0)) for p in matched_pagos),
         })
 
     for cl in clientes_dict.values():

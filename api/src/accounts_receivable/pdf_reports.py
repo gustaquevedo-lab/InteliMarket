@@ -413,10 +413,14 @@ def generate_deuda_detallada_pdf(
 
         inv_head = ["N° Documento", "Emisión", "Vencimiento", "Mora", "Monto Original", "Saldo Pendiente"]
         inv_rows = [inv_head]
+        custom_styles = []
+
         facturas = sorted(
             c.get("facturas", []),
             key=lambda f: (str(f.get("fecha_emision") or ""), str(f.get("numero_documento") or "")),
         )
+        total_nc_cliente_count = 0
+
         for f in facturas:
             emision = f["fecha_emision"].strftime("%d/%m/%Y") if hasattr(f["fecha_emision"], "strftime") else str(f["fecha_emision"] or "—")
             vto = f["fecha_vencimiento"].strftime("%d/%m/%Y") if hasattr(f["fecha_vencimiento"], "strftime") else str(f["fecha_vencimiento"] or "—")
@@ -437,16 +441,72 @@ def generate_deuda_detallada_pdf(
                 _num(_fmt_gs(f["saldo_pendiente"]), bold=True),
             ])
 
+            # Notas de Crédito asociadas a esta factura
+            for nc in f.get("notas_credito", []):
+                nc_row_idx = len(inv_rows)
+                nc_num = nc.get("numero") or "S/N"
+                nc_tot = Decimal(str(nc.get("total") or 0))
+                total_nc_cliente_count += 1
+                nc_dt = nc.get("created_at")
+                if hasattr(nc_dt, "strftime"):
+                    nc_fecha = nc_dt.strftime("%d/%m/%Y")
+                elif isinstance(nc_dt, str) and nc_dt:
+                    nc_fecha = nc_dt[:10]
+                else:
+                    nc_fecha = "—"
+
+                inv_rows.append([
+                    Paragraph(f"<font color='#B45309'>&nbsp;&nbsp;&nbsp;&nbsp;↳ <b>NC {nc_num}</b></font>", CELL_STYLE),
+                    Paragraph(f"<font color='#B45309'>{nc_fecha}</font>", CELL_STYLE),
+                    Paragraph("<font color='#94A3B8'>—</font>", CELL_STYLE),
+                    Paragraph("<font color='#B45309'><b>Nota Crédito</b></font>", NUM_STYLE),
+                    Paragraph(f"<font color='#DC2626'><b>-{_fmt_gs(nc_tot)}</b></font>", NUM_STYLE),
+                    Paragraph("<font color='#94A3B8'>—</font>", NUM_STYLE),
+                ])
+                custom_styles.extend([
+                    ("BACKGROUND", (0, nc_row_idx), (-1, nc_row_idx), HexColor("#FFFBEB")),
+                    ("LINEBELOW", (0, nc_row_idx), (-1, nc_row_idx), 0.3, HexColor("#FDE68A")),
+                    ("TOPPADDING", (0, nc_row_idx), (-1, nc_row_idx), 2),
+                    ("BOTTOMPADDING", (0, nc_row_idx), (-1, nc_row_idx), 2),
+                ])
+
+            # Pagos parciales asociados a esta factura
+            for p in f.get("pagos", []):
+                p_row_idx = len(inv_rows)
+                p_recibo = p.get("numero_recibo") or p.get("forma_pago") or "Recibo"
+                p_monto = Decimal(str(p.get("monto") or 0))
+                p_dt = p.get("fecha")
+                p_fecha = p_dt.strftime("%d/%m/%Y") if hasattr(p_dt, "strftime") else (str(p_dt)[:10] if p_dt else "—")
+
+                inv_rows.append([
+                    Paragraph(f"<font color='#047857'>&nbsp;&nbsp;&nbsp;&nbsp;↳ <b>PAGO {p_recibo}</b></font>", CELL_STYLE),
+                    Paragraph(f"<font color='#047857'>{p_fecha}</font>", CELL_STYLE),
+                    Paragraph("<font color='#94A3B8'>—</font>", CELL_STYLE),
+                    Paragraph("<font color='#047857'><b>Pago Aplicado</b></font>", NUM_STYLE),
+                    Paragraph(f"<font color='#047857'><b>-{_fmt_gs(p_monto)}</b></font>", NUM_STYLE),
+                    Paragraph("<font color='#94A3B8'>—</font>", NUM_STYLE),
+                ])
+                custom_styles.extend([
+                    ("BACKGROUND", (0, p_row_idx), (-1, p_row_idx), HexColor("#F0FDF4")),
+                    ("LINEBELOW", (0, p_row_idx), (-1, p_row_idx), 0.3, HexColor("#BBF7D0")),
+                    ("TOPPADDING", (0, p_row_idx), (-1, p_row_idx), 2),
+                    ("BOTTOMPADDING", (0, p_row_idx), (-1, p_row_idx), 2),
+                ])
+
         # Fila de subtotal por cliente
+        subtotal_label = f"Subtotal {c_name[:26]} ({len(facturas)} docs"
+        if total_nc_cliente_count > 0:
+            subtotal_label += f" · {total_nc_cliente_count} NCs"
+        subtotal_label += ")"
+
         inv_rows.append([
-            _cell(f"Subtotal {c_name[:28]} ({len(c.get('facturas', []))} docs)", bold=True),
+            _cell(subtotal_label, bold=True),
             _cell(""), _cell(""), _cell(""),
             _num(_fmt_gs(c.get("monto_original_total", 0)), bold=True),
             _num(_fmt_gs(c_saldo), bold=True),
         ])
 
-        t_inv = Table(inv_rows, colWidths=[36 * mm, 22 * mm, 22 * mm, 22 * mm, 40 * mm, 44 * mm], repeatRows=1)
-        t_inv.setStyle(TableStyle([
+        base_styles = [
             ("BACKGROUND", (0, 0), (-1, 0), HexColor("#F1F5F9")),
             ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#334155")),
             ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
@@ -461,7 +521,9 @@ def generate_deuda_detallada_pdf(
             ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
             ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        ]))
+        ]
+        t_inv = Table(inv_rows, colWidths=[36 * mm, 22 * mm, 22 * mm, 22 * mm, 40 * mm, 44 * mm], repeatRows=1)
+        t_inv.setStyle(TableStyle(base_styles + custom_styles))
         elements.append(t_inv)
         elements.append(Spacer(1, 6))
 

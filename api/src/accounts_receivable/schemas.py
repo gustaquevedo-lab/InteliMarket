@@ -24,6 +24,8 @@ class AccountsReceivableResponse(BaseModel):
     dias_mora: Optional[int] = None
     ultimo_pago: Optional[datetime] = None
     notas_cobranza: Optional[str] = None
+    notas_credito: list[dict] = Field(default_factory=list)
+    total_nc: Decimal = Decimal("0")
     created_at: datetime
     updated_at: datetime
 

@@ -2425,7 +2425,21 @@ export default function AccountsReceivablePage() {
                         return (
                           <tr key={d.id} className="hover:bg-gray-50 dark:hover:bg-slate-800/50 transition-colors">
                             <td className="p-3.5 font-mono font-bold text-gray-900 dark:text-white">
-                              {d.numero_documento || "—"}
+                              <div>{d.numero_documento || "—"}</div>
+                              {d.notas_credito && d.notas_credito.length > 0 && (
+                                <div className="mt-1 flex flex-col gap-1 font-sans">
+                                  {d.notas_credito.map((nc: any, idx: number) => (
+                                    <span
+                                      key={nc.id || idx}
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 w-fit"
+                                      title={nc.motivo || "Nota de Crédito vinculada"}
+                                    >
+                                      <span>↳ NC {nc.numero}:</span>
+                                      <span className="font-mono font-bold text-red-600 dark:text-red-400">-{formatPYG(nc.total || nc.monto || 0)}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </td>
                             <td className="p-3.5 font-medium text-gray-900 dark:text-white max-w-xs truncate" title={d.customer_name}>
                               <div>{d.customer_name || "Cliente general"}</div>
@@ -2701,6 +2715,20 @@ export default function AccountsReceivablePage() {
                                             <div className="text-gray-400 text-[11px] mt-0.5">
                                               Emisión: {d.fecha_emision} · Vence: {d.fecha_vencimiento}
                                             </div>
+                                            {d.notas_credito && d.notas_credito.length > 0 && (
+                                              <div className="mt-1 flex flex-col gap-1 font-sans">
+                                                {d.notas_credito.map((nc: any, idx: number) => (
+                                                  <span
+                                                    key={nc.id || idx}
+                                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 w-fit"
+                                                    title={nc.motivo || "Nota de Crédito vinculada"}
+                                                  >
+                                                    <span>↳ NC {nc.numero}:</span>
+                                                    <span className="font-mono font-bold text-red-600 dark:text-red-400">-{formatPYG(nc.total || nc.monto || 0)}</span>
+                                                  </span>
+                                                ))}
+                                              </div>
+                                            )}
                                           </div>
                                           <div className="flex items-center gap-2.5">
                                             <div className="text-right">
@@ -7854,9 +7882,41 @@ export default function AccountsReceivablePage() {
                 <div><span className="text-gray-400 block text-[11px]">Fecha Vencimiento</span><span className="font-mono text-gray-700 dark:text-gray-300">{selectedDoc.fecha_vencimiento || "—"}</span></div>
               </div>
 
-              {selectedDoc.notas_cobranza && (
-                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs">
-                  <span className="font-bold">Ajustes / Devoluciones (Notas de Crédito):</span> {selectedDoc.notas_cobranza}
+              {((selectedDoc.notas_credito && selectedDoc.notas_credito.length > 0) || selectedDoc.notas_cobranza) && (
+                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs space-y-2">
+                  <div className="font-bold flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <span>Notas de Crédito Vinculadas</span>
+                      {selectedDoc.notas_credito && selectedDoc.notas_credito.length > 0 && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-amber-200/60 dark:bg-amber-900/60 text-[10px]">
+                          {selectedDoc.notas_credito.length}
+                        </span>
+                      )}
+                    </span>
+                    {selectedDoc.total_nc ? (
+                      <span className="font-mono text-red-600 dark:text-red-400 font-bold">Total: -{formatPYG(selectedDoc.total_nc)}</span>
+                    ) : null}
+                  </div>
+                  {selectedDoc.notas_credito && selectedDoc.notas_credito.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {selectedDoc.notas_credito.map((nc: any, idx: number) => (
+                        <div key={nc.id || idx} className="p-2 rounded bg-white/70 dark:bg-slate-800/70 border border-amber-200/60 dark:border-amber-800/50 flex items-center justify-between text-xs">
+                          <div>
+                            <span className="font-mono font-bold text-gray-900 dark:text-white">NC N° {nc.numero}</span>
+                            {nc.created_at && (
+                              <span className="text-[10px] text-gray-400 ml-2">
+                                {typeof nc.created_at === "string" ? nc.created_at.slice(0, 10) : nc.created_at}
+                              </span>
+                            )}
+                            {nc.motivo && <div className="text-[11px] text-gray-500 mt-0.5">{nc.motivo}</div>}
+                          </div>
+                          <span className="font-mono font-bold text-red-600 dark:text-red-400">-{formatPYG(nc.total || nc.monto || 0)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div>{selectedDoc.notas_cobranza}</div>
+                  )}
                 </div>
               )}
 
