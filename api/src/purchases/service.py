@@ -967,11 +967,14 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             )
 
     po_price_map: dict[str, Decimal] = {}
+    po_qty_map: dict[str, Decimal] = {}
     if data.purchase_order_id:
         po_items_result = await db.execute(
             select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == data.purchase_order_id)
         )
-        po_price_map = {str(i.product_id): i.precio_unitario for i in po_items_result.scalars().all()}
+        for i in po_items_result.scalars().all():
+            po_price_map[str(i.product_id)] = i.precio_unitario
+            po_qty_map[str(i.product_id)] = Decimal(str(i.cantidad or 0))
 
     review_reasons: list[str] = []
 
@@ -1202,7 +1205,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
                 for itm in data.items
             ).quantize(Decimal("1"))
             tot_ordenado = sum(
-                Decimal(str(getattr(itm, "cantidad_ordenada", None) or itm.cantidad_recibida or 0)) * (itm.costo_unitario or Decimal("0"))
+                (po_qty_map.get(str(itm.product_id)) or Decimal(str(getattr(itm, "cantidad_ordenada", None) or itm.cantidad_recibida or 0))) * (itm.costo_unitario or Decimal("0"))
                 for itm in data.items
             ).quantize(Decimal("1"))
 
@@ -1210,12 +1213,15 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             if data.total_factura_impreso is not None and data.total_factura_impreso > 0:
                 factura_total = data.total_factura_impreso.quantize(Decimal("1"))
                 diff_redondeo = (factura_total - receipt.total).quantize(Decimal("1"))
-            elif tot_ordenado > receipt.total:
+            elif tot_ordenado > 0:
+                # Regla canónica: si hay Orden de Compra, el total de la factura fiscal
+                # corresponde al total pactado en la OC (valor facial impreso por el proveedor).
+                # Jamás se infla sumándole averías/rechazos por encima de la OC.
                 factura_total = tot_ordenado
-            elif tot_despachado > receipt.total:
-                factura_total = tot_despachado
-            else:
+            elif receipt.total > 0:
                 factura_total = receipt.total
+            else:
+                factura_total = tot_despachado
 
             # El monto retenido es la discrepancia que requiere NC del proveedor (faltante o rechazo)
             monto_retenido_inicial = max(Decimal("0"), factura_total - receipt.total)
@@ -1272,7 +1278,16 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
             for itm in data.items:
                 cant_rec = Decimal(str(itm.cantidad_recibida or 0))
                 cant_rech = Decimal(str(itm.cantidad_rechazada or 0))
-                cant_fac = (cant_rec + cant_rech) if (cant_rec + cant_rech) > 0 else (Decimal(str(itm.cantidad_ordenada or 1)))
+                cant_ord = po_qty_map.get(str(itm.product_id)) or Decimal(str(getattr(itm, "cantidad_ordenada", None) or 0))
+                
+                # La cantidad facturada nominal debe reflejar la factura del proveedor (la OC).
+                # Si no hay OC, refleja lo recibido o rechazado sin duplicar.
+                if cant_ord > 0:
+                    cant_fac = cant_ord
+                elif cant_rec > 0:
+                    cant_fac = cant_rec
+                else:
+                    cant_fac = cant_rech
                 cost = itm.costo_unitario or Decimal("0")
                 prod_id = itm.product_id
 
