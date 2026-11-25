@@ -1172,8 +1172,12 @@ export default function PurchasesPage() {
   const handleOpenGenerateModal = () => {
     const itemsToOrder = (replenishmentData?.items || []).filter(
       (it: any) => {
-        if (selectedSupplierIA && String(it.ultimo_proveedor_id || "").toLowerCase() !== String(selectedSupplierIA).toLowerCase()) return false
-        return selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+        if (selectedSupplierIA) {
+          const itemSupId = String(it.proveedor_oficial_id || it.ultimo_proveedor_id || "").toLowerCase()
+          if (itemSupId !== String(selectedSupplierIA).toLowerCase()) return false
+        }
+        const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
+        return selectedItemsIA[it.product_id] && Number(qty) > 0
       }
     )
     if (itemsToOrder.length === 0) {
@@ -1214,7 +1218,14 @@ export default function PurchasesPage() {
 
   const handleResetToLastSuppliers = () => {
     const itemsToOrder = (replenishmentData?.items || []).filter(
-      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+      (it: any) => {
+        if (selectedSupplierIA) {
+          const itemSupId = String(it.proveedor_oficial_id || it.ultimo_proveedor_id || "").toLowerCase()
+          if (itemSupId !== String(selectedSupplierIA).toLowerCase()) return false
+        }
+        const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
+        return selectedItemsIA[it.product_id] && Number(qty) > 0
+      }
     )
     const newMap: Record<string, string> = {}
     const newIncluded: Record<string, boolean> = { ...includedSuppliers }
@@ -1231,7 +1242,14 @@ export default function PurchasesPage() {
   const handleApplyGlobalSupplier = () => {
     if (!globalApplySupplierId) return
     const itemsToOrder = (replenishmentData?.items || []).filter(
-      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+      (it: any) => {
+        if (selectedSupplierIA) {
+          const itemSupId = String(it.proveedor_oficial_id || it.ultimo_proveedor_id || "").toLowerCase()
+          if (itemSupId !== String(selectedSupplierIA).toLowerCase()) return false
+        }
+        const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
+        return selectedItemsIA[it.product_id] && Number(qty) > 0
+      }
     )
     const newMap: Record<string, string> = {}
     itemsToOrder.forEach((it: any) => {
@@ -1245,7 +1263,14 @@ export default function PurchasesPage() {
   const handleCreatePOFromReplenishment = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
     const itemsToOrder = (replenishmentData?.items || []).filter(
-      (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+      (it: any) => {
+        if (selectedSupplierIA) {
+          const itemSupId = String(it.proveedor_oficial_id || it.ultimo_proveedor_id || "").toLowerCase()
+          if (itemSupId !== String(selectedSupplierIA).toLowerCase()) return false
+        }
+        const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
+        return selectedItemsIA[it.product_id] && Number(qty) > 0
+      }
     )
 
     const groupsBySup: Record<string, any[]> = {}
@@ -7369,7 +7394,14 @@ export default function PurchasesPage() {
       ────────────────────────────────────────────────────────────────────────── */}
       {showGenerateModal && (() => {
         const itemsToOrder = (replenishmentData?.items || []).filter(
-          (it: any) => selectedItemsIA[it.product_id] && (editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida) > 0
+          (it: any) => {
+            if (selectedSupplierIA) {
+              const itemSupId = String(it.proveedor_oficial_id || it.ultimo_proveedor_id || "").toLowerCase()
+              if (itemSupId !== String(selectedSupplierIA).toLowerCase()) return false
+            }
+            const qty = editedQuantities[it.product_id] !== undefined ? editedQuantities[it.product_id] : it.cantidad_sugerida
+            return selectedItemsIA[it.product_id] && Number(qty) > 0
+          }
         )
 
         // Agrupación por proveedor asignado
