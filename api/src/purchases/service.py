@@ -491,8 +491,8 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate, fo
 
         # Si la orden ya cuenta con recepciones previas, el estado debe reflejar lo recibido
         if received_by_product:
-            all_received = all(
-                (it.cantidad_recibida or Decimal("0")) >= it.cantidad
+            all_received = bool(newly_added_items) and all(
+                (it.cantidad_recibida or Decimal("0")) >= (it.cantidad - Decimal("0.0001"))
                 for it in newly_added_items
             )
             any_received = any(
@@ -503,11 +503,6 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate, fo
                 order.estado = "completado"
             elif any_received and order.estado not in ("cancelado", "facturado"):
                 order.estado = "parcial"
-    elif order.id:
-        items_check = (await db.execute(select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == order.id))).scalars().all()
-        if items_check and all((it.cantidad_recibida or Decimal("0")) >= it.cantidad for it in items_check):
-            if order.estado not in ("cancelado", "facturado"):
-                order.estado = "completado"
 
         shipping = (order.shipping_cost or Decimal("0")) + (order.insurance_cost or Decimal("0")) + (order.customs_cost or Decimal("0")) + (order.otros_costos or Decimal("0"))
         order.subtotal = subtotal.quantize(Decimal("1"))
@@ -541,6 +536,16 @@ async def update_purchase_order(db: AsyncSession, po_id: str, data: POUpdate, fo
                         prod.ultimo_costo = item_data.precio_unitario
                     if getattr(data, "update_default_supplier", False):
                         prod.costo_unitario = item_data.precio_unitario
+    else:
+        # data.items is None: actualizar estado si todos los ítems existentes ya fueron recibidos
+        items_check = (await db.execute(
+            select(PurchaseOrderItem)
+            .where(PurchaseOrderItem.purchase_order_id == order.id)
+            .execution_options(populate_existing=True)
+        )).scalars().all()
+        if items_check and all((it.cantidad_recibida or Decimal("0")) >= (it.cantidad - Decimal("0.0001")) for it in items_check):
+            if order.estado not in ("cancelado", "facturado"):
+                order.estado = "completado"
 
     await db.flush()
     await db.refresh(order)
@@ -968,6 +973,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
 
     po_price_map: dict[str, Decimal] = {}
     po_qty_map: dict[str, Decimal] = {}
+    po_items_map: dict[str, PurchaseOrderItem] = {}
     if data.purchase_order_id:
         po_items_result = await db.execute(
             select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == data.purchase_order_id)
@@ -975,6 +981,7 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         for i in po_items_result.scalars().all():
             po_price_map[str(i.product_id)] = i.precio_unitario
             po_qty_map[str(i.product_id)] = Decimal(str(i.cantidad or 0))
+            po_items_map[str(i.product_id)] = i
 
     review_reasons: list[str] = []
 
@@ -1109,44 +1116,68 @@ async def create_receipt(db: AsyncSession, data: ReceiptCreate) -> PurchaseRecei
         db.add(movement)
 
     if po:
+        prev_estado = po.estado
+        for item_data in data.items:
+            po_item = po_items_map.get(str(item_data.product_id))
+            rec_qty = Decimal(str(item_data.cantidad_recibida or 0))
+            if po_item:
+                curr_rec = Decimal(str(po_item.cantidad_recibida or 0))
+                po_item.cantidad_recibida = (curr_rec + rec_qty).quantize(Decimal("0.001"))
+
+            await db.execute(
+                text("""
+                    UPDATE purchase_order_items
+                    SET cantidad_recibida = COALESCE(cantidad_recibida, 0) + :recibida
+                    WHERE purchase_order_id = :po_id AND product_id = :product_id
+                """),
+                {
+                    "recibida": float(item_data.cantidad_recibida),
+                    "po_id": data.purchase_order_id,
+                    "product_id": item_data.product_id,
+                }
+            )
+
+        items_result = await db.execute(
+            select(PurchaseOrderItem)
+            .where(PurchaseOrderItem.purchase_order_id == data.purchase_order_id)
+            .execution_options(populate_existing=True)
+        )
+        po_items = list(items_result.scalars().all())
+        all_received = bool(po_items) and all(
+            Decimal(str(item.cantidad_recibida or 0)) >= (Decimal(str(item.cantidad or 0)) - Decimal("0.0001"))
+            for item in po_items
+        )
+        nuevo_estado = "completado" if all_received else "parcial"
+        po.estado = nuevo_estado
+        po.updated_at = datetime.now(timezone.utc)
+
+        if prev_estado != nuevo_estado:
+            await add_po_history(
+                db,
+                po_id=str(po.id),
+                estado_anterior=prev_estado,
+                estado_nuevo=nuevo_estado,
+                cambiado_por=str(data.user_id) if data.user_id else None,
+                observaciones=f"Recepción {receipt.numero} registrada ({nuevo_estado})"
+            )
+
+        if all_received and getattr(po, "fecha_entrega_estimada", None):
             for item_data in data.items:
+                po_item = po_items_map.get(str(item_data.product_id))
+                if po_item:
+                    po_item.fecha_entrega_real = date.today()
                 await db.execute(
                     text("""
                         UPDATE purchase_order_items
-                        SET cantidad_recibida = COALESCE(cantidad_recibida, 0) + :recibida
+                        SET fecha_entrega_real = :hoy
                         WHERE purchase_order_id = :po_id AND product_id = :product_id
                     """),
                     {
-                        "recibida": float(item_data.cantidad_recibida),
+                        "hoy": date.today(),
                         "po_id": data.purchase_order_id,
                         "product_id": item_data.product_id,
                     }
                 )
-
-            items_result = await db.execute(
-                select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == data.purchase_order_id)
-            )
-            po_items = list(items_result.scalars().all())
-            all_received = all(
-                (item.cantidad_recibida or 0) >= item.cantidad
-                for item in po_items
-            )
-            po.estado = "completado" if all_received else "parcial"
-
-            if all_received and getattr(po, "fecha_entrega_estimada", None):
-                for item_data in data.items:
-                    await db.execute(
-                        text("""
-                            UPDATE purchase_order_items
-                            SET fecha_entrega_real = :hoy
-                            WHERE purchase_order_id = :po_id AND product_id = :product_id
-                        """),
-                        {
-                            "hoy": date.today(),
-                            "po_id": data.purchase_order_id,
-                            "product_id": item_data.product_id,
-                        }
-                    )
 
     if review_reasons:
         receipt.requiere_revision = True
@@ -1377,6 +1408,7 @@ async def cancel_receipt(db: AsyncSession, receipt_id: str) -> PurchaseReceipt:
         po_result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == receipt.purchase_order_id))
         po = po_result.scalar_one_or_none()
         if po:
+            prev_estado = po.estado
             for item in receipt.items:
                 await db.execute(
                     text("""
@@ -1391,13 +1423,31 @@ async def cancel_receipt(db: AsyncSession, receipt_id: str) -> PurchaseReceipt:
                     },
                 )
             items_result = await db.execute(
-                select(PurchaseOrderItem).where(PurchaseOrderItem.purchase_order_id == receipt.purchase_order_id)
+                select(PurchaseOrderItem)
+                .where(PurchaseOrderItem.purchase_order_id == receipt.purchase_order_id)
+                .execution_options(populate_existing=True)
             )
             po_items = list(items_result.scalars().all())
-            all_received = all((i.cantidad_recibida or 0) >= i.cantidad for i in po_items)
-            nothing_received = all((i.cantidad_recibida or 0) <= 0 for i in po_items)
+            all_received = bool(po_items) and all(
+                Decimal(str(i.cantidad_recibida or 0)) >= (Decimal(str(i.cantidad or 0)) - Decimal("0.0001"))
+                for i in po_items
+            )
+            nothing_received = all(
+                Decimal(str(i.cantidad_recibida or 0)) <= Decimal("0")
+                for i in po_items
+            )
             if po.estado != "cancelado":
-                po.estado = "completado" if all_received else ("confirmado" if nothing_received else "parcial")
+                nuevo_estado = "completado" if all_received else ("confirmado" if nothing_received else "parcial")
+                po.estado = nuevo_estado
+                po.updated_at = datetime.now(timezone.utc)
+                if prev_estado != nuevo_estado:
+                    await add_po_history(
+                        db,
+                        po_id=str(po.id),
+                        estado_anterior=prev_estado,
+                        estado_nuevo=nuevo_estado,
+                        observaciones=f"Cancelación de recepción {receipt.numero} ({nuevo_estado})"
+                    )
 
     receipt.estado = "cancelado"
     await db.flush()
