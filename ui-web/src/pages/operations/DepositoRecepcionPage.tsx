@@ -134,6 +134,7 @@ export default function DepositoRecepcionPage() {
   const [loadingOrders, setLoadingOrders] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [orderFilterTab, setOrderFilterTab] = useState<"todas" | "pendientes" | "parciales">("todas")
+  const [timeRange, setTimeRange] = useState<"30d" | "todas">("30d")
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null)
 
   // Borrador de ítems que se van descargando
@@ -1165,7 +1166,18 @@ export default function DepositoRecepcionPage() {
   // ---------------------------------------------------------------------------
   // VISTA 1 & 2: APLICACIÓN PRINCIPAL DE DEPÓSITO
   // ---------------------------------------------------------------------------
-  const filteredOrders = orders.filter((o) => {
+  const visiblePeriodOrders = useMemo(() => {
+    if (timeRange === "todas" || searchQuery.trim().length > 0) {
+      return orders
+    }
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
+    return orders.filter((o) => {
+      const orderDate = new Date(o.created_at || o.fecha || 0).getTime()
+      return orderDate >= cutoff
+    })
+  }, [orders, timeRange, searchQuery])
+
+  const filteredOrders = visiblePeriodOrders.filter((o) => {
     const q = searchQuery.toLowerCase()
     const matchesQuery =
       o.numero?.toLowerCase().includes(q) ||
@@ -1392,41 +1404,73 @@ export default function DepositoRecepcionPage() {
               )}
             </div>
 
-            {/* Pestañas de Filtro de Órdenes */}
-            <div className="flex gap-2 bg-slate-200/80 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-300/80 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setOrderFilterTab("todas")}
-                className={`flex-1 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all ${
-                  orderFilterTab === "todas"
-                    ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
-              >
-                Todas ({orders.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setOrderFilterTab("pendientes")}
-                className={`flex-1 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all ${
-                  orderFilterTab === "pendientes"
-                    ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
-              >
-                Completas ({orders.filter((o) => ["confirmado", "enviada", "enviado"].includes(o.estado || "")).length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setOrderFilterTab("parciales")}
-                className={`flex-1 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all ${
-                  orderFilterTab === "parciales"
-                    ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-                }`}
-              >
-                Parciales ({orders.filter((o) => o.estado === "parcial").length})
-              </button>
+            {/* Pestañas de Filtro y Selector de Período */}
+            <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center justify-between">
+              <div className="flex-1 flex gap-1.5 bg-slate-200/80 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-300/80 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setOrderFilterTab("todas")}
+                  className={`flex-1 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all ${
+                    orderFilterTab === "todas"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                >
+                  Todas ({visiblePeriodOrders.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOrderFilterTab("pendientes")}
+                  className={`flex-1 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all ${
+                    orderFilterTab === "pendientes"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                  title="Órdenes confirmadas o enviadas que aún no han recibido ningún camión"
+                >
+                  Sin Iniciar ({visiblePeriodOrders.filter((o) => ["confirmado", "enviada", "enviado"].includes(o.estado || "")).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOrderFilterTab("parciales")}
+                  className={`flex-1 py-2 text-xs sm:text-sm font-bold rounded-xl transition-all ${
+                    orderFilterTab === "parciales"
+                      ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                  title="Órdenes con recepción parcial y saldo pendiente de entrega"
+                >
+                  Parciales ({visiblePeriodOrders.filter((o) => o.estado === "parcial").length})
+                </button>
+              </div>
+
+              {/* Selector de Período de Tiempo */}
+              <div className="flex items-center gap-1 bg-slate-200/80 dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-300/80 dark:border-slate-800 shrink-0 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setTimeRange("30d")}
+                  className={`px-3 py-1.5 text-xs rounded-xl transition-all ${
+                    timeRange === "30d"
+                      ? "bg-amber-500 text-slate-950 font-black shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 font-bold hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                  title="Mostrar órdenes de los últimos 30 días"
+                >
+                  Últimos 30d
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTimeRange("todas")}
+                  className={`px-3 py-1.5 text-xs rounded-xl transition-all ${
+                    timeRange === "todas"
+                      ? "bg-amber-500 text-slate-950 font-black shadow-sm"
+                      : "text-slate-600 dark:text-slate-400 font-bold hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                  title="Incluir órdenes históricas anteriores a 30 días"
+                >
+                  Todo ({orders.length})
+                </button>
+              </div>
             </div>
 
             {/* Banner de Ayuda con Escáner Láser & Descarga APK */}
