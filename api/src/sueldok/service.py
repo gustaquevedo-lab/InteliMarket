@@ -740,6 +740,145 @@ async def create_labor_settlement(
     }
 
 
+async def annul_labor_settlement(
+    db: AsyncSession,
+    company_id: str,
+    settlement_id: str,
+    user_id: str | None = None,
+    employee_ci: str | None = None,
+    employee_id: str | None = None
+) -> dict:
+    """
+    Anula de punta a punta una liquidación final / finiquito laboral:
+    1. Si tiene compensación de Cuentas por Cobrar (receivable_payment_id):
+       - Restaura cada ticket en accounts_receivable a estado = 'REMITIDO_EMPRESA' y saldo_pendiente = monto_original.
+       - Si pertenece a una remisión corporativa, restaura ar_corporate_remissions a estado = 'REMITIDO' y saldo_pendiente = monto_total.
+       - Elimina las asignaciones (receivable_payment_allocations).
+       - Elimina el recibo interno de pago (receivable_payments).
+    2. Si tiene Orden de Pago (payment_order_id):
+       - Si la OP no está pagada, la marca como 'anulado'.
+    3. Elimina el registro en labor_settlements.
+    4. Sincroniza con SueldOK invocando el webhook revert-settlement para reactivar al colaborador,
+       revertir sus deudas comerciales y eliminar la liquidación en Convex.
+    """
+    import uuid
+    import httpx
+    import logging
+    from sqlalchemy import select, text
+    from api.src.sueldok.models import LaborSettlement
+    from api.src.financial.models import SupplierPaymentOrder
+    from api.src.accounts_receivable.models import ReceivablePayment, ReceivablePaymentAllocation, Account, CorporateRemission
+
+    logger = logging.getLogger(__name__)
+    cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
+
+    # Buscar settlement por ID de PostgreSQL o CI / employee_id
+    settlement = None
+    try:
+        sid = uuid.UUID(str(settlement_id))
+        res = await db.execute(select(LaborSettlement).where(LaborSettlement.company_id == cid, LaborSettlement.id == sid))
+        settlement = res.scalars().first()
+    except (ValueError, TypeError):
+        pass
+
+    if not settlement:
+        # Fallback a buscar por employee_id o CI
+        res = await db.execute(
+            select(LaborSettlement).where(
+                LaborSettlement.company_id == cid,
+                (LaborSettlement.employee_id == str(settlement_id)) | 
+                (LaborSettlement.employee_ci == str(settlement_id)) |
+                (LaborSettlement.employee_ci == str(employee_ci or ""))
+            )
+        )
+        settlement = res.scalars().first()
+
+    target_ci = settlement.employee_ci if settlement else (employee_ci or (settlement_id if settlement_id.isdigit() else None))
+    target_emp_id = settlement.employee_id if settlement else employee_id
+    employee_nombre = settlement.employee_nombre if settlement else "Colaborador"
+
+    # 1. Si existe compensación de Cuentas por Cobrar, revertir
+    restored_ar_count = 0
+    if settlement and settlement.receivable_payment_id:
+        rp_id = settlement.receivable_payment_id
+        alloc_res = await db.execute(
+            select(ReceivablePaymentAllocation).where(ReceivablePaymentAllocation.receivable_payment_id == rp_id)
+        )
+        allocations = alloc_res.scalars().all()
+        remission_ids = set()
+
+        for alloc in allocations:
+            ar_res = await db.execute(select(Account).where(Account.id == alloc.accounts_receivable_id))
+            ar = ar_res.scalars().first()
+            if ar:
+                ar.estado = "REMITIDO_EMPRESA"
+                ar.saldo_pendiente = ar.monto_original
+                ar.ultimo_pago = None
+                if ar.corporate_remission_id:
+                    remission_ids.add(ar.corporate_remission_id)
+                restored_ar_count += 1
+            await db.delete(alloc)
+
+        # Restaurar remisiones corporativas afectadas
+        for rem_id in remission_ids:
+            rem_res = await db.execute(select(CorporateRemission).where(CorporateRemission.id == rem_id))
+            rem = rem_res.scalars().first()
+            if rem:
+                rem.estado = "REMITIDO"
+                rem.saldo_pendiente = rem.monto_total
+
+        # Eliminar el recibo interno
+        rp_res = await db.execute(select(ReceivablePayment).where(ReceivablePayment.id == rp_id))
+        rp = rp_res.scalars().first()
+        if rp:
+            await db.delete(rp)
+
+    # 2. Si existe Orden de Pago, anularla si no fue pagada
+    if settlement and settlement.payment_order_id:
+        po_res = await db.execute(select(SupplierPaymentOrder).where(SupplierPaymentOrder.id == settlement.payment_order_id))
+        po = po_res.scalars().first()
+        if po and po.estado != "pagado":
+            po.estado = "anulado"
+            po.observaciones = (po.observaciones or "") + " [ANULADA por reversión de finiquito laboral]"
+
+    # 3. Eliminar registro de liquidación
+    if settlement:
+        await db.delete(settlement)
+
+    await db.commit()
+
+    # 4. Sincronizar reversión con SueldOK
+    sueldok_res = {}
+    try:
+        key_res = await db.execute(
+            text("SELECT api_key FROM sueldok_sync_config WHERE company_id = :cid OR enabled = true LIMIT 1"),
+            {"cid": cid}
+        )
+        api_key = key_res.scalar_one_or_none() or "ifk_santateresa_live_api_key_2026"
+        url = f"{SUELDOK_BASE_URL}/http/api/intelimarket/revert-settlement"
+        payload = {
+            "apiKey": api_key,
+            "employeeCi": target_ci,
+            "employeeId": target_emp_id,
+            "liquidationId": str(settlement_id) if not settlement else None,
+        }
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code == 200:
+                sueldok_res = resp.json()
+    except Exception as e:
+        logger.warning(f"Error sincronizando anulación de finiquito con SueldOK: {e}")
+
+    return {
+        "success": True,
+        "message": f"Finiquito de {employee_nombre} anulado correctamente.",
+        "employee_ci": employee_ci,
+        "employee_nombre": employee_nombre,
+        "restored_receivables": restored_ar_count,
+        "sueldok_sync": sueldok_res,
+    }
+
+
 async def get_labor_settlement_receipt_pdf(
     db: AsyncSession,
     company_id: str,

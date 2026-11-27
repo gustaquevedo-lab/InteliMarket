@@ -299,89 +299,121 @@ export function LiquidacionSalarioModal({
     })
   }
 
-  // 2. Consumo Comercial Extra Club / Vales de Salón
-  if (Number(activeItem.commercialDeduction || 0) > 0) {
-    descuentos.push({
-      concepto: "Consumo Comercial Extra Club / Vales de Salón",
-      tipo: "Crédito Salón",
-      referencia: "Despensa Mayorista / Extra Club",
-      monto: Number(activeItem.commercialDeduction),
-    })
-  }
-
-  // 3. Anticipos de Salario Quincenal
-  if (Number(activeItem.advances || 0) > 0) {
-    descuentos.push({
-      concepto: "Anticipo de Salario Quincenal",
-      tipo: "Anticipo",
-      referencia: "Entrega Efectivo / Transferencia SIPAP",
-      monto: Number(activeItem.advances),
-    })
-  }
-
-  // 4. Desglose Exhaustivo de Préstamos y Convenios Comerciales de Terceros
-  const loanList =
-    (Array.isArray(activeItem.loanDeductions) && activeItem.loanDeductions.length > 0)
-      ? activeItem.loanDeductions
-      : (activeItem.rawItem?.loanDeductionsDetails || activeItem.rawItem?.typedDeductions || [])
-
-  if (Array.isArray(loanList) && loanList.length > 0) {
-    loanList.forEach((ld: any, idx: number) => {
-      const amt = Number(ld.amount || 0)
+  // Si activeItem cuenta con desglose exhaustivo tipificado (typedDeductions):
+  const typedList = activeItem.typedDeductions || activeItem.rawItem?.typedDeductions
+  if (Array.isArray(typedList) && typedList.length > 0) {
+    typedList.forEach((td: any) => {
+      const amt = Number(td.amount || 0)
       if (amt <= 0) return
 
-      const razon = ld.reason || ld.description || ld.descripcion || `Convenio Comercial / Préstamo #${idx + 1}`
-      const cuotas = ld.installments && ld.installments > 1
-        ? `Cuota ${ld.paidInstallments || 1} de ${ld.installments}`
-        : (ld.thirdPartyName ? `Convenio: ${ld.thirdPartyName}` : "Retención Autorizada")
+      let tipoLabel = "Deducción"
+      if (td.category === "anticipo") tipoLabel = "Anticipo de Sueldo"
+      else if (td.category === "uniformes") tipoLabel = "Uniformes"
+      else if (td.category === "convenio_tercero") tipoLabel = td.thirdPartyName ? `Convenio: ${td.thirdPartyName}` : "Convenio Comercial"
+      else if (td.category === "multa") tipoLabel = "Sanción / Multa"
+      else if (td.category === "extra_club") tipoLabel = "Crédito Salón"
+      else if (td.category === "prestamo_interno") tipoLabel = "Préstamo Personal"
+      else if (td.category === "judicial") tipoLabel = "Mandato Judicial"
+      else if (td.category === "ausencia_tardanza") tipoLabel = "Asistencia"
+
+      const ref = td.thirdPartyName
+        ? `Tercero: ${td.thirdPartyName}`
+        : (td.installments && td.installments > 1
+            ? `Cuota ${td.paidInstallments || 1} de ${td.installments}`
+            : "Descuento Autorizado")
 
       descuentos.push({
-        concepto: razon.toUpperCase(),
-        tipo: ld.category || "Convenio Tercero",
-        referencia: cuotas,
+        concepto: (td.description || "Deducción Autorizada").toUpperCase(),
+        tipo: tipoLabel,
+        referencia: ref,
         monto: amt,
       })
     })
-  } else if (
-    Number(activeItem.loanDeduction || 0) > 0 &&
-    !descuentos.some(d => d.concepto.includes("CONVENIO") || d.concepto.includes("PRÉSTAMO") || d.concepto.includes("MALOU"))
-  ) {
-    descuentos.push({
-      concepto: "Convenio Comercial / Préstamo de Personal",
-      tipo: "Convenio",
-      referencia: "Retención Autorizada",
-      monto: Number(activeItem.loanDeduction),
-    })
-  }
+  } else {
+    // 2. Consumo Comercial Extra Club / Vales de Salón
+    if (Number(activeItem.commercialDeduction || 0) > 0) {
+      descuentos.push({
+        concepto: "Consumo Comercial Extra Club / Vales de Salón",
+        tipo: "Crédito Salón",
+        referencia: "Despensa Mayorista / Extra Club",
+        monto: Number(activeItem.commercialDeduction),
+      })
+    }
 
-  // 5. Retención Judicial / Embargo
-  if (Number(activeItem.judicialDeduction || 0) > 0) {
-    descuentos.push({
-      concepto: "Retención Judicial / Embargo Preventivo",
-      tipo: "Mandato Judicial",
-      referencia: "Oficio Judicial N°",
-      monto: Number(activeItem.judicialDeduction),
-    })
-  }
+    // 3. Anticipos de Salario Quincenal
+    if (Number(activeItem.advances || 0) > 0) {
+      descuentos.push({
+        concepto: "Anticipo de Salario Quincenal",
+        tipo: "Anticipo",
+        referencia: "Entrega Efectivo / Transferencia SIPAP",
+        monto: Number(activeItem.advances),
+      })
+    }
 
-  // 6. Llegadas Tardías / Ausencias Injustificadas
-  if (Number(activeItem.attendanceDeduction || 0) > 0) {
-    descuentos.push({
-      concepto: "Descuento por Llegadas Tardías / Ausencias",
-      tipo: "Asistencia",
-      referencia: "Reloj Biométrico de Marcación",
-      monto: Number(activeItem.attendanceDeduction),
-    })
-  }
+    // 4. Desglose Exhaustivo de Préstamos y Convenios Comerciales de Terceros
+    const loanList =
+      (Array.isArray(activeItem.loanDeductions) && activeItem.loanDeductions.length > 0)
+        ? activeItem.loanDeductions
+        : (activeItem.rawItem?.loanDeductionsDetails || activeItem.rawItem?.typedDeductions || [])
 
-  // 7. Otras Deducciones Autorizadas
-  if (Number(activeItem.otherDeduction || 0) > 0) {
-    descuentos.push({
-      concepto: "Otras Deducciones Autorizadas por el Trabajador",
-      tipo: "Varios",
-      referencia: "Conforme a Autorización Expresa",
-      monto: Number(activeItem.otherDeduction),
-    })
+    if (Array.isArray(loanList) && loanList.length > 0) {
+      loanList.forEach((ld: any, idx: number) => {
+        const amt = Number(ld.amount || 0)
+        if (amt <= 0) return
+
+        const razon = ld.reason || ld.description || ld.descripcion || `Convenio Comercial / Préstamo #${idx + 1}`
+        const cuotas = ld.installments && ld.installments > 1
+          ? `Cuota ${ld.paidInstallments || 1} de ${ld.installments}`
+          : (ld.thirdPartyName ? `Convenio: ${ld.thirdPartyName}` : "Retención Autorizada")
+
+        descuentos.push({
+          concepto: razon.toUpperCase(),
+          tipo: ld.category || "Convenio Tercero",
+          referencia: cuotas,
+          monto: amt,
+        })
+      })
+    } else if (
+      Number(activeItem.loanDeduction || 0) > 0 &&
+      !descuentos.some(d => d.concepto.includes("CONVENIO") || d.concepto.includes("PRÉSTAMO") || d.concepto.includes("MALOU"))
+    ) {
+      descuentos.push({
+        concepto: "Convenio Comercial / Préstamo de Personal",
+        tipo: "Convenio",
+        referencia: "Retención Autorizada",
+        monto: Number(activeItem.loanDeduction),
+      })
+    }
+
+    // 5. Retención Judicial / Embargo
+    if (Number(activeItem.judicialDeduction || 0) > 0) {
+      descuentos.push({
+        concepto: "Retención Judicial / Embargo Preventivo",
+        tipo: "Mandato Judicial",
+        referencia: "Oficio Judicial N°",
+        monto: Number(activeItem.judicialDeduction),
+      })
+    }
+
+    // 6. Llegadas Tardías / Ausencias Injustificadas
+    if (Number(activeItem.attendanceDeduction || 0) > 0) {
+      descuentos.push({
+        concepto: "Descuento por Llegadas Tardías / Ausencias",
+        tipo: "Asistencia",
+        referencia: "Reloj Biométrico de Marcación",
+        monto: Number(activeItem.attendanceDeduction),
+      })
+    }
+
+    // 7. Otras Deducciones Autorizadas
+    if (Number(activeItem.otherDeduction || 0) > 0) {
+      descuentos.push({
+        concepto: "Otras Deducciones Autorizadas por el Trabajador",
+        tipo: "Varios",
+        referencia: "Conforme a Autorización Expresa",
+        monto: Number(activeItem.otherDeduction),
+      })
+    }
   }
 
   const totalHaberes = haberes.reduce((sum, h) => sum + h.monto, 0)

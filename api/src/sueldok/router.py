@@ -178,6 +178,23 @@ async def list_settlements(
     return await service.list_labor_settlements(db, company_id)
 
 
+@router.post("/settlements/{settlement_id}/annul")
+async def annul_settlement(
+    settlement_id: str,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    employee_ci: str | None = Query(None),
+    employee_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Anula de punta a punta un finiquito laboral: restaura deudas comerciales / Extra Club
+    a estado pendiente, anula la Orden de Pago si existe y reactiva al colaborador en SueldOK.
+    """
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    return await service.annul_labor_settlement(db, company_id, settlement_id, user_id, employee_ci, employee_id)
+
+
 @router.get("/settlements/{settlement_id}/receipt-pdf")
 async def download_settlement_receipt_pdf(
     settlement_id: str,

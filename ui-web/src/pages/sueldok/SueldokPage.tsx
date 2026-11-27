@@ -33,6 +33,7 @@ import {
   Eye,
   FileText,
   PiggyBank,
+  Trash2,
 } from "lucide-react"
 import {
   ResponsiveContainer,
@@ -117,12 +118,16 @@ export interface PayrollItem {
   otherDeduction?: number
   attendanceDeduction?: number
   concepts?: any[]
+  typedDeductions?: any[]
   totalNet: number
   rawItem?: any
 }
 
 const estadoConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
   presente: { label: "Presente", color: "#10b981", bg: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", icon: CheckCircle },
+  Present: { label: "Presente", color: "#10b981", bg: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", icon: CheckCircle },
+  OnTime: { label: "A Tiempo", color: "#10b981", bg: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", icon: CheckCircle },
+  ontime: { label: "A Tiempo", color: "#10b981", bg: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", icon: CheckCircle },
   Late: { label: "Tardanza", color: "#f59e0b", bg: "bg-amber-500/10 text-amber-400 border-amber-500/20", icon: AlertTriangle },
   tardanza: { label: "Tardanza", color: "#f59e0b", bg: "bg-amber-500/10 text-amber-400 border-amber-500/20", icon: AlertTriangle },
   absent: { label: "Ausente", color: "#ef4444", bg: "bg-rose-500/10 text-rose-400 border-rose-500/20", icon: XCircle },
@@ -177,6 +182,7 @@ export default function SueldokPage() {
   const [loadingSettlements, setLoadingSettlements] = useState(false)
   const [modalFiniquitoOpen, setModalFiniquitoOpen] = useState(false)
   const [savingFiniquito, setSavingFiniquito] = useState(false)
+  const [annullingSettlementId, setAnnullingSettlementId] = useState<string | null>(null)
 
   // Formulario Finiquito
   const [finiquitoEmpId, setFiniquitoEmpId] = useState("")
@@ -832,39 +838,146 @@ export default function SueldokPage() {
     }
   }
 
-  // Manejo de Finiquitos Laborales
-  const handleSeleccionarFuncionarioFiniquito = (empId: string) => {
-    setFiniquitoEmpId(empId)
-    const emp = employees.find((e: any) => e.id === empId)
-    if (!emp) return
+  // Manejo de Finiquitos Laborales con cálculo legal exacto de días trabajados
+  const handleRecalcularRubrosFiniquito = (
+    baseSalary: number,
+    fechaIngresoStr: string,
+    fechaEgresoStr: string,
+    motivo: string,
+    diasManuales?: number
+  ) => {
+    const dailyWage = Math.round(baseSalary / 30)
 
-    const baseSalary = emp.salario || 0
-    setFiniquitoDiasMes(30)
-    setFiniquitoSalarioMes(baseSalary)
-    setFiniquitoAguinaldo(Math.round(baseSalary / 12))
-    setFiniquitoVacaciones(Math.round((baseSalary / 30) * 12))
+    let diasEfectivos = 30
+    if (diasManuales !== undefined && diasManuales !== null && !isNaN(diasManuales)) {
+      diasEfectivos = Math.max(0, Math.min(30, diasManuales))
+    } else if (fechaIngresoStr && fechaEgresoStr) {
+      const [yIn, mIn, dIn] = fechaIngresoStr.split("-").map(Number)
+      const [yOut, mOut, dOut] = fechaEgresoStr.split("-").map(Number)
+      if (yIn === yOut && mIn === mOut) {
+        // Ingresó en el mismo mes y año (ej. ingresó 7 nov y sale 30 nov = 24 días)
+        diasEfectivos = Math.max(0, dOut - dIn + 1)
+      } else {
+        diasEfectivos = Math.min(30, dOut || 30)
+      }
+    }
 
-    if (finiquitoMotivo === "despido_sin_causa") {
+    setFiniquitoDiasMes(diasEfectivos)
+    const salarioProp = Math.round(dailyWage * diasEfectivos)
+    setFiniquitoSalarioMes(salarioProp)
+
+    // Aguinaldo proporcional computado sobre los días transcurridos del año
+    if (fechaEgresoStr) {
+      const [yOut, mOut, dOut] = fechaEgresoStr.split("-").map(Number)
+      const startOfYear = new Date(yOut, 0, 1, 12, 0, 0)
+      let startDate = startOfYear
+      if (fechaIngresoStr) {
+        const [yIn, mIn, dIn] = fechaIngresoStr.split("-").map(Number)
+        const inDate = new Date(yIn, mIn - 1, dIn, 12, 0, 0)
+        if (inDate > startOfYear) startDate = inDate
+      }
+      const outDate = new Date(yOut, mOut - 1, dOut, 12, 0, 0)
+      const elapsedDays = Math.max(0, Math.floor((outDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+      const aguinaldo = Math.round((dailyWage * elapsedDays) / 12)
+      setFiniquitoAguinaldo(aguinaldo)
+    } else {
+      setFiniquitoAguinaldo(Math.round(baseSalary / 12))
+    }
+
+    setFiniquitoVacaciones(Math.round(dailyWage * 12))
+
+    if (motivo === "despido_sin_causa") {
       setFiniquitoPreaviso(baseSalary)
       setFiniquitoIndemnizacion(baseSalary)
     } else {
       setFiniquitoPreaviso(0)
       setFiniquitoIndemnizacion(0)
     }
-    setFiniquitoDescuentos(0)
+  }
+
+  const handleSeleccionarFuncionarioFiniquito = (empId: string) => {
+    setFiniquitoEmpId(empId)
+    const emp = employees.find((e: any) => e.id === empId)
+    if (!emp) return
+
+    const baseSalary = emp.salario || 0
+    const entryDate = emp.entryDate || emp.fecha_ingreso || ""
+    setFiniquitoFechaIngreso(entryDate)
+    handleRecalcularRubrosFiniquito(baseSalary, entryDate, finiquitoFechaEgreso, finiquitoMotivo)
   }
 
   const handleCambiarMotivoFiniquito = (nuevoMotivo: string) => {
     setFiniquitoMotivo(nuevoMotivo)
     const emp = employees.find((e: any) => e.id === finiquitoEmpId)
-    const baseSalary = emp?.salario || finiquitoSalarioMes || 0
+    const baseSalary = emp?.salario || (finiquitoSalarioMes ? Math.round((finiquitoSalarioMes / Math.max(1, finiquitoDiasMes)) * 30) : 0)
+    handleRecalcularRubrosFiniquito(baseSalary, finiquitoFechaIngreso, finiquitoFechaEgreso, nuevoMotivo, finiquitoDiasMes)
+  }
 
-    if (nuevoMotivo === "despido_sin_causa") {
-      setFiniquitoPreaviso(baseSalary)
-      setFiniquitoIndemnizacion(baseSalary)
-    } else {
-      setFiniquitoPreaviso(0)
-      setFiniquitoIndemnizacion(0)
+  const handleCambiarFechaIngreso = (nuevaFechaIn: string) => {
+    setFiniquitoFechaIngreso(nuevaFechaIn)
+    const emp = employees.find((e: any) => e.id === finiquitoEmpId)
+    const baseSalary = emp?.salario || (finiquitoSalarioMes ? Math.round((finiquitoSalarioMes / Math.max(1, finiquitoDiasMes)) * 30) : 0)
+    handleRecalcularRubrosFiniquito(baseSalary, nuevaFechaIn, finiquitoFechaEgreso, finiquitoMotivo)
+  }
+
+  const handleCambiarFechaEgreso = (nuevaFechaOut: string) => {
+    setFiniquitoFechaEgreso(nuevaFechaOut)
+    const emp = employees.find((e: any) => e.id === finiquitoEmpId)
+    const baseSalary = emp?.salario || (finiquitoSalarioMes ? Math.round((finiquitoSalarioMes / Math.max(1, finiquitoDiasMes)) * 30) : 0)
+    handleRecalcularRubrosFiniquito(baseSalary, finiquitoFechaIngreso, nuevaFechaOut, finiquitoMotivo)
+  }
+
+  const handleCambiarDiasMes = (nuevosDias: number) => {
+    const d = Math.max(0, Math.min(30, nuevosDias))
+    setFiniquitoDiasMes(d)
+    const emp = employees.find((e: any) => e.id === finiquitoEmpId)
+    const baseSalary = emp?.salario || (finiquitoSalarioMes ? Math.round((finiquitoSalarioMes / Math.max(1, finiquitoDiasMes)) * 30) : 0)
+    const dailyWage = Math.round(baseSalary / 30)
+    setFiniquitoSalarioMes(Math.round(dailyWage * d))
+  }
+
+  // Anulación integral de liquidación / finiquito con reactivación de colaborador
+  const handleAnularFiniquito = async (s: any) => {
+    const empName = s.employee_nombre || "este colaborador"
+    const isPaid = s.payment_order?.estado === "pagado"
+
+    if (isPaid) {
+      toast.error(
+        "Orden de Pago Ya Pagada",
+        `La liquidación de ${empName} ya tiene una Orden de Pago pagada/desembolsada. Debe anular o revertir el pago en Tesorería antes de anular el finiquito.`
+      )
+      return
+    }
+
+    const confirmed = window.confirm(
+      `¿Estás seguro de ANULAR el finiquito laboral de ${empName}?\n\n` +
+      `Esta acción de punta a punta:\n` +
+      `1. Reactivará al colaborador a estado Activo (eliminando la baja).\n` +
+      `2. Reabrirá todos sus vales y deudas comerciales en Cuentas por Cobrar a estado pendiente.\n` +
+      `3. Anulará la Orden de Pago / Recibo pendiente de Tesorería.\n` +
+      `4. Eliminará el registro del finiquito para poder reliquidar correctamente.`
+    )
+
+    if (!confirmed) return
+
+    setAnnullingSettlementId(s.id)
+    try {
+      toast.info("Anulando Finiquito", `Reactivando a ${empName} y restaurando cuentas por cobrar...`)
+      await api.sueldok.annulSettlement(s.id, {
+        employee_ci: s.employee_ci,
+        employee_id: s.employee_id
+      })
+      toast.success(
+        "Finiquito Anulado",
+        `El finiquito de ${empName} fue anulado exitosamente y el colaborador ha quedado 100% activo.`
+      )
+      fetchSettlements()
+      fetchData(false)
+    } catch (err: any) {
+      console.error("Error al anular finiquito:", err)
+      toast.error("Error al anular finiquito", err.message || String(err))
+    } finally {
+      setAnnullingSettlementId(null)
     }
   }
 
@@ -1728,7 +1841,7 @@ export default function SueldokPage() {
               ) : (
                 <div className="divide-y divide-slate-100 dark:divide-slate-800 max-h-[380px] overflow-y-auto">
                   {todayAttendance.slice(0, 7).map((att: any, idx: number) => {
-                    const cfg = estadoConfig[att.status] || estadoConfig.Late
+                    const cfg = estadoConfig[att.status] || (att.horaEntrada && att.horaEntrada !== '—' ? estadoConfig.presente : estadoConfig.Late)
                     const Icon = cfg.icon
                     return (
                       <div
@@ -2145,15 +2258,27 @@ export default function SueldokPage() {
                               }`}>
                                 {s.payment_order.estado === "pagado" ? "Liquidada" : "Pte. Desembolso"}
                               </span>
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
-                                className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-semibold border border-slate-300 dark:border-slate-600 flex items-center gap-1 cursor-pointer transition-all"
-                                title="Descargar Recibo Oficial de Finiquito en PDF"
-                              >
-                                <FileText className="w-3 h-3 text-indigo-500" />
-                                <span>Recibo PDF</span>
-                              </button>
+                              <div className="flex items-center gap-1 mt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
+                                  className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-semibold border border-slate-300 dark:border-slate-600 flex items-center gap-1 cursor-pointer transition-all"
+                                  title="Descargar Recibo Oficial de Finiquito en PDF"
+                                >
+                                  <FileText className="w-3 h-3 text-indigo-500" />
+                                  <span>Recibo PDF</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={annullingSettlementId === s.id}
+                                  onClick={() => handleAnularFiniquito(s)}
+                                  className="px-2 py-0.5 rounded-md bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 text-[10px] font-bold border border-rose-300 dark:border-rose-800 flex items-center gap-1 cursor-pointer transition-all shadow-xs disabled:opacity-50"
+                                  title="Anular Finiquito, reactivar colaborador y restaurar cuentas por cobrar"
+                                >
+                                  {annullingSettlementId === s.id ? <RefreshCw className="w-3 h-3 animate-spin text-rose-500" /> : <Trash2 className="w-3 h-3 text-rose-500" />}
+                                  <span>Anular</span>
+                                </button>
+                              </div>
                             </div>
                           ) : (s.receivable_payment_numero || s.is_compensado) && Number(s.total_neto || 0) <= 0 ? (
                             <div className="flex flex-col items-center gap-1">
@@ -2163,15 +2288,27 @@ export default function SueldokPage() {
                               <span className="text-[9px] font-bold uppercase text-emerald-600 dark:text-emerald-400">
                                 Compensado
                               </span>
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
-                                className="px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1 cursor-pointer transition-all shadow-xs"
-                                title="Descargar Recibo Oficial de Compensación y Finiquito en PDF"
-                              >
-                                <FileText className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                <span>Recibo PDF</span>
-                              </button>
+                              <div className="flex items-center gap-1 mt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
+                                  className="px-2 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold border border-emerald-500/30 flex items-center gap-1 cursor-pointer transition-all shadow-xs"
+                                  title="Descargar Recibo Oficial de Compensación y Finiquito en PDF"
+                                >
+                                  <FileText className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                  <span>Recibo PDF</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={annullingSettlementId === s.id}
+                                  onClick={() => handleAnularFiniquito(s)}
+                                  className="px-2 py-0.5 rounded-md bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 text-[10px] font-bold border border-rose-300 dark:border-rose-800 flex items-center gap-1 cursor-pointer transition-all shadow-xs disabled:opacity-50"
+                                  title="Anular Finiquito, reactivar colaborador y restaurar cuentas por cobrar"
+                                >
+                                  {annullingSettlementId === s.id ? <RefreshCw className="w-3 h-3 animate-spin text-rose-500" /> : <Trash2 className="w-3 h-3 text-rose-500" />}
+                                  <span>Anular</span>
+                                </button>
+                              </div>
                             </div>
                           ) : Number(s.total_neto || 0) > 0 ? (
                             <div className="flex flex-col items-center gap-1.5">
@@ -2188,26 +2325,49 @@ export default function SueldokPage() {
                                 <Plus className="w-3 h-3" />
                                 <span>{s.receivable_payment_numero ? "Pagar Saldo" : "Emitir OP"}</span>
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
-                                className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-semibold border border-slate-300 dark:border-slate-600 flex items-center gap-1 cursor-pointer transition-all"
-                                title="Descargar Recibo Oficial de Finiquito en PDF"
-                              >
-                                <FileText className="w-3 h-3 text-indigo-500" />
-                                <span>Recibo PDF</span>
-                              </button>
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
+                                  className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-semibold border border-slate-300 dark:border-slate-600 flex items-center gap-1 cursor-pointer transition-all"
+                                  title="Descargar Recibo Oficial de Finiquito en PDF"
+                                >
+                                  <FileText className="w-3 h-3 text-indigo-500" />
+                                  <span>Recibo PDF</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={annullingSettlementId === s.id}
+                                  onClick={() => handleAnularFiniquito(s)}
+                                  className="px-2 py-0.5 rounded-md bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 text-[10px] font-bold border border-rose-300 dark:border-rose-800 flex items-center gap-1 cursor-pointer transition-all shadow-xs disabled:opacity-50"
+                                  title="Anular Finiquito, reactivar colaborador y restaurar cuentas por cobrar"
+                                >
+                                  {annullingSettlementId === s.id ? <RefreshCw className="w-3 h-3 animate-spin text-rose-500" /> : <Trash2 className="w-3 h-3 text-rose-500" />}
+                                  <span>Anular</span>
+                                </button>
+                              </div>
                             </div>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenFiniquitoOPModal(s)}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1 mx-auto"
-                              title="Confirmar extinción de deuda y generar Recibo Oficial"
-                            >
-                              <Check className="w-3 h-3" />
-                              <span>Compensar Recibo</span>
-                            </button>
+                            <div className="flex items-center gap-1.5 justify-center">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenFiniquitoOPModal(s)}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1"
+                                title="Confirmar extinción de deuda y generar Recibo Oficial"
+                              >
+                                <Check className="w-3 h-3" />
+                                <span>Compensar Recibo</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={annullingSettlementId === s.id}
+                                onClick={() => handleAnularFiniquito(s)}
+                                className="p-1 rounded-md bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 text-[10px] font-bold border border-rose-300 dark:border-rose-800 flex items-center cursor-pointer transition-all shadow-xs disabled:opacity-50"
+                                title="Anular Finiquito"
+                              >
+                                {annullingSettlementId === s.id ? <RefreshCw className="w-3 h-3 animate-spin text-rose-500" /> : <Trash2 className="w-3 h-3 text-rose-500" />}
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -2534,7 +2694,7 @@ export default function SueldokPage() {
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {todayAttendance.map((att: any, idx: number) => {
-                    const cfg = estadoConfig[att.status] || estadoConfig.Late
+                    const cfg = estadoConfig[att.status] || (att.horaEntrada && att.horaEntrada !== '—' ? estadoConfig.presente : estadoConfig.Late)
                     const Icon = cfg.icon
                     return (
                       <div
@@ -3175,38 +3335,63 @@ export default function SueldokPage() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Fecha de Ingreso *</label>
+                  <input
+                    type="date"
+                    value={finiquitoFechaIngreso}
+                    onChange={(e) => handleCambiarFechaIngreso(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                  />
+                </div>
                 <div>
                   <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Fecha de Egreso *</label>
                   <input
                     type="date"
                     value={finiquitoFechaEgreso}
-                    onChange={(e) => setFiniquitoFechaEgreso(e.target.value)}
+                    onChange={(e) => handleCambiarFechaEgreso(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
                   />
                 </div>
                 <div>
-                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Motivo de Salida</label>
-                  <select
-                    value={finiquitoMotivo}
-                    onChange={(e) => handleCambiarMotivoFiniquito(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
-                  >
-                    <option value="despido_sin_causa">Despido Injustificado (Con Indemnización)</option>
-                    <option value="despido_con_causa">Despido Justificado (Sin Indemnización)</option>
-                    <option value="renuncia">Renuncia Voluntaria</option>
-                    <option value="mutuo_acuerdo">Mutuo Acuerdo / Conciliación</option>
-                    <option value="fin_contrato">Fin de Contrato a Plazo Fijo</option>
-                  </select>
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Días Trabajados Mes</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="30"
+                    value={finiquitoDiasMes}
+                    onChange={(e) => handleCambiarDiasMes(parseInt(e.target.value || "0", 10))}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold text-slate-900 dark:text-white"
+                  />
                 </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 dark:text-slate-300 block mb-1">Motivo de Salida</label>
+                <select
+                  value={finiquitoMotivo}
+                  onChange={(e) => handleCambiarMotivoFiniquito(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
+                >
+                  <option value="despido_sin_causa">Despido Injustificado (Con Indemnización)</option>
+                  <option value="despido_con_causa">Despido Justificado (Sin Indemnización)</option>
+                  <option value="renuncia">Renuncia Voluntaria</option>
+                  <option value="mutuo_acuerdo">Mutuo Acuerdo / Conciliación</option>
+                  <option value="fin_contrato">Fin de Contrato a Plazo Fijo</option>
+                </select>
               </div>
 
               {/* Rubros de Liquidación */}
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-3">
-                <div className="font-bold text-slate-400 text-[10px] uppercase">Rubros de Haberes & Indemnizaciones (PYG)</div>
+                <div className="font-bold text-slate-400 text-[10px] uppercase">
+                  Rubros de Haberes & Indemnizaciones (PYG) · {finiquitoDiasMes} días computados
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="font-medium text-slate-600 dark:text-slate-400 block mb-1">Salario Mes / Días Trabajados</label>
+                    <label className="font-medium text-slate-600 dark:text-slate-400 block mb-1">
+                      Salario Mes ({finiquitoDiasMes} días)
+                    </label>
                     <CurrencyInput
                       value={finiquitoSalarioMes}
                       onChangeValue={(v) => setFiniquitoSalarioMes(v || 0)}
