@@ -740,6 +740,114 @@ async def create_labor_settlement(
     }
 
 
+async def update_labor_settlement(
+    db: AsyncSession,
+    company_id: str,
+    settlement_id: str,
+    data: SettlementUpdate,
+    user_id: str | None = None
+) -> dict:
+    """
+    Actualiza montos y rubros de una liquidación laboral existente.
+    Si tiene una Orden de Pago pendiente, actualiza también el monto de la OP.
+    """
+    import uuid
+    import logging
+    from datetime import datetime
+    from sqlalchemy import select
+    from api.src.sueldok.models import LaborSettlement
+    from api.src.financial.models import SupplierPaymentOrder
+
+    logger = logging.getLogger(__name__)
+    cid = company_id if isinstance(company_id, uuid.UUID) else uuid.UUID(str(company_id))
+
+    settlement = None
+    try:
+        sid = uuid.UUID(str(settlement_id))
+        res = await db.execute(select(LaborSettlement).where(LaborSettlement.company_id == cid, LaborSettlement.id == sid))
+        settlement = res.scalars().first()
+    except (ValueError, TypeError):
+        pass
+
+    if not settlement:
+        res = await db.execute(
+            select(LaborSettlement).where(
+                LaborSettlement.company_id == cid,
+                (LaborSettlement.employee_id == str(settlement_id)) | 
+                (LaborSettlement.employee_ci == str(settlement_id))
+            )
+        )
+        settlement = res.scalars().first()
+
+    if not settlement:
+        raise ValueError(f"No se encontró el finiquito con ID o referencia: {settlement_id}")
+
+    if data.fecha_ingreso:
+        try:
+            settlement.fecha_ingreso = datetime.fromisoformat(data.fecha_ingreso.replace("Z", "+00:00"))
+        except Exception:
+            pass
+    if data.fecha_salida:
+        try:
+            settlement.fecha_salida = datetime.fromisoformat(data.fecha_salida.replace("Z", "+00:00"))
+        except Exception:
+            pass
+    if data.motivo:
+        settlement.motivo = data.motivo
+    if data.dias_trabajados_mes is not None:
+        settlement.dias_trabajados_mes = data.dias_trabajados_mes
+    if data.monto_dias_trabajados is not None:
+        settlement.monto_dias_trabajados = data.monto_dias_trabajados
+    if data.vacaciones_monto is not None:
+        settlement.vacaciones_monto = data.vacaciones_monto
+    if data.aguinaldo_proporcional is not None:
+        settlement.aguinaldo_proporcional = data.aguinaldo_proporcional
+    if data.preaviso is not None:
+        settlement.preaviso = data.preaviso
+    if data.indemnizacion_legal is not None:
+        settlement.indemnizacion_legal = data.indemnizacion_legal
+    if data.descuentos_varios is not None:
+        settlement.descuentos_varios = data.descuentos_varios
+    if data.observaciones is not None:
+        settlement.observaciones = data.observaciones
+
+    # Calcular o asignar total_liquidacion_neta
+    if data.total_liquidacion_neta is not None:
+        settlement.total_liquidacion_neta = data.total_liquidacion_neta
+    else:
+        haberes = (
+            float(settlement.monto_dias_trabajados or 0)
+            + float(settlement.vacaciones_monto or 0)
+            + float(settlement.aguinaldo_proporcional or 0)
+            + float(settlement.preaviso or 0)
+            + float(settlement.indemnizacion_legal or 0)
+        )
+        deducciones = (
+            float(settlement.descuentos_varios or 0)
+            + float(settlement.descuento_extra_club or 0)
+            + float(settlement.descuento_anticipos or 0)
+        )
+        settlement.total_liquidacion_neta = max(0, haberes - deducciones)
+
+    # Si hay una Orden de Pago vinculada y sigue pendiente, actualizar su monto
+    if settlement.payment_order_id:
+        po_res = await db.execute(select(SupplierPaymentOrder).where(SupplierPaymentOrder.id == settlement.payment_order_id))
+        po = po_res.scalars().first()
+        if po and po.estado == "pendiente":
+            po.monto_total = settlement.total_liquidacion_neta
+            po.saldo_pendiente = settlement.total_liquidacion_neta
+
+    await db.commit()
+    await db.refresh(settlement)
+
+    return {
+        "success": True,
+        "message": f"Finiquito de {settlement.employee_nombre} actualizado exitosamente.",
+        "settlement_id": str(settlement.id),
+        "total_neto": float(settlement.total_liquidacion_neta or 0)
+    }
+
+
 async def annul_labor_settlement(
     db: AsyncSession,
     company_id: str,

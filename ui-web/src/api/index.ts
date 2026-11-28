@@ -4565,6 +4565,10 @@ export const api = {
       if (params?.employee_id) q.set("employee_id", params.employee_id)
       return client.post<any>(`/v1/sueldok/settlements/${settlementId}/annul?${q.toString()}`)
     },
+    updateSettlement: (settlementId: string, data: any) => {
+      const q = new URLSearchParams({ company_id: COMPANY_ID })
+      return client.put<any>(`/v1/sueldok/settlements/${settlementId}?${q.toString()}`, data)
+    },
     downloadSettlementReceiptPdf: (settlementId: string, filename?: string) =>
       downloadAuthenticated(`/v1/sueldok/settlements/${settlementId}/receipt-pdf?company_id=${COMPANY_ID}`, {}, filename || `recibo_finiquito_${settlementId.slice(0, 8)}.pdf`),
     createDossier: (data: any) => client.post<any>(`/v1/sueldok/dossiers?company_id=${COMPANY_ID}`, data),

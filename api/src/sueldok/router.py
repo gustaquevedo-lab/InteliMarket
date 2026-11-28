@@ -195,6 +195,22 @@ async def annul_settlement(
     return await service.annul_labor_settlement(db, company_id, settlement_id, user_id, employee_ci, employee_id)
 
 
+@router.put("/settlements/{settlement_id}")
+async def update_settlement(
+    settlement_id: str,
+    data: SettlementUpdate,
+    company_id: str = Query("00000000-0000-0000-0000-000000000010"),
+    db: AsyncSession = Depends(get_db),
+    user: Any = Depends(require_auth)
+):
+    """
+    Actualiza los rubros y montos de una liquidación/finiquito existente,
+    actualizando la Orden de Pago si sigue en estado pendiente.
+    """
+    user_id = str(user.get("id")) if isinstance(user, dict) else str(getattr(user, "id", ""))
+    return await service.update_labor_settlement(db, company_id, settlement_id, data, user_id)
+
+
 @router.get("/settlements/{settlement_id}/receipt-pdf")
 async def download_settlement_receipt_pdf(
     settlement_id: str,

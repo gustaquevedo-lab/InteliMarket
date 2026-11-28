@@ -105,6 +105,55 @@ class SettlementCreate(BaseModel):
     fecha_pago: Optional[str] = None
     sueldok_liquidation_id: Optional[str] = None
 
+
+class SettlementUpdate(BaseModel):
+    fecha_ingreso: Optional[str] = None
+    fecha_salida: Optional[str] = None
+    fecha_egreso: Optional[str] = None
+    motivo: Optional[str] = None
+    motivo_egreso: Optional[str] = None
+    salario_base: Optional[float] = None
+    salario_mes_monto: Optional[float] = None
+    dias_trabajados_mes: Optional[int] = None
+    monto_dias_trabajados: Optional[float] = None
+    vacaciones_monto: Optional[float] = None
+    vacaciones_causadas_monto: Optional[float] = None
+    aguinaldo_proporcional: Optional[float] = None
+    aguinaldo_proporcional_monto: Optional[float] = None
+    preaviso: Optional[float] = None
+    preaviso_monto: Optional[float] = None
+    indemnizacion_legal: Optional[float] = None
+    indemnizacion_monto: Optional[float] = None
+    descuentos_varios: Optional[float] = None
+    descuentos_monto: Optional[float] = None
+    total_liquidacion_neta: Optional[float] = None
+    total_neto: Optional[float] = None
+    observaciones: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_aliases(cls, data: any) -> any:
+        if isinstance(data, dict):
+            if not data.get("fecha_salida") and data.get("fecha_egreso"):
+                data["fecha_salida"] = data["fecha_egreso"]
+            if not data.get("motivo") and data.get("motivo_egreso"):
+                data["motivo"] = data["motivo_egreso"]
+            if data.get("salario_mes_monto") is not None and data.get("monto_dias_trabajados") is None:
+                data["monto_dias_trabajados"] = data["salario_mes_monto"]
+            if data.get("vacaciones_causadas_monto") is not None and data.get("vacaciones_monto") is None:
+                data["vacaciones_monto"] = data["vacaciones_causadas_monto"]
+            if data.get("aguinaldo_proporcional_monto") is not None and data.get("aguinaldo_proporcional") is None:
+                data["aguinaldo_proporcional"] = data["aguinaldo_proporcional_monto"]
+            if data.get("preaviso_monto") is not None and data.get("preaviso") is None:
+                data["preaviso"] = data["preaviso_monto"]
+            if data.get("indemnizacion_monto") is not None and data.get("indemnizacion_legal") is None:
+                data["indemnizacion_legal"] = data["indemnizacion_monto"]
+            if data.get("descuentos_monto") is not None and data.get("descuentos_varios") is None:
+                data["descuentos_varios"] = data["descuentos_monto"]
+            if data.get("total_neto") is not None and data.get("total_liquidacion_neta") is None:
+                data["total_liquidacion_neta"] = data["total_neto"]
+        return data
+
     @model_validator(mode="before")
     @classmethod
     def normalize_aliases(cls, data: any) -> any:

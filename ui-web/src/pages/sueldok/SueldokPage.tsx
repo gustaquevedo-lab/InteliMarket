@@ -34,6 +34,7 @@ import {
   FileText,
   PiggyBank,
   Trash2,
+  Edit2,
 } from "lucide-react"
 import {
   ResponsiveContainer,
@@ -185,6 +186,7 @@ export default function SueldokPage() {
   const [annullingSettlementId, setAnnullingSettlementId] = useState<string | null>(null)
 
   // Formulario Finiquito
+  const [finiquitoEditingId, setFiniquitoEditingId] = useState<string | null>(null)
   const [finiquitoEmpId, setFiniquitoEmpId] = useState("")
   const [finiquitoFechaIngreso, setFiniquitoFechaIngreso] = useState("")
   const [finiquitoFechaEgreso, setFiniquitoFechaEgreso] = useState(() => getTodayAsuncion())
@@ -936,6 +938,26 @@ export default function SueldokPage() {
     setFiniquitoSalarioMes(Math.round(dailyWage * d))
   }
 
+  // Abrir modal para editar liquidación existente
+  const handleOpenEditFiniquito = (s: any) => {
+    setFiniquitoEditingId(s.id)
+    setFiniquitoEmpId(s.employee_id || "")
+    setFiniquitoFechaIngreso(s.fecha_ingreso ? String(s.fecha_ingreso).slice(0, 10) : "")
+    setFiniquitoFechaEgreso(s.fecha_salida || s.fecha_egreso ? String(s.fecha_salida || s.fecha_egreso).slice(0, 10) : getTodayAsuncion())
+    setFiniquitoMotivo(s.motivo_egreso || s.motivo || "despido_sin_causa")
+    setFiniquitoDiasMes(Number(s.dias_trabajados_mes || 30))
+    setFiniquitoSalarioMes(Number(s.salario_mes_monto || s.monto_dias_trabajados || 0))
+    setFiniquitoVacaciones(Number(s.vacaciones_causadas_monto || s.vacaciones_monto || 0))
+    setFiniquitoAguinaldo(Number(s.aguinaldo_proporcional_monto || s.aguinaldo_proporcional || 0))
+    setFiniquitoPreaviso(Number(s.preaviso_monto || s.preaviso || 0))
+    setFiniquitoIndemnizacion(Number(s.indemnizacion_monto || s.indemnizacion_legal || 0))
+    setFiniquitoDescuentos(Number(s.descuentos_monto || s.descuentos_varios || 0))
+    setFiniquitoObs(s.observaciones || "")
+    setFiniquitoGenerarOP(false)
+    setFiniquitoDesembolsoInmediato(false)
+    setModalFiniquitoOpen(true)
+  }
+
   // Anulación integral de liquidación / finiquito con reactivación de colaborador
   const handleAnularFiniquito = async (s: any) => {
     const empName = s.employee_nombre || "este colaborador"
@@ -1012,38 +1034,61 @@ export default function SueldokPage() {
 
     setSavingFiniquito(true)
     try {
-      const res = await api.sueldok.createSettlement({
-        employee_id: emp.id,
-        employee_nombre: emp.nombre,
-        employee_ci: emp.ci || undefined,
-        fecha_ingreso: finiquitoFechaIngreso || undefined,
-        fecha_egreso: finiquitoFechaEgreso,
-        motivo_egreso: finiquitoMotivo,
-        dias_trabajados_mes: finiquitoDiasMes,
-        salario_mes_monto: Number(finiquitoSalarioMes || 0),
-        vacaciones_causadas_monto: Number(finiquitoVacaciones || 0),
-        aguinaldo_proporcional_monto: Number(finiquitoAguinaldo || 0),
-        preaviso_monto: Number(finiquitoPreaviso || 0),
-        indemnizacion_monto: Number(finiquitoIndemnizacion || 0),
-        descuentos_monto: Number(finiquitoDescuentos || 0),
-        observaciones: finiquitoObs || undefined,
-        generar_orden_pago: finiquitoGenerarOP,
-        desembolso_inmediato: finiquitoDesembolsoInmediato,
-        metodo_pago: finiquitoDesembolsoInmediato ? finiquitoMetodoPago : undefined,
-        bank_account_id: finiquitoDesembolsoInmediato && finiquitoBankAccountId ? finiquitoBankAccountId : undefined,
-        petty_cash_fund_id: finiquitoDesembolsoInmediato && finiquitoPettyCashFundId ? finiquitoPettyCashFundId : undefined,
-        referencia: finiquitoReferencia || undefined,
-      })
-
-
-      toast.success(
-        "Finiquito Registrado",
-        `Liquidación para ${emp.nombre} registrada por ₲ ${formatPYG(res.total_neto).replace('₲ ', '')}. ${res.payment_order_id ? 'Se generó la OP correspondiente en Tesorería.' : ''}`
-      )
+      if (finiquitoEditingId) {
+        // Actualización de finiquito existente
+        const updatePayload: any = {
+          fecha_ingreso: finiquitoFechaIngreso || undefined,
+          fecha_egreso: finiquitoFechaEgreso,
+          motivo_egreso: finiquitoMotivo,
+          dias_trabajados_mes: finiquitoDiasMes,
+          salario_mes_monto: Number(finiquitoSalarioMes || 0),
+          vacaciones_causadas_monto: Number(finiquitoVacaciones || 0),
+          aguinaldo_proporcional_monto: Number(finiquitoAguinaldo || 0),
+          preaviso_monto: Number(finiquitoPreaviso || 0),
+          indemnizacion_monto: Number(finiquitoIndemnizacion || 0),
+          descuentos_monto: Number(finiquitoDescuentos || 0),
+          total_neto: totalNetoFiniquitoCalc,
+          observaciones: finiquitoObs || undefined,
+        }
+        await api.sueldok.updateSettlement(finiquitoEditingId, updatePayload)
+        toast.success(
+          "Finiquito Actualizado",
+          `La liquidación de ${emp.nombre} fue actualizada exitosamente por ${formatPYG(totalNetoFiniquitoCalc)}.`
+        )
+      } else {
+        // Creación nueva
+        const res = await api.sueldok.createSettlement({
+          employee_id: emp.id,
+          employee_nombre: emp.nombre,
+          employee_ci: emp.ci || undefined,
+          fecha_ingreso: finiquitoFechaIngreso || undefined,
+          fecha_egreso: finiquitoFechaEgreso,
+          motivo_egreso: finiquitoMotivo,
+          dias_trabajados_mes: finiquitoDiasMes,
+          salario_mes_monto: Number(finiquitoSalarioMes || 0),
+          vacaciones_causadas_monto: Number(finiquitoVacaciones || 0),
+          aguinaldo_proporcional_monto: Number(finiquitoAguinaldo || 0),
+          preaviso_monto: Number(finiquitoPreaviso || 0),
+          indemnizacion_monto: Number(finiquitoIndemnizacion || 0),
+          descuentos_monto: Number(finiquitoDescuentos || 0),
+          observaciones: finiquitoObs || undefined,
+          generar_orden_pago: finiquitoGenerarOP,
+          desembolso_inmediato: finiquitoDesembolsoInmediato,
+          metodo_pago: finiquitoDesembolsoInmediato ? finiquitoMetodoPago : undefined,
+          bank_account_id: finiquitoDesembolsoInmediato && finiquitoBankAccountId ? finiquitoBankAccountId : undefined,
+          petty_cash_fund_id: finiquitoDesembolsoInmediato && finiquitoPettyCashFundId ? finiquitoPettyCashFundId : undefined,
+          referencia: finiquitoReferencia || undefined,
+        })
+        toast.success(
+          "Finiquito Registrado",
+          `Liquidación para ${emp.nombre} registrada por ₲ ${formatPYG(res.total_neto).replace('₲ ', '')}. ${res.payment_order_id ? 'Se generó la OP correspondiente en Tesorería.' : ''}`
+        )
+      }
       setModalFiniquitoOpen(false)
+      setFiniquitoEditingId(null)
       fetchSettlements()
     } catch (err: any) {
-      toast.error("Error al registrar finiquito", err.message || String(err))
+      toast.error("Error al guardar finiquito", err.message || String(err))
     } finally {
       setSavingFiniquito(false)
     }
@@ -2261,6 +2306,15 @@ export default function SueldokPage() {
                               <div className="flex items-center gap-1 mt-1">
                                 <button
                                   type="button"
+                                  onClick={() => handleOpenEditFiniquito(s)}
+                                  className="px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 text-[10px] font-bold border border-amber-300 dark:border-amber-800 flex items-center gap-1 cursor-pointer transition-all shadow-xs"
+                                  title="Editar Rubros de Liquidación"
+                                >
+                                  <Edit2 className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                  <span>Editar</span>
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
                                   className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-semibold border border-slate-300 dark:border-slate-600 flex items-center gap-1 cursor-pointer transition-all"
                                   title="Descargar Recibo Oficial de Finiquito en PDF"
@@ -2289,6 +2343,15 @@ export default function SueldokPage() {
                                 Compensado
                               </span>
                               <div className="flex items-center gap-1 mt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditFiniquito(s)}
+                                  className="px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 text-[10px] font-bold border border-amber-300 dark:border-amber-800 flex items-center gap-1 cursor-pointer transition-all shadow-xs"
+                                  title="Editar Rubros de Liquidación"
+                                >
+                                  <Edit2 className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                  <span>Editar</span>
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
@@ -2326,6 +2389,15 @@ export default function SueldokPage() {
                                 <span>{s.receivable_payment_numero ? "Pagar Saldo" : "Emitir OP"}</span>
                               </button>
                               <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditFiniquito(s)}
+                                  className="px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 text-[10px] font-bold border border-amber-300 dark:border-amber-800 flex items-center gap-1 cursor-pointer transition-all shadow-xs"
+                                  title="Editar Rubros de Liquidación"
+                                >
+                                  <Edit2 className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                                  <span>Editar</span>
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => handleDownloadReceiptPdf(s.id, s.employee_ci)}
@@ -3307,7 +3379,8 @@ export default function SueldokPage() {
           >
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <Briefcase className="w-5 h-5 text-amber-500" /> Nueva Liquidación / Finiquito Laboral
+                <Briefcase className="w-5 h-5 text-amber-500" />{" "}
+                {finiquitoEditingId ? "Editar Liquidación / Finiquito Laboral" : "Nueva Liquidación / Finiquito Laboral"}
               </h3>
               <button
                 onClick={() => setModalFiniquitoOpen(false)}
@@ -3560,7 +3633,7 @@ export default function SueldokPage() {
                 className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-black transition-all shadow-md cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
               >
                 {savingFiniquito ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Briefcase className="w-3.5 h-3.5" />}
-                <span>Guardar y Emitir Finiquito</span>
+                <span>{finiquitoEditingId ? "Guardar Cambios de Liquidación" : "Guardar y Emitir Finiquito"}</span>
               </button>
             </div>
           </div>
