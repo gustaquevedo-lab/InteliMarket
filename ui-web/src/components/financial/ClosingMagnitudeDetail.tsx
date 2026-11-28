@@ -352,6 +352,12 @@ export function ClosingMagnitudeDetail({
   const currentMonthName = monthNames[activeMonth] || `Mes ${activeMonth}`
   const monthLabel = `${currentMonthName} ${activeYear}`
 
+  // Totales
+  const totalNominaNeto = nominaData.reduce((acc, curr) => acc + curr.neto, 0)
+  const totalNominaBruto = nominaData.reduce((acc, curr) => acc + curr.total_devengado, 0)
+  const totalNominaIpsPatronal = nominaData.reduce((acc, curr) => acc + curr.ips_patronal, 0)
+  const totalGastosMonto = gastosGenerales.reduce((acc: number, curr: any) => acc + (Number(curr.monto) || 0), 0)
+
   const titleMap: Record<string, { title: string; subtitle: string; icon: any }> = {
     nomina: {
       title: `4. Nómina y Costo Laboral SueldOK (${monthLabel})`,
@@ -369,13 +375,13 @@ export function ClosingMagnitudeDetail({
       icon: ShoppingBag
     },
     opex: {
-      title: `5. Gastos Operativos (OPEX) (${monthLabel})`,
-      subtitle: `Egresos corrientes del ejercicio que deducen el EBITDA. Al redestinar a CMV, CAPEX o Anticipos, el comprobante sale inmediatamente de esta lista.`,
+      title: `5. Gastos Operativos Generales (No Laborales) (${monthLabel})`,
+      subtitle: `Servicios básicos, mantenimiento, logística y administración que deducen el EBITDA (excluye nómina de Pestaña 4). Total: ${formatPYG(totalGastosMonto)}.`,
       icon: Building2
     },
     gastos: {
-      title: `5. Gastos Operativos (OPEX) (${monthLabel})`,
-      subtitle: `Egresos corrientes del ejercicio que deducen el EBITDA. Al redestinar a CMV, CAPEX o Anticipos, el comprobante sale inmediatamente de esta lista.`,
+      title: `5. Gastos Operativos Generales (No Laborales) (${monthLabel})`,
+      subtitle: `Servicios básicos, mantenimiento, logística y administración que deducen el EBITDA (excluye nómina de Pestaña 4). Total: ${formatPYG(totalGastosMonto)}.`,
       icon: Building2
     },
     capex: {
@@ -401,12 +407,6 @@ export function ClosingMagnitudeDetail({
     icon: FileText
   }
   const Icon = currentMeta.icon
-
-  // Totales
-  const totalNominaNeto = nominaData.reduce((acc, curr) => acc + curr.neto, 0)
-  const totalNominaBruto = nominaData.reduce((acc, curr) => acc + curr.total_devengado, 0)
-  const totalNominaIpsPatronal = nominaData.reduce((acc, curr) => acc + curr.ips_patronal, 0)
-  const totalGastosMonto = gastosGenerales.reduce((acc: number, curr: any) => acc + (Number(curr.monto) || 0), 0)
 
   return (
     <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">

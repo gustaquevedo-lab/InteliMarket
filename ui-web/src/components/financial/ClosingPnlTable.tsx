@@ -203,7 +203,7 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
             <tr className="bg-amber-50/40 dark:bg-amber-950/20 font-semibold text-slate-900 dark:text-slate-100">
               <td className="py-3 px-4 text-center text-xs text-slate-500">4.0</td>
               <td className="py-3 px-4 text-amber-800 dark:text-amber-400">
-                (-) GASTOS OPERATIVOS TOTALES (OPEX + NÓMINA)
+                (-) GASTOS OPERATIVOS TOTALES (OPEX: Nómina 4.1 + Gastos Generales 4.2 a 4.5)
               </td>
               <td className="py-3 px-4 text-right text-amber-800 dark:text-amber-400 font-black font-mono">
                 -{formatPYG(kpis?.total_opex)}
@@ -216,7 +216,7 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
                   onClick={() => onSelectMagnitude("opex")}
                   className="text-xs text-amber-700 dark:text-amber-400 hover:underline font-semibold inline-flex items-center gap-0.5 cursor-pointer"
                 >
-                  Ver OPEX <ChevronRight className="w-3.5 h-3.5" />
+                  Ver Gastos <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </td>
             </tr>
@@ -225,7 +225,7 @@ export function ClosingPnlTable({ data, onSelectMagnitude }: ClosingPnlTableProp
             <tr className="text-xs hover:bg-slate-50 dark:hover:bg-slate-800/50">
               <td className="py-2.5 px-4 text-center text-slate-400">4.1</td>
               <td className="py-2.5 px-4 pl-8 font-medium text-slate-800 dark:text-slate-200">
-                Costo Laboral SueldOK (44 Colaboradores — Salarios e IPS Patronal 16.5% Desembolsados)
+                Costo Laboral SueldOK ({nomina?.empleados_activos || 44} Colaboradores — {nomina?.estado_nomina === "proyeccion_en_curso" ? "Proyección Devengada Mes Completo" : "Planilla Auditada"})
               </td>
               <td className="py-2.5 px-4 text-right font-bold font-mono text-slate-900 dark:text-slate-100">
                 {formatPYG(nomina?.total_costo_laboral)}

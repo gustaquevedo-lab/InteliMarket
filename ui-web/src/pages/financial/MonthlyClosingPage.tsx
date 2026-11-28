@@ -118,12 +118,15 @@ export default function MonthlyClosingPage() {
   const kpis = data?.kpis || {}
   const mesNombre = data?.periodo?.mes_nombre || MESES.find(m => m.id === selectedMonth)?.nombre || `Mes ${selectedMonth}`
 
+  const opexNoLaboral = data?.opex?.total_opex_no_laboral ?? Math.max(0, (kpis.total_opex || 0) - (kpis.costo_laboral_total || 0))
+  const esNominaProyectada = data?.nomina?.estado_nomina === "proyeccion_en_curso"
+
   const tabs = [
     { id: "resumen", label: "1. Resumen P&L en Cascada", icon: TrendingUp, badge: "Oficial" },
     { id: "ingresos", label: "2. Cajas / Ingresos", icon: DollarSign, badge: formatPYG(kpis.ventas_netas || 0) },
     { id: "cogs", label: "3. CMV / Compras", icon: ShoppingBag, badge: `${kpis.margen_bruto_pct || 0}% MB` },
-    { id: "nomina", label: "4. Nómina SueldOK", icon: Users, badge: "44 pers." },
-    { id: "opex", label: "5. Gastos Operativos (OPEX)", icon: Building2, badge: formatPYG(kpis.total_opex || 0) },
+    { id: "nomina", label: "4. Nómina SueldOK", icon: Users, badge: formatPYG(kpis.costo_laboral_total || 0) },
+    { id: "opex", label: "5. Gastos Operativos (No Laborales)", icon: Building2, badge: formatPYG(opexNoLaboral) },
     { id: "capex", label: "6. Inversiones / Activo Fijo (CAPEX)", icon: Layers, badge: formatPYG(kpis.total_capex || 0) },
     { id: "anticipos", label: "7. Anticipos y No Operativos", icon: Landmark, badge: "Excluidos P&L" }
   ]
@@ -268,24 +271,30 @@ export default function MonthlyClosingPage() {
 
           <div className="space-y-1 bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Gastos OPEX</span>
-              <span className="text-[9px] font-bold text-amber-400">Absorción</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Gastos OPEX Total</span>
+              <span className="text-[9px] font-bold text-amber-400">Personal + Gastos</span>
             </div>
             <p className="text-lg lg:text-xl font-black font-mono tracking-tight text-amber-400">
               {formatPYG(kpis.total_opex || 0)}
             </p>
-            <p className="text-[10px] text-slate-400 font-mono">{kpis.absorcion_opex_pct || 0}% s/ Ventas</p>
+            <p className="text-[10px] text-slate-400 font-mono">
+              {kpis.absorcion_opex_pct || 0}% s/ Ventas (Nómina 86% · Gastos 14%)
+            </p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Costo Laboral</span>
-              <span className="text-[9px] font-bold text-purple-400">SueldOK</span>
+              <span className={`text-[9px] font-bold ${esNominaProyectada ? "text-amber-400" : "text-purple-400"}`}>
+                {esNominaProyectada ? "Proyección Mes" : "Auditado SueldOK"}
+              </span>
             </div>
             <p className="text-lg lg:text-xl font-black font-mono tracking-tight text-purple-400">
               {formatPYG(kpis.costo_laboral_total || 0)}
             </p>
-            <p className="text-[10px] text-slate-400 font-mono">44 colaboradores</p>
+            <p className="text-[10px] text-slate-400 font-mono">
+              {data?.nomina?.empleados_activos || 44} colaboradores · {esNominaProyectada ? "Devengado mes completo" : "Cierre liquidado"}
+            </p>
           </div>
 
           <div className="space-y-1 bg-slate-900/60 p-3 rounded-2xl border border-slate-800/80">
