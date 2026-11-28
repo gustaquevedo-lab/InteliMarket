@@ -11,7 +11,7 @@ import io
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
-from pypdf import PdfReader
+import pymupdf
 from sqlalchemy import text
 
 from api.src.db import async_session_factory
@@ -25,8 +25,8 @@ COMPANY_ID = "00000000-0000-0000-0000-000000000010"
 
 
 def _extract_pdf_text(pdf_bytes: bytes) -> str:
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    return "\n".join(page.get_text() or "" for page in doc)
 
 
 async def run_e2e():
@@ -145,8 +145,8 @@ async def run_e2e():
             ind_list = await ar_service.get_corporate_remission_individual_receipts_data(db, COMPANY_ID, str(rem_id))
             assert len(ind_list) == 2
             ind_pdf = ar_pdf_reports.generate_recibos_individuales_consolidados_pdf(comp, ind_list)
-            reader = PdfReader(io.BytesIO(ind_pdf))
-            assert len(reader.pages) == 2, f"El PDF consolidado debe tener 2 páginas, tiene {len(reader.pages)}"
+            doc_ind = pymupdf.open(stream=ind_pdf, filetype="pdf")
+            assert len(doc_ind) == 2, f"El PDF consolidado debe tener 2 páginas, tiene {len(doc_ind)}"
             ind_text = _extract_pdf_text(ind_pdf)
             assert "Pedro Juan Caballero" in ind_text
             assert "Oviedo" not in ind_text
