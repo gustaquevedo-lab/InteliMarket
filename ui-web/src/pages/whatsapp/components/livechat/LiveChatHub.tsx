@@ -23,11 +23,13 @@ import {
   ChevronDown,
   Phone,
   Calendar,
+  UserCircle,
 } from "lucide-react"
-import { api, WhatsAppConversation, WhatsAppMessage } from "../../../../api"
+import { api, WhatsAppConversation, WhatsAppMessage, WhatsAppTemplate } from "../../../../api"
 import { ChatMediaMessage } from "./ChatMediaMessage"
 import { MediaLightboxModal } from "./MediaLightboxModal"
 import { TransferChatModal } from "./TransferChatModal"
+import { CustomerProfilePanel } from "./CustomerProfilePanel"
 import { Modal } from "../../../../components/Modal"
 
 interface LiveChatHubProps {
@@ -35,6 +37,8 @@ interface LiveChatHubProps {
   onRefreshConversations?: () => void
   currentUserId?: string
   currentUserName?: string
+  templates?: WhatsAppTemplate[]
+  onSendCampaign?: (phone: string) => void
 }
 
 type InboxTab = "pending" | "mine" | "bot" | "all" | "resolved"
@@ -56,6 +60,8 @@ const QUICK_RESPONSES = [
 export const LiveChatHub: React.FC<LiveChatHubProps> = ({
   currentUserId,
   currentUserName = "Operador",
+  templates = [],
+  onSendCampaign,
 }) => {
   // ── Estados Principales ──
   const [inboxTab, setInboxTab] = useState<InboxTab>("pending")
@@ -74,6 +80,8 @@ export const LiveChatHub: React.FC<LiveChatHubProps> = ({
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [filePreview, setFilePreview] = useState<string | null>(null)
   const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false)
+  const [showCustomerProfile, setShowCustomerProfile] = useState<boolean>(false)
+  const [quickReplySearch, setQuickReplySearch] = useState<string>("")
   const [showQuickResponses, setShowQuickResponses] = useState<boolean>(false)
 
   // ── Modales ──
@@ -610,7 +618,8 @@ export const LiveChatHub: React.FC<LiveChatHubProps> = ({
       {/* ══════════════════════════════════════════════════════════ */}
       {/* COLUMNA 2: ÁREA DE CHAT EN VIVO & PANEL DE ATENCIÓN         */}
       {/* ══════════════════════════════════════════════════════════ */}
-      <div className="lg:col-span-8 flex flex-col bg-slate-50/50 dark:bg-slate-950/30">
+      <div className="lg:col-span-8 flex min-h-0 overflow-hidden bg-slate-50/50 dark:bg-slate-950/30">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {selectedConv ? (
           <>
             {/* Header del Chat Activo */}
@@ -691,6 +700,19 @@ export const LiveChatHub: React.FC<LiveChatHubProps> = ({
                 >
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                   <span className="hidden sm:inline">Resolver</span>
+                </button>
+
+                <button
+                  onClick={() => setShowCustomerProfile((p) => !p)}
+                  className={`px-2.5 py-1.5 rounded-xl border text-xs font-medium flex items-center gap-1 transition-all ${
+                    showCustomerProfile
+                      ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300"
+                      : "border-slate-200 dark:border-slate-800 hover:bg-slate-100 text-slate-600 dark:text-slate-300"
+                  }`}
+                  title="Ver ficha del cliente (ExtraClub, deuda, compras)"
+                >
+                  <UserCircle className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Ficha</span>
                 </button>
 
                 <button
@@ -868,22 +890,64 @@ export const LiveChatHub: React.FC<LiveChatHubProps> = ({
 
             {/* Barra de Respuestas Rápidas (Popover) */}
             {showQuickResponses && (
-              <div className="p-2.5 bg-slate-100 dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 flex items-center gap-1.5 overflow-x-auto text-xs">
-                <span className="text-[10px] font-bold uppercase text-slate-400 mr-1 shrink-0">Plantillas:</span>
-                {QUICK_RESPONSES.map((qr, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => {
-                      setReplyText((prev) => (prev ? prev + " " + qr.text : qr.text))
-                      setShowQuickResponses(false)
-                      replyInputRef.current?.focus()
-                    }}
-                    className="px-2.5 py-1 rounded-xl bg-white dark:bg-slate-700 hover:bg-emerald-50 text-slate-700 dark:text-slate-200 text-xs font-semibold shrink-0 border border-slate-200 dark:border-slate-600 transition-colors"
-                  >
-                    {qr.label}
-                  </button>
-                ))}
+              <div className="p-2.5 bg-slate-100 dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 space-y-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 shrink-0">Plantillas:</span>
+                  <input
+                    type="text"
+                    value={quickReplySearch}
+                    onChange={(e) => setQuickReplySearch(e.target.value)}
+                    placeholder="Filtrar plantillas..."
+                    className="flex-1 max-w-xs px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs outline-none"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                  {QUICK_RESPONSES.filter(
+                    (qr) =>
+                      !quickReplySearch ||
+                      qr.label.toLowerCase().includes(quickReplySearch.toLowerCase()) ||
+                      qr.text.toLowerCase().includes(quickReplySearch.toLowerCase())
+                  ).map((qr, i) => (
+                    <button
+                      key={`qr-${i}`}
+                      type="button"
+                      onClick={() => {
+                        setReplyText((prev) => (prev ? prev + " " + qr.text : qr.text))
+                        setShowQuickResponses(false)
+                        replyInputRef.current?.focus()
+                      }}
+                      className="px-2.5 py-1 rounded-xl bg-white dark:bg-slate-700 hover:bg-emerald-50 text-slate-700 dark:text-slate-200 text-xs font-semibold shrink-0 border border-slate-200 dark:border-slate-600 transition-colors"
+                    >
+                      {qr.label}
+                    </button>
+                  ))}
+                  {templates
+                    .filter(
+                      (t) =>
+                        Boolean(t.content) &&
+                        (!quickReplySearch ||
+                          (t.name || "").toLowerCase().includes(quickReplySearch.toLowerCase()) ||
+                          (t.content || "").toLowerCase().includes(quickReplySearch.toLowerCase()))
+                    )
+                    .map((t) => {
+                      const tplContent = t.content || ""
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => {
+                            setReplyText((prev) => (prev ? prev + " " + tplContent : tplContent))
+                            setShowQuickResponses(false)
+                            replyInputRef.current?.focus()
+                          }}
+                          className="px-2.5 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-200 text-xs font-semibold shrink-0 border border-emerald-200 dark:border-emerald-800 transition-colors"
+                          title={tplContent}
+                        >
+                          💬 {t.name || t.tipo}
+                        </button>
+                      )
+                    })}
+                </div>
               </div>
             )}
 
@@ -1024,6 +1088,17 @@ export const LiveChatHub: React.FC<LiveChatHubProps> = ({
               </p>
             </div>
           </div>
+        )}
+        </div>
+        {showCustomerProfile && selectedConv && (
+          <CustomerProfilePanel
+            convId={selectedConv.id}
+            onSendCampaign={(phone) => {
+              setShowCustomerProfile(false)
+              onSendCampaign?.(phone)
+            }}
+            onClose={() => setShowCustomerProfile(false)}
+          />
         )}
       </div>
 

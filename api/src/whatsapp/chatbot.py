@@ -335,7 +335,7 @@ class ChatbotEngine:
         res = await self.db.execute(stmt)
         customer = res.scalar_one_or_none()
 
-        cliente_nombre = (customer.razon_social or customer.nombre or conversation.contact_name or "Cliente").strip() if customer else (conversation.contact_name or "Cliente")
+        cliente_nombre = (customer.razon_social or conversation.contact_name or "Cliente").strip() if customer else (conversation.contact_name or "Cliente")
         documento = (customer.ci or customer.ruc or "").strip() if customer else ""
         socio_numero = (getattr(customer, "extra_club_numero", None) or getattr(customer, "socio_numero", None) or "").strip() if customer else ""
 
@@ -825,8 +825,8 @@ class ChatbotEngine:
         for i, p in enumerate(products, 1):
             # Consultar stock actual de lotes en tiempo real
             stock_res = await self.db.execute(
-                select(func.coalesce(func.sum(StockLot.cantidad_actual), 0)).where(
-                    StockLot.producto_id == p.id
+                select(func.coalesce(func.sum(StockLot.cantidad_disponible), 0)).where(
+                    StockLot.product_id == p.id
                 )
             )
             stock = stock_res.scalar() or 0

@@ -20,6 +20,16 @@ from api.src.whatsapp.schemas import TwilioWebhook
 from api.src.whatsapp.evolution_client import evolution_client, normalize_phone_e164
 
 
+def verify_twilio_signature(auth_token: str, signature: str, url: str, params: dict) -> bool:
+    """Verifica firma HMAC-SHA1 de webhook Twilio (retrocompatibilidad)."""
+    if not auth_token or not signature:
+        return False
+    data_str = url + "".join(f"{k}{v}" for k, v in sorted(params.items()))
+    digest = hmac.new(auth_token.encode("utf-8"), data_str.encode("utf-8"), hashlib.sha1).digest()
+    expected = base64.b64encode(digest).decode("utf-8")
+    return hmac.compare_digest(expected, signature)
+
+
 def mask_token(token: str) -> str:
     return "****"
 
@@ -266,8 +276,8 @@ async def execute_command(
         lines = []
         for p in products[:5]:
             stock_result = await db.execute(
-                select(func.coalesce(func.sum(StockLot.cantidad_actual), 0))
-                .where(StockLot.producto_id == p.id)
+                select(func.coalesce(func.sum(StockLot.cantidad_disponible), 0))
+                .where(StockLot.product_id == p.id)
             )
             stock = stock_result.scalar() or 0
             lines.append(f"• {p.nombre}: {stock} unidades")
@@ -293,13 +303,13 @@ async def execute_command(
             text("""
                 SELECT p.nombre, si.cantidad, si.precio_unitario
                 FROM sale_items si
-                JOIN products p ON p.id = si.producto_id
-                WHERE si.venta_id = :sale_id
+                JOIN products p ON p.id = si.product_id
+                WHERE si.sale_id = :sale_id
             """),
             {"sale_id": str(sale.id)},
         )
         items = items_result.fetchall()
-        total_iva = float(sale.total_iva or 0)
+        total_iva = float(sale.iva_10 or 0) + float(sale.iva_5 or 0)
         total_neto = float(sale.total or 0) - total_iva
         item_lines = [f"• {r[0]} x{r[1]}: {r[2]:,.0f} PYG" for r in items]
         return (
@@ -340,12 +350,13 @@ async def execute_command(
         )
 
     if command == "/ventas":
-        today = datetime.now(timezone.utc).date()
+        from zoneinfo import ZoneInfo
+        py_today = datetime.now(ZoneInfo("America/Asuncion")).date()
         result = await db.execute(
             select(
                 func.count(Sale.id).label("count"),
                 func.coalesce(func.sum(Sale.total), 0).label("total"),
-            ).where(func.cast(Sale.created_at, Date) == today)
+            ).where(func.cast(func.timezone("America/Asuncion", Sale.created_at), Date) == py_today)
         )
         row = result.one()
         return (
@@ -624,9 +635,9 @@ async def send_message_to_phone(
 
 
 async def get_stats(db: AsyncSession, tenant_id: UUID) -> dict:
-    from datetime import timedelta
-    now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    from zoneinfo import ZoneInfo
+    now_py = datetime.now(ZoneInfo("America/Asuncion"))
+    today_start = now_py.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     today_messages = await db.execute(
         select(func.count(WhatsAppMessage.id)).where(
             WhatsAppMessage.tenant_id == tenant_id,
@@ -672,11 +683,58 @@ async def get_stats(db: AsyncSession, tenant_id: UUID) -> dict:
     if inbound_count > 0 and outbound_count > 0:
         avg_response_time = 0.0
 
+    from datetime import timedelta
+    cutoff_30 = datetime.now(timezone.utc) - timedelta(days=30)
+
+    human_res = await db.execute(
+        select(func.count(WhatsAppMessage.conversation_id.distinct())).where(
+            WhatsAppMessage.tenant_id == tenant_id,
+            WhatsAppMessage.direction == MessageDirection.outbound.value,
+            WhatsAppMessage.sender_type == "agent",
+            WhatsAppMessage.created_at >= cutoff_30,
+        )
+    )
+    human_handled = int(human_res.scalar() or 0)
+
+    total_30d_res = await db.execute(
+        select(func.count(WhatsAppConversation.id)).where(
+            WhatsAppConversation.tenant_id == tenant_id,
+            WhatsAppConversation.last_message_at >= cutoff_30,
+        )
+    )
+    total_30d = int(total_30d_res.scalar() or 0)
+    bot_handled = max(0, total_30d - human_handled)
+
+    avg_res = await db.execute(
+        text("""
+            SELECT AVG(EXTRACT(EPOCH FROM (o.created_at - i.created_at)))
+            FROM whatsapp_messages i
+            JOIN LATERAL (
+                SELECT created_at FROM whatsapp_messages
+                WHERE conversation_id = i.conversation_id
+                  AND direction = 'outbound'
+                  AND created_at > i.created_at
+                  AND tenant_id = CAST(:tid AS uuid)
+                ORDER BY created_at ASC LIMIT 1
+            ) o ON TRUE
+            WHERE i.direction = 'inbound'
+              AND i.tenant_id = CAST(:tid AS uuid)
+              AND i.created_at >= :cutoff
+        """),
+        {"tid": str(tenant_id), "cutoff": cutoff_30},
+    )
+    avg_resp = avg_res.scalar()
+    avg_response_time_s = round(float(avg_resp), 1) if avg_resp else 0.0
+
     return {
         "total_conversations": total_conversations,
         "active_today": active_today,
         "messages_today": messages_today,
         "avg_response_time_seconds": avg_response_time,
+        "bot_handled": bot_handled,
+        "human_handled": human_handled,
+        "avg_response_time_s": avg_response_time_s,
+        "total_conversations_30d": total_30d,
     }
 
 
@@ -860,9 +918,14 @@ async def update_ai_training_example(
     db: AsyncSession,
     example_id: UUID,
     data: dict,
+    tenant_id: Optional[UUID] = None,
 ):
     from api.src.whatsapp.models import WhatsAppAITrainingExample
-    example = await db.get(WhatsAppAITrainingExample, example_id)
+    stmt = select(WhatsAppAITrainingExample).where(WhatsAppAITrainingExample.id == example_id)
+    if tenant_id is not None:
+        stmt = stmt.where(WhatsAppAITrainingExample.tenant_id == tenant_id)
+    res = await db.execute(stmt)
+    example = res.scalar_one_or_none()
     if not example:
         return None
     for k, v in data.items():
@@ -876,12 +939,104 @@ async def update_ai_training_example(
 async def delete_ai_training_example(
     db: AsyncSession,
     example_id: UUID,
+    tenant_id: Optional[UUID] = None,
 ) -> bool:
     from api.src.whatsapp.models import WhatsAppAITrainingExample
-    example = await db.get(WhatsAppAITrainingExample, example_id)
+    stmt = select(WhatsAppAITrainingExample).where(WhatsAppAITrainingExample.id == example_id)
+    if tenant_id is not None:
+        stmt = stmt.where(WhatsAppAITrainingExample.tenant_id == tenant_id)
+    res = await db.execute(stmt)
+    example = res.scalar_one_or_none()
     if not example:
         return False
     await db.delete(example)
     await db.commit()
     return True
+
+
+async def get_customer_profile(
+    db: AsyncSession,
+    conv_id: UUID,
+    company_id: UUID,
+    tenant_id: UUID,
+) -> dict:
+    """Resuelve el perfil completo del cliente vinculado a una conversación WhatsApp."""
+    from zoneinfo import ZoneInfo
+    from api.src.customers.models import Customer
+    from api.src.sales.models import Sale
+    from api.src.loyalty import service as loyalty_svc
+
+    conv = await db.get(WhatsAppConversation, conv_id)
+    if not conv or conv.tenant_id != tenant_id:
+        return {"linked": False}
+
+    digits = re.sub(r"\D", "", conv.contact_phone or "")
+    normalized = re.sub(r"^(?:595|0)", "", digits)
+    if len(normalized) < 6:
+        return {"linked": False}
+
+    res = await db.execute(
+        select(Customer)
+        .where(
+            Customer.company_id == company_id,
+            func.regexp_replace(Customer.telefono, "[^0-9]", "", "g").ilike(f"%{normalized}"),
+        )
+        .limit(1)
+    )
+    cust = res.scalars().first()
+    if not cust:
+        return {"linked": False}
+
+    balance = await loyalty_svc.get_balance(db, str(cust.id), str(company_id))
+
+    deuda_res = await db.execute(
+        select(func.coalesce(func.sum(Sale.saldo), 0)).where(
+            Sale.customer_id == cust.id,
+            Sale.saldo > 0,
+        )
+    )
+    deuda_total = int(deuda_res.scalar() or 0)
+
+    ventas_res = await db.execute(
+        select(Sale)
+        .where(Sale.customer_id == cust.id)
+        .order_by(Sale.fecha.desc())
+        .limit(5)
+    )
+    ventas = ventas_res.scalars().all()
+
+    asu = ZoneInfo("America/Asuncion")
+
+    def _fmt_fecha(dt) -> str:
+        if not dt:
+            return ""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(asu).strftime("%d/%m/%Y %H:%M")
+
+    return {
+        "linked": True,
+        "customer_id": str(cust.id),
+        "razon_social": cust.razon_social,
+        "ci": cust.ci,
+        "ruc": cust.ruc,
+        "ciudad": cust.ciudad,
+        "telefono": cust.telefono,
+        "limite_credito": int(cust.limite_credito or 0),
+        "extra_club_numero": balance.get("extra_club_numero"),
+        "extra_club_puntos": balance.get("total_puntos", 0),
+        "extra_club_puntos_por_vencer": balance.get("puntos_por_vencer", 0),
+        "extra_club_is_member": balance.get("is_member", False),
+        "deuda_total": deuda_total,
+        "ultimas_ventas": [
+            {
+                "fecha": _fmt_fecha(v.fecha),
+                "numero": v.numero or "",
+                "tipo_comprobante": v.tipo_comprobante or "",
+                "total": int(v.total or 0),
+                "saldo": int(v.saldo or 0),
+            }
+            for v in ventas
+        ],
+    }
 

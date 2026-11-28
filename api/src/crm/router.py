@@ -221,11 +221,9 @@ async def delete_actividad(
     _=Depends(require_permission("crm:update")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
-    actividad = await service.get_actividad(db, tenant_id, actividad_id)
-    if not actividad:
+    success = await service.delete_actividad(db, tenant_id, actividad_id)
+    if not success:
         raise HTTPException(status_code=404, detail="Actividad not found")
-    await db.delete(actividad)
-    await db.commit()
     return {"message": "Actividad deleted"}
 
 
@@ -235,6 +233,7 @@ async def complete_actividad(
     data: ActividadRealizadaCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_auth),
+    _=Depends(require_permission("crm:update")),
 ):
     tenant_id = uuid.UUID(user["tenant_id"])
     user_id = uuid.UUID(user["id"])

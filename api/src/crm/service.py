@@ -1,6 +1,6 @@
 """CRM service"""
 
-from sqlalchemy import select, func as sql_func, and_, cast, Integer
+from sqlalchemy import select, func as sql_func, and_, cast, delete, update, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 import uuid
@@ -57,6 +57,8 @@ async def delete_lead(db: AsyncSession, tenant_id: uuid.UUID, lead_id: uuid.UUID
     lead = await get_lead(db, tenant_id, lead_id)
     if not lead:
         return False
+    await db.execute(update(Oportunidad).where(Oportunidad.lead_id == lead_id).values(lead_id=None))
+    await db.execute(update(Actividad).where(Actividad.lead_id == lead_id).values(lead_id=None))
     await db.delete(lead)
     await db.commit()
     return True
@@ -102,6 +104,7 @@ async def delete_oportunidad(db: AsyncSession, tenant_id: uuid.UUID, opp_id: uui
     opp = await get_oportunidad(db, tenant_id, opp_id)
     if not opp:
         return False
+    await db.execute(update(Actividad).where(Actividad.oportunidad_id == opp_id).values(oportunidad_id=None))
     await db.delete(opp)
     await db.commit()
     return True
@@ -158,6 +161,16 @@ async def update_actividad(db: AsyncSession, tenant_id: uuid.UUID, actividad_id:
     await db.commit()
     await db.refresh(actividad)
     return actividad
+
+
+async def delete_actividad(db: AsyncSession, tenant_id: uuid.UUID, actividad_id: uuid.UUID) -> bool:
+    actividad = await get_actividad(db, tenant_id, actividad_id)
+    if not actividad:
+        return False
+    await db.execute(delete(ActividadRealizada).where(ActividadRealizada.actividad_id == actividad_id))
+    await db.delete(actividad)
+    await db.commit()
+    return True
 
 
 async def complete_actividad(
@@ -268,7 +281,7 @@ async def get_activity_stats(db: AsyncSession, tenant_id: uuid.UUID) -> Activity
         select(
             Actividad.tipo,
             sql_func.count(Actividad.id).label("total"),
-            sql_func.sum(sql_func.cast(Actividad.completada, Integer)).label("completadas"),
+            sql_func.sum(cast(Actividad.completada, Integer)).label("completadas"),
         )
         .where(Actividad.tenant_id == tenant_id)
         .group_by(Actividad.tipo)

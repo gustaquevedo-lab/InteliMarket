@@ -69,6 +69,13 @@ class LeadUpdate(BaseModel):
     notas: Optional[str] = None
     asignado_a: Optional[uuid.UUID] = None
 
+    @field_validator("puntaje")
+    @classmethod
+    def validate_puntaje(cls, v):
+        if v is not None and (v < 0 or v > 100):
+            raise ValueError("puntaje must be between 0 and 100")
+        return v
+
 
 class LeadResponse(BaseModel):
     id: uuid.UUID
@@ -128,6 +135,13 @@ class OportunidadUpdate(BaseModel):
     fecha_cierre_estimada: Optional[date] = None
     notas: Optional[str] = None
     asignado_a: Optional[uuid.UUID] = None
+
+    @field_validator("probabilidad")
+    @classmethod
+    def validate_probabilidad(cls, v):
+        if v is not None and (v < 0 or v > 100):
+            raise ValueError("probabilidad must be between 0 and 100")
+        return v
 
 
 class OportunidadResponse(BaseModel):

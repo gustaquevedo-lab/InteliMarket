@@ -159,6 +159,10 @@ class WhatsAppStats(BaseModel):
     active_today: int
     messages_today: int
     avg_response_time_seconds: Optional[float] = None
+    bot_handled: int = 0
+    human_handled: int = 0
+    avg_response_time_s: float = 0.0
+    total_conversations_30d: int = 0
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -289,18 +293,48 @@ class AITrainingExampleResponse(BaseModel):
 
 class AITrainingSimulateRequest(BaseModel):
     message: str
-    persona: str = "paraguay_regular"  # paraguay_regular, brasil_frontier, extraclub_vip, reclamante
+    persona: str = "paraguay"  # paraguay, brasil, extraclub, reclamante
     conversation_history: Optional[list] = None
+    custom_instructions: Optional[str] = None
+    emphasis_promotions: Optional[str] = None
 
 
 class AITrainingSimulateResponse(BaseModel):
     text: str
     latency_ms: int
-    model: str
+    model: str = "qwen2.5:7b"
     tools_called: list = []
     tools_trace: list = []
     guardrails_passed: bool = True
     guardrails_notes: Optional[str] = None
+    pdf_generated: bool = False
+    pdf_base64: Optional[str] = None
     pdf_filename: Optional[str] = None
     order_code: Optional[str] = None
+    persona: Optional[str] = None
+
+
+class UltimaVentaItem(BaseModel):
+    fecha: str
+    numero: str
+    tipo_comprobante: str
+    total: int
+    saldo: int
+
+
+class CustomerProfileResponse(BaseModel):
+    linked: bool
+    customer_id: Optional[str] = None
+    razon_social: Optional[str] = None
+    ci: Optional[str] = None
+    ruc: Optional[str] = None
+    ciudad: Optional[str] = None
+    telefono: Optional[str] = None
+    limite_credito: Optional[int] = None
+    extra_club_numero: Optional[str] = None
+    extra_club_puntos: Optional[int] = None
+    extra_club_puntos_por_vencer: Optional[int] = None
+    extra_club_is_member: Optional[bool] = None
+    deuda_total: Optional[int] = None
+    ultimas_ventas: Optional[list[UltimaVentaItem]] = None
 

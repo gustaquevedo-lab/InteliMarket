@@ -22,7 +22,7 @@ async def get_public_chat(
         select(WhatsAppConversation)
         .where(WhatsAppConversation.contact_phone == phone.strip())
     )
-    conversation = result.scalar_one_or_none()
+    conversation = result.scalars().first()
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversación no encontrada")
 
@@ -36,10 +36,10 @@ async def get_public_chat(
         "messages": [
             {
                 "id": str(m.id),
-                "direction": m.direction.value if m.direction else "inbound",
+                "direction": m.direction or "inbound",
                 "content": m.content,
                 "media_url": m.media_url,
-                "status": m.status.value if m.status else "queued",
+                "status": m.status or "queued",
                 "created_at": m.created_at.isoformat(),
             }
             for m in messages

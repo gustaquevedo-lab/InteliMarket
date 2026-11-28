@@ -2,11 +2,14 @@
 
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
+import logging
 from uuid import UUID
 import re
 
-from sqlalchemy import select, func, and_, or_, update
+from sqlalchemy import select, func, and_, or_, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger("whatsapp.campaigns")
 
 from api.src.whatsapp.models import (
     WhatsAppCampaign, WhatsAppCampaignRecipient, WhatsAppAutomationRule,
@@ -64,7 +67,7 @@ async def delete_campaign(db: AsyncSession, campaign_id: UUID):
         raise ValueError("Campaña no encontrada")
     # Delete recipients first
     await db.execute(
-        select(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == campaign_id)
+        delete(WhatsAppCampaignRecipient).where(WhatsAppCampaignRecipient.campaign_id == campaign_id)
     )
     await db.delete(obj)
     await db.commit()
@@ -114,14 +117,16 @@ async def _resolve_segment(db: AsyncSession, tenant_id: UUID, filters: dict) -> 
       - con_credito: bool — has credit limit
     """
     from api.src.customers.models import Customer
+    from api.src.companies.models import Company
     from api.src.sales.models import Sale
 
-    cid = tenant_id  # We use tenant_id as company_id context
+    comp_res = await db.execute(select(Company.id).where(Company.tenant_id == tenant_id).limit(1))
+    cid = comp_res.scalar_one_or_none() or tenant_id
     q = select(Customer).where(Customer.company_id == cid)
 
     zona = filters.get("zona")
     if zona:
-        q = q.where(Customer.zona.in_(zona))
+        q = q.where(Customer.ciudad.in_(zona))
 
     r = await db.execute(q)
     customers = r.scalars().all()
@@ -129,7 +134,7 @@ async def _resolve_segment(db: AsyncSession, tenant_id: UUID, filters: dict) -> 
     # If no filters, default to customers with phones
     if not filters or not any(k for k in filters if k != "con_credito"):
         return [
-            {"customer_id": c.id, "phone": c.telefono, "name": c.nombre}
+            {"customer_id": c.id, "phone": c.telefono, "name": c.razon_social}
             for c in customers if c.telefono
         ][:5000]
 
@@ -179,7 +184,8 @@ async def _resolve_segment(db: AsyncSession, tenant_id: UUID, filters: dict) -> 
             )
             last_date = r.scalar()
             if last_date:
-                days_since = (datetime.now(timezone.utc).date() - last_date).days
+                last_dt = last_date.date() if hasattr(last_date, "date") else last_date
+                days_since = (datetime.now(timezone.utc).date() - last_dt).days
                 if days_since < dias_inactivo:
                     continue
             else:
@@ -188,7 +194,7 @@ async def _resolve_segment(db: AsyncSession, tenant_id: UUID, filters: dict) -> 
         results.append({
             "customer_id": c.id,
             "phone": c.telefono,
-            "name": c.nombre,
+            "name": c.razon_social,
         })
 
         if len(results) >= 5000:
@@ -394,7 +400,7 @@ async def trigger_automation(db: AsyncSession, tenant_id: UUID, event: str, cont
     r = await db.execute(
         select(WhatsAppAutomationRule).where(
             WhatsAppAutomationRule.tenant_id == tenant_id,
-            WhatsAppAutomationRule.trigger_event == trigger,
+            WhatsAppAutomationRule.trigger_event == trigger.value,
             WhatsAppAutomationRule.active == True,
         )
     )
@@ -456,8 +462,8 @@ async def trigger_automation(db: AsyncSession, tenant_id: UUID, event: str, cont
             )
             db.add(msg)
             triggered += 1
-        except Exception:
-            pass
+        except Exception as err:
+            logger.warning(f"Error ejecutando regla de automatización {rule.id} ({event}): {err}")
 
     await db.commit()
     return {"triggered": triggered, "total_rules": len(rules)}

@@ -23,12 +23,15 @@ from api.src.whatsapp.schemas import (
     AssignConversationRequest, SetHandlingModeRequest, CreateInternalNoteRequest, AgentItemResponse,
     AITrainingExampleCreate, AITrainingExampleUpdate, AITrainingExampleResponse,
     AITrainingSimulateRequest, AITrainingSimulateResponse,
+    CustomerProfileResponse,
 )
 from api.src.auth.models import User
 from api.src.whatsapp import service as whatsapp_service
 from api.src.whatsapp.models import (
     WhatsAppConversation,
     WhatsAppMessage,
+    WhatsAppCampaign,
+    WhatsAppCampaignRecipient,
     MessageDirection,
     MessageStatus,
     ConversationStatus,
@@ -43,6 +46,11 @@ from api.src.whatsapp.evolution_client import (
 from api.src.whatsapp.watchdog import get_watchdog_status, trigger_watchdog_check
 
 logger = logging.getLogger("whatsapp.router")
+
+_OPTIN_PATTERN = re.compile(
+    r"^\s*(s[íi]|sim|yes|ok|dale|confirmo|acepto|quiero)\s*[!.]*\s*$",
+    re.IGNORECASE,
+)
 
 # Conjunto en memoria para evitar ejecuciones concurrentes del Agente IA en la misma conversación
 _active_agent_conversations: set = set()
@@ -634,6 +642,23 @@ async def get_conversation(
     )
 
 
+@router.get("/conversations/{conv_id}/customer-profile", response_model=CustomerProfileResponse)
+async def get_conversation_customer_profile(
+    conv_id: str,
+    user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna el perfil completo del cliente vinculado a la conversación."""
+    tenant_id = UUID(user["tenant_id"])
+    company_id = UUID(user["company_id"]) if user.get("company_id") else None
+    if not company_id:
+        from api.src.companies.models import Company
+        comp_res = await db.execute(select(Company.id).where(Company.tenant_id == tenant_id).limit(1))
+        company_id = comp_res.scalar_one_or_none() or tenant_id
+    profile = await whatsapp_service.get_customer_profile(db, UUID(conv_id), company_id, tenant_id)
+    return CustomerProfileResponse(**profile)
+
+
 @router.get("/conversations/{conv_id}/messages")
 async def get_messages(
     conv_id: str,
@@ -648,7 +673,7 @@ async def get_messages(
     
     # Marcar mensajes como leídos para el operador
     conv = await db.get(WhatsAppConversation, c_uuid)
-    if conv and conv.tenant_id == tenant_id and conv.unread_agent_count > 0:
+    if conv and conv.tenant_id == tenant_id and (conv.unread_agent_count or 0) > 0:
         conv.unread_agent_count = 0
         await db.commit()
 
@@ -1501,6 +1526,38 @@ async def evolution_webhook(
         conv.last_message_at = datetime.now(timezone.utc)
         await db.commit()
 
+        # Opt-in automático si respondió SÍ/sim a una campaña de sorteo.optin reciente (72h)
+        if _OPTIN_PATTERN.match(content or ""):
+            try:
+                from datetime import timedelta
+                from sqlalchemy.orm.attributes import flag_modified
+                optin_cutoff = datetime.now(timezone.utc) - timedelta(hours=72)
+                optin_res = await db.execute(
+                    select(WhatsAppCampaignRecipient)
+                    .join(WhatsAppCampaign, WhatsAppCampaignRecipient.campaign_id == WhatsAppCampaign.id)
+                    .where(
+                        WhatsAppCampaignRecipient.contact_phone == clean_phone,
+                        WhatsAppCampaign.tenant_id == tenant.id,
+                        WhatsAppCampaign.tipo.in_(["sorteo.optin", "optin"]),
+                        WhatsAppCampaignRecipient.sent_at >= optin_cutoff,
+                    )
+                    .order_by(WhatsAppCampaignRecipient.sent_at.desc())
+                    .limit(1)
+                )
+                if optin_res.scalars().first():
+                    sess = dict(conv.session_data or {})
+                    if not sess.get("optin_validado"):
+                        sess["optin_promociones"] = True
+                        sess["optin_validado"] = True
+                        sess["optin_fecha"] = datetime.now(timezone.utc).isoformat()
+                        conv.session_data = sess
+                        flag_modified(conv, "session_data")
+                        tmpl = await whatsapp_service.get_wa_template(db, tenant.id, "optin.confirmado")
+                        if tmpl:
+                            await whatsapp_service.reply_to_conversation(db, tenant.id, conv.id, tmpl)
+            except Exception as _optin_err:
+                logger.warning(f"[Evolution Webhook] Opt-in auto failed: {_optin_err}")
+
         # Si el Agente IA de WhatsApp está activo
         try:
             t_cfg = (tenant.config or {}) if tenant else {}
@@ -1813,6 +1870,7 @@ async def simulate_ai_interaction(
 
     return AITrainingSimulateResponse(
         text=ai_res.get("text", ""),
+        model=ai_res.get("model", "qwen2.5:7b"),
         tools_called=ai_res.get("tools_called", []),
         tools_trace=ai_res.get("tools_trace", []),
         pdf_generated=bool(ai_res.get("pdf_bytes")),
@@ -1822,6 +1880,7 @@ async def simulate_ai_interaction(
         latency_ms=ai_res.get("latency_ms", 0),
         persona=body.persona,
         guardrails_passed=ai_res.get("guardrails_passed", True),
+        guardrails_notes=ai_res.get("guardrails_notes"),
     )
 
 
@@ -1848,10 +1907,13 @@ async def run_ai_qa_tests(
     from api.src.whatsapp.ai_agent import CustomerAIAgent
     agent = CustomerAIAgent(db, company.id, tenant_id)
 
-    # Conversación de prueba
+    # Conversación de prueba (marcada como simulated para no contaminar el inbox)
     test_conv = await whatsapp_service.get_or_create_conversation(
-        db, tenant_id, "595999999999", name="QA Test Bot"
+        db, tenant_id, "+595990000000", name="QA Test Bot"
     )
+    if test_conv.status != "simulated":
+        test_conv.status = "simulated"
+        await db.commit()
 
     scenarios = [
         {
@@ -1866,14 +1928,14 @@ async def run_ai_qa_tests(
             "title": "Consulta de Stock y Precio",
             "prompt": "¿Tienen arroz y cuánto cuesta?",
             "expected_keywords": ["arroz", "precio", "gs"],
-            "expected_tool": "consultar_catalogo_stock",
+            "expected_tool": "buscar_productos",
         },
         {
             "id": 3,
             "title": "Generación de Pedido PDF",
             "prompt": "Quiero encargar 5 bolsas de arroz y 2 paquetes de fideos para retirar hoy",
             "expected_keywords": ["pedido", "presupuesto"],
-            "expected_tool": "generar_presupuesto_pedido",
+            "expected_tool": "finalizar_pedido",
         },
         {
             "id": 4,

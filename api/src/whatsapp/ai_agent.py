@@ -7,7 +7,9 @@ armado de carritos y generación de PDF de pedido / derivación a humano.
 
 import json
 import logging
+import re
 import time
+import uuid
 from datetime import datetime, date, timezone
 from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any, List, Tuple
@@ -538,41 +540,43 @@ class CustomerAIAgent:
         total_pyg = sum(float(it.get("subtotal", 0)) for it in cart)
 
         # Generar código de pedido amigable
-        order_num = f"WA-{datetime.now().strftime('%y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
+        now_py = datetime.now(ZoneInfo("America/Asuncion"))
+        order_num = f"WA-{now_py.strftime('%y%m%d')}-{str(uuid.uuid4())[:4].upper()}"
 
-        # 1. Crear SalesOrder preliminar en la base de datos
+        # 1. Crear SalesOrder preliminar en la base de datos (aislado en savepoint)
         try:
-            new_order = SalesOrder(
-                company_id=self.company_id,
-                numero=order_num,
-                fecha=datetime.now(timezone.utc),
-                estado="borrador",
-                moneda="PYG",
-                tipo_cambio=brl_rate,
-                condicion="contado",
-                subtotal=total_pyg,
-                total=total_pyg,
-                observaciones=f"Pedido generado por Agente IA WhatsApp. Cliente: {conversation.contact_name or 'Cliente WhatsApp'} ({conversation.contact_phone}). Notas: {notas}",
-            )
-            self.db.add(new_order)
-            await self.db.flush()
-
-            for it in cart:
-                cant = float(it.get("quantity", 1.0))
-                p_unit = float(it.get("unit_price", 0.0))
-                subt = cant * p_unit
-                item_obj = SalesOrderItem(
-                    order_id=new_order.id,
-                    product_id=uuid.UUID(it["product_id"]),
-                    descripcion=it["product_name"],
-                    cantidad=cant,
-                    cantidad_pendiente=cant,
-                    precio_unitario=p_unit,
-                    total=subt,
+            async with self.db.begin_nested():
+                new_order = SalesOrder(
+                    company_id=self.company_id,
+                    numero=order_num,
+                    fecha=datetime.now(timezone.utc),
+                    estado="borrador",
+                    moneda="PYG",
+                    tipo_cambio=brl_rate,
+                    condicion="contado",
+                    subtotal=total_pyg,
+                    total=total_pyg,
+                    observaciones=f"Pedido generado por Agente IA WhatsApp. Cliente: {conversation.contact_name or 'Cliente WhatsApp'} ({conversation.contact_phone}). Notas: {notas}",
                 )
-                self.db.add(item_obj)
+                self.db.add(new_order)
+                await self.db.flush()
 
-            await self.db.flush()
+                for it in cart:
+                    cant = float(it.get("quantity", 1.0))
+                    p_unit = float(it.get("unit_price", 0.0))
+                    subt = cant * p_unit
+                    item_obj = SalesOrderItem(
+                        order_id=new_order.id,
+                        product_id=uuid.UUID(it["product_id"]),
+                        descripcion=it["product_name"],
+                        cantidad=cant,
+                        cantidad_pendiente=cant,
+                        precio_unitario=p_unit,
+                        total=subt,
+                    )
+                    self.db.add(item_obj)
+
+                await self.db.flush()
         except Exception as e:
             logger.error(f"Error creando SalesOrder en base de datos: {e}", exc_info=True)
 

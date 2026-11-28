@@ -16,6 +16,7 @@ import {
 import { useAuth } from "../../context/AuthContext"
 import { useToast } from "../../context/ToastContext"
 import { formatPYG, formatDate, formatDateTime } from "../../utils/format"
+import CurrencyInput from "../../components/CurrencyInput"
 import TarjetasSocioPage from "../loyalty/TarjetasSocioPage"
 
 type CrmTab = "miembros" | "tarjetas" | "solicitudes" | "rfm" | "premios" | "reglas"
@@ -1481,11 +1482,10 @@ export default function CrmPage() {
                 <div>
                   <label className="label-sm">Guaraníes por cada 1 Punto *</label>
                   <div className="relative">
-                    <input
-                      type="number"
+                    <CurrencyInput
                       value={rulesForm.puntos_por_guarani}
-                      onChange={(e) => setRulesForm(f => ({ ...f, puntos_por_guarani: parseInt(e.target.value) || 1000 }))}
-                      className="input text-xs font-mono font-bold"
+                      onChangeValue={(val) => setRulesForm(f => ({ ...f, puntos_por_guarani: val || 1000 }))}
+                      className="input text-xs font-mono font-bold pr-10"
                     />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 font-mono">Gs.</span>
                   </div>
@@ -1495,11 +1495,10 @@ export default function CrmPage() {
                 <div>
                   <label className="label-sm">Valor de Canje por Punto *</label>
                   <div className="relative">
-                    <input
-                      type="number"
+                    <CurrencyInput
                       value={rulesForm.guarani_por_punto}
-                      onChange={(e) => setRulesForm(f => ({ ...f, guarani_por_punto: parseInt(e.target.value) || 100 }))}
-                      className="input text-xs font-mono font-bold"
+                      onChangeValue={(val) => setRulesForm(f => ({ ...f, guarani_por_punto: val || 100 }))}
+                      className="input text-xs font-mono font-bold pr-12"
                     />
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 font-mono">Gs./pt</span>
                   </div>
@@ -2182,11 +2181,10 @@ export default function CrmPage() {
                 </div>
                 <div>
                   <label className="label-sm">Valor Monetario Gs.</label>
-                  <input
-                    type="number"
+                  <CurrencyInput
                     className="input text-xs font-mono font-bold"
                     value={rewardForm.valor_recompensa}
-                    onChange={e => setRewardForm(f => ({ ...f, valor_recompensa: parseFloat(e.target.value) || 0 }))}
+                    onChangeValue={(val) => setRewardForm(f => ({ ...f, valor_recompensa: val || 0 }))}
                   />
                 </div>
               </div>

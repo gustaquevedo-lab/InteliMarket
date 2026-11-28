@@ -7,7 +7,9 @@ import {
   type WhatsAppMessage,
   type IntelliZappCampaign,
   type IntelliZappAutomationRule,
+  type WhatsAppStats,
 } from "../../api"
+import { PieChart, Pie, Cell, Tooltip, Legend } from "recharts"
 import { useToast } from "../../context/ToastContext"
 import { useAuth } from "../../context/AuthContext"
 import { Modal } from "../../components/Modal"
@@ -22,7 +24,7 @@ import {
   Building, HelpCircle, RotateCcw, Megaphone, BellRing, Users,
   CheckCheck, AlertTriangle, GitFork, Sliders, Power,
   Paperclip, Smile, Maximize2, Download, X, Image as ImageIcon,
-  Cpu, ShoppingCart
+  Cpu, ShoppingCart, BarChart3
 } from "lucide-react"
 import BotFlowBuilder, { type BotFlow } from "./BotFlowBuilder"
 
@@ -210,10 +212,11 @@ interface GatewayStatus {
   gateway_url?: string
 }
 
-type TabType = "connection" | "conversations" | "chatbot" | "simulator" | "campaigns" | "automations" | "templates" | "gateway"
+type TabType = "connection" | "conversations" | "chatbot" | "simulator" | "campaigns" | "automations" | "templates" | "stats" | "gateway"
 
 export default function WhatsAppPage() {
   const [tab, setTab] = useState<TabType>("connection")
+  const [stats, setStats] = useState<WhatsAppStats | null>(null)
   const toast = useToast()
   const { user } = useAuth()
 
@@ -379,6 +382,7 @@ export default function WhatsAppPage() {
     fetchRules()
     fetchTemplates()
     fetchChatbotConfig()
+    fetchStats()
   }, [])
 
   useEffect(() => {
@@ -393,7 +397,18 @@ export default function WhatsAppPage() {
       fetchRules()
     } else if (tab === "templates") {
       fetchTemplates()
+    } else if (tab === "stats") {
+      fetchStats()
     }
+  }, [tab])
+
+  // Polling de bandeja (15 s) cuando el operador está en otras pestañas para mantener el badge actualizado
+  useEffect(() => {
+    if (tab === "conversations") return
+    const timer = setInterval(() => {
+      fetchConversations()
+    }, 15_000)
+    return () => clearInterval(timer)
   }, [tab])
 
   // Polling automático cuando el estado es 'connecting' (escaneo de QR)
@@ -552,6 +567,15 @@ export default function WhatsAppPage() {
   }
 
   // ── Conversaciones ──
+  const fetchStats = async () => {
+    try {
+      const data = await api.whatsapp.getStats()
+      if (data) setStats(data)
+    } catch {
+      // silencioso
+    }
+  }
+
   const fetchConversations = async () => {
     setConversationsLoading(true)
     try {
@@ -999,7 +1023,7 @@ export default function WhatsAppPage() {
     setLaunchingCampId(campId)
     try {
       const resLaunch = await api.intellizapp.launchCampaign(campId)
-      toast.info("Segmento Resuelto", `Se prepararon ${resLaunch.total_recipients || 0} destinatarios`)
+      toast.info("Segmento Resuelto", `Se prepararon ${resLaunch.recipients_created || 0} destinatarios`)
       // Enviar primer lote
       const resBatch = await api.intellizapp.sendBatch(campId, 25)
       toast.success("Lote Despachado", `Enviados: ${resBatch.sent}. Restantes: ${resBatch.remaining}`)
@@ -1424,14 +1448,21 @@ export default function WhatsAppPage() {
       {/* 🧭 NAVEGACIÓN GLASSMORPHISM POR PESTAÑAS */}
       <div className="bg-slate-100 dark:bg-slate-800/80 backdrop-blur-md p-1.5 rounded-2xl border border-slate-200 dark:border-slate-700/80 flex flex-wrap gap-1.5 shadow-sm">
         {[
-          { key: "connection", label: "Conexión QR", icon: Smartphone, count: null },
-          { key: "conversations", label: "Chat en Vivo", icon: MessageSquare, count: conversations.length },
-          { key: "chatbot", label: "Agente IA (InteliZapp)", icon: Bot, count: null },
-          { key: "simulator", label: "🧪 Laboratorio IA", icon: Sparkles, count: null },
-          { key: "campaigns", label: "Campañas Masivas", icon: Megaphone, count: campaigns.length },
-          { key: "automations", label: "Automatizaciones", icon: Zap, count: rules.length },
-          { key: "templates", label: "Plantillas Oficiales", icon: FileText, count: templates.length },
-          { key: "gateway", label: "Servidor & Gateway", icon: Server, count: null },
+          { key: "connection", label: "Conexión QR", icon: Smartphone, count: null, unread: 0 },
+          {
+            key: "conversations",
+            label: "Chat en Vivo",
+            icon: MessageSquare,
+            count: conversations.length,
+            unread: conversations.reduce((s, c) => s + (c.unread_agent_count || 0), 0),
+          },
+          { key: "chatbot", label: "Agente IA (InteliZapp)", icon: Bot, count: null, unread: 0 },
+          { key: "simulator", label: "🧪 Laboratorio IA", icon: Sparkles, count: null, unread: 0 },
+          { key: "campaigns", label: "Campañas Masivas", icon: Megaphone, count: campaigns.length, unread: 0 },
+          { key: "automations", label: "Automatizaciones", icon: Zap, count: rules.length, unread: 0 },
+          { key: "templates", label: "Plantillas Oficiales", icon: FileText, count: templates.length, unread: 0 },
+          { key: "stats", label: "Estadísticas", icon: BarChart3, count: null, unread: 0 },
+          { key: "gateway", label: "Servidor & Gateway", icon: Server, count: null, unread: 0 },
         ].map((t) => {
           const Icon = t.icon
           const active = tab === t.key
@@ -1447,7 +1478,12 @@ export default function WhatsAppPage() {
             >
               <Icon className="w-4 h-4" />
               <span>{t.label}</span>
-              {t.count !== null && t.count > 0 && (
+              {t.unread > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-red-500 text-white">
+                  {t.unread > 99 ? "99+" : t.unread}
+                </span>
+              )}
+              {t.unread === 0 && t.count !== null && t.count > 0 && (
                 <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-black ${
                   active
                     ? "bg-emerald-500 text-white"
@@ -1680,6 +1716,8 @@ export default function WhatsAppPage() {
         <LiveChatHub
           currentUserId={user?.id}
           currentUserName={user?.nombre || "Operador"}
+          templates={templates}
+          onSendCampaign={() => setShowCampModal(true)}
         />
       )}
 
@@ -2837,6 +2875,70 @@ export default function WhatsAppPage() {
                     </div>
                   )
                 })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB: ESTADÍSTICAS (BOT VS HUMANO) ── */}
+      {tab === "stats" && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm">
+              <p className="text-xs text-slate-500 mb-1">Conversaciones (30d)</p>
+              <p className="text-2xl font-black text-slate-900 dark:text-white">
+                {stats?.total_conversations_30d ?? "—"}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm">
+              <p className="text-xs text-slate-500 mb-1">⏱ Respuesta promedio</p>
+              <p className="text-2xl font-black text-slate-900 dark:text-white">
+                {stats?.avg_response_time_s != null
+                  ? stats.avg_response_time_s < 60
+                    ? `${stats.avg_response_time_s}s`
+                    : `${Math.round(stats.avg_response_time_s / 60)}min`
+                  : "—"}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm">
+              <p className="text-xs text-slate-500 mb-1">🤖 Bot resolvió</p>
+              <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                {stats?.bot_handled ?? "—"}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm">
+              <p className="text-xs text-slate-500 mb-1">👤 Humano atendió</p>
+              <p className="text-2xl font-black text-blue-600 dark:text-blue-400">
+                {stats?.human_handled ?? "—"}
+              </p>
+            </div>
+          </div>
+
+          {(stats?.bot_handled != null || stats?.human_handled != null) && (
+            <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200/80 dark:border-slate-800 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-4">
+                Distribución de atención (últimos 30 días)
+              </h3>
+              <div className="flex justify-center">
+                <PieChart width={280} height={220}>
+                  <Pie
+                    data={[
+                      { name: "🤖 Bot", value: stats?.bot_handled || 0 },
+                      { name: "👤 Humano", value: stats?.human_handled || 0 },
+                    ]}
+                    cx={140}
+                    cy={95}
+                    outerRadius={75}
+                    dataKey="value"
+                    label
+                  >
+                    <Cell fill="#10b981" />
+                    <Cell fill="#3b82f6" />
+                  </Pie>
+                  <Tooltip formatter={(v: number) => [`${v} conv.`]} />
+                  <Legend />
+                </PieChart>
+              </div>
             </div>
           )}
         </div>
