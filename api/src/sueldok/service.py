@@ -808,6 +808,10 @@ async def update_labor_settlement(
         settlement.indemnizacion_legal = data.indemnizacion_legal
     if data.descuentos_varios is not None:
         settlement.descuentos_varios = data.descuentos_varios
+    if data.descuento_extra_club is not None:
+        settlement.descuento_extra_club = Decimal(str(data.descuento_extra_club))
+    if data.descuento_anticipos is not None:
+        settlement.descuento_anticipos = Decimal(str(data.descuento_anticipos))
     if data.observaciones is not None:
         settlement.observaciones = data.observaciones
 

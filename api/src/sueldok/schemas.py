@@ -126,6 +126,8 @@ class SettlementUpdate(BaseModel):
     indemnizacion_monto: Optional[float] = None
     descuentos_varios: Optional[float] = None
     descuentos_monto: Optional[float] = None
+    descuento_extra_club: Optional[float] = None
+    descuento_anticipos: Optional[float] = None
     total_liquidacion_neta: Optional[float] = None
     total_neto: Optional[float] = None
     observaciones: Optional[str] = None
