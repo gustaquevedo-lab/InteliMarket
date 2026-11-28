@@ -70,43 +70,15 @@ router = APIRouter(prefix="/api/v1/financial", tags=["financial"], dependencies=
 
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
-    r = await db.execute(
-        text("SELECT razon_social, nombre_fantasia, ruc, direccion, ciudad, departamento, telefono, timbrado_numero, logo_url FROM companies WHERE id = :cid"),
-        {"cid": company_id}
-    )
-    row = r.first()
-    if row:
-        dir_base = (row.direccion or "Alejo García esq. Carlos Antonio López").strip()
-        loc_parts = []
-        if row.ciudad and row.ciudad.lower() not in dir_base.lower():
-            loc_parts.append(row.ciudad)
-        if row.departamento and row.departamento.lower() not in dir_base.lower():
-            loc_parts.append(row.departamento)
-        if "paraguay" not in dir_base.lower():
-            loc_parts.append("Paraguay")
-        full_dir = f"{dir_base}, {' - '.join(loc_parts)}" if loc_parts else dir_base
-
-        return {
-            "razon_social": row.razon_social or "GRUPO SANTA TERESA E.A.S.",
-            "nombre_fantasia": row.nombre_fantasia or "Extra Supermercado Mayorista",
-            "ruc": row.ruc or "80150377-9",
-            "timbrado": row.timbrado_numero or "18545636",
-            "direccion": full_dir,
-            "ciudad": row.ciudad or "Pedro Juan Caballero",
-            "departamento": row.departamento or "Amambay",
-            "telefono": row.telefono or "+595 992 052200",
-            "logo_url": row.logo_url,
-        }
-    return {
-        "razon_social": "GRUPO SANTA TERESA E.A.S.",
-        "nombre_fantasia": "Extra Supermercado Mayorista",
-        "ruc": "80150377-9",
-        "timbrado": "18545636",
-        "direccion": "Alejo García esq. Carlos Antonio López, Pedro Juan Caballero - Paraguay",
-        "ciudad": "Pedro Juan Caballero",
-        "departamento": "Amambay",
-        "telefono": "+595 992 052200",
-    }
+    from api.src.companies.service import get_canonical_company_info
+    info = await get_canonical_company_info(db, company_id)
+    dir_base = (info.get("direccion") or "").strip()
+    loc_parts = [p for p in (info.get("ciudad"), info.get("departamento")) if p and p.lower() not in dir_base.lower()]
+    if dir_base and "paraguay" not in dir_base.lower():
+        loc_parts.append("Paraguay")
+    if dir_base and loc_parts:
+        info["direccion"] = f"{dir_base}, {' - '.join(loc_parts)}"
+    return info
 
 
 # ── AP: Supplier Invoices ──────────────────────────────────────────────────────

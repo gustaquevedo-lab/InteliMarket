@@ -27,9 +27,8 @@ router = APIRouter(prefix="/api/v1", tags=["inventory"], dependencies=[Depends(r
 
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
-    r = await db.execute(text("SELECT razon_social, ruc, logo_url FROM companies WHERE id = :cid"), {"cid": company_id})
-    row = r.first()
-    return {"razon_social": row.razon_social, "ruc": row.ruc, "logo_url": row.logo_url} if row else {"razon_social": "Empresa", "ruc": "N/A"}
+    from api.src.companies.service import get_canonical_company_info
+    return await get_canonical_company_info(db, company_id)
 
 
 # ---------------------------------------------------------------------------

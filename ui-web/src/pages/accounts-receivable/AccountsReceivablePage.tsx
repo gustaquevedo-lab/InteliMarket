@@ -3391,14 +3391,24 @@ export default function AccountsReceivablePage() {
                                 </button>
 
                                 {(r.estado === "PAGADO" || r.estado === "PAGADO_PARCIAL") && (
-                                  <button
-                                    onClick={() => api.accountsReceivable.downloadRemisionReciboPdf(r.id, r.numero_remision)}
-                                    className="p-1.5 px-2 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 inline-flex items-center gap-1 text-[11px] font-bold shadow-2xs transition"
-                                    title="Descargar / Reimprimir Recibo Oficial de Cobranza (A6 Horizontal con QR)"
-                                  >
-                                    <FileCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                                    <span>Recibo</span>
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => api.accountsReceivable.downloadRemisionReciboPdf(r.id, r.numero_remision)}
+                                      className="p-1.5 px-2 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 inline-flex items-center gap-1 text-[11px] font-bold shadow-2xs transition"
+                                      title="Descargar / Reimprimir Recibo Oficial de Cobranza Corporativo (REC-CORP)"
+                                    >
+                                      <FileCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                      <span>Recibo</span>
+                                    </button>
+                                    <button
+                                      onClick={() => api.accountsReceivable.downloadRemisionRecibosIndividualesPdf(r.id, r.numero_remision)}
+                                      className="p-1.5 px-2 rounded-lg border border-teal-300 dark:border-teal-700 bg-teal-50/50 dark:bg-teal-950/30 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-900/50 inline-flex items-center gap-1 text-[11px] font-bold shadow-2xs transition"
+                                      title="Descargar PDF Consolidado de Recibos Individuales por Funcionario (Finiquito)"
+                                    >
+                                      <FileDown className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                                      <span>Recibos Ind.</span>
+                                    </button>
+                                  </>
                                 )}
 
                                 {r.estado !== "PAGADO" && r.estado !== "ANULADO" && (

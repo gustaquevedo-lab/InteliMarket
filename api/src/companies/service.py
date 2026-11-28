@@ -89,3 +89,43 @@ async def delete_company(db: AsyncSession, company_id: str) -> bool:
     await db.delete(company)
     await db.flush()
     return True
+
+
+async def get_canonical_company_info(db: AsyncSession, company_id: str) -> dict:
+    """Fuente canónica única de datos fiscales y corporativos de la empresa desde PostgreSQL.
+    Todos los routers, reportes PDF y tickets deben consultar aquí en vez de hardcodear datos."""
+    import uuid
+    cid = None
+    try:
+        cid = uuid.UUID(str(company_id))
+    except Exception:
+        pass
+
+    row = None
+    if cid:
+        r = await db.execute(
+            text("""
+                SELECT id, ruc, razon_social, nombre_fantasia, direccion, ciudad,
+                       departamento, telefono, email, timbrado_numero, logo_url
+                FROM companies
+                WHERE id = :cid
+            """),
+            {"cid": cid},
+        )
+        row = r.first()
+
+    timbrado = (row.timbrado_numero if row and row.timbrado_numero else None) or ""
+    return {
+        "id": str(row.id) if row else str(company_id),
+        "razon_social": (row.razon_social if row and row.razon_social else None) or "",
+        "ruc": (row.ruc if row and row.ruc else None) or "",
+        "nombre_fantasia": (row.nombre_fantasia if row and row.nombre_fantasia else None) or "",
+        "direccion": (row.direccion if row and row.direccion else None) or "",
+        "ciudad": (row.ciudad if row and row.ciudad else None) or "",
+        "departamento": (row.departamento if row and row.departamento else None) or "",
+        "telefono": (row.telefono if row and row.telefono else None) or "",
+        "email": (row.email if row and row.email else None) or "",
+        "timbrado": timbrado,
+        "timbrado_numero": timbrado,
+        "logo_url": row.logo_url if row else None,
+    }

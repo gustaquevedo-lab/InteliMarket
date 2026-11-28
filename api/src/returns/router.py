@@ -12,21 +12,8 @@ router = APIRouter(prefix="/api/v1", tags=["returns"], dependencies=[Depends(req
 
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
-    result = await db.execute(
-        text("SELECT razon_social, nombre_fantasia, ruc, direccion, ciudad, logo_url FROM companies WHERE id = :cid"),
-        {"cid": company_id},
-    )
-    row = result.first()
-    if not row:
-        return {
-            "razon_social": "GRUPO SANTA TERESA E.A.S.",
-            "nombre_fantasia": "Extra Supermercado Mayorista",
-            "ruc": "80150377-9",
-            "direccion": "Av. San Blas km 3.5",
-            "ciudad": "Ciudad del Este",
-            "logo_url": None,
-        }
-    return dict(row._mapping)
+    from api.src.companies.service import get_canonical_company_info
+    return await get_canonical_company_info(db, company_id)
 
 
 @router.post("/returns", response_model=ReturnResponse, status_code=status.HTTP_201_CREATED)

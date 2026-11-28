@@ -40,27 +40,8 @@ router = APIRouter(prefix="/api/v1", tags=["caja"], dependencies=[Depends(requir
 
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
-    r = await db.execute(
-        text("SELECT razon_social, nombre_fantasia, ruc, direccion, ciudad, logo_url FROM companies WHERE id = :cid"),
-        {"cid": company_id}
-    )
-    row = r.first()
-    if row:
-        return {
-            "razon_social": row.razon_social or "GRUPO SANTA TERESA E.A.S.",
-            "nombre_fantasia": row.nombre_fantasia or "EXTRA SUPERMERCADO MAYORISTA",
-            "ruc": row.ruc or "80150377-9",
-            "direccion": row.direccion or "Alejo Garcia esq. Carlos Antonio López",
-            "ciudad": row.ciudad or "Pedro Juan Caballero",
-            "logo_url": row.logo_url,
-        }
-    return {
-        "razon_social": "GRUPO SANTA TERESA E.A.S.",
-        "nombre_fantasia": "EXTRA SUPERMERCADO MAYORISTA",
-        "ruc": "80150377-9",
-        "direccion": "Alejo Garcia esq. Carlos Antonio López",
-        "ciudad": "Pedro Juan Caballero",
-    }
+    from api.src.companies.service import get_canonical_company_info
+    return await get_canonical_company_info(db, company_id)
 
 
 def _pdf_response(pdf_bytes: bytes, filename: str) -> StreamingResponse:

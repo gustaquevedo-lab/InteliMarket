@@ -119,6 +119,7 @@ class ReceivablePayment(Base):
     monto_transferencia = Column(Numeric(15, 0))
     monto_cheque = Column(Numeric(15, 0))
     referencia_transferencia = Column(String(150))
+    parent_payment_id = Column(UUID(as_uuid=True), ForeignKey("receivable_payments.id", ondelete="CASCADE"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

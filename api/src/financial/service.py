@@ -2585,6 +2585,7 @@ async def preview_bank_statement_file(db: AsyncSession, bank_account_id: str, fi
             LEFT JOIN customers c ON c.id = rp.customer_id
             LEFT JOIN bank_accounts ba ON ba.id = rp.bank_account_id
             WHERE rp.company_id = :cid
+              AND rp.parent_payment_id IS NULL
               AND rp.fecha >= :w_start AND rp.fecha <= :w_end
         """),
         {"cid": account.company_id, "w_start": w_start, "w_end": w_end},
@@ -2891,6 +2892,7 @@ async def import_bank_statement_file(db: AsyncSession, company_id: str, bank_acc
             LEFT JOIN customers c ON c.id = rp.customer_id
             LEFT JOIN bank_accounts ba ON ba.id = rp.bank_account_id
             WHERE rp.company_id = :cid
+              AND rp.parent_payment_id IS NULL
               AND rp.fecha >= :w_start AND rp.fecha <= :w_end
         """),
         {"cid": account.company_id, "w_start": w_start, "w_end": w_end},
@@ -3359,6 +3361,7 @@ async def suggest_reconciliation_matches(db: AsyncSession, company_id: str, tran
                 LEFT JOIN customers c ON c.id = rp.customer_id
                 LEFT JOIN bank_accounts ba ON ba.id = rp.bank_account_id
                 WHERE rp.company_id = :cid
+                  AND rp.parent_payment_id IS NULL
                   AND rp.monto_total >= :m_min AND rp.monto_total <= :m_max
                 ORDER BY rp.fecha DESC LIMIT 15
             """),

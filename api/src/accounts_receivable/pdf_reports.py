@@ -554,28 +554,13 @@ def generate_deuda_detallada_pdf(
 
 # ── Recibo de Cobranza en A6 Horizontal con QR ─────────────────────────
 
-def generate_recibo_a6_pdf(
+def _build_recibo_a6_elements(
     company: dict,
     receipt_data: dict,
+    styles,
     verification_base_url: str = "https://intelimarket.superextra.com.py",
-) -> bytes:
-    """Genera el Recibo de Cobranza Oficial en formato A6 HORIZONTAL (148mm x 105mm).
-    Diseñado para encajar en 1 sola página exacta con logo institucional, datos fiscales,
-    número de recibo, cliente, imputación de facturas, monto en letras y números,
-    firmas y código QR para verificación pública en línea."""
-    buffer = io.BytesIO()
-    PAGE_WIDTH = 148 * mm
-    PAGE_HEIGHT = 105 * mm
-    MARGIN_A6 = 3.0 * mm
-
-    doc = SimpleDocTemplate(
-        buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT),
-        leftMargin=MARGIN_A6, rightMargin=MARGIN_A6,
-        topMargin=MARGIN_A6, bottomMargin=MARGIN_A6,
-        title=f"Recibo de Cobranza {receipt_data.get('numero_recibo', 'REC')}",
-    )
-    styles = getSampleStyleSheet()
-
+) -> list:
+    """Construye los flowables de un Recibo Oficial de Cobranza A6 Horizontal."""
     elements = []
 
     # Fecha / Hora convertida a America/Asuncion
@@ -591,10 +576,22 @@ def generate_recibo_a6_pdf(
     # 1. HEADER (Logo + Datos Fiscales + Caja N° Recibo)
     logo_flow = _logo_flowable(company, max_w=26 * mm, max_h=10 * mm)
 
+    comp_razon = company.get("razon_social") or ""
+    comp_ruc = company.get("ruc") or ""
+    comp_fantasia = company.get("nombre_fantasia") or ""
+    comp_timbrado = company.get("timbrado_numero") or company.get("timbrado") or ""
+    comp_ciudad = company.get("ciudad") or ""
+    comp_depto = company.get("departamento") or ""
+    loc_str = ", ".join(p for p in [comp_ciudad, "Paraguay" if comp_ciudad else ""] if p)
+    timb_str = f"Timbrado: {comp_timbrado}" if comp_timbrado else ""
+    line3 = " · ".join(p for p in [timb_str, loc_str] if p)
+
     fiscal_lines = (
-        "<font size=7 color='#0F172A'><b>GRUPO SANTA TERESA E.A.S.</b></font><br/>"
-        "<font size=5.5 color='#475569'><b>RUC:</b> 80150377-9 · Extra Supermercado Mayorista<br/>"
-        "Timbrado: 18545636 · Cnel. Oviedo, Paraguay</font>"
+        f"<font size=7 color='#0F172A'><b>{comp_razon}</b></font><br/>"
+        f"<font size=5.5 color='#475569'><b>RUC:</b> {comp_ruc}"
+        + (f" · {comp_fantasia}" if comp_fantasia else "")
+        + (f"<br/>{line3}" if line3 else "")
+        + "</font>"
     )
 
     recibo_num = receipt_data.get("numero_recibo", f"REC-{str(receipt_data.get('id', ''))[:8].upper()}")
@@ -729,8 +726,20 @@ def generate_recibo_a6_pdf(
             else:
                 nc_cell = Paragraph("<font size=4.8 color='#94A3B8'>—</font>", ParagraphStyle("TDNC", parent=styles["Normal"], alignment=TA_RIGHT))
 
+        titular_nom = (a.get("titular_nombre") or "").strip()
+        rec_ind = (a.get("recibo_individual_numero") or "").strip()
+        if titular_nom and titular_nom.upper() != c_name.upper():
+            tit_short = titular_nom[:26] + ("…" if len(titular_nom) > 26 else "")
+            ind_badge = f" · {rec_ind}" if rec_ind else ""
+            doc_cell_html = (
+                f"<font size=5.5 color='#0F172A'><b>{doc_num}</b></font><br/>"
+                f"<font size=4.2 color='#475569'>{tit_short}{ind_badge}</font>"
+            )
+        else:
+            doc_cell_html = f"<font size=5.5 color='#0F172A'><b>{doc_num}</b></font>"
+
         t_alloc_data.append([
-            Paragraph(f"<font size=5.5 color='#0F172A'><b>{doc_num}</b></font>", styles["Normal"]),
+            Paragraph(doc_cell_html, styles["Normal"]),
             Paragraph(f"<font size=5 color='#475569'>{vto_str}</font>", styles["Normal"]),
             Paragraph(f"<font size=5.2 color='#475569'>{_fmt_gs(m_orig)}</font>", ParagraphStyle("TD1", parent=styles["Normal"], alignment=TA_RIGHT)),
             nc_cell,
@@ -859,6 +868,59 @@ def generate_recibo_a6_pdf(
         ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
     ]))
     elements.append(footer_table)
+    return elements
+
+
+def generate_recibo_a6_pdf(
+    company: dict,
+    receipt_data: dict,
+    verification_base_url: str = "https://intelimarket.superextra.com.py",
+) -> bytes:
+    """Genera un Recibo Oficial de Cobranza profesional en formato Media Hoja / A6 Horizontal (148 x 105 mm),
+    diseñado para caber estrictamente en 1 sola página compacta (sin desborde) con firma, detalle de
+    facturas, Notas de Crédito aplicadas, formas de pago multimoneda, retención IVA y código QR."""
+    buffer = io.BytesIO()
+    PAGE_WIDTH, PAGE_HEIGHT = 148 * mm, 105 * mm
+    MARGIN_A6 = 3.5 * mm
+
+    doc = SimpleDocTemplate(
+        buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT),
+        leftMargin=MARGIN_A6, rightMargin=MARGIN_A6,
+        topMargin=MARGIN_A6, bottomMargin=MARGIN_A6,
+        title=f"Recibo de Cobranza {receipt_data.get('numero_recibo', 'REC')}",
+    )
+    styles = getSampleStyleSheet()
+    elements = _build_recibo_a6_elements(company, receipt_data, styles, verification_base_url)
+    doc.build(elements)
+    return buffer.getvalue()
+
+
+def generate_recibos_individuales_consolidados_pdf(
+    company: dict,
+    receipts_data: list[dict],
+    verification_base_url: str = "https://intelimarket.superextra.com.py",
+) -> bytes:
+    """Genera un PDF multipágina en formato A6 Horizontal conteniendo los recibos individuales
+    de finiquito de cada funcionario titular de facturas a crédito de una remisión corporativa."""
+    buffer = io.BytesIO()
+    PAGE_WIDTH, PAGE_HEIGHT = 148 * mm, 105 * mm
+    MARGIN_A6 = 3.5 * mm
+
+    doc = SimpleDocTemplate(
+        buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT),
+        leftMargin=MARGIN_A6, rightMargin=MARGIN_A6,
+        topMargin=MARGIN_A6, bottomMargin=MARGIN_A6,
+        title="Recibos Individuales de Finiquito",
+    )
+    styles = getSampleStyleSheet()
+    elements: list = []
+    for idx, rdata in enumerate(receipts_data):
+        if idx > 0:
+            elements.append(PageBreak())
+        elements.extend(_build_recibo_a6_elements(company, rdata, styles, verification_base_url))
+
+    if not elements:
+        elements.append(Paragraph("No hay recibos individuales generados para esta remisión.", styles["Normal"]))
 
     doc.build(elements)
     return buffer.getvalue()

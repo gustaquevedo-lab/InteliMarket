@@ -30,19 +30,8 @@ router = APIRouter(prefix="/api/v1", tags=["accounts-receivable"])
 
 
 async def _get_company_info(db: AsyncSession, company_id: str) -> dict:
-    r = await db.execute(
-        text("SELECT razon_social, ruc, logo_url, nombre_fantasia, direccion, ciudad FROM companies WHERE id = :cid"),
-        {"cid": company_id}
-    )
-    row = r.first()
-    return {
-        "razon_social": (row.razon_social if row and row.razon_social else None) or "GRUPO SANTA TERESA E.A.S.",
-        "ruc": (row.ruc if row and row.ruc else None) or "80150377-9",
-        "logo_url": row.logo_url if row else None,
-        "nombre_fantasia": getattr(row, "nombre_fantasia", None) or "Extra Supermercado Mayorista",
-        "direccion": getattr(row, "direccion", None) or "Alejo Garcia esq. Carlos Antonio López",
-        "ciudad": getattr(row, "ciudad", None) or "Pedro Juan Caballero",
-    }
+    from api.src.companies.service import get_canonical_company_info
+    return await get_canonical_company_info(db, company_id)
 
 
 
@@ -674,6 +663,64 @@ async def export_corporate_remission_receipt_pdf(
         media_type="application/pdf",
         headers={
             "Content-Disposition": f"attachment; filename=recibo_{safe_num}.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
+    )
+
+
+@router.get("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/individual-receipts")
+async def list_corporate_remission_individual_receipts(
+    company_id: str,
+    remission_id: str,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Lista los recibos individuales de finiquito emitidos para los funcionarios de una remisión cobrada."""
+    receipts = await service.get_corporate_remission_individual_receipts_data(db, company_id, remission_id)
+    return [
+        {
+            "id": str(r["id"]),
+            "numero_recibo": r.get("numero_recibo"),
+            "customer_id": str(r.get("customer_id")),
+            "customer_name": r.get("customer_name"),
+            "customer_ruc": r.get("customer_ruc"),
+            "monto_total": float(r.get("monto_total") or 0),
+            "fecha": str(r.get("fecha") or ""),
+            "cantidad_facturas": len(r.get("allocations") or []),
+        }
+        for r in receipts
+    ]
+
+
+@router.get("/companies/{company_id}/accounts-receivable/corporate-remissions/{remission_id}/individual-receipts.pdf")
+async def export_corporate_remission_individual_receipts_pdf(
+    company_id: str,
+    remission_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Genera un PDF multipágina A6 Horizontal con todos los recibos individuales de finiquito de los funcionarios."""
+    receipts = await service.get_corporate_remission_individual_receipts_data(db, company_id, remission_id)
+    if not receipts:
+        raise HTTPException(status_code=404, detail="No hay recibos individuales emitidos para esta remisión")
+
+    company = await _get_company_info(db, company_id)
+    forwarded_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    forwarded_proto = request.headers.get("x-forwarded-proto", "https")
+    if forwarded_host and "superextra.com.py" in forwarded_host:
+        base_url = f"{forwarded_proto}://{forwarded_host}"
+    else:
+        base_url = os.getenv("PUBLIC_APP_URL", "https://intelimarket.superextra.com.py")
+
+    pdf_bytes = ar_pdf_reports.generate_recibos_individuales_consolidados_pdf(
+        company, receipts, verification_base_url=base_url
+    )
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=recibos_individuales_{remission_id[:8]}.pdf",
             "Content-Length": str(len(pdf_bytes)),
         },
     )

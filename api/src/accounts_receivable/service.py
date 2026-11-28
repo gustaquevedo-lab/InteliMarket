@@ -1377,9 +1377,11 @@ async def list_payments_period(db: AsyncSession, company_id: str, fecha_desde: d
                COALESCE(json_agg(json_build_object('numero_documento', ar.numero_documento, 'monto', rpa.monto)) FILTER (WHERE rpa.id IS NOT NULL), '[]') as allocations
         FROM receivable_payments rp
         LEFT JOIN customers c ON c.id = rp.customer_id
-        LEFT JOIN receivable_payment_allocations rpa ON rpa.receivable_payment_id = rp.id
+        LEFT JOIN receivable_payments ch ON ch.parent_payment_id = rp.id
+        LEFT JOIN receivable_payment_allocations rpa ON rpa.receivable_payment_id = COALESCE(ch.id, rp.id)
         LEFT JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
         WHERE rp.company_id = :company_id
+          AND rp.parent_payment_id IS NULL
     """
     params = {"company_id": company_id}
     if fecha_desde:
@@ -2118,7 +2120,7 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
         SELECT
             rp.id, rp.company_id, rp.customer_id, rp.monto_total, rp.moneda,
             rp.forma_pago, rp.referencia, rp.fecha, rp.observaciones, rp.created_at,
-            rp.numero_recibo,
+            rp.numero_recibo, rp.parent_payment_id,
             rp.aplica_retencion, rp.monto_retencion, rp.retencion_numero_comprobante,
             rp.retencion_fecha, rp.retencion_porcentaje, rp.monto_efectivo_recibido,
             rp.bank_account_id, rp.fecha_transferencia, rp.monto_transferencia, rp.monto_cheque, rp.referencia_transferencia,
@@ -2165,7 +2167,7 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
             SELECT
                 rp.id, rp.company_id, rp.customer_id, rp.monto_total, rp.moneda,
                 rp.forma_pago, rp.referencia, rp.fecha, rp.observaciones, rp.created_at,
-                rp.numero_recibo,
+                rp.numero_recibo, rp.parent_payment_id,
                 rp.aplica_retencion, rp.monto_retencion, rp.retencion_numero_comprobante,
                 rp.retencion_fecha, rp.retencion_porcentaje, rp.monto_efectivo_recibido,
                 rp.bank_account_id, rp.fecha_transferencia, rp.monto_transferencia, rp.monto_cheque, rp.referencia_transferencia,
@@ -2191,17 +2193,42 @@ async def get_payment_receipt_data(db: AsyncSession, payment_id: str) -> dict | 
     if not row:
         return None
 
-    q_alloc = text("""
-        SELECT
-            rpa.id, rpa.monto, rpa.monto as monto_aplicado,
-            ar.id as accounts_receivable_id, ar.sale_id,
-            ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
-            ar.monto_original, ar.saldo_pendiente, ar.estado, ar.notas_cobranza
-        FROM receivable_payment_allocations rpa
-        LEFT JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
-        WHERE rpa.receivable_payment_id = :payment_id
-        ORDER BY ar.fecha_vencimiento ASC NULLS LAST, ar.fecha_emision ASC
-    """)
+    ch_cnt_res = await db.execute(
+        text("SELECT count(*) FROM receivable_payments WHERE parent_payment_id = :pid"),
+        {"pid": payment_id},
+    )
+    has_children = (ch_cnt_res.scalar() or 0) > 0
+
+    if has_children:
+        q_alloc = text("""
+            SELECT
+                rpa.id, rpa.monto, rpa.monto as monto_aplicado,
+                ar.id as accounts_receivable_id, ar.sale_id,
+                ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
+                ar.monto_original, ar.saldo_pendiente, ar.estado, ar.notas_cobranza,
+                c_tit.razon_social as titular_nombre, c_tit.ruc as titular_ruc,
+                ch.numero_recibo as recibo_individual_numero, ch.id as recibo_individual_id
+            FROM receivable_payments ch
+            JOIN receivable_payment_allocations rpa ON rpa.receivable_payment_id = ch.id
+            LEFT JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
+            LEFT JOIN customers c_tit ON c_tit.id = ar.customer_id
+            WHERE ch.parent_payment_id = :payment_id
+            ORDER BY c_tit.razon_social ASC NULLS LAST, ar.fecha_emision ASC
+        """)
+    else:
+        q_alloc = text("""
+            SELECT
+                rpa.id, rpa.monto, rpa.monto as monto_aplicado,
+                ar.id as accounts_receivable_id, ar.sale_id,
+                ar.numero_documento, ar.fecha_emision, ar.fecha_vencimiento,
+                ar.monto_original, ar.saldo_pendiente, ar.estado, ar.notas_cobranza,
+                c_tit.razon_social as titular_nombre, c_tit.ruc as titular_ruc
+            FROM receivable_payment_allocations rpa
+            LEFT JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
+            LEFT JOIN customers c_tit ON c_tit.id = ar.customer_id
+            WHERE rpa.receivable_payment_id = :payment_id
+            ORDER BY ar.fecha_vencimiento ASC NULLS LAST, ar.fecha_emision ASC
+        """)
     alloc_res = await db.execute(q_alloc, {"payment_id": payment_id})
     allocations = [dict(a._mapping) for a in alloc_res.fetchall()]
 
@@ -2877,7 +2904,8 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
         cust_id = r_c2.scalar()
 
     p_id = uuid.uuid4()
-    p_date = getattr(data, "fecha_pago", None) or date.today()
+    from zoneinfo import ZoneInfo
+    p_date = getattr(data, "fecha_pago", None) or datetime.now(ZoneInfo("America/Asuncion")).date()
     seq_res = await db.execute(
         text("SELECT count(*) FROM receivable_payments WHERE company_id = :cid AND fecha = :fec"),
         {"cid": company_id, "fec": p_date}
@@ -2971,28 +2999,20 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
 
         # Amortización en cascada sobre los documentos AR de la remisión
         q_ars = text("""
-            SELECT id, saldo_pendiente, monto_original 
-            FROM accounts_receivable 
+            SELECT id, customer_id, saldo_pendiente, monto_original
+            FROM accounts_receivable
             WHERE corporate_remission_id = :rem_id AND saldo_pendiente > 0
             ORDER BY fecha_emision ASC
         """)
         ars_res = await db.execute(q_ars, {"rem_id": remission_id})
         remanente = Decimal(str(monto_pago))
+        amortized_docs: list[dict] = []
         for ar_row in ars_res.fetchall():
             if remanente <= Decimal("0"):
                 break
             s_pend = Decimal(str(ar_row.saldo_pendiente or 0))
             m_ap = min(remanente, s_pend)
             if m_ap > 0:
-                await db.execute(
-                    text("""
-                        INSERT INTO receivable_payment_allocations
-                            (id, receivable_payment_id, accounts_receivable_id, monto, created_at)
-                        VALUES
-                            (gen_random_uuid(), :pid, :arid, :monto, NOW())
-                    """),
-                    {"pid": p_id, "arid": ar_row.id, "monto": float(m_ap)}
-                )
                 n_saldo = max(Decimal("0"), s_pend - m_ap)
                 n_estado = "pagado" if n_saldo <= Decimal("0") else "pendiente"
                 await db.execute(
@@ -3003,7 +3023,26 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
                     """),
                     {"saldo": float(n_saldo), "estado": n_estado, "arid": ar_row.id}
                 )
+                amortized_docs.append({
+                    "ar_id": ar_row.id,
+                    "customer_id": ar_row.customer_id,
+                    "monto_aplicado": m_ap,
+                })
                 remanente -= m_ap
+
+        # Emitir recibos oficiales individuales por cada titular/funcionario (sin duplicar Tesorería)
+        if amortized_docs:
+            await _generate_individual_receipts_for_corporate_payment(
+                db=db,
+                company_id=company_id,
+                parent_payment_id=p_id,
+                parent_numero_recibo=numero_recibo,
+                remission_numero=rem.numero_remision,
+                empresa_nombre=empresa_nombre,
+                p_date=p_date,
+                user_id=user_id,
+                amortized_docs=amortized_docs,
+            )
 
     nuevo_saldo = max(Decimal("0"), saldo_actual - monto_pago)
     nuevo_estado = "PAGADO" if nuevo_saldo <= Decimal("0") else "PAGADO_PARCIAL"
@@ -3061,12 +3100,201 @@ async def pay_corporate_remission(db: AsyncSession, company_id: str, remission_i
     }
 
 
+async def _generate_individual_receipts_for_corporate_payment(
+    db: AsyncSession,
+    company_id: str,
+    parent_payment_id: uuid.UUID,
+    parent_numero_recibo: str,
+    remission_numero: str,
+    empresa_nombre: str,
+    p_date: date,
+    user_id: str | None,
+    amortized_docs: list[dict],
+) -> list[dict]:
+    """Genera 1 recibo individual (REC-YYYYMMDD-NNNN) por cada funcionario/titular agrupando
+    sus facturas cubiertas por el cobro corporativo, vinculado al REC-CORP padre vía parent_payment_id
+    para no duplicar ingresos en Tesorería ni Contabilidad."""
+    from collections import defaultdict
+    by_customer: dict[str, list[dict]] = defaultdict(list)
+    for d in amortized_docs:
+        cid = str(d["customer_id"])
+        by_customer[cid].append(d)
+
+    p_date_str = p_date.strftime("%Y%m%d") if hasattr(p_date, "strftime") else str(p_date).replace("-", "")
+    seq_res = await db.execute(
+        text("SELECT count(*) FROM receivable_payments WHERE company_id = :cid AND fecha = :fec"),
+        {"cid": company_id, "fec": p_date},
+    )
+    seq = int(seq_res.scalar() or 0)
+    uid = uuid.UUID(str(user_id)) if user_id else None
+    created: list[dict] = []
+
+    for emp_cust_id, docs in by_customer.items():
+        seq += 1
+        child_rec_num = f"REC-{p_date_str}-{seq:04d}"
+        # Evitar colisión si ya existe el número en la empresa
+        while True:
+            chk = await db.execute(
+                text("SELECT 1 FROM receivable_payments WHERE company_id = :cid AND numero_recibo = :num LIMIT 1"),
+                {"cid": company_id, "num": child_rec_num},
+            )
+            if not chk.scalar():
+                break
+            seq += 1
+            child_rec_num = f"REC-{p_date_str}-{seq:04d}"
+
+        child_pid = uuid.uuid4()
+        emp_total = sum((Decimal(str(x["monto_aplicado"])) for x in docs), Decimal("0"))
+        obs_ind = (
+            f"Cancelación vía Convenio Corporativo ({empresa_nombre}) · "
+            f"Remisión {remission_numero} · Comprobante Madre: {parent_numero_recibo}"
+        )
+
+        await db.execute(
+            text("""
+                INSERT INTO receivable_payments
+                    (id, company_id, customer_id, monto_total, moneda, forma_pago, referencia, fecha,
+                     observaciones, registrado_por, numero_recibo, aplica_retencion, monto_retencion,
+                     monto_efectivo_recibido, monto_facturas_canceladas, diferencia_monto, tipo_diferencia,
+                     parent_payment_id, created_at)
+                VALUES
+                    (:id, :company_id, :customer_id, :monto_total, 'PYG', 'convenio_corporativo', :referencia, :fecha,
+                     :observaciones, :registrado_por, :numero_recibo, false, 0,
+                     :monto_total, :monto_total, 0, 'exacto',
+                     :parent_payment_id, NOW())
+            """),
+            {
+                "id": child_pid,
+                "company_id": company_id,
+                "customer_id": emp_cust_id,
+                "monto_total": float(emp_total),
+                "referencia": parent_numero_recibo,
+                "fecha": p_date,
+                "observaciones": obs_ind,
+                "registrado_por": uid,
+                "numero_recibo": child_rec_num,
+                "parent_payment_id": parent_payment_id,
+            },
+        )
+
+        for x in docs:
+            await db.execute(
+                text("""
+                    INSERT INTO receivable_payment_allocations
+                        (id, receivable_payment_id, accounts_receivable_id, monto, created_at)
+                    VALUES
+                        (gen_random_uuid(), :pid, :arid, :monto, NOW())
+                """),
+                {"pid": child_pid, "arid": x["ar_id"], "monto": float(x["monto_aplicado"])},
+            )
+
+        created.append({"id": str(child_pid), "numero_recibo": child_rec_num, "customer_id": emp_cust_id, "monto": float(emp_total)})
+
+    return created
+
+
+async def ensure_individual_receipts_for_remission(db: AsyncSession, company_id: str, remission_id: str) -> list[str]:
+    """Backfill idempotente: si una remisión ya cobrada (PAGADO o PAGADO_PARCIAL) tiene un REC-CORP-*
+    con allocations directas sin recibos individuales hijos, los genera y reasigna las allocations
+    al recibo individual de cada funcionario sin tocar Tesorería ni Contabilidad."""
+    q_rem = text("SELECT * FROM ar_corporate_remissions WHERE id = :id AND company_id = :cid")
+    rem = (await db.execute(q_rem, {"id": remission_id, "cid": company_id})).fetchone()
+    if not rem or rem.estado not in ("PAGADO", "PAGADO_PARCIAL"):
+        return []
+
+    # Buscar pagos madre asociados a la remisión
+    q_parents = text("""
+        SELECT DISTINCT rp.id, rp.numero_recibo, rp.fecha, rp.registrado_por
+        FROM receivable_payments rp
+        LEFT JOIN receivable_payment_allocations rpa ON rpa.receivable_payment_id = rp.id
+        LEFT JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
+        WHERE rp.company_id = :cid
+          AND rp.parent_payment_id IS NULL
+          AND (
+              ar.corporate_remission_id = :rem_id
+              OR rp.observaciones ILIKE :obs_rem
+              OR rp.referencia ILIKE :obs_rem
+          )
+        ORDER BY rp.fecha ASC
+    """)
+    parents = (await db.execute(q_parents, {"cid": company_id, "rem_id": remission_id, "obs_rem": f"%{rem.numero_remision}%"})).fetchall()
+
+    # Si ya existen hijos para alguno de esos padres, devolverlos
+    if parents:
+        parent_ids = [p.id for p in parents]
+        existing_children = (await db.execute(
+            text("SELECT id FROM receivable_payments WHERE parent_payment_id = ANY(:pids) ORDER BY numero_recibo ASC"),
+            {"pids": parent_ids},
+        )).fetchall()
+        if existing_children:
+            return [str(r.id) for r in existing_children]
+
+        # Migrar allocations directas del padre hacia recibos individuales por funcionario
+        main_parent = parents[0]
+        q_dir_allocs = text("""
+            SELECT rpa.id as alloc_id, rpa.accounts_receivable_id as ar_id, rpa.monto as monto_aplicado,
+                   ar.customer_id
+            FROM receivable_payment_allocations rpa
+            JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
+            WHERE rpa.receivable_payment_id = ANY(:pids)
+              AND ar.customer_id IS NOT NULL
+        """)
+        dir_allocs = (await db.execute(q_dir_allocs, {"pids": parent_ids})).fetchall()
+        if dir_allocs:
+            docs = [{"ar_id": r.ar_id, "customer_id": r.customer_id, "monto_aplicado": Decimal(str(r.monto_aplicado or 0))} for r in dir_allocs]
+            created = await _generate_individual_receipts_for_corporate_payment(
+                db=db,
+                company_id=company_id,
+                parent_payment_id=main_parent.id,
+                parent_numero_recibo=main_parent.numero_recibo or f"REC-CORP-{rem.numero_remision}",
+                remission_numero=rem.numero_remision,
+                empresa_nombre=rem.empresa_vinculada_nombre,
+                p_date=main_parent.fecha or date.today(),
+                user_id=str(main_parent.registrado_por) if main_parent.registrado_por else None,
+                amortized_docs=docs,
+            )
+            # Eliminar las allocations directas del padre para no duplicar en cuentas corrientes
+            alloc_ids = [r.alloc_id for r in dir_allocs]
+            await db.execute(
+                text("DELETE FROM receivable_payment_allocations WHERE id = ANY(:aids)"),
+                {"aids": alloc_ids},
+            )
+            await db.flush()
+            return [c["id"] for c in created]
+
+    return []
+
+
+async def get_corporate_remission_individual_receipts_data(db: AsyncSession, company_id: str, remission_id: str) -> list[dict]:
+    """Retorna la lista completa de get_payment_receipt_data para cada recibo individual emitido en una remisión."""
+    await ensure_individual_receipts_for_remission(db, company_id, remission_id)
+    q_children = text("""
+        SELECT DISTINCT rp.id, c.razon_social
+        FROM receivable_payments rp
+        JOIN receivable_payment_allocations rpa ON rpa.receivable_payment_id = rp.id
+        JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
+        LEFT JOIN customers c ON c.id = rp.customer_id
+        WHERE rp.company_id = :cid
+          AND rp.parent_payment_id IS NOT NULL
+          AND ar.corporate_remission_id = :rem_id
+        ORDER BY c.razon_social ASC NULLS LAST
+    """)
+    rows = (await db.execute(q_children, {"cid": company_id, "rem_id": remission_id})).fetchall()
+    results = []
+    for r in rows:
+        data = await get_payment_receipt_data(db, str(r.id))
+        if data:
+            results.append(data)
+    return results
+
+
 async def get_corporate_remission_receipt_data(db: AsyncSession, company_id: str, remission_id: str) -> dict | None:
     """Obtiene los datos estructurados del Recibo Oficial de Cobranza (A6 Horizontal) para una remisión corporativa cobrada.
     Si la remisión ya tiene un pago formal en receivable_payments, lo estira.
     Si fue cobrada previamente antes de registrar receivable_payments, sintetiza fielmente el recibo a partir de la remisión."""
+    await ensure_individual_receipts_for_remission(db, company_id, remission_id)
     q_p = text("""
-        SELECT rp.id 
+        SELECT COALESCE(rp.parent_payment_id, rp.id) as corp_pid
         FROM receivable_payments rp
         JOIN receivable_payment_allocations rpa ON rpa.receivable_payment_id = rp.id
         JOIN accounts_receivable ar ON ar.id = rpa.accounts_receivable_id
@@ -3174,6 +3402,14 @@ async def revert_corporate_remission_payment(
     )
     linked_rps = rp_res.fetchall()
     rp_ids = [r.id for r in linked_rps]
+    if rp_ids:
+        child_rps = (await db.execute(
+            text("SELECT id FROM receivable_payments WHERE parent_payment_id = ANY(:pids)"),
+            {"pids": rp_ids},
+        )).fetchall()
+        for cr in child_rps:
+            if cr.id not in rp_ids:
+                rp_ids.append(cr.id)
     ve_ids = [r.vault_entry_id for r in linked_rps if r.vault_entry_id]
     chq_ids = [r.cheque_id for r in linked_rps if r.cheque_id]
     recibo_nums = [r.numero_recibo for r in linked_rps if r.numero_recibo]
