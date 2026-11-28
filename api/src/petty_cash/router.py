@@ -17,7 +17,7 @@ from api.src.petty_cash.schemas import (
     ExpenseApprovalConfig, ExpenseRejectBody, FundReplenishRequest,
     ExpenseVoidBody, ComprobanteUploadResponse,
     ExpenseRevertPaymentRequest, ExpenseBatchRevertPaymentRequest,
-    ExpenseBatchAssignInvoiceRequest, ExpenseBatchDisburseRequest,
+    ExpenseBatchAssignInvoiceRequest, ExpenseBatchDisburseRequest, ExpenseBatchReassignRequest,
     FundCountCreate, FundCountConfirm, PettyCashFundCountResponse,
     PettyCashRendicionCreate, PettyCashRendicionAuditRequest, PettyCashRendicionReplenishRequest,
     PettyCashRendicionResponse, PettyCashRendicionDetailResponse,
@@ -559,6 +559,23 @@ async def batch_assign_invoice(
             expense_ids=body.expense_ids,
             supplier_invoice_id=body.supplier_invoice_id,
             notas=body.notas,
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+
+
+@router.post("/batch-reassign")
+async def batch_reassign(
+    body: ExpenseBatchReassignRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Reasigna en lote Sector, Categoría, Fondo Fijo y/o Naturaleza Económica de comprobantes."""
+    try:
+        return await service.batch_reassign_expenses(
+            db=db,
+            company_id=user["company_id"],
+            body=body,
         )
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err))

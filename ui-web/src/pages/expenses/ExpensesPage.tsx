@@ -8,7 +8,7 @@ import {
   SlidersHorizontal, Check, AlertCircle, FileText, Download, Calendar, Tag,
   FileSpreadsheet, Printer, PieChart, BookOpen, FileCheck, ScrollText, CheckCheck,
   Pencil, Package, RotateCcw, X, ChevronDown, UserCheck, Trash2, Settings, Edit3,
-  ChefHat, History
+  ChefHat, History, ArrowRightLeft
 } from "lucide-react"
 import {
   api, API_ORIGIN, type Expense, type ExpenseCategory, type CostCenter,
@@ -46,6 +46,8 @@ export default function ExpensesPage() {
   const [filterRendicion, setFilterRendicion] = useState("")
   const [filterEstado, setFilterEstado] = useState("")
   const [filterNaturaleza, setFilterNaturaleza] = useState("")
+  const [naturalezaTab, setNaturalezaTab] = useState<"todos" | "gastos" | "proveedores" | "anticipos">("todos")
+  const [reportNaturalezaTab, setReportNaturalezaTab] = useState<"todos" | "gastos" | "proveedores" | "anticipos">("todos")
   const [filterFund, setFilterFund] = useState("")
   const [userFundInitialized, setUserFundInitialized] = useState(false)
   const [filterCategory, setFilterCategory] = useState("")
@@ -1933,8 +1935,97 @@ export default function ExpensesPage() {
   const gastosPendientes = expenses.filter(e => e.estado === "pendiente")
   const totalPendienteMonto = gastosPendientes.reduce((acc, e) => acc + (e.monto || 0), 0)
 
+  const classifyExpenseTab = (e: any): "gastos" | "proveedores" | "anticipos" => {
+    const nat = e.naturaleza_economica
+    if (nat === "ANTICIPO_PERSONAL" || (!nat && e.es_anticipo_sueldo) || e.es_anticipo_sueldo) return "anticipos"
+    if (nat === "CMV_REVENTA" || (!nat && e.es_pago_proveedor) || e.es_pago_proveedor) return "proveedores"
+    return "gastos"
+  }
+
+  // Modal Rápido de Reasignación (Sector, Categoría, Fondo Fijo, Naturaleza)
+  const [showReassignModal, setShowReassignModal] = useState(false)
+  const [reassignTargets, setReassignTargets] = useState<any[]>([])
+  const [reassignSaving, setReassignSaving] = useState(false)
+  const [reassignForm, setReassignForm] = useState({
+    apply_cost_center: true,
+    cost_center_id: "",
+    apply_category: false,
+    category_id: "",
+    apply_fund: false,
+    fund_id: "",
+    apply_naturaleza: false,
+    naturaleza_economica: "OPEX_GASTO_OPERATIVO",
+  })
+
+  const openReassignModal = (targets: any[]) => {
+    if (!targets.length) return
+    const first = targets[0]
+    setReassignTargets(targets)
+    const firstNat = first.naturaleza_economica || (first.es_pago_proveedor ? "CMV_REVENTA" : first.es_anticipo_sueldo ? "ANTICIPO_PERSONAL" : "OPEX_GASTO_OPERATIVO")
+    setReassignForm({
+      apply_cost_center: true,
+      cost_center_id: first.cost_center_id || "",
+      apply_category: targets.length === 1,
+      category_id: first.category_id || "",
+      apply_fund: false,
+      fund_id: first.fund_id || "",
+      apply_naturaleza: false,
+      naturaleza_economica: firstNat,
+    })
+    setShowReassignModal(true)
+  }
+
+  const hasPaidRendicionTarget = useMemo(() => {
+    return reassignTargets.some(t => {
+      if (!t.rendicion_id) return false
+      const r = rendiciones.find(x => x.id === t.rendicion_id)
+      return r?.estado === "pagada"
+    })
+  }, [reassignTargets, rendiciones])
+
+  const handleSaveReassign = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!reassignTargets.length) return
+    const payload = {
+      expense_ids: reassignTargets.map(t => t.id),
+      apply_cost_center: reassignForm.apply_cost_center,
+      cost_center_id: reassignForm.cost_center_id || null,
+      apply_category: reassignForm.apply_category,
+      category_id: reassignForm.category_id || null,
+      apply_fund: reassignForm.apply_fund && !hasPaidRendicionTarget,
+      fund_id: reassignForm.fund_id || null,
+      apply_naturaleza: reassignForm.apply_naturaleza,
+      naturaleza_economica: reassignForm.naturaleza_economica,
+    }
+    if (!payload.apply_cost_center && !payload.apply_category && !payload.apply_fund && !payload.apply_naturaleza) {
+      toast.warning("Sin cambios", "Marcá al menos un campo para reasignar")
+      return
+    }
+    setReassignSaving(true)
+    try {
+      const res = await api.expenses.batchReassign(payload)
+      toast.success(
+        "Reasignación aplicada",
+        `${res.updated_count} comprobante${res.updated_count === 1 ? "" : "s"} actualizado${res.updated_count === 1 ? "" : "s"}`
+      )
+      setShowReassignModal(false)
+      setSelectedTableExpenseIds([])
+      await fetchAll()
+      if (tab === "reportes" && reportSubTab === "sector") {
+        fetchReportData()
+      }
+    } catch (err: any) {
+      toast.error("Error al reasignar", err?.message || "No se pudo reasignar")
+    } finally {
+      setReassignSaving(false)
+    }
+  }
+
   // Filtrado de gastos en tabla
   const filteredExpenses = expenses.filter(e => {
+    // 0. Pestaña de Naturaleza (Todos | Gastos Operativos | Pagos a Proveedores | Anticipos de Sueldo)
+    if (naturalezaTab !== "todos" && classifyExpenseTab(e) !== naturalezaTab) return false
+
     // 1. Filtro por Rendición
     if (filterRendicion === "sin_rendicion" && e.rendicion_id) return false
     if (filterRendicion === "con_rendicion" && !e.rendicion_id) return false
@@ -2012,7 +2103,7 @@ export default function ExpensesPage() {
   // Reset de página al cambiar filtros
   useEffect(() => {
     setPage(0)
-  }, [search, filterMonto, filterRendicion, filterEstado, filterNaturaleza, filterFund, filterSector, filterCategory])
+  }, [search, filterMonto, filterRendicion, filterEstado, filterNaturaleza, naturalezaTab, filterFund, filterSector, filterCategory])
 
   const paginatedExpenses = useMemo(() => {
     const start = page * PAGE_SIZE
@@ -2867,6 +2958,32 @@ export default function ExpensesPage() {
                 </button>
               </div>
 
+              {/* Pestañas de Clasificación Contable */}
+              <div className="flex items-center gap-1.5 flex-wrap bg-slate-100/80 dark:bg-slate-900/60 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 w-fit">
+                {([
+                  { id: "todos", label: "Todos", count: expenses.length },
+                  { id: "gastos", label: "Gastos Operativos", count: expenses.filter(e => classifyExpenseTab(e) === "gastos").length },
+                  { id: "proveedores", label: "Pagos a Proveedores", count: expenses.filter(e => classifyExpenseTab(e) === "proveedores").length },
+                  { id: "anticipos", label: "Anticipos de Sueldo", count: expenses.filter(e => classifyExpenseTab(e) === "anticipos").length },
+                ] as const).map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setNaturalezaTab(t.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                      naturalezaTab === t.id
+                        ? "bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 shadow-sm border border-slate-200 dark:border-slate-700"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                  >
+                    <span>{t.label}</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-slate-200/70 dark:bg-slate-700/70 font-mono">
+                      {t.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
               {/* Barra de Filtros */}
               <div className="card p-4 bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700/60 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 items-center">
@@ -3088,6 +3205,15 @@ export default function ExpensesPage() {
                         <span>Pagar con Transferencia / Banco ({eligibleUnpaidExpenses.length})</span>
                       </button>
                     )}
+
+                    <button
+                      type="button"
+                      onClick={() => openReassignModal(expenses.filter(e => selectedTableExpenseIds.includes(e.id)))}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white rounded-xl text-xs font-bold transition shadow-md"
+                    >
+                      <ArrowRightLeft className="w-4 h-4" />
+                      <span>Reasignar Sector / Categoría / Fondo</span>
+                    </button>
 
                     <button
                       type="button"
@@ -3368,15 +3494,24 @@ export default function ExpensesPage() {
                             </td>
                             <td className="p-3.5 text-right whitespace-nowrap">
                               <div className="flex items-center justify-end gap-1.5">
-                                {/* 0. Botón Editar Comprobante */}
+                                {/* 0. Botón Editar Comprobante y Reasignar */}
                                 {!e.anulado && e.estado !== "anulado" && (
-                                  <button
-                                    onClick={() => handleOpenEdit(e)}
-                                    title="Editar comprobante de gasto"
-                                    className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                  >
-                                    <Pencil className="w-4 h-4" />
-                                  </button>
+                                  <>
+                                    <button
+                                      onClick={() => openReassignModal([e])}
+                                      title="Reasignar Sector, Categoría, Fondo Fijo o Naturaleza"
+                                      className="p-1.5 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors"
+                                    >
+                                      <ArrowRightLeft className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleOpenEdit(e)}
+                                      title="Editar comprobante de gasto"
+                                      className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                    >
+                                      <Pencil className="w-4 h-4" />
+                                    </button>
+                                  </>
                                 )}
 
                                 {/* 1. Si está pendiente: Botones de Aprobar y Rechazar */}
@@ -3926,11 +4061,42 @@ export default function ExpensesPage() {
                         </div>
 
                         {/* Detalle de Comprobantes Recientes */}
-                        {reportSectorData.detalle_gastos?.length > 0 && (
-                          <div className="space-y-2">
-                            <h5 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                              Comprobantes Registrados ({reportSectorData.detalle_gastos.length})
-                            </h5>
+                        {reportSectorData.detalle_gastos?.length > 0 && (() => {
+                          const detAll = reportSectorData.detalle_gastos as any[]
+                          const detFiltered = reportNaturalezaTab === "todos"
+                            ? detAll
+                            : detAll.filter(g => classifyExpenseTab(g) === reportNaturalezaTab)
+                          return (
+                          <div className="space-y-3">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <h5 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                Comprobantes Registrados ({detFiltered.length})
+                              </h5>
+                              <div className="flex items-center gap-1 flex-wrap bg-slate-100 dark:bg-slate-900/60 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+                                {([
+                                  { id: "todos", label: "Todos", count: detAll.length },
+                                  { id: "gastos", label: "Gastos Operativos", count: detAll.filter(g => classifyExpenseTab(g) === "gastos").length },
+                                  { id: "proveedores", label: "Pagos a Proveedores", count: detAll.filter(g => classifyExpenseTab(g) === "proveedores").length },
+                                  { id: "anticipos", label: "Anticipos de Sueldo", count: detAll.filter(g => classifyExpenseTab(g) === "anticipos").length },
+                                ] as const).map(t => (
+                                  <button
+                                    key={t.id}
+                                    type="button"
+                                    onClick={() => setReportNaturalezaTab(t.id)}
+                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1.5 ${
+                                      reportNaturalezaTab === t.id
+                                        ? "bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 shadow-sm border border-slate-200 dark:border-slate-700"
+                                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                                    }`}
+                                  >
+                                    <span>{t.label}</span>
+                                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-200/70 dark:bg-slate-700/70 font-mono">
+                                      {t.count}
+                                    </span>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
                             <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 max-h-96">
                               <table className="w-full text-left text-xs border-collapse">
                                 <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
@@ -3942,17 +4108,18 @@ export default function ExpensesPage() {
                                     <th className="p-2.5">Fondo Fijo</th>
                                     <th className="p-2.5 text-right">Monto</th>
                                     <th className="p-2.5 text-center">Comprobante</th>
+                                    <th className="p-2.5 text-right">Acciones</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                  {reportSectorData.detalle_gastos.map((g: any) => (
+                                  {detFiltered.map((g: any) => (
                                     <tr key={g.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                                       <td className="p-2.5 font-mono text-[11px] text-slate-500">{g.fecha_gasto}</td>
                                       <td className="p-2.5 font-semibold text-slate-800 dark:text-slate-200">{g.sector_nombre || "—"}</td>
                                       <td className="p-2.5 text-slate-600 dark:text-slate-300 max-w-xs truncate">{g.descripcion}</td>
                                       <td className="p-2.5 text-slate-600 dark:text-slate-400">{g.proveedor || "—"}</td>
                                       <td className="p-2.5 text-slate-500">{g.fund_nombre || "Caja Chica"}</td>
-                                      <td className="p-2.5 text-right font-mono font-bold text-slate-900 dark:text-white">{formatPYG(g.monto)}</td>
+                                      <td className="p-2.5 text-right font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap">{formatPYG(g.monto)}</td>
                                       <td className="p-2.5 text-center">
                                         {g.comprobante_url ? (
                                           <a
@@ -3967,13 +4134,37 @@ export default function ExpensesPage() {
                                           <span className="text-[10px] text-slate-400">Sin archivo</span>
                                         )}
                                       </td>
+                                      <td className="p-2.5 text-right whitespace-nowrap">
+                                        <div className="inline-flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => openReassignModal([expenses.find(x => x.id === g.id) || g])}
+                                            title="Reasignar Sector, Categoría, Fondo Fijo o Naturaleza"
+                                            className="p-1 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors"
+                                          >
+                                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const full = expenses.find(x => x.id === g.id)
+                                              if (full) handleOpenEdit(full)
+                                            }}
+                                            title="Editar comprobante completo"
+                                            className="p-1 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                          >
+                                            <Pencil className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </td>
                                     </tr>
                                   ))}
                                 </tbody>
                               </table>
                             </div>
                           </div>
-                        )}
+                          )
+                        })()}
                       </div>
                     ) : null}
                   </div>
@@ -7748,6 +7939,173 @@ export default function ExpensesPage() {
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔄 MODAL RÁPIDO: REASIGNAR SECTOR, CATEGORÍA, FONDO FIJO O NATURALEZA */}
+      {showReassignModal && reassignTargets.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm" onClick={() => !reassignSaving && setShowReassignModal(false)}>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+            {/* Header Fijo */}
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50 dark:bg-slate-900">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Reasignar {reassignTargets.length === 1 ? "Comprobante" : `${reassignTargets.length} Comprobantes`}
+                  </h3>
+                  <p className="text-xs text-slate-500 truncate max-w-xs">
+                    {reassignTargets.length === 1
+                      ? `${reassignTargets[0].descripcion} · ${formatPYG(reassignTargets[0].monto || 0)}`
+                      : `Total seleccionado: ${formatPYG(reassignTargets.reduce((s, x) => s + Number(x.monto || 0), 0))}`}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !reassignSaving && setShowReassignModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Cuerpo Central Scrolleable */}
+            <form onSubmit={handleSaveReassign} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+                {hasPaidRendicionTarget && (
+                  <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                    <span>
+                      Uno o más comprobantes pertenecen a una <strong>rendición ya pagada</strong>. Podés reclasificar Sector, Categoría y Naturaleza, pero el Fondo Fijo queda bloqueado.
+                    </span>
+                  </div>
+                )}
+
+                {/* 1. Sector / Centro de Costo */}
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                  <label className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={reassignForm.apply_cost_center}
+                      onChange={e => setReassignForm(prev => ({ ...prev, apply_cost_center: e.target.checked }))}
+                      className="rounded border-slate-300 text-indigo-600"
+                    />
+                    <span>Sector / Centro de Costo</span>
+                  </label>
+                  <select
+                    disabled={!reassignForm.apply_cost_center}
+                    className="input-field text-xs w-full disabled:opacity-50"
+                    value={reassignForm.cost_center_id}
+                    onChange={e => setReassignForm(prev => ({ ...prev, cost_center_id: e.target.value }))}
+                  >
+                    <option value="">— Sin sector asignado —</option>
+                    {costCenters.map(cc => (
+                      <option key={cc.id} value={cc.id}>{cc.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. Categoría */}
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                  <label className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={reassignForm.apply_category}
+                      onChange={e => setReassignForm(prev => ({ ...prev, apply_category: e.target.checked }))}
+                      className="rounded border-slate-300 text-indigo-600"
+                    />
+                    <span>Categoría de Gasto</span>
+                  </label>
+                  <select
+                    disabled={!reassignForm.apply_category}
+                    className="input-field text-xs w-full disabled:opacity-50"
+                    value={reassignForm.category_id}
+                    onChange={e => setReassignForm(prev => ({ ...prev, category_id: e.target.value }))}
+                  >
+                    <option value="">— Sin categoría —</option>
+                    {categories.map(c => (
+                      <option key={c.id} value={c.id}>{c.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. Fondo Fijo */}
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                  <label className={`flex items-center gap-2 font-bold ${hasPaidRendicionTarget ? "text-slate-400 cursor-not-allowed" : "text-slate-800 dark:text-slate-200 cursor-pointer"}`}>
+                    <input
+                      type="checkbox"
+                      disabled={hasPaidRendicionTarget}
+                      checked={reassignForm.apply_fund && !hasPaidRendicionTarget}
+                      onChange={e => setReassignForm(prev => ({ ...prev, apply_fund: e.target.checked }))}
+                      className="rounded border-slate-300 text-indigo-600"
+                    />
+                    <span>Fondo Fijo / Caja Chica</span>
+                  </label>
+                  <select
+                    disabled={!reassignForm.apply_fund || hasPaidRendicionTarget}
+                    className="input-field text-xs w-full disabled:opacity-50"
+                    value={reassignForm.fund_id}
+                    onChange={e => setReassignForm(prev => ({ ...prev, fund_id: e.target.value }))}
+                  >
+                    <option value="">— Sin fondo fijo (Banco / General) —</option>
+                    {funds.map(f => (
+                      <option key={f.id} value={f.id}>{f.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 4. Naturaleza Económica */}
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
+                  <label className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={reassignForm.apply_naturaleza}
+                      onChange={e => setReassignForm(prev => ({ ...prev, apply_naturaleza: e.target.checked }))}
+                      className="rounded border-slate-300 text-indigo-600"
+                    />
+                    <span>Naturaleza Económica (Pestaña)</span>
+                  </label>
+                  <select
+                    disabled={!reassignForm.apply_naturaleza}
+                    className="input-field text-xs w-full disabled:opacity-50"
+                    value={reassignForm.naturaleza_economica}
+                    onChange={e => setReassignForm(prev => ({ ...prev, naturaleza_economica: e.target.value }))}
+                  >
+                    <option value="OPEX_GASTO_OPERATIVO">🏢 Gasto Operativo (OPEX)</option>
+                    <option value="CMV_MATERIA_PRIMA">🥖 Materia Prima (Producción)</option>
+                    <option value="CAPEX_ACTIVO_FIJO">🏗️ Activo Fijo / Inversión (CAPEX)</option>
+                    <option value="CMV_REVENTA">📦 Pago a Proveedor / Mercadería Reventa</option>
+                    <option value="ANTICIPO_PERSONAL">👤 Anticipo al Personal</option>
+                    <option value="PASIVO_PERIODO_ANTERIOR">⏳ Pasivo Período Anterior</option>
+                    <option value="GASTO_DIFERIDO_CUOTAS">📅 Gasto Diferido / En Cuotas</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Pie Fijo */}
+              <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-end gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={reassignSaving}
+                  onClick={() => setShowReassignModal(false)}
+                  className="px-4 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold hover:bg-slate-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={reassignSaving}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                >
+                  {reassignSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  <span>Aplicar Reasignación</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

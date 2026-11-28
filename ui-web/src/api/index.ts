@@ -1261,7 +1261,32 @@ export interface WhatsAppConfig { id: string; company_id?: string; tenant_id?: s
 export interface WhatsAppConversation { id: string; tenant_id?: string; company_id?: string; customer_id?: string; contact_id?: string; customer?: Customer; telefono?: string; nombre_contacto?: string; contact_name?: string; contact_phone?: string; estado?: string; status?: string; ultimo_mensaje?: string; last_message_preview?: string; ultima_respuesta?: string; fecha_ultimo_mensaje?: string; last_message_at?: string; fecha_ultima_respuesta?: string; mensajes_no_leidos?: number; etiquetas?: string[]; asignado_a?: string; session_state?: string; session_data?: Record<string, unknown>; activo?: boolean; created_at?: string; updated_at?: string; handling_mode?: string; assigned_user_id?: string | null; assigned_user_name?: string | null; department?: string; waiting_since?: string | null; unread_agent_count?: number; is_ai_typing?: boolean; total_messages?: number }
 export interface WhatsAppMessage { id: string; tenant_id?: string; message_id?: string; conversacion_id?: string; conversation_id?: string; conversacion?: WhatsAppConversation; direccion?: string; direction?: string; tipo?: string; contenido?: string; content?: string; media_url?: string; estado?: string; status?: string; error_mensaje?: string; fecha_envio?: string; fecha_entrega?: string; fecha_lectura?: string; metadata?: Record<string, unknown>; created_at?: string; sender_type?: string; sender_user_id?: string | null; sender_name?: string | null; media_type?: string | null; media_filename?: string | null; media_size_bytes?: number | null }
 export interface WhatsAppTemplate { id: string; tenant_id?: string; company_id?: string; nombre?: string; name?: string; tipo?: string; categoria?: string; idioma?: string; contenido?: string; content?: string; variables?: string[]; ejemplo?: string; aprobado?: boolean; estado_aprobacion?: string; activo?: boolean; active?: boolean; created_at?: string; updated_at?: string }
-export interface WhatsAppStats { id?: string; company_id?: string; fecha?: string; total_conversaciones?: number; total_conversations?: number; conversaciones_activas?: number; active_today?: number; mensajes_enviados?: number; messages_today?: number; mensajes_recibidos?: number; tiempo_respuesta_promedio_min?: number; avg_response_time?: number; satisfaccion_promedio?: number; conversiones?: number; ventas_generadas?: number; created_at?: string }
+export interface WhatsAppStats { id?: string; company_id?: string; fecha?: string; total_conversaciones?: number; total_conversations?: number; conversaciones_activas?: number; active_today?: number; mensajes_enviados?: number; messages_today?: number; mensajes_recibidos?: number; tiempo_respuesta_promedio_min?: number; avg_response_time?: number; satisfaccion_promedio?: number; conversiones?: number; ventas_generadas?: number; created_at?: string; bot_handled?: number; human_handled?: number; avg_response_time_s?: number; total_conversations_30d?: number }
+
+export interface UltimaVentaItem {
+  fecha: string
+  numero: string
+  tipo_comprobante: string
+  total: number
+  saldo: number
+}
+
+export interface CustomerProfile {
+  linked: boolean
+  customer_id?: string
+  razon_social?: string
+  ci?: string
+  ruc?: string
+  ciudad?: string
+  telefono?: string
+  limite_credito?: number
+  extra_club_numero?: string
+  extra_club_puntos?: number
+  extra_club_puntos_por_vencer?: number
+  extra_club_is_member?: boolean
+  deuda_total?: number
+  ultimas_ventas?: UltimaVentaItem[]
+}
 export interface WhatsAppAITrainingExample { id: string; tenant_id: string; company_id?: string; categoria: string; mensaje_usuario: string; respuesta_ideal: string; directiva_asociada?: string; activo: boolean; origen: string; created_at?: string; updated_at?: string }
 export interface AITrainingSimulateResponse { text: string; tools_called: string[]; tools_trace: Array<{ tool: string; input: any; output_preview: string; latency_ms?: number }>; pdf_generated: boolean; pdf_base64?: string; pdf_filename?: string; order_code?: string; latency_ms: number; persona: string; guardrails_passed: boolean }
 export interface AIQAResult { passed: number; total: number; all_passed: boolean; score_percentage: number; scenarios: Array<{ id: number; title: string; prompt: string; passed: boolean; latency_ms: number; response_preview: string; tools_called: string[]; pdf_generated: boolean; guardrails_passed: boolean; keywords_matched: string[] }> }
@@ -3092,6 +3117,7 @@ export const api = {
     listConversations: (params?: { inbox?: string; department?: string; assigned_user_id?: string; search?: string; status?: string; limit?: number; offset?: number }) =>
       client.get<WhatsAppConversation[]>("/v1/whatsapp/conversations", params),
     getConversation: (id: string) => client.get<WhatsAppConversation>(`/v1/whatsapp/conversations/${id}`),
+    getCustomerProfile: (convId: string) => client.get<CustomerProfile>(`/v1/whatsapp/conversations/${convId}/customer-profile`),
     getMessages: (convId: string) => client.get<WhatsAppMessage[]>(`/v1/whatsapp/conversations/${convId}/messages`),
     uploadMedia: (file: File) => {
       const formData = new FormData()
@@ -3166,24 +3192,23 @@ export const api = {
     listLeads: () => client.get<Lead[]>("/v1/crm/leads"),
     getLead: (id: string) => client.get<Lead>(`/v1/crm/leads/${id}`),
     createLead: (data: Partial<Lead>) => client.post<Lead>("/v1/crm/leads", data),
-    updateLead: (id: string, data: Partial<Lead>) => client.patch<Lead>(`/v1/crm/leads/${id}`, data),
+    updateLead: (id: string, data: Partial<Lead>) => client.put<Lead>(`/v1/crm/leads/${id}`, data),
     deleteLead: (id: string) => client.delete<void>(`/v1/crm/leads/${id}`),
     listOportunidades: () => client.get<Oportunidad[]>("/v1/crm/oportunidades"),
     getOportunidad: (id: string) => client.get<Oportunidad>(`/v1/crm/oportunidades/${id}`),
     createOportunidad: (data: Partial<Oportunidad>) => client.post<Oportunidad>("/v1/crm/oportunidades", data),
-    updateOportunidad: (id: string, data: Partial<Oportunidad>) => client.patch<Oportunidad>(`/v1/crm/oportunidades/${id}`, data),
+    updateOportunidad: (id: string, data: Partial<Oportunidad>) => client.put<Oportunidad>(`/v1/crm/oportunidades/${id}`, data),
     deleteOportunidad: (id: string) => client.delete<void>(`/v1/crm/oportunidades/${id}`),
-    moveOportunidadEtapa: (id: string, etapa: string) => client.patch<Oportunidad>(`/v1/crm/oportunidades/${id}/etapa`, { etapa }),
+    moveOportunidadEtapa: (id: string, etapa: string) => client.put<Oportunidad>(`/v1/crm/oportunidades/${id}/etapa`, { etapa }),
     listActividades: () => client.get<Actividad[]>("/v1/crm/actividades"),
     getActividad: (id: string) => client.get<Actividad>(`/v1/crm/actividades/${id}`),
     createActividad: (data: Partial<Actividad>) => client.post<Actividad>("/v1/crm/actividades", data),
-    updateActividad: (id: string, data: Partial<Actividad>) => client.patch<Actividad>(`/v1/crm/actividades/${id}`, data),
-    completeActividad: (id: string) => client.post<Actividad>(`/v1/crm/actividades/${id}/complete`),
+    updateActividad: (id: string, data: Partial<Actividad>) => client.put<Actividad>(`/v1/crm/actividades/${id}`, data),
+    completeActividad: (id: string, notas?: string) => client.post<Actividad>(`/v1/crm/actividades/${id}/complete`, { notas: notas ?? null }),
     deleteActividad: (id: string) => client.delete<void>(`/v1/crm/actividades/${id}`),
     getLeadStats: () => client.get<LeadStats>("/v1/crm/stats/leads"),
     getPipelineStats: () => client.get<PipelineStats>("/v1/crm/stats/pipeline"),
     getActivityStats: () => client.get<ActivityStats>("/v1/crm/stats/activities"),
-    stats: () => client.get<{ leads: number; oportunidades: number; actividades: number; conversion_rate: number }>("/v1/crm/stats"),
   },
   rbac: {
     permissions: () => client.get<Permission[]>("/v1/rbac/permissions"),
@@ -4941,6 +4966,21 @@ export const api = {
         "/v1/expenses/batch-disburse",
         data
       ),
+    batchReassign: (data: {
+      expense_ids: string[]
+      apply_cost_center?: boolean
+      cost_center_id?: string | null
+      apply_category?: boolean
+      category_id?: string | null
+      apply_fund?: boolean
+      fund_id?: string | null
+      apply_naturaleza?: boolean
+      naturaleza_economica?: string
+    }) =>
+      client.post<{ success: boolean; updated_count: number; updated_ids: string[]; errors: { id: string; error: string }[] }>(
+        "/v1/expenses/batch-reassign",
+        data
+      ),
     disburse: (id: string, data: { fecha_pago?: string; disbursements: any[]; notas?: string }) => client.post<Expense>(`/v1/expenses/${id}/disburse`, data),
     getDisbursements: (id: string) => client.get<any[]>(`/v1/expenses/${id}/disbursements`),
     downloadPdf: (id: string) => downloadAuthenticated(`/v1/expenses/${id}/pdf`, {}, `recibo_gasto_${id.slice(0, 8)}.pdf`),
@@ -5412,11 +5452,11 @@ export const api = {
     getCampaign: (id: string) => client.get<IntelliZappCampaign>(`/v1/intellizapp/campaigns/${id}`),
     updateCampaign: (id: string, data: Partial<IntelliZappCampaign>) => client.put<IntelliZappCampaign>(`/v1/intellizapp/campaigns/${id}`, data),
     deleteCampaign: (id: string) => client.delete<void>(`/v1/intellizapp/campaigns/${id}`),
-    launchCampaign: (id: string) => client.post<{ status: string; total_recipients: number }>(`/v1/intellizapp/campaigns/${id}/launch`),
+    launchCampaign: (id: string) => client.post<{ recipients_created: number }>(`/v1/intellizapp/campaigns/${id}/launch`),
     sendBatch: (id: string, batchSize?: number) => {
       let url = `/v1/intellizapp/campaigns/${id}/send-batch`
       if (batchSize) url += `?batch_size=${batchSize}`
-      return client.post<{ sent: number; failed: number; remaining: number }>(url)
+      return client.post<{ sent: number; errors: number; remaining: number }>(url)
     },
     listRecipients: (id: string, params?: { status?: string; limit?: number }) => client.get<IntelliZappCampaignRecipient[]>(`/v1/intellizapp/campaigns/${id}/recipients`, params),
     listRules: (activeOnly?: boolean) => client.get<IntelliZappAutomationRule[]>("/v1/intellizapp/automation-rules", { active_only: activeOnly?.toString() }),

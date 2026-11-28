@@ -539,3 +539,15 @@ class ExpenseDashboard(BaseModel):
     tendencia_mensual: list[dict]
     top_proveedores: list[dict]
     sugerencias: list[dict]
+
+
+class ExpenseBatchReassignRequest(BaseModel):
+    expense_ids: list[str] = Field(..., min_length=1)
+    apply_cost_center: bool = False
+    cost_center_id: Optional[str] = None
+    apply_category: bool = False
+    category_id: Optional[str] = None
+    apply_fund: bool = False
+    fund_id: Optional[str] = None
+    apply_naturaleza: bool = False
+    naturaleza_economica: Optional[NaturalezaEconomica] = None

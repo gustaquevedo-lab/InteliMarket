@@ -22,7 +22,7 @@ from api.src.petty_cash.schemas import (
     ExpenseCreate, ExpenseUpdate, ExpenseSummary, CostCenterCreate, PettyCashFundCreate, PettyCashFundUpdate,
     ExpenseApprovalConfig, FundCountCreate, FundCountConfirm,
     PettyCashRendicionCreate, PettyCashRendicionAuditRequest, PettyCashRendicionReplenishRequest,
-    ExpenseDisburseRequest, ExpenseDisbursementLineCreate,
+    ExpenseDisburseRequest, ExpenseDisbursementLineCreate, ExpenseBatchReassignRequest,
 )
 
 TZ_ASUNCION = ZoneInfo("America/Asuncion")
@@ -1907,12 +1907,41 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
         return None
 
     old_rendicion_id = exp.rendicion_id
+    update_data = data.model_dump(exclude_unset=True)
+
     if exp.rendicion_id is not None:
         rend = await db.get(PettyCashRendicion, exp.rendicion_id)
         if rend and rend.estado == "pagada":
-            raise ValueError("Operación denegada: Este comprobante forma parte de una rendición que ya ha sido pagada y cerrada.")
+            # En rendiciones ya pagadas y cerradas, bloqueamos cambios financieros (fondo, monto, rendición),
+            # pero permitimos reclasificación contable (sector, categoría, naturaleza económica).
+            touches_financial = (
+                ("fund_id" in update_data and _safe_uuid(update_data.get("fund_id")) != exp.fund_id)
+                or ("rendicion_id" in update_data and _safe_uuid(update_data.get("rendicion_id")) != exp.rendicion_id)
+                or ("monto" in update_data and update_data.get("monto") is not None and Decimal(str(update_data["monto"])) != Decimal(str(exp.monto)))
+                or ("linked_invoice_ids" in update_data)
+            )
+            if touches_financial:
+                raise ValueError("Operación denegada: Este comprobante forma parte de una rendición que ya ha sido pagada y cerrada. Solo podés reclasificar Sector, Categoría o Naturaleza.")
 
-    update_data = data.model_dump(exclude_unset=True)
+    # Sincronizar flags booleanos al cambiar naturaleza_economica explícitamente
+    if "naturaleza_economica" in update_data and update_data["naturaleza_economica"] is not None:
+        nat = str(update_data["naturaleza_economica"])
+        if nat == "CMV_REVENTA":
+            update_data.setdefault("es_pago_proveedor", True)
+            update_data.setdefault("es_anticipo_sueldo", False)
+            update_data.setdefault("es_inversion", False)
+        elif nat == "ANTICIPO_PERSONAL":
+            update_data.setdefault("es_anticipo_sueldo", True)
+            update_data.setdefault("es_pago_proveedor", False)
+            update_data.setdefault("es_inversion", False)
+        elif nat == "CAPEX_ACTIVO_FIJO":
+            update_data.setdefault("es_inversion", True)
+            update_data.setdefault("es_pago_proveedor", False)
+            update_data.setdefault("es_anticipo_sueldo", False)
+        else:
+            update_data.setdefault("es_pago_proveedor", False)
+            update_data.setdefault("es_anticipo_sueldo", False)
+            update_data.setdefault("es_inversion", False)
 
     # Permitir cambiar o desvincular de fondo
     if "fund_id" in update_data:
@@ -2196,7 +2225,7 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
                             g_exp.ruc = first_supplier_ruc
 
     for field, value in update_data.items():
-        if value is not None or field in ("supplier_invoice_id", "supplier_id"):
+        if value is not None or field in ("supplier_invoice_id", "supplier_id", "cost_center_id", "category_id"):
             setattr(exp, field, value)
 
     await db.flush()
@@ -2210,6 +2239,50 @@ async def update_expense(db: AsyncSession, expense_id: str, data: ExpenseUpdate)
     await db.refresh(exp)
     await _populate_linked_invoices(db, exp)
     return exp
+
+
+async def batch_reassign_expenses(
+    db: AsyncSession,
+    company_id: str,
+    body: "ExpenseBatchReassignRequest",
+) -> dict:
+    """Reasigna en lote Sector, Categoría, Fondo Fijo y/o Naturaleza Económica reutilizando update_expense."""
+    cid = uuid.UUID(str(company_id))
+    payload_dict: dict = {}
+    if body.apply_cost_center:
+        payload_dict["cost_center_id"] = body.cost_center_id or None
+    if body.apply_category:
+        payload_dict["category_id"] = body.category_id or None
+    if body.apply_fund:
+        payload_dict["fund_id"] = body.fund_id or None
+    if body.apply_naturaleza and body.naturaleza_economica is not None:
+        payload_dict["naturaleza_economica"] = body.naturaleza_economica
+
+    if not payload_dict:
+        raise ValueError("Debes marcar al menos un campo para reasignar (Sector, Categoría, Fondo Fijo o Naturaleza).")
+
+    updated_ids: list[str] = []
+    errors: list[dict] = []
+    for raw_id in body.expense_ids:
+        exp = await get_expense(db, str(raw_id))
+        if not exp or exp.company_id != cid:
+            errors.append({"id": str(raw_id), "error": "Comprobante no encontrado"})
+            continue
+        try:
+            await update_expense(db, str(raw_id), ExpenseUpdate(**payload_dict))
+            updated_ids.append(str(raw_id))
+        except ValueError as err:
+            errors.append({"id": str(raw_id), "error": str(err)})
+
+    if not updated_ids and errors:
+        raise ValueError(errors[0]["error"])
+
+    return {
+        "success": True,
+        "updated_count": len(updated_ids),
+        "updated_ids": updated_ids,
+        "errors": errors,
+    }
 
 
 async def delete_expense(db: AsyncSession, expense_id: str) -> bool:
@@ -2655,6 +2728,13 @@ async def get_expenses_by_sector_report(
             Expense.tipo_pago,
             Expense.estado,
             Expense.notas,
+            Expense.cost_center_id,
+            Expense.category_id,
+            Expense.fund_id,
+            Expense.rendicion_id,
+            Expense.naturaleza_economica,
+            Expense.es_pago_proveedor,
+            Expense.es_anticipo_sueldo,
             CostCenter.nombre.label("sector_nombre"),
             PettyCashFund.nombre.label("fund_nombre"),
             ExpenseCategory.nombre.label("categoria_nombre"),
@@ -2683,6 +2763,13 @@ async def get_expenses_by_sector_report(
             "tipo_pago": row["tipo_pago"],
             "estado": row["estado"],
             "notas": row["notas"],
+            "cost_center_id": str(row["cost_center_id"]) if row["cost_center_id"] else None,
+            "category_id": str(row["category_id"]) if row["category_id"] else None,
+            "fund_id": str(row["fund_id"]) if row["fund_id"] else None,
+            "rendicion_id": str(row["rendicion_id"]) if row["rendicion_id"] else None,
+            "naturaleza_economica": row["naturaleza_economica"],
+            "es_pago_proveedor": bool(row["es_pago_proveedor"]),
+            "es_anticipo_sueldo": bool(row["es_anticipo_sueldo"]),
             "sector_nombre": row["sector_nombre"],
             "fund_nombre": row["fund_nombre"],
             "categoria_nombre": row["categoria_nombre"],
