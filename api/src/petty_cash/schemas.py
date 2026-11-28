@@ -542,7 +542,7 @@ class ExpenseDashboard(BaseModel):
 
 
 class ExpenseBatchReassignRequest(BaseModel):
-    expense_ids: list[str] = Field(..., min_length=1)
+    expense_ids: list[str]
     apply_cost_center: bool = False
     cost_center_id: Optional[str] = None
     apply_category: bool = False
