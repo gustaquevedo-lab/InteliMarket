@@ -56,6 +56,8 @@ export default function MonthlyClosingPage() {
   const [activeSubTab, setActiveSubTab] = useState("todas")
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [downloadingExcel, setDownloadingExcel] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
 
   // Carga reactiva de los datos de cierre para el mes y año seleccionados
   const fetchClosingData = useCallback(async () => {
@@ -107,12 +109,28 @@ export default function MonthlyClosingPage() {
     fetchClosingData()
   }, [fetchClosingData])
 
-  const handleDownloadExcel = () => {
-    window.open(`/api/v1/financial/closing/export/excel?month=${selectedMonth}&year=${selectedYear}&company_id=80150377-9`, "_blank")
+  const handleDownloadExcel = async () => {
+    setDownloadingExcel(true)
+    try {
+      await api.financial.closing.downloadExcel(selectedMonth, selectedYear, "80150377-9")
+    } catch (err: any) {
+      console.error("Error al descargar Excel de cierre:", err)
+      alert("No se pudo descargar el archivo Excel: " + (err?.message || "Error de red"))
+    } finally {
+      setDownloadingExcel(false)
+    }
   }
 
-  const handleDownloadPdf = () => {
-    window.open(`/api/v1/financial/closing/export/pdf?month=${selectedMonth}&year=${selectedYear}&company_id=80150377-9`, "_blank")
+  const handleDownloadPdf = async () => {
+    setDownloadingPdf(true)
+    try {
+      await api.financial.closing.downloadPdf(selectedMonth, selectedYear, "80150377-9")
+    } catch (err: any) {
+      console.error("Error al descargar PDF de cierre:", err)
+      alert("No se pudo generar el informe PDF: " + (err?.message || "Error de red"))
+    } finally {
+      setDownloadingPdf(false)
+    }
   }
 
   const kpis = data?.kpis || {}
@@ -226,18 +244,20 @@ export default function MonthlyClosingPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={handleDownloadExcel}
-                className="px-3.5 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 shadow-lg shadow-emerald-600/30 transition flex items-center gap-2 cursor-pointer"
+                disabled={downloadingExcel || loading}
+                className="px-3.5 py-2.5 rounded-xl text-xs font-extrabold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-400/40 shadow-lg shadow-emerald-600/30 transition flex items-center gap-2 cursor-pointer disabled:opacity-60"
               >
-                <FileSpreadsheet className="w-4 h-4 text-white" />
-                Descargar Excel (.xlsx)
+                <FileSpreadsheet className={`w-4 h-4 text-white ${downloadingExcel ? "animate-spin" : ""}`} />
+                {downloadingExcel ? "Generando Excel..." : "Descargar Excel (.xlsx)"}
               </button>
 
               <button
                 onClick={handleDownloadPdf}
-                className="px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm cursor-pointer"
+                disabled={downloadingPdf || loading}
+                className="px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-200 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 backdrop-blur-md transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-60"
               >
-                <FileText className="w-4 h-4 text-indigo-400" />
-                Exportar PDF
+                <FileText className={`w-4 h-4 text-indigo-400 ${downloadingPdf ? "animate-spin" : ""}`} />
+                {downloadingPdf ? "Generando PDF..." : "Exportar PDF"}
               </button>
             </div>
           </div>

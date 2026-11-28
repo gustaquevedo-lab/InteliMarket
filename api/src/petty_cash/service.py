@@ -2721,6 +2721,8 @@ async def get_expenses_by_sector_report(
         select(
             Expense.id,
             Expense.fecha_gasto,
+            Expense.numero_factura,
+            Expense.ruc,
             Expense.descripcion,
             Expense.proveedor,
             Expense.monto,
@@ -2756,6 +2758,8 @@ async def get_expenses_by_sector_report(
         detalle_gastos.append({
             "id": str(row["id"]),
             "fecha_gasto": row["fecha_gasto"],
+            "numero_factura": row["numero_factura"] or "S/N",
+            "ruc": row["ruc"] or "",
             "descripcion": row["descripcion"],
             "proveedor": row["proveedor"],
             "monto": float(row["monto"] or 0),

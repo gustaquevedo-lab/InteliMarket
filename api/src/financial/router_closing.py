@@ -94,9 +94,20 @@ async def export_closing_excel(
     company_id: str = Query("80150377-9"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Descarga el libro Excel (.xlsx) de 8 hojas con fórmulas vivas."""
+    """Descarga el libro Excel (.xlsx) de 8 hojas con fórmulas vivas y anexos analíticos."""
     service = MonthlyClosingService(db)
     data = await service.get_monthly_closing_summary(company_id=company_id, month=month, year=year)
+    # Cargar detalles analíticos para poblar las hojas secundarias y cuadro puente
+    data["details"] = {
+        "ingresos": await service.get_magnitude_details(company_id, month, year, "ingresos"),
+        "cogs": await service.get_magnitude_details(company_id, month, year, "cogs"),
+        "cogs_mp": await service.get_magnitude_details(company_id, month, year, "cogs_mp"),
+        "cogs_nc": await service.get_magnitude_details(company_id, month, year, "cogs_nc"),
+        "nomina": await service.get_magnitude_details(company_id, month, year, "nomina"),
+        "gastos": await service.get_magnitude_details(company_id, month, year, "gastos"),
+        "capex": await service.get_magnitude_details(company_id, month, year, "capex"),
+        "anticipos": await service.get_magnitude_details(company_id, month, year, "anticipos"),
+    }
     excel_bytes = generate_closing_excel(data)
     
     filename = f"Cierre_Resultados_{data['periodo']['mes_nombre']}_{year}.xlsx"
@@ -114,9 +125,19 @@ async def export_closing_pdf(
     company_id: str = Query("80150377-9"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Descarga el informe ejecutivo en PDF institucional para Directorio."""
+    """Descarga el informe ejecutivo en PDF institucional con P&L, cuadro puente y anexos."""
     service = MonthlyClosingService(db)
     data = await service.get_monthly_closing_summary(company_id=company_id, month=month, year=year)
+    data["details"] = {
+        "ingresos": await service.get_magnitude_details(company_id, month, year, "ingresos"),
+        "cogs": await service.get_magnitude_details(company_id, month, year, "cogs"),
+        "cogs_mp": await service.get_magnitude_details(company_id, month, year, "cogs_mp"),
+        "cogs_nc": await service.get_magnitude_details(company_id, month, year, "cogs_nc"),
+        "nomina": await service.get_magnitude_details(company_id, month, year, "nomina"),
+        "gastos": await service.get_magnitude_details(company_id, month, year, "gastos"),
+        "capex": await service.get_magnitude_details(company_id, month, year, "capex"),
+        "anticipos": await service.get_magnitude_details(company_id, month, year, "anticipos"),
+    }
     pdf_bytes = generate_closing_pdf(data)
     
     filename = f"Informe_Ejecutivo_{data['periodo']['mes_nombre']}_{year}.pdf"

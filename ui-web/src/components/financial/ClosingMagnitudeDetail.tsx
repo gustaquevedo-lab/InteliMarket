@@ -61,13 +61,45 @@ export function ClosingMagnitudeDetail({
   const [mpItems, setMpItems] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedExpense, setSelectedExpense] = useState<any | null>(null)
-
-  useEffect(() => {
-    if (subMagnitude) setFamilyFilter(subMagnitude)
-  }, [subMagnitude])
+  const [downloadingAuditPdf, setDownloadingAuditPdf] = useState(false)
+  const [downloadingAuditXlsx, setDownloadingAuditXlsx] = useState(false)
 
   const activeMonth = month || 11
   const activeYear = year || 2026
+
+  const handleDownloadAuditPdf = async () => {
+    setDownloadingAuditPdf(true)
+    try {
+      const m = activeMonth
+      const y = activeYear
+      const lastDay = new Date(y, m, 0).getDate()
+      const fecha_desde = `${y}-${String(m).padStart(2, "0")}-01`
+      const fecha_hasta = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+      await api.expenses.reports.downloadPhysicalAuditSheetPdf({ fecha_desde, fecha_hasta })
+    } catch (err: any) {
+      console.error("Error descargando Hoja de Punteo PDF:", err)
+      alert("No se pudo generar la hoja de punteo PDF: " + (err?.message || "Error de red"))
+    } finally {
+      setDownloadingAuditPdf(false)
+    }
+  }
+
+  const handleDownloadAuditXlsx = async () => {
+    setDownloadingAuditXlsx(true)
+    try {
+      const m = activeMonth
+      const y = activeYear
+      const lastDay = new Date(y, m, 0).getDate()
+      const fecha_desde = `${y}-${String(m).padStart(2, "0")}-01`
+      const fecha_hasta = `${y}-${String(m).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+      await api.expenses.reports.downloadPhysicalAuditSheetXlsx({ fecha_desde, fecha_hasta })
+    } catch (err: any) {
+      console.error("Error descargando Hoja de Punteo Excel:", err)
+      alert("No se pudo generar la hoja de punteo Excel: " + (err?.message || "Error de red"))
+    } finally {
+      setDownloadingAuditXlsx(false)
+    }
+  }
 
   // Carga reactiva de comprobantes/items para la magnitud activa
   const fetchDetails = async () => {
@@ -1081,6 +1113,30 @@ export function ClosingMagnitudeDetail({
                   Limpiar filtros
                 </button>
               )}
+
+              {/* Botones de Hoja de Punteo y Verificación Física */}
+              <div className="flex items-center gap-1.5 ml-auto">
+                <button
+                  type="button"
+                  onClick={handleDownloadAuditPdf}
+                  disabled={downloadingAuditPdf}
+                  title="Descargar Hoja de Punteo y Verificación Física en PDF (Landscape) para cotejo manual con bolígrafo"
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shadow-xs"
+                >
+                  <FileText className={`w-3.5 h-3.5 text-indigo-400 ${downloadingAuditPdf ? "animate-spin" : ""}`} />
+                  {downloadingAuditPdf ? "Generando..." : "Hoja Punteo Físico (PDF)"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadAuditXlsx}
+                  disabled={downloadingAuditXlsx}
+                  title="Descargar Hoja de Punteo en Excel con fórmulas y filtros"
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 border border-emerald-300 dark:border-emerald-700 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-60 shadow-xs"
+                >
+                  <Download className={`w-3.5 h-3.5 text-emerald-600 ${downloadingAuditXlsx ? "animate-spin" : ""}`} />
+                  {downloadingAuditXlsx ? "..." : "Punteo (.xlsx)"}
+                </button>
+              </div>
             </div>
           </div>
 

@@ -928,6 +928,30 @@ export default function ExpensesPage() {
     }
   }
 
+  const handleDownloadPhysicalAuditPdf = async () => {
+    setDownloadingPdf(true)
+    try {
+      await api.expenses.reports.downloadPhysicalAuditSheetPdf({ fecha_desde: repFechaDesde, fecha_hasta: repFechaHasta })
+      toast.success("PDF Generado", "La hoja de punteo físico se descargó correctamente.")
+    } catch (e: any) {
+      toast.error("Error al descargar PDF", e.message)
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
+  const handleDownloadPhysicalAuditXlsx = async () => {
+    setDownloadingPdf(true)
+    try {
+      await api.expenses.reports.downloadPhysicalAuditSheetXlsx({ fecha_desde: repFechaDesde, fecha_hasta: repFechaHasta })
+      toast.success("Excel Generado", "La hoja de punteo físico en Excel se descargó correctamente.")
+    } catch (e: any) {
+      toast.error("Error al descargar Excel", e.message)
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
   const handleDownloadRendicionPdf = async (targetFundId?: string) => {
     const fid = targetFundId || rendicionFundId || funds[0]?.id
     if (!fid) {
@@ -3951,14 +3975,34 @@ export default function ExpensesPage() {
                           Imputación directa a sectores operativos con prorrateo de gastos globales según peso configurado.
                         </p>
                       </div>
-                      <button
-                        onClick={handleDownloadSectorPdf}
-                        disabled={downloadingPdf}
-                        className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md hover:shadow-indigo-500/20 flex items-center justify-center gap-2 shrink-0 disabled:opacity-50"
-                      >
-                        {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
-                        Descargar Acta PDF Firmada
-                      </button>
+                      <div className="flex items-center gap-2 flex-wrap shrink-0">
+                        <button
+                          onClick={handleDownloadSectorPdf}
+                          disabled={downloadingPdf}
+                          className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md hover:shadow-indigo-500/20 flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer"
+                        >
+                          {downloadingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                          Acta PDF Firmada
+                        </button>
+                        <button
+                          onClick={handleDownloadPhysicalAuditPdf}
+                          disabled={downloadingPdf}
+                          className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition-all border border-slate-700 flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer shadow-xs"
+                          title="Descargar Hoja de Punteo y Verificación Física en PDF (Landscape) para cotejo manual con bolígrafo"
+                        >
+                          <FileText className="w-4 h-4 text-indigo-400" />
+                          Hoja Punteo Físico (PDF)
+                        </button>
+                        <button
+                          onClick={handleDownloadPhysicalAuditXlsx}
+                          disabled={downloadingPdf}
+                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer shadow-xs"
+                          title="Descargar Hoja de Punteo en Excel con fórmulas y casillas de cotejo"
+                        >
+                          <FileSpreadsheet className="w-4 h-4 text-white" />
+                          Punteo Excel (.xlsx)
+                        </button>
+                      </div>
                     </div>
 
                     {loadingReport ? (

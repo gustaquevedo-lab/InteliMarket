@@ -1,6 +1,6 @@
 from io import BytesIO
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from api.src.db import get_db
 from api.src.auth.middleware import require_auth
 from api.src.petty_cash import service, pdf_reports, expense_pdf
+from api.src.petty_cash.physical_audit_reports import generate_hoja_punteo_fisico_pdf, generate_hoja_punteo_fisico_excel
 from api.src.petty_cash.schemas import (
     ExpenseCategoryCreate, ExpenseCategoryResponse,
     ExpenseCreate, ExpenseUpdate, ExpenseResponse, ExpenseSummary,
@@ -416,6 +417,41 @@ async def export_expenses_by_sector_pdf_endpoint(
     generated_by = user.get("user_nombre") or user.get("user_email") or "Sistema"
     pdf_bytes = pdf_reports.generate_gastos_por_sector_pdf(company, data, fecha_desde, fecha_hasta, generated_by)
     return _pdf_response(pdf_bytes, f"gastos_por_sector_{fecha_desde}_{fecha_hasta}.pdf")
+
+
+@router.get("/reports/physical-audit-sheet.pdf")
+async def export_physical_audit_sheet_pdf_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Descarga la Hoja de Punteo y Verificación Física de Comprobantes en PDF (Landscape) para cotejo manual."""
+    company = await _get_company_info(db, user["company_id"])
+    data = await service.get_expenses_by_sector_report(db, user["company_id"], fecha_desde, fecha_hasta)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Auditoría Interna"
+    pdf_bytes = generate_hoja_punteo_fisico_pdf(company, data, fecha_desde, fecha_hasta, generated_by)
+    return _pdf_response(pdf_bytes, f"hoja_punteo_fisico_{fecha_desde}_{fecha_hasta}.pdf")
+
+
+@router.get("/reports/physical-audit-sheet.xlsx")
+async def export_physical_audit_sheet_excel_endpoint(
+    fecha_desde: date = Query(...),
+    fecha_hasta: date = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_auth),
+):
+    """Descarga la Hoja de Punteo y Verificación Física en Excel (.xlsx) con casillas y fórmulas."""
+    company = await _get_company_info(db, user["company_id"])
+    data = await service.get_expenses_by_sector_report(db, user["company_id"], fecha_desde, fecha_hasta)
+    generated_by = user.get("user_nombre") or user.get("user_email") or "Auditoría Interna"
+    excel_bytes = generate_hoja_punteo_fisico_excel(company, data, fecha_desde, fecha_hasta, generated_by)
+    filename = f"hoja_punteo_fisico_{fecha_desde}_{fecha_hasta}.xlsx"
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 
 @router.get("/reports/fiscal-purchases")

@@ -5020,6 +5020,10 @@ export const api = {
         client.get<any>("/v1/expenses/reports/fiscal-purchases", params as any),
       downloadFiscalPurchasesPdf: (params: { fecha_desde: string; fecha_hasta: string; fund_id?: string }) =>
         downloadAuthenticated("/v1/expenses/reports/fiscal-purchases.pdf", params, `libro_compras_fiscal_${params.fecha_desde}_${params.fecha_hasta}.pdf`),
+      downloadPhysicalAuditSheetPdf: (params: { fecha_desde: string; fecha_hasta: string }) =>
+        downloadAuthenticated("/v1/expenses/reports/physical-audit-sheet.pdf", params, `hoja_punteo_fisico_${params.fecha_desde}_${params.fecha_hasta}.pdf`),
+      downloadPhysicalAuditSheetXlsx: (params: { fecha_desde: string; fecha_hasta: string }) =>
+        downloadAuthenticated("/v1/expenses/reports/physical-audit-sheet.xlsx", params, `hoja_punteo_fisico_${params.fecha_desde}_${params.fecha_hasta}.xlsx`),
       fundsStatus: () =>
         client.get<any[]>("/v1/petty-cash-funds/reports/funds-status"),
       downloadFundsStatusPdf: () =>
@@ -5048,6 +5052,10 @@ export const api = {
           `/v1/financial/closing/expenses/${expenseId}/reclassify`,
           payload
         ),
+      downloadExcel: (month: number = 11, year: number = 2026, companyId: string = "80150377-9") =>
+        downloadAuthenticated(`/v1/financial/closing/export/excel`, { month, year, company_id: companyId }, `Cierre_Resultados_Mes_${month}_${year}.xlsx`),
+      downloadPdf: (month: number = 11, year: number = 2026, companyId: string = "80150377-9") =>
+        downloadAuthenticated(`/v1/financial/closing/export/pdf`, { month, year, company_id: companyId }, `Informe_Ejecutivo_Mes_${month}_${year}.pdf`),
     },
     invoices: {
       list: (params?: { estado?: string; supplier_id?: string; vencidas?: boolean; desde?: string; hasta?: string; limit?: number; offset?: number; order_by?: string }) => client.get<SupplierInvoice[]>("/v1/financial/invoices", { company_id: COMPANY_ID, ...params } as any),
