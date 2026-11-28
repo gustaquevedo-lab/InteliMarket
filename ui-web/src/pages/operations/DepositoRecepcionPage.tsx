@@ -137,6 +137,17 @@ export default function DepositoRecepcionPage() {
   const [timeRange, setTimeRange] = useState<"30d" | "todas">("30d")
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null)
 
+  const visiblePeriodOrders = useMemo(() => {
+    if (timeRange === "todas" || searchQuery.trim().length > 0) {
+      return orders
+    }
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
+    return orders.filter((o) => {
+      const orderDate = new Date(o.created_at || o.fecha || 0).getTime()
+      return orderDate >= cutoff
+    })
+  }, [orders, timeRange, searchQuery])
+
   // Borrador de ítems que se van descargando
   const [itemsDraft, setItemsDraft] = useState<ReceptionItemDraft[]>([])
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null)
@@ -1166,17 +1177,6 @@ export default function DepositoRecepcionPage() {
   // ---------------------------------------------------------------------------
   // VISTA 1 & 2: APLICACIÓN PRINCIPAL DE DEPÓSITO
   // ---------------------------------------------------------------------------
-  const visiblePeriodOrders = useMemo(() => {
-    if (timeRange === "todas" || searchQuery.trim().length > 0) {
-      return orders
-    }
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
-    return orders.filter((o) => {
-      const orderDate = new Date(o.created_at || o.fecha || 0).getTime()
-      return orderDate >= cutoff
-    })
-  }, [orders, timeRange, searchQuery])
-
   const filteredOrders = visiblePeriodOrders.filter((o) => {
     const q = searchQuery.toLowerCase()
     const matchesQuery =
